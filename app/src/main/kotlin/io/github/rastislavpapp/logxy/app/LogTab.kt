@@ -1,33 +1,42 @@
 package io.github.rastislavpapp.logxy.app
 
 import io.github.rastislavpapp.logxy.core.FileActivity
+import io.github.rastislavpapp.logxy.core.FileChange
+import io.github.rastislavpapp.logxy.core.FileSnapshot
 import io.github.rastislavpapp.logxy.core.formatByteSize
 import io.github.rastislavpapp.logxy.core.index.IndexProgress
 import io.github.rastislavpapp.logxy.core.index.LineIndex
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.swing.Swing
 import kotlinx.coroutines.withContext
 import net.miginfocom.swing.MigLayout
 import java.awt.BorderLayout
+import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.Path
-import java.nio.file.attribute.BasicFileAttributes
 import java.text.NumberFormat
 import java.util.concurrent.atomic.AtomicReference
 import javax.swing.JComponent
 import javax.swing.JLabel
 import javax.swing.JPanel
 import javax.swing.JProgressBar
+import javax.swing.JToggleButton
+import javax.swing.JToolBar
 import javax.swing.UIManager
-import kotlin.time.Duration.Companion.milliseconds
+import kotlin.coroutines.coroutineContext
 
-/** One open file: indexes it in the background, then shows its lines. */
+private const val LIVE_POLL_MILLIS = 500L
+private const val STATIC_POLL_MILLIS = 2000L
+
+/** One open file: indexes it in the background, shows its lines and follows changes to it. */
 class LogTab(
     val path: Path,
     private val openFiles: (List<Path>) -> Unit,
@@ -35,30 +44,66 @@ class LogTab(
 ) : JPanel(BorderLayout()) {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Swing)
+    private var job: Job? = null
+    private val content = JPanel(BorderLayout())
+    private val followButton = JToggleButton("Follow").apply {
+        toolTipText = "Keep the end of the file in view as it grows"
+        addActionListener { follow = isSelected }
+    }
+
     private var index: LineIndex? = null
+    private var model: LineTableModel? = null
+    private var scrollPane: VirtualScrollPane? = null
+    private var activity = FileActivity.STATIC
+    private var indexMillis = 0L
+    private var problem: String? = null
+
+    private var follow = false
+        set(value) {
+            field = value
+            followButton.isSelected = value
+            scrollPane?.follow = value
+        }
 
     /** Right-hand status bar text for this file. */
     var statusText = "Indexing…"
         private set
 
     init {
-        scope.launch { load() }
+        add(JToolBar().apply {
+            isFloatable = false
+            add(followButton)
+        }, BorderLayout.NORTH)
+        add(content, BorderLayout.CENTER)
+        start()
     }
 
-    private suspend fun load() {
+    private fun start() {
+        job = scope.launch {
+            val reference = load() ?: return@launch
+            watch(reference)
+        }
+    }
+
+    /** Indexes the file and shows it; returns the snapshot the index corresponds to, or null on error. */
+    private suspend fun load(): FileSnapshot? {
         val progress = IndexProgress()
         val progressBar = JProgressBar(0, 1000)
-        val progressLabel = JLabel("Indexing ${path.fileName}…")
-        showCentered(progressLabel, progressBar)
+        showCentered(JLabel("Indexing ${path.fileName}…"), progressBar)
+        statusText = "Indexing…"
+        onStatusChanged()
 
         val ticker = scope.launch {
             while (true) {
                 progressBar.value = (progress.fraction * 1000).toInt()
-                delay(100.milliseconds)
+                delay(100)
             }
         }
         try {
             val started = System.nanoTime()
+            // Taken before indexing, so a file replaced meanwhile shows up as a change on the first poll.
+            val snapshot = withContext(Dispatchers.IO) { FileSnapshot.take(path) }
+                ?: throw IOException("File not found")
             // Hand the result over outside the coroutine, so a cancellation racing with completion cannot leak it.
             val built = AtomicReference<LineIndex>()
             try {
@@ -68,11 +113,15 @@ class LogTab(
                 throw e
             }
             val loaded = built.get()
-            val millis = (System.nanoTime() - started) / 1_000_000
+            indexMillis = (System.nanoTime() - started) / 1_000_000
             index = loaded
-            val activity = withContext(Dispatchers.IO) { classify(loaded) }
+            val currentSize = withContext(Dispatchers.IO) { Files.size(path) }
+            activity = FileActivity.classify(snapshot.lastModified, snapshot.size, currentSize)
+            problem = null
             showTable(loaded)
-            updateStatus(loaded, activity, millis)
+            if (activity == FileActivity.LIVE) follow = true
+            updateStatus()
+            return snapshot
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -81,23 +130,68 @@ class LogTab(
             showCentered(error)
             statusText = "Error"
             onStatusChanged()
+            return null
         } finally {
             ticker.cancel()
         }
     }
 
-    private fun classify(index: LineIndex): FileActivity {
-        val attributes = Files.readAttributes(path, BasicFileAttributes::class.java)
-        return FileActivity.classify(attributes.lastModifiedTime().toInstant(), index.indexedSize, attributes.size())
+    private suspend fun watch(reference: FileSnapshot) {
+        var known = reference
+        while (true) {
+            delay(if (activity == FileActivity.LIVE) LIVE_POLL_MILLIS else STATIC_POLL_MILLIS)
+            val index = index ?: return
+            try {
+                val current = withContext(Dispatchers.IO) { FileSnapshot.take(path) }
+                when (known.changeTo(current, index.indexedSize)) {
+                    FileChange.MISSING -> {
+                        problem = "file not found"
+                        updateStatus()
+                        continue
+                    }
+                    FileChange.SHRUNK, FileChange.REPLACED -> {
+                        reload()
+                        return
+                    }
+                    FileChange.GROWN -> {
+                        val appended = withContext(Dispatchers.IO) { index.scanAppended(current!!.size) }
+                        val oldLineCount = index.lineCount
+                        index.append(appended)
+                        model?.linesAppended(oldLineCount)
+                        scrollPane?.rowsAppended()
+                        if (activity == FileActivity.STATIC) {
+                            activity = FileActivity.LIVE
+                            follow = true
+                        }
+                    }
+                    FileChange.UNCHANGED ->
+                        activity = FileActivity.classify(current!!.lastModified, current.size, current.size)
+                }
+                known = current!!
+                problem = null
+            } catch (e: IOException) {
+                // Closing the tab closes the file under a running read.
+                coroutineContext.ensureActive()
+                problem = e.message ?: e.javaClass.simpleName
+            }
+            updateStatus()
+        }
+    }
+
+    /** Starts over with the file now at [path], e.g. after rotation or truncation. */
+    private fun reload() {
+        job?.cancel()
+        closeIndex()
+        start()
     }
 
     private fun showCentered(vararg components: JComponent) {
-        removeAll()
-        add(JPanel(MigLayout("fill, wrap 1", "[center]", "push[]8[]push")).apply {
+        content.removeAll()
+        content.add(JPanel(MigLayout("fill, wrap 1", "[center]", "push[]8[]push")).apply {
             components.forEach { add(it, if (it is JProgressBar) "w 320!" else "") }
         })
-        revalidate()
-        repaint()
+        content.revalidate()
+        content.repaint()
     }
 
     private fun showTable(index: LineIndex) {
@@ -105,24 +199,37 @@ class LogTab(
         val table = LineTable(model)
         // The table has its own transfer handler (for copy), which would otherwise swallow file drops.
         table.transferHandler = FileDropHandler(openFiles, table.transferHandler)
-        removeAll()
-        add(VirtualScrollPane(table, model), BorderLayout.CENTER)
-        revalidate()
-        repaint()
+        val scrollPane = VirtualScrollPane(table, model)
+        scrollPane.onFollowChanged = { if (follow != it) follow = it }
+        this.model = model
+        this.scrollPane = scrollPane
+        content.removeAll()
+        content.add(scrollPane, BorderLayout.CENTER)
+        content.revalidate()
+        content.repaint()
+        scrollPane.follow = follow
     }
 
-    private fun updateStatus(index: LineIndex, activity: FileActivity, millis: Long) {
+    private fun updateStatus() {
+        val index = index ?: return
         val numbers = NumberFormat.getIntegerInstance()
         val mode = if (activity == FileActivity.LIVE) "live" else "static"
-        statusText = "${formatByteSize(index.indexedSize)}  ·  ${numbers.format(index.lineCount)} lines  ·  " +
-            "$mode  ·  indexed in ${numbers.format(millis)} ms"
+        val lines = if (index.lineCount == 1) "line" else "lines"
+        statusText = "${formatByteSize(index.indexedSize)}  ·  ${numbers.format(index.lineCount)} $lines  ·  " +
+            "$mode  ·  indexed in ${numbers.format(indexMillis)} ms" + (problem?.let { "  ·  $it" } ?: "")
         onStatusChanged()
+    }
+
+    private fun closeIndex() {
+        index?.close()
+        index = null
+        model = null
+        scrollPane = null
     }
 
     /** Cancels any running work and releases the file. */
     fun dispose() {
         scope.cancel()
-        index?.close()
-        index = null
+        closeIndex()
     }
 }

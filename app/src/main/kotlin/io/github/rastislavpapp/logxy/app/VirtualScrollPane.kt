@@ -4,6 +4,8 @@ import java.awt.BorderLayout
 import java.awt.Dimension
 import java.awt.Point
 import java.awt.event.ActionEvent
+import java.awt.event.KeyAdapter
+import java.awt.event.KeyEvent
 import java.awt.event.MouseWheelEvent
 import javax.swing.AbstractAction
 import javax.swing.DefaultListSelectionModel
@@ -21,6 +23,8 @@ const val WINDOW_ROWS = 1_000_000
 
 /** When the view gets this close to either end of the window, the window is moved. */
 private const val EDGE_ROWS = 50_000
+
+private val UPWARD_KEYS = setOf(KeyEvent.VK_UP, KeyEvent.VK_KP_UP, KeyEvent.VK_PAGE_UP, KeyEvent.VK_HOME)
 
 /** A table model that shows [WINDOW_ROWS] rows of a larger list, starting at [windowStart]. */
 interface RowWindow {
@@ -48,6 +52,17 @@ class VirtualScrollPane(private val table: JTable, private val window: RowWindow
     private var moveScheduled = false
     private var wheelRemainder = 0.0
 
+    /** Keeps the end of the list in view as rows are appended; user scrolling upwards turns it off. */
+    var follow = false
+        set(value) {
+            if (field == value) return
+            field = value
+            onFollowChanged(value)
+            if (value) scrollToEnd()
+        }
+
+    var onFollowChanged: (Boolean) -> Unit = {}
+
     private val visibleRows get() = maxOf(1, viewport.extentSize.height / table.rowHeight)
 
     private val topRow get() = window.windowStart + viewport.viewPosition.y / table.rowHeight
@@ -63,13 +78,32 @@ class VirtualScrollPane(private val table: JTable, private val window: RowWindow
         }, BorderLayout.EAST)
 
         viewport.addChangeListener { onViewChanged() }
-        scrollBar.addAdjustmentListener { if (!updatingScrollBar) scrollToRow(it.value) }
+        scrollBar.addAdjustmentListener {
+            if (!updatingScrollBar) {
+                if (it.value + visibleRows < window.totalRowCount) follow = false
+                scrollToRow(it.value)
+            }
+        }
         scrollPane.addMouseWheelListener(::onWheel)
+        table.addKeyListener(object : KeyAdapter() {
+            override fun keyPressed(e: KeyEvent) {
+                if (e.keyCode in UPWARD_KEYS) follow = false
+            }
+        })
         installJumpActions()
+    }
+
+    fun scrollToEnd() = scrollToRow(window.totalRowCount)
+
+    /** Call after rows were appended to the list. */
+    fun rowsAppended() {
+        if (follow) scrollToEnd() else updateScrollBar()
     }
 
     /** Scrolls so that [row] (of the whole list) is the top visible row, as far as possible. */
     fun scrollToRow(row: Int) {
+        // The table may just have grown; its height must be current before positioning the view.
+        scrollPane.validate()
         val top = row.coerceIn(0, maxOf(0, window.totalRowCount - visibleRows))
         if (top < window.windowStart || top + visibleRows > window.windowStart + table.rowCount) {
             moveWindow(top - WINDOW_ROWS / 2)
@@ -150,6 +184,7 @@ class VirtualScrollPane(private val table: JTable, private val window: RowWindow
         val rows = e.preciseWheelRotation * perNotch + wheelRemainder
         val whole = rows.toInt()
         wheelRemainder = rows - whole
+        if (rows < 0) follow = false
         if (whole != 0) scrollToRow(topRow + whole)
         e.consume()
     }
@@ -163,6 +198,7 @@ class VirtualScrollPane(private val table: JTable, private val window: RowWindow
                     val row = if (toEnd) window.totalRowCount - 1 else 0
                     scrollToRow(row)
                     table.changeSelection(row - window.windowStart, 0, false, extend)
+                    if (toEnd) follow = true
                 }
             })
             val inputMap = table.getInputMap(WHEN_ANCESTOR_OF_FOCUSED_COMPONENT)

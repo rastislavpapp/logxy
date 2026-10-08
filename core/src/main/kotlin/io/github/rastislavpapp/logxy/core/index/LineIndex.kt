@@ -1,7 +1,6 @@
 package io.github.rastislavpapp.logxy.core.index
 
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.ensureActive
@@ -27,19 +26,28 @@ data class IndexOptions(
     }
 }
 
+/** Bytes appended to a file, scanned by [LineIndex.scanAppended] and applied with [LineIndex.append]. */
+class AppendedLines internal constructor(internal val from: Long, internal val to: Long, internal val starts: LongChunkList)
+
 /**
  * Start offsets of all lines in a file. Lines end with `\n` or `\r\n`; a trailing line without
  * terminator counts as a line, a terminator at the very end does not start an empty one.
  *
- * Holds the file open for reading line text until [close]d.
+ * Holds the file open for reading line text until [close]d. Not thread-safe: [append] must run on
+ * the thread that reads the index; only [scanAppended] may run elsewhere, but not during [append].
  */
 class LineIndex private constructor(
     val path: Path,
     private val channel: FileChannel,
     private val starts: LongChunkList,
-    /** Number of bytes covered by the index. */
-    val indexedSize: Long,
+    indexedSize: Long,
+    // Whether bytes appended next start a new line, i.e. the file is empty or ends with a newline.
+    private var lastLineComplete: Boolean,
 ) : Closeable {
+
+    /** Number of bytes covered by the index. */
+    var indexedSize = indexedSize
+        private set
 
     val lineCount: Int get() = starts.size
 
@@ -65,6 +73,24 @@ class LineIndex private constructor(
         }
         if (length <= maxBytes) return String(bytes, 0, length, Charsets.UTF_8)
         return String(bytes, 0, utf8Boundary(bytes, maxBytes), Charsets.UTF_8) + "…"
+    }
+
+    /** Scans bytes between [indexedSize] and [size]; does not change the index. */
+    fun scanAppended(size: Long): AppendedLines {
+        val from = indexedSize
+        if (size <= from) return AppendedLines(from, from, LongChunkList())
+        val scan = scanRange(channel, from..<size, APPEND_BUFFER_SIZE, checkCancelled = {}, progress = null)
+        return AppendedLines(from, scan.end, scan.starts)
+    }
+
+    fun append(appended: AppendedLines) {
+        require(appended.from == indexedSize) { "Appended bytes start at ${appended.from}, index ends at $indexedSize" }
+        if (appended.to == appended.from) return
+        if (lastLineComplete) starts.add(appended.from)
+        starts.addAll(appended.starts)
+        lastLineComplete = starts.size > 0 && starts.last() == appended.to
+        if (lastLineComplete) starts.removeLast()
+        indexedSize = appended.to
     }
 
     private fun readFully(target: ByteArray, position: Long): Int {
@@ -93,7 +119,10 @@ class LineIndex private constructor(
                 progress.totalBytes = size
                 val ranges = splitIntoRanges(size, options)
                 val scans = ranges.map { range ->
-                    async { scanRange(channel, range, options.bufferSize, coroutineContext.job, progress) }
+                    async {
+                        val job = coroutineContext.job
+                        scanRange(channel, range, options.bufferSize, { job.ensureActive() }, progress)
+                    }
                 }.awaitAll()
                 ensureActive()
                 merge(path, channel, size, scans)
@@ -119,8 +148,8 @@ class LineIndex private constructor(
             channel: FileChannel,
             range: LongRange,
             bufferSize: Int,
-            job: Job,
-            progress: IndexProgress,
+            checkCancelled: () -> Unit,
+            progress: IndexProgress?,
         ): RangeScan {
             val starts = LongChunkList()
             val end = range.last + 1
@@ -128,7 +157,7 @@ class LineIndex private constructor(
             Arena.ofConfined().use { arena ->
                 val buffer = arena.allocate(bufferSize.toLong(), 8).asByteBuffer()
                 while (position < end) {
-                    job.ensureActive()
+                    checkCancelled()
                     buffer.clear().limit(minOf(bufferSize.toLong(), end - position).toInt())
                     while (buffer.hasRemaining()) {
                         if (channel.read(buffer, position + buffer.position()) < 0) break
@@ -137,7 +166,7 @@ class LineIndex private constructor(
                     if (read == 0) return RangeScan(starts, position, complete = false)
                     NewlineScanner.scan(buffer, 0, read, position, starts)
                     position += read
-                    progress.add(read.toLong())
+                    progress?.add(read.toLong())
                 }
             }
             return RangeScan(starts, end, complete = true)
@@ -155,10 +184,13 @@ class LineIndex private constructor(
                     break
                 }
             }
-            while (starts.size > 0 && starts.last() >= indexedSize) starts.removeLast()
-            return LineIndex(path, channel, starts, indexedSize)
+            while (starts.size > 0 && starts.last() > indexedSize) starts.removeLast()
+            val lastLineComplete = starts.size > 0 && starts.last() == indexedSize
+            if (lastLineComplete) starts.removeLast()
+            return LineIndex(path, channel, starts, indexedSize, lastLineComplete)
         }
 
+        private const val APPEND_BUFFER_SIZE = 256 * 1024
         private const val LF = '\n'.code.toByte()
         private const val CR = '\r'.code.toByte()
 

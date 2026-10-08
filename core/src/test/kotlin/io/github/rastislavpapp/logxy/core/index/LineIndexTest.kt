@@ -8,9 +8,11 @@ import kotlinx.coroutines.yield
 import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.StandardOpenOption
 import kotlin.random.Random
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 class LineIndexTest {
@@ -86,6 +88,69 @@ class LineIndexTest {
         job.cancelAndJoin()
         assertTrue(job.isCancelled)
         assertTrue(progress.bytesDone < progress.totalBytes)
+    }
+
+    private fun LineIndex.appendFrom(file: Path, more: String) {
+        Files.write(file, more.toByteArray(), StandardOpenOption.APPEND)
+        append(scanAppended(Files.size(file)))
+    }
+
+    private fun growing(content: String): Pair<Path, LineIndex> {
+        val file = Files.write(dir.resolve("growing.log"), content.toByteArray())
+        return file to runBlocking { LineIndex.build(file) }
+    }
+
+    @Test
+    fun `appending after a trailing newline adds lines`() {
+        val (file, index) = growing("a\n")
+        index.use {
+            it.appendFrom(file, "b\nc\n")
+            assertEquals(listOf("a", "b", "c"), it.lines())
+            assertEquals(Files.size(file), it.indexedSize)
+        }
+    }
+
+    @Test
+    fun `appending completes a partial last line`() {
+        val (file, index) = growing("a\nhal")
+        index.use {
+            assertEquals(listOf("a", "hal"), it.lines())
+            it.appendFrom(file, "f\r")
+            assertEquals(listOf("a", "half"), it.lines())
+            it.appendFrom(file, "\nnext")
+            assertEquals(listOf("a", "half", "next"), it.lines())
+        }
+    }
+
+    @Test
+    fun `appending to an empty file`() {
+        val (file, index) = growing("")
+        index.use {
+            it.appendFrom(file, "first")
+            assertEquals(listOf("first"), it.lines())
+        }
+    }
+
+    @Test
+    fun `appending only a newline does not add an empty line`() {
+        val (file, index) = growing("a")
+        index.use {
+            it.appendFrom(file, "\n")
+            assertEquals(listOf("a"), it.lines())
+            it.appendFrom(file, "\n")
+            assertEquals(listOf("a", ""), it.lines())
+        }
+    }
+
+    @Test
+    fun `appended lines must continue the index`() {
+        val (file, index) = growing("a\n")
+        index.use {
+            Files.write(file, "b\n".toByteArray(), StandardOpenOption.APPEND)
+            val first = it.scanAppended(Files.size(file))
+            it.append(first)
+            assertFailsWith<IllegalArgumentException> { it.append(first) }
+        }
     }
 
     @Test

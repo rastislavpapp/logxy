@@ -5,14 +5,14 @@ import java.io.BufferedOutputStream
 import java.nio.file.Files
 import java.nio.file.Path
 import java.time.Instant
-import java.time.ZoneOffset
+import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.SplittableRandom
 
 private val LEVELS = listOf("TRACE" to 5, "DEBUG" to 25, "INFO" to 55, "WARN" to 10, "ERROR" to 5)
 
 private val TIMESTAMP_SECONDS: DateTimeFormatter =
-    DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").withZone(ZoneOffset.UTC)
+    DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").withZone(ZoneId.systemDefault())
 
 /** Writes log4j-style lines (`%d [%t] %-5p %c - %m%n`) with occasional stack traces until [size] bytes. */
 fun generateLog(file: Path, size: Long, seed: Long) {
@@ -33,7 +33,7 @@ fun generateLog(file: Path, size: Long, seed: Long) {
     println("Wrote ${formatByteSize(written)} ($lines records) to $file in %.1f s".format(seconds))
 }
 
-private class LogGenerator(private val random: SplittableRandom) {
+internal class LogGenerator(private val random: SplittableRandom) {
 
     private val threads = List(40) { i ->
         when (i % 4) {
@@ -55,7 +55,7 @@ private class LogGenerator(private val random: SplittableRandom) {
         }.distinct()
     }
 
-    private var timeMillis = Instant.parse("2026-10-01T08:00:00Z").toEpochMilli()
+    var timeMillis = Instant.parse("2026-10-01T08:00:00Z").toEpochMilli()
     private var cachedSecond = -1L
     private var cachedSecondText = ""
 

@@ -25,6 +25,20 @@ class LineTableModel(private val index: LineIndex) : AbstractTableModel(), RowWi
 
     override fun getRowCount() = minOf(index.lineCount, WINDOW_ROWS)
 
+    /** Call after lines were appended to the index, which had [oldLineCount] lines before. */
+    fun linesAppended(oldLineCount: Int) {
+        // The previous last line may have been incomplete and now has more text.
+        val lastLine = oldLineCount - 1
+        if (lastLine >= 0) {
+            val slot = lastLine and (CACHE_SIZE - 1)
+            if (cachedRows[slot] == lastLine) cachedRows[slot] = -1
+        }
+        val oldRows = minOf(oldLineCount, WINDOW_ROWS)
+        if (rowCount > oldRows) fireTableRowsInserted(oldRows, rowCount - 1)
+        val lastRow = lastLine - windowStart
+        if (lastRow in 0..<rowCount) fireTableRowsUpdated(lastRow, lastRow)
+    }
+
     override fun getColumnCount() = 2
 
     override fun getColumnName(column: Int) = if (column == 0) "#" else "Line"
