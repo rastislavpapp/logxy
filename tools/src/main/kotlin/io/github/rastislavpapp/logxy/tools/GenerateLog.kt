@@ -1,0 +1,154 @@
+package io.github.rastislavpapp.logxy.tools
+
+import io.github.rastislavpapp.logxy.core.formatByteSize
+import java.io.BufferedOutputStream
+import java.nio.file.Files
+import java.nio.file.Path
+import java.time.Instant
+import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
+import java.util.SplittableRandom
+
+private val LEVELS = listOf("TRACE" to 5, "DEBUG" to 25, "INFO" to 55, "WARN" to 10, "ERROR" to 5)
+
+private val TIMESTAMP_SECONDS: DateTimeFormatter =
+    DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").withZone(ZoneOffset.UTC)
+
+/** Writes log4j-style lines (`%d [%t] %-5p %c - %m%n`) with occasional stack traces until [size] bytes. */
+fun generateLog(file: Path, size: Long, seed: Long) {
+    val generator = LogGenerator(SplittableRandom(seed))
+    val started = System.nanoTime()
+    var written = 0L
+    var lines = 0L
+    Files.createDirectories(file.parent)
+    BufferedOutputStream(Files.newOutputStream(file), 1 shl 20).use { out ->
+        while (written < size) {
+            val record = generator.next().toByteArray()
+            out.write(record)
+            written += record.size
+            lines++
+        }
+    }
+    val seconds = (System.nanoTime() - started) / 1e9
+    println("Wrote ${formatByteSize(written)} ($lines records) to $file in %.1f s".format(seconds))
+}
+
+private class LogGenerator(private val random: SplittableRandom) {
+
+    private val threads = List(40) { i ->
+        when (i % 4) {
+            0 -> "http-nio-8080-exec-${i / 4 + 1}"
+            1 -> "pool-2-thread-${i / 4 + 1}"
+            2 -> "scheduler-${i / 4 + 1}"
+            else -> "kafka-consumer-${i / 4 + 1}"
+        }
+    } + "main"
+
+    private val loggers = run {
+        val modules = listOf("order", "billing", "auth", "inventory", "shipping", "search", "notification", "report")
+        val layers = listOf("api", "service", "repository", "client", "config", "job")
+        val nouns = listOf("Order", "Invoice", "User", "Session", "Stock", "Parcel", "Query", "Email", "Cache", "Token")
+        val roles = listOf("Controller", "Service", "Repository", "Client", "Handler", "Mapper", "Validator", "Scheduler")
+        List(300) {
+            "com.example.${modules[random.nextInt(modules.size)]}.${layers[random.nextInt(layers.size)]}." +
+                "${nouns[random.nextInt(nouns.size)]}${roles[random.nextInt(roles.size)]}"
+        }.distinct()
+    }
+
+    private var timeMillis = Instant.parse("2026-10-01T08:00:00Z").toEpochMilli()
+    private var cachedSecond = -1L
+    private var cachedSecondText = ""
+
+    fun next(): String {
+        timeMillis += random.nextInt(0, 6)
+        val level = pickLevel()
+        val sb = StringBuilder(200)
+        sb.append(timestamp()).append(" [").append(threads[random.nextInt(threads.size)]).append("] ")
+        sb.append(level.padEnd(5)).append(' ').append(loggers[random.nextInt(loggers.size)]).append(" - ")
+        sb.append(message(level)).append('\n')
+        val withTrace = (level == "ERROR" && random.nextInt(10) < 3) || (level == "WARN" && random.nextInt(20) == 0)
+        if (withTrace) appendStackTrace(sb)
+        return sb.toString()
+    }
+
+    private fun pickLevel(): String {
+        var roll = random.nextInt(100)
+        for ((level, weight) in LEVELS) {
+            if (roll < weight) return level
+            roll -= weight
+        }
+        return "INFO"
+    }
+
+    private fun timestamp(): String {
+        val second = timeMillis / 1000
+        if (second != cachedSecond) {
+            cachedSecond = second
+            cachedSecondText = TIMESTAMP_SECONDS.format(Instant.ofEpochSecond(second))
+        }
+        return cachedSecondText + "." + (timeMillis % 1000).toString().padStart(3, '0')
+    }
+
+    private fun id() = random.nextInt(1, 1_000_000)
+    private fun ms() = random.nextInt(1, 5000)
+
+    private fun message(level: String): String = when (level) {
+        "ERROR" -> when (random.nextInt(3)) {
+            0 -> "Failed to process message ${uuid()}: timeout after ${ms()} ms"
+            1 -> "Payment declined for order ${id()}: insufficient funds"
+            else -> "Unexpected error while handling request GET /api/v1/orders/${id()}"
+        }
+        "WARN" -> when (random.nextInt(3)) {
+            0 -> "Retrying operation sync-${id()} (attempt ${random.nextInt(1, 6)}/5)"
+            1 -> "Slow query detected: ${ms()} ms for findByCustomerId(${id()})"
+            else -> "Connection pool nearly exhausted: active=${random.nextInt(40, 50)}, idle=0, waiting=${random.nextInt(1, 20)}"
+        }
+        else -> when (random.nextInt(8)) {
+            0 -> "User ${id()} logged in from 10.${random.nextInt(256)}.${random.nextInt(256)}.${random.nextInt(256)}"
+            1 -> "Processed ${random.nextInt(1, 10_000)} records in ${ms()} ms"
+            2 -> "Cache miss for key order:${id()}"
+            3 -> "Request GET /api/v1/orders/${id()} completed with status 200 in ${ms()} ms"
+            4 -> "Connection pool stats: active=${random.nextInt(50)}, idle=${random.nextInt(50)}, waiting=0"
+            5 -> "Zákazník ${id()} změnil doručovací adresu"
+            6 -> "Payload: " + payload()
+            else -> "Scheduled job report-${random.nextInt(20)} finished"
+        }
+    }
+
+    private fun uuid() = "%08x-%04x-%04x-%04x-%012x".format(
+        random.nextInt(), random.nextInt(0x10000), random.nextInt(0x10000), random.nextInt(0x10000),
+        random.nextLong(0x1000000000000L),
+    )
+
+    private fun payload(): String {
+        val items = random.nextInt(1, 40)
+        return (0..<items).joinToString(",", "{\"orderId\":${id()},\"items\":[", "]}") {
+            "{\"sku\":\"SKU-${id()}\",\"qty\":${random.nextInt(1, 10)},\"price\":${random.nextInt(100, 100_000) / 100.0}}"
+        }
+    }
+
+    private fun appendStackTrace(sb: StringBuilder) {
+        val exceptions = listOf(
+            "java.lang.IllegalStateException: Order is not in a payable state",
+            "java.net.SocketTimeoutException: Read timed out",
+            "java.sql.SQLTransientConnectionException: HikariPool-1 - Connection is not available",
+            "java.lang.NullPointerException: Cannot invoke \"String.length()\" because \"name\" is null",
+        )
+        sb.append(exceptions[random.nextInt(exceptions.size)]).append('\n')
+        appendFrames(sb, random.nextInt(8, 40))
+        if (random.nextBoolean()) {
+            sb.append("Caused by: ").append(exceptions[random.nextInt(exceptions.size)]).append('\n')
+            appendFrames(sb, random.nextInt(3, 10))
+            sb.append("\t... ").append(random.nextInt(5, 30)).append(" more\n")
+        }
+    }
+
+    private fun appendFrames(sb: StringBuilder, count: Int) {
+        repeat(count) {
+            val logger = loggers[random.nextInt(loggers.size)]
+            val simpleName = logger.substringAfterLast('.')
+            sb.append("\tat ").append(logger).append(".handle(").append(simpleName).append(".java:")
+                .append(random.nextInt(20, 900)).append(")\n")
+        }
+    }
+}

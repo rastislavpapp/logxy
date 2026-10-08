@@ -13,4 +13,11 @@
     <artifactId>logxy-core</artifactId>
     <name>logxy-core</name>
     <description>UI-free core: file access, indexing, parsing, filtering, merging</description>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.jetbrains.kotlinx</groupId>
+            <artifactId>kotlinx-coroutines-core</artifactId>
+        </dependency>
+    </dependencies>
 </project>

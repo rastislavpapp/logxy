@@ -12,6 +12,13 @@ java -jar app/target/logxy.jar      # run the fat jar
 ./mvnw -q install -DskipTests && ./mvnw -q -pl app exec:java   # run during development
 ```
 
+Test data and benchmarks:
+
+```sh
+./mvnw -q -pl tools exec:java -Dexec.args="generate /path/to/test.log 2g"
+./mvnw -q -pl tools exec:java -Dexec.args="benchmark /path/to/test.log"
+```
+
 ## AI disclosure
 
 This project is developed with the help of AI coding tools, primarily [Claude Code](https://claude.com/claude-code).
