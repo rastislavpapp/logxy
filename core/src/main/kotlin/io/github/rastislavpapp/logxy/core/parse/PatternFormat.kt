@@ -156,15 +156,21 @@ class PatternFormat(val pattern: String, private val zone: ZoneId = ZoneId.syste
         private val timestampParsers = arrayOfNulls<TimestampParser>(fields.size).also { parsers ->
             timestamps.forEach { (field, format) -> parsers[field] = format.newParser() }
         }
-        private val starts = IntArray(tokens.size)
-        private val ends = IntArray(tokens.size)
+        // Arrays and index loops: this runs for every line of the file.
+        private val tokenArray = tokens.toTypedArray()
+
+        /** The literal after each token, which ends a field's value; null for the last token. */
+        private val nextLiteral = Array(tokenArray.size) { (tokenArray.getOrNull(it + 1) as? Literal)?.bytes }
+        private val endsWithLiteral = tokenArray.last() is Literal
+        private val starts = IntArray(tokenArray.size)
+        private val ends = IntArray(tokenArray.size)
         private var lineFrom = 0
         private var bytes = ByteArray(0)
 
         override fun match(bytes: ByteArray, from: Int, to: Int): Boolean {
             var position = from
-            for ((k, token) in tokens.withIndex()) {
-                when (token) {
+            for (k in tokenArray.indices) {
+                when (val token = tokenArray[k]) {
                     is Literal -> {
                         if (!regionMatches(bytes, position, to, token.bytes)) return false
                         position += token.bytes.size
@@ -178,11 +184,11 @@ class PatternFormat(val pattern: String, private val zone: ZoneId = ZoneId.syste
                             position = end
                             continue
                         }
-                        val next = tokens.getOrNull(k + 1) as Literal?
+                        val next = nextLiteral[k]
                         val end = when {
                             next == null -> to
-                            token.kind == Kind.MESSAGE -> lastIndexOf(bytes, next.bytes, position, to)
-                            else -> indexOf(bytes, next.bytes, minOf(position + token.minWidth, to), to)
+                            token.kind == Kind.MESSAGE -> lastIndexOf(bytes, next, position, to)
+                            else -> indexOf(bytes, next, minOf(position + token.minWidth, to), to)
                         }
                         if (end < 0) return false
                         var start = position
@@ -198,7 +204,7 @@ class PatternFormat(val pattern: String, private val zone: ZoneId = ZoneId.syste
                     }
                 }
             }
-            if (tokens.last() is Literal) {
+            if (endsWithLiteral) {
                 while (position < to && bytes[position] == SPACE) position++
                 if (position != to) return false
             }
@@ -208,7 +214,8 @@ class PatternFormat(val pattern: String, private val zone: ZoneId = ZoneId.syste
         }
 
         override fun write(out: Columns) {
-            for ((k, token) in tokens.withIndex()) {
+            for (k in tokenArray.indices) {
+                val token = tokenArray[k]
                 if (token !is FieldToken) continue
                 val field = token.field
                 when (token.kind) {
@@ -217,7 +224,7 @@ class PatternFormat(val pattern: String, private val zone: ZoneId = ZoneId.syste
                     Kind.DICT -> out.setDict(field, bytes, starts[k], ends[k])
                     Kind.SPAN -> out.setSpan(field, starts[k] - lineFrom, ends[k] - starts[k])
                     Kind.MESSAGE -> {
-                        val toEnd = k == tokens.lastIndex
+                        val toEnd = k == tokenArray.lastIndex
                         out.setSpan(field, starts[k] - lineFrom, if (toEnd) Columns.TO_RECORD_END else ends[k] - starts[k])
                     }
                 }
