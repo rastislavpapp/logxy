@@ -53,7 +53,7 @@ class ParsedLog private constructor(
     private val dictionaries: Array<ByteDictionary?>,
     indexedSize: Long,
     private var tail: Tail,
-) : LogData {
+) : LogData() {
 
     override val schema: Schema = format.schema
 
@@ -65,8 +65,9 @@ class ParsedLog private constructor(
     private val levelField = schema.indexOf(Role.LEVEL)
     private val levels = ArrayList<Level>()
 
-    /** How level texts map to [Level]; may change while the log is open. */
-    var levelMapping: LevelMapping = LevelMapping.DEFAULT
+    override val isRaw get() = false
+
+    override var levelMapping: LevelMapping = LevelMapping.DEFAULT
         set(value) {
             field = value
             levels.clear()
@@ -101,8 +102,7 @@ class ParsedLog private constructor(
             return true
         }
 
-    /** Canonical level of [record], or null if the format has no level or the record lacks one. */
-    fun level(record: Int): Level? {
+    override fun level(record: Int): Level? {
         if (levelField < 0) return null
         val segment = segmentOf(record)
         val id = segments[segment].bytes[levelField]!![record - segmentFirst[segment]].toInt() and 0xFF
@@ -112,7 +112,7 @@ class ParsedLog private constructor(
         return levels[id]
     }
 
-    internal fun filterSnapshot(): RecordSnapshot = ParsedSnapshot(
+    override fun filterSnapshot(): RecordSnapshot = ParsedSnapshot(
         schema, recordCount, indexedSize, channel,
         segments = segments.toList(),
         first = segmentFirst.copyOf(),

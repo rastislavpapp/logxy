@@ -5,7 +5,6 @@ import io.github.rastislavpapp.logxy.core.FileChange
 import io.github.rastislavpapp.logxy.core.FileSnapshot
 import io.github.rastislavpapp.logxy.core.formatByteSize
 import io.github.rastislavpapp.logxy.core.index.IndexProgress
-import io.github.rastislavpapp.logxy.core.index.LineIndex
 import io.github.rastislavpapp.logxy.core.filter.Filter
 import io.github.rastislavpapp.logxy.core.filter.FilterEngine
 import io.github.rastislavpapp.logxy.core.filter.LevelCondition
@@ -13,7 +12,6 @@ import io.github.rastislavpapp.logxy.core.log.LogData
 import io.github.rastislavpapp.logxy.core.log.Role
 import io.github.rastislavpapp.logxy.core.query.QueryCompiler
 import io.github.rastislavpapp.logxy.core.query.QueryException
-import io.github.rastislavpapp.logxy.core.log.ParsedLog
 import io.github.rastislavpapp.logxy.core.parse.FormatMismatchException
 import io.github.rastislavpapp.logxy.core.parse.LogFormat
 import io.github.rastislavpapp.logxy.core.parse.open
@@ -196,9 +194,9 @@ class LogTab(
 
     private fun settingsChanged() {
         val settings = AppSettings.current
-        val parsed = log as? ParsedLog
-        val levelsChanged = parsed != null && parsed.levelMapping != settings.levels
-        parsed?.levelMapping = settings.levels
+        val log = log
+        val levelsChanged = log != null && !log.isRaw && log.levelMapping != settings.levels
+        log?.levelMapping = settings.levels
         model?.fireTableRowsUpdated(0, maxOf(0, (model?.rowCount ?: 0) - 1))
         // A saved format this tab uses was edited: read the file with the new definition.
         val edited = chosenFormat?.let { chosen -> settings.formats.firstOrNull { it.name == chosen.name && it != chosen } }
@@ -536,7 +534,7 @@ class LogTab(
                 size = log.indexedSize,
                 records = log.recordCount,
                 shown = model?.filteredRowCount,
-                unit = if (log is LineIndex) "line" else "record",
+                unit = if (log.isRaw) "line" else "record",
                 live = activity == FileActivity.LIVE,
                 following = follow,
                 indexMillis = indexMillis,

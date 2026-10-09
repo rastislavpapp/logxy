@@ -9,6 +9,8 @@ import kotlinx.coroutines.withContext
 import io.github.rastislavpapp.logxy.core.filter.LineSnapshot
 import io.github.rastislavpapp.logxy.core.filter.RecordSnapshot
 import io.github.rastislavpapp.logxy.core.log.AppendedData
+import io.github.rastislavpapp.logxy.core.log.Level
+import io.github.rastislavpapp.logxy.core.log.LevelMapping
 import io.github.rastislavpapp.logxy.core.log.LogData
 import io.github.rastislavpapp.logxy.core.log.Schema
 import java.lang.foreign.Arena
@@ -50,12 +52,19 @@ class LineIndex private constructor(
     indexedSize: Long,
     // Whether bytes appended next start a new line, i.e. the file is empty or ends with a newline.
     private var lastLineComplete: Boolean,
-) : LogData {
+) : LogData() {
 
     override var indexedSize = indexedSize
         private set
 
     override val schema get() = Schema.RAW
+
+    override val isRaw get() = true
+
+    // Raw lines have no levels; kept only to satisfy LogData.
+    override var levelMapping = LevelMapping.DEFAULT
+
+    override fun level(record: Int): Level? = null
 
     val lineCount: Int get() = starts.size
 
@@ -63,7 +72,7 @@ class LineIndex private constructor(
 
     override fun rowValues(record: Int, maxBytes: Int) = arrayOf(lineText(record, maxBytes))
 
-    internal fun filterSnapshot(): RecordSnapshot = LineSnapshot(lineCount, indexedSize, channel, starts)
+    override fun filterSnapshot(): RecordSnapshot = LineSnapshot(lineCount, indexedSize, channel, starts)
 
     override fun recordText(record: Int, maxBytes: Int) = lineText(record, maxBytes)
 

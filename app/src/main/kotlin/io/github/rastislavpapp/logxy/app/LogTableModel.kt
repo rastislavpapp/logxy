@@ -3,9 +3,7 @@ package io.github.rastislavpapp.logxy.app
 import io.github.rastislavpapp.logxy.core.log.Field
 import io.github.rastislavpapp.logxy.core.log.Level
 import io.github.rastislavpapp.logxy.core.log.LogData
-import io.github.rastislavpapp.logxy.core.log.ParsedLog
 import io.github.rastislavpapp.logxy.core.log.Role
-import io.github.rastislavpapp.logxy.core.index.LineIndex
 import javax.swing.table.AbstractTableModel
 
 /** Longest value prefix shown in the table; the rest is cut off. */
@@ -20,7 +18,7 @@ private const val CACHE_SIZE = 1024
  */
 class LogTableModel(val log: LogData) : AbstractTableModel(), RowWindow {
 
-    val showsLineNumbers = log is LineIndex
+    val showsLineNumbers = log.isRaw
 
     /** Field index of each column after the line number column. */
     private val columnFields: List<Int> = log.schema.fields.indices.sortedBy { log.schema.fields[it].role == Role.MESSAGE }
@@ -115,7 +113,7 @@ class LogTableModel(val log: LogData) : AbstractTableModel(), RowWindow {
     }
 
     /** Canonical level of the record shown in [row], if the format has levels. */
-    fun level(row: Int): Level? = (log as? ParsedLog)?.level(recordAt(row))
+    fun level(row: Int): Level? = log.level(recordAt(row))
 
     private fun values(record: Int): Array<String> {
         val slot = record and (CACHE_SIZE - 1)

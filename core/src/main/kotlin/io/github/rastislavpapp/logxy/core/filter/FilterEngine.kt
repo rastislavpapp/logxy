@@ -1,11 +1,9 @@
 package io.github.rastislavpapp.logxy.core.filter
 
-import io.github.rastislavpapp.logxy.core.index.LineIndex
 import io.github.rastislavpapp.logxy.core.log.ColumnType
 import io.github.rastislavpapp.logxy.core.log.Columns
 import io.github.rastislavpapp.logxy.core.log.LevelMapping
 import io.github.rastislavpapp.logxy.core.log.LogData
-import io.github.rastislavpapp.logxy.core.log.ParsedLog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -48,11 +46,7 @@ class FilterEngine(private val log: LogData, private val maxCacheBytes: Long = D
      * IllegalArgumentException for an invalid regex.
      */
     fun prepare(filter: Filter, from: Int = 0): Evaluation {
-        val snapshot = when (log) {
-            is ParsedLog -> log.filterSnapshot()
-            is LineIndex -> log.filterSnapshot()
-            else -> throw IllegalArgumentException("Cannot filter ${log.javaClass.simpleName}")
-        }
+        val snapshot = log.filterSnapshot()
         if (snapshot.levels != cachedLevels) {
             cache.keys.removeIf { it is LevelCondition }
             cachedLevels = snapshot.levels
