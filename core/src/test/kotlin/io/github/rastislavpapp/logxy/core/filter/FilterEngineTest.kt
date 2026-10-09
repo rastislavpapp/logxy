@@ -132,6 +132,38 @@ class FilterEngineTest {
         }
     }
 
+    private fun grow(log: LogData, file: Path, text: String) {
+        Files.writeString(file, text, StandardOpenOption.APPEND)
+        log.append(log.readAppended(Files.size(file)))
+    }
+
+    @Test
+    fun `cached results follow the last record as it grows`() {
+        val file = Files.writeString(dir.resolve("grow.log"), "2026-10-01 08:00:01.000 [w] ERROR app.Db - Query failed\n")
+        runBlocking { ParsedLog.build(file, format) }.use { log ->
+            val engine = FilterEngine(log)
+            val npe = TextCondition("Message", TextOp.EQUALS, "*NullPointer*", ignoreCase = true)
+            val endsFailed = TextCondition("Message", TextOp.EQUALS, "*failed")
+            assertEquals(listOf(), engine.rows(npe))
+            assertEquals(listOf(0), engine.rows(endsFailed))
+            grow(log, file, "java.lang.NullPointerException: x\n\tat a.B(B.java:1)\n")
+            assertEquals(listOf(0), engine.rows(npe))
+            assertEquals(listOf(), engine.rows(endsFailed))
+        }
+    }
+
+    @Test
+    fun `cached results follow a raw line being completed`() {
+        val file = Files.writeString(dir.resolve("partial.log"), "hello wor")
+        runBlocking { LineIndex.build(file) }.use { log ->
+            val engine = FilterEngine(log)
+            val world = TextCondition("Line", TextOp.EQUALS, "*world*", ignoreCase = true)
+            assertEquals(listOf(), engine.rows(world))
+            grow(log, file, "ld\n")
+            assertEquals(listOf(0), engine.rows(world))
+        }
+    }
+
     /** A larger random log, compared against a straightforward record-by-record evaluation. */
     @Test
     fun `parallel cached and incremental evaluation agree with a direct one`() {

@@ -9,7 +9,8 @@ import java.nio.channels.FileChannel
 
 /**
  * The first [count] records of a log, taken on the thread that owns it and readable from any thread:
- * records below [count] never change, appended ones are not seen.
+ * records below [count] never change, appended ones are not seen. The exception is the last record,
+ * which grows while it is being written (continuation lines, an unfinished line).
  */
 internal abstract class RecordSnapshot(
     val schema: Schema,

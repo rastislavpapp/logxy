@@ -108,8 +108,16 @@ class FilterEngine(private val log: LogData) {
             var bits = entry?.bits
             if (anyNeeded) {
                 val computed = compute(leaf, need)
-                bits = LongArray(words) { (bits?.getOrElse(it) { 0L } ?: 0L) or computed[it] }
-                val coverage = LongArray(words) { (entry?.coverage?.getOrElse(it) { 0L } ?: 0L) or need[it] }
+                val oldCoverage = entry?.coverage
+                bits = LongArray(words) {
+                    ((bits?.getOrElse(it) { 0L } ?: 0L) and (oldCoverage?.getOrElse(it) { 0L } ?: 0L)) or computed[it]
+                }
+                val coverage = LongArray(words) { (oldCoverage?.getOrElse(it) { 0L } ?: 0L) or need[it] }
+                // The last record may still grow while tailing, so it is computed again every time.
+                if (snapshot.count > 0) {
+                    val last = snapshot.count - 1
+                    coverage[last ushr 6] = coverage[last ushr 6] and (1L shl (last and 63)).inv()
+                }
                 cache[leaf.condition] = Entry(bits, coverage)
             }
             return LongArray(words) { (bits?.getOrElse(it) { 0L } ?: 0L) and candidates[it] }
