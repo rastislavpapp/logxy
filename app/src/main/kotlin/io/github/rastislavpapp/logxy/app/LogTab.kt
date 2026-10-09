@@ -45,6 +45,7 @@ import javax.swing.JSplitPane
 import javax.swing.JTextArea
 import javax.swing.ScrollPaneConstants
 import javax.swing.SwingUtilities
+import javax.swing.Timer
 import javax.swing.UIManager
 import kotlin.time.Duration.Companion.milliseconds
 
@@ -198,11 +199,27 @@ class LogTab(
         // A saved format this tab uses was edited: read the file with the new definition.
         val edited = chosenFormat?.let { chosen -> settings.formats.firstOrNull { it.name == chosen.name && it != chosen } }
         if (edited != null) chosenFormat = edited
+        // Only renamed: nothing to read again, just show the new name.
+        chosenFormat?.let { renamed(it, settings.formats) }?.let { chosenFormat = it }
+        renamed(format, settings.formats)?.let { format = it }
         showFormat()
         if (edited != null) {
             reload()
         } else if (levelsChanged && activeFilter != null) {
             runFilter(keepView = true)
+        }
+    }
+
+    /** The saved format that [format] became by a rename, i.e. with the same definition under a new name. */
+    private fun renamed(format: LogFormat, saved: List<LogFormat>): LogFormat? {
+        if (format == LogFormat.Raw || format in LogFormat.BUILT_IN || saved.any { it.name == format.name }) return null
+        return saved.firstOrNull { candidate ->
+            when (format) {
+                is LogFormat.Pattern -> candidate is LogFormat.Pattern && candidate.pattern == format.pattern
+                is LogFormat.Regex -> candidate is LogFormat.Regex && candidate.regex == format.regex &&
+                    candidate.timestampPattern == format.timestampPattern
+                LogFormat.Raw -> false
+            }
         }
     }
 
@@ -295,6 +312,7 @@ class LogTab(
                         val oldRecordCount = log.recordCount
                         log.append(appended)
                         model?.recordsAppended(oldRecordCount)
+                        refreshDetail(oldRecordCount - 1)
                         if (activeFilter != null) runFilter(keepView = true) else scrollPane?.rowsAppended()
                         if (activity == FileActivity.STATIC) {
                             activity = FileActivity.LIVE
@@ -383,10 +401,15 @@ class LogTab(
         content.validate()
         content.repaint()
         split.setDividerLocation(AppState[AppState.DETAIL_DIVIDER]?.toDoubleOrNull()?.coerceIn(0.1, 0.95) ?: 0.75)
-        // Remembered as a proportion, so it fits any window size.
+        // Remembered as a proportion, so it fits any window size; saved once dragging stops, as each save writes a file.
+        var proportion = ""
+        val saveDivider = Timer(300) { AppState[AppState.DETAIL_DIVIDER] = proportion }.apply { isRepeats = false }
         split.addPropertyChangeListener(JSplitPane.DIVIDER_LOCATION_PROPERTY) {
             val height = split.height - split.dividerSize
-            if (height > 0 && split.isShowing) AppState[AppState.DETAIL_DIVIDER] = "%.3f".format(java.util.Locale.ROOT, split.dividerLocation.toDouble() / height)
+            if (height > 0 && split.isShowing) {
+                proportion = "%.3f".format(java.util.Locale.ROOT, split.dividerLocation.toDouble() / height)
+                saveDivider.restart()
+            }
         }
         scrollPane.follow = follow
         applyFilter()
@@ -395,6 +418,18 @@ class LogTab(
     private fun showDetail(model: LogTableModel, row: Int) {
         detail.text = if (row < 0 || row >= model.rowCount) "" else model.log.recordText(model.recordAt(row), MAX_DETAIL_BYTES)
         detail.caretPosition = 0
+    }
+
+    /** Shows [record] again if it is selected; it may have grown, e.g. by a stack trace written after it. */
+    private fun refreshDetail(record: Int) {
+        val model = model ?: return
+        val row = table?.selectionModel?.leadSelectionIndex ?: return
+        if (row !in 0..<model.rowCount || model.recordAt(row) != record) return
+        val text = model.log.recordText(record, MAX_DETAIL_BYTES)
+        if (text == detail.text) return
+        val caret = detail.caretPosition
+        detail.text = text
+        detail.caretPosition = caret.coerceAtMost(detail.document.length)
     }
 
     /** Applies the filter bar's level and query to this file's records. */
