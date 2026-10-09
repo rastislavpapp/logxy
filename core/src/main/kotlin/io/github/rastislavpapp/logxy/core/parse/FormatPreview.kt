@@ -19,13 +19,17 @@ object FormatPreview {
 
     private const val SAMPLE_BYTES = 256 * 1024
 
-    /** The first lines of [path], up to [maxLines]. */
-    fun sample(path: Path, maxLines: Int): List<ByteArray> = FileChannel.open(path, StandardOpenOption.READ).use { channel ->
-        val reader = LineReader(channel, 0, minOf(channel.size(), SAMPLE_BYTES.toLong()), SAMPLE_BYTES)
-        buildList {
-            while (size < maxLines && reader.next()) add(reader.buffer.copyOfRange(reader.lineFrom, reader.lineTo))
+    /** The first lines of [path], up to [maxLines], from its first 256 KB; empty lines left out if [skipEmpty]. */
+    fun sample(path: Path, maxLines: Int, skipEmpty: Boolean = false): List<ByteArray> =
+        FileChannel.open(path, StandardOpenOption.READ).use { channel ->
+            val reader = LineReader(channel, 0, minOf(channel.size(), SAMPLE_BYTES.toLong()), SAMPLE_BYTES)
+            buildList {
+                while (size < maxLines && reader.next()) {
+                    if (skipEmpty && reader.lineTo == reader.lineFrom) continue
+                    add(reader.buffer.copyOfRange(reader.lineFrom, reader.lineTo))
+                }
+            }
         }
-    }
 
     fun preview(format: RecordFormat, lines: List<ByteArray>): List<PreviewLine> {
         val parser = format.newParser()

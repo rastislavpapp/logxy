@@ -5,9 +5,7 @@ import io.github.rastislavpapp.logxy.core.index.LineIndex
 import io.github.rastislavpapp.logxy.core.log.LevelMapping
 import io.github.rastislavpapp.logxy.core.log.LogData
 import io.github.rastislavpapp.logxy.core.log.ParsedLog
-import java.nio.channels.FileChannel
 import java.nio.file.Path
-import java.nio.file.StandardOpenOption
 
 /** A saved description of how to read a log: raw lines, a pattern layout, or a regex. */
 sealed interface LogFormat {
@@ -46,7 +44,6 @@ sealed interface LogFormat {
 
         private class Scored(val format: LogFormat, val matches: Int, val preferred: Boolean, val fields: Int)
 
-        private const val SAMPLE_BYTES = 256 * 1024
         private const val SAMPLE_LINES = 1000
 
         /**
@@ -57,14 +54,7 @@ sealed interface LogFormat {
          */
         fun detect(path: Path, preferred: List<LogFormat> = emptyList()): LogFormat {
             val candidates = preferred + BUILT_IN
-            val sample = FileChannel.open(path, StandardOpenOption.READ).use { channel ->
-                val reader = LineReader(channel, 0, minOf(channel.size(), SAMPLE_BYTES.toLong()), SAMPLE_BYTES)
-                buildList {
-                    while (size < SAMPLE_LINES && reader.next()) {
-                        if (reader.lineTo > reader.lineFrom) add(reader.buffer.copyOfRange(reader.lineFrom, reader.lineTo))
-                    }
-                }
-            }
+            val sample = FormatPreview.sample(path, SAMPLE_LINES, skipEmpty = true)
             val realLines = sample.count { !FormatCheck.looksLikeContinuation(it, 0, it.size) }
             if (sample.isEmpty()) return Raw
             val scored = candidates.mapNotNull { candidate ->

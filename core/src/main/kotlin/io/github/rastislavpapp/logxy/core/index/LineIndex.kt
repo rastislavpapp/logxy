@@ -32,6 +32,9 @@ data class IndexOptions(
         require(minRangeSize >= 1) { "minRangeSize must be at least 1" }
         require(bufferSize >= 8) { "bufferSize must be at least 8" }
     }
+
+    /** How many ranges a file of [size] bytes is split into for scanning in parallel. */
+    fun rangeCount(size: Long): Int = (size / minRangeSize).coerceIn(1, parallelism.toLong()).toInt()
 }
 
 class AppendedLines internal constructor(
@@ -148,7 +151,7 @@ class LineIndex private constructor(
         }
 
         private fun splitIntoRanges(size: Long, options: IndexOptions): List<LongRange> {
-            val count = (size / options.minRangeSize).coerceIn(1, options.parallelism.toLong()).toInt()
+            val count = options.rangeCount(size)
             val rangeSize = size / count
             return List(count) { i ->
                 val start = i * rangeSize

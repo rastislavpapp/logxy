@@ -202,8 +202,7 @@ class ParsedLog private constructor(
             val target = segments.last()
             val remaps = Array(schema.fields.size) { field ->
                 val local = source.dictionaries[field] ?: return@Array null
-                val global = dictionaries[field]!!
-                IntArray(local.size) { id -> local.key(id).let { global.idOf(it, 0, it.size) } }
+                local.idsIn(dictionaries[field]!!)
             }
             for (i in 0..<source.size) copyRecord(source, i, target, remaps)
         }
@@ -293,7 +292,7 @@ class ParsedLog private constructor(
                 val size = channel.size()
                 progress.totalBytes = size
                 FormatCheck.check(channel, size, format.newParser())
-                val count = (size / options.minRangeSize).coerceIn(1, options.parallelism.toLong()).toInt()
+                val count = options.rangeCount(size)
 
                 // Ranges must start where records start, so each can be parsed on its own.
                 val bounds = LongArray(count + 1)
@@ -389,7 +388,7 @@ class ParsedLog private constructor(
                 val remaps = segments.map { segment ->
                     Array(schema.fields.size) { field ->
                         val local = segment.dictionaries[field] ?: return@Array null
-                        IntArray(local.size) { id -> local.key(id).let { global[field]!!.idOf(it, 0, it.size) } }
+                        local.idsIn(global[field]!!)
                     }
                 }
                 segments.mapIndexed { s, segment ->
