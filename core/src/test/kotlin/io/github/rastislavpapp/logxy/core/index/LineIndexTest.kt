@@ -92,7 +92,7 @@ class LineIndexTest {
 
     private fun LineIndex.appendFrom(file: Path, more: String) {
         Files.write(file, more.toByteArray(), StandardOpenOption.APPEND)
-        append(scanAppended(Files.size(file)))
+        append(readAppended(Files.size(file)))
     }
 
     private fun growing(content: String): Pair<Path, LineIndex> {
@@ -147,7 +147,7 @@ class LineIndexTest {
         val (file, index) = growing("a\n")
         index.use {
             Files.write(file, "b\n".toByteArray(), StandardOpenOption.APPEND)
-            val first = it.scanAppended(Files.size(file))
+            val first = it.readAppended(Files.size(file))
             it.append(first)
             assertFailsWith<IllegalArgumentException> { it.append(first) }
         }

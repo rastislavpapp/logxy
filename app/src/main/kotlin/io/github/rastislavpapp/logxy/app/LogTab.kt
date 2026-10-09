@@ -6,12 +6,17 @@ import io.github.rastislavpapp.logxy.core.FileSnapshot
 import io.github.rastislavpapp.logxy.core.formatByteSize
 import io.github.rastislavpapp.logxy.core.index.IndexProgress
 import io.github.rastislavpapp.logxy.core.index.LineIndex
+import io.github.rastislavpapp.logxy.core.log.LogData
+import io.github.rastislavpapp.logxy.core.parse.FormatMismatchException
+import io.github.rastislavpapp.logxy.core.parse.LogFormat
+import io.github.rastislavpapp.logxy.core.parse.open
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
@@ -19,24 +24,47 @@ import kotlinx.coroutines.swing.Swing
 import kotlinx.coroutines.withContext
 import net.miginfocom.swing.MigLayout
 import java.awt.BorderLayout
+import java.awt.Dimension
+import java.awt.Font
 import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.Path
 import java.text.NumberFormat
 import java.util.concurrent.atomic.AtomicReference
+import javax.swing.DefaultComboBoxModel
+import javax.swing.JComboBox
 import javax.swing.JComponent
 import javax.swing.JLabel
 import javax.swing.JPanel
 import javax.swing.JProgressBar
+import javax.swing.JScrollPane
+import javax.swing.JSplitPane
+import javax.swing.JTextArea
 import javax.swing.JToggleButton
 import javax.swing.JToolBar
+import javax.swing.ScrollPaneConstants
 import javax.swing.UIManager
-import kotlin.coroutines.coroutineContext
 
 private const val LIVE_POLL_MILLIS = 500L
 private const val STATIC_POLL_MILLIS = 2000L
+private const val MAX_DETAIL_BYTES = 1024 * 1024
 
-/** One open file: indexes it in the background, shows its lines and follows changes to it. */
+/** An entry of the format chooser. */
+private sealed interface FormatChoice {
+    data class Auto(val detected: LogFormat?) : FormatChoice {
+        override fun toString() = if (detected == null) "Auto-detect" else "Auto: ${detected.name}"
+    }
+
+    data class Fixed(val format: LogFormat) : FormatChoice {
+        override fun toString() = format.name
+    }
+
+    data object Custom : FormatChoice {
+        override fun toString() = "Custom…"
+    }
+}
+
+/** One open file: indexes it in the background, shows its records and follows changes to it. */
 class LogTab(
     val path: Path,
     private val openFiles: (List<Path>) -> Unit,
@@ -46,13 +74,35 @@ class LogTab(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Swing)
     private var job: Job? = null
     private val content = JPanel(BorderLayout())
+    private val detail = JTextArea().apply {
+        isEditable = false
+        lineWrap = true
+    }
     private val followButton = JToggleButton("Follow").apply {
         toolTipText = "Keep the end of the file in view as it grows"
         addActionListener { follow = isSelected }
     }
+    private val formats = DefaultComboBoxModel<FormatChoice>().apply {
+        addElement(FormatChoice.Auto(null))
+        addElement(FormatChoice.Fixed(LogFormat.Raw))
+        LogFormat.BUILT_IN.forEach { addElement(FormatChoice.Fixed(it)) }
+        addElement(FormatChoice.Custom)
+    }
+    private val formatBox = object : JComboBox<FormatChoice>(formats) {
+        // A toolbar would otherwise stretch it across the whole width.
+        override fun getMaximumSize(): Dimension = preferredSize
+    }.apply {
+        toolTipText = "How lines are split into columns"
+        addActionListener { formatChosen() }
+    }
+    private var updatingFormatBox = false
 
-    private var index: LineIndex? = null
-    private var model: LineTableModel? = null
+    /** The format the user picked, or null to detect it. */
+    private var chosenFormat: LogFormat? = null
+    private var format: LogFormat = LogFormat.Raw
+
+    private var log: LogData? = null
+    private var model: LogTableModel? = null
     private var scrollPane: VirtualScrollPane? = null
     private var activity = FileActivity.STATIC
     private var indexMillis = 0L
@@ -73,6 +123,9 @@ class LogTab(
         add(JToolBar().apply {
             isFloatable = false
             add(followButton)
+            addSeparator()
+            add(JLabel("Format: "))
+            add(formatBox)
         }, BorderLayout.NORTH)
         add(content, BorderLayout.CENTER)
         start()
@@ -82,6 +135,44 @@ class LogTab(
         job = scope.launch {
             val reference = load() ?: return@launch
             watch(reference)
+        }
+    }
+
+    private fun formatChosen() {
+        if (updatingFormatBox) return
+        when (val choice = formatBox.selectedItem as FormatChoice) {
+            is FormatChoice.Auto -> chosenFormat = null
+            is FormatChoice.Fixed -> chosenFormat = choice.format
+            FormatChoice.Custom -> {
+                val custom = askForCustomFormat(this, chosenFormat ?: format)
+                if (custom == null) {
+                    showFormat()
+                    return
+                }
+                val existing = (0..<formats.size).map { formats.getElementAt(it) }
+                    .firstOrNull { it is FormatChoice.Fixed && it.format == custom }
+                if (existing == null) formats.insertElementAt(FormatChoice.Fixed(custom), formats.size - 1)
+                chosenFormat = custom
+            }
+        }
+        reload()
+    }
+
+    /** Selects the entry for the current format without reacting to it. */
+    private fun showFormat() {
+        updatingFormatBox = true
+        try {
+            val chosen = chosenFormat
+            if (chosen == null) {
+                formats.removeElementAt(0)
+                formats.insertElementAt(FormatChoice.Auto(format), 0)
+                formatBox.selectedIndex = 0
+            } else {
+                formatBox.selectedItem = (0..<formats.size).map { formats.getElementAt(it) }
+                    .first { it is FormatChoice.Fixed && it.format == chosen }
+            }
+        } finally {
+            updatingFormatBox = false
         }
     }
 
@@ -104,17 +195,19 @@ class LogTab(
             // Taken before indexing, so a file replaced meanwhile shows up as a change on the first poll.
             val snapshot = withContext(Dispatchers.IO) { FileSnapshot.take(path) }
                 ?: throw IOException("File not found")
+            format = chosenFormat ?: withContext(Dispatchers.IO) { LogFormat.detect(path) }
+            showFormat()
             // Hand the result over outside the coroutine, so a cancellation racing with completion cannot leak it.
-            val built = AtomicReference<LineIndex>()
+            val built = AtomicReference<LogData>()
             try {
-                withContext(Dispatchers.IO) { built.set(LineIndex.build(path, progress)) }
+                withContext(Dispatchers.IO) { built.set(format.open(path, progress)) }
             } catch (e: CancellationException) {
                 built.getAndSet(null)?.close()
                 throw e
             }
             val loaded = built.get()
             indexMillis = (System.nanoTime() - started) / 1_000_000
-            index = loaded
+            log = loaded
             val currentSize = withContext(Dispatchers.IO) { Files.size(path) }
             activity = FileActivity.classify(snapshot.lastModified, snapshot.size, currentSize)
             problem = null
@@ -124,10 +217,17 @@ class LogTab(
             return snapshot
         } catch (e: CancellationException) {
             throw e
+        } catch (e: FormatMismatchException) {
+            showProblem(
+                "${path.fileName} does not match the format “${format.name}”.",
+                e.message.orEmpty(),
+                "Choose another format in the toolbar, or Raw text.",
+            )
+            statusText = "Format does not match"
+            onStatusChanged()
+            return null
         } catch (e: Exception) {
-            val error = JLabel("Cannot open ${path.fileName}: ${e.message ?: e.javaClass.simpleName}")
-            error.foreground = UIManager.getColor("Component.error.focusedBorderColor")
-            showCentered(error)
+            showProblem("Cannot open ${path.fileName}.", e.message ?: e.javaClass.simpleName, null)
             statusText = "Error"
             onStatusChanged()
             return null
@@ -140,10 +240,10 @@ class LogTab(
         var known = reference
         while (true) {
             delay(if (activity == FileActivity.LIVE) LIVE_POLL_MILLIS else STATIC_POLL_MILLIS)
-            val index = index ?: return
+            val log = log ?: return
             try {
                 val current = withContext(Dispatchers.IO) { FileSnapshot.take(path) }
-                when (known.changeTo(current, index.indexedSize)) {
+                when (known.changeTo(current, log.indexedSize)) {
                     FileChange.MISSING -> {
                         problem = "file not found"
                         updateStatus()
@@ -154,10 +254,10 @@ class LogTab(
                         return
                     }
                     FileChange.GROWN -> {
-                        val appended = withContext(Dispatchers.IO) { index.scanAppended(current!!.size) }
-                        val oldLineCount = index.lineCount
-                        index.append(appended)
-                        model?.linesAppended(oldLineCount)
+                        val appended = withContext(Dispatchers.IO) { log.readAppended(current!!.size) }
+                        val oldRecordCount = log.recordCount
+                        log.append(appended)
+                        model?.recordsAppended(oldRecordCount)
                         scrollPane?.rowsAppended()
                         if (activity == FileActivity.STATIC) {
                             activity = FileActivity.LIVE
@@ -171,58 +271,93 @@ class LogTab(
                 problem = null
             } catch (e: IOException) {
                 // Closing the tab closes the file under a running read.
-                coroutineContext.ensureActive()
+                currentCoroutineContext().ensureActive()
                 problem = e.message ?: e.javaClass.simpleName
             }
             updateStatus()
         }
     }
 
-    /** Starts over with the file now at [path], e.g. after rotation or truncation. */
+    /** Starts over with the file now at [path], e.g. after rotation, truncation or a format change. */
     private fun reload() {
         job?.cancel()
-        closeIndex()
+        closeLog()
         start()
     }
 
     private fun showCentered(vararg components: JComponent) {
         content.removeAll()
-        content.add(JPanel(MigLayout("fill, wrap 1", "[center]", "push[]8[]push")).apply {
+        content.add(JPanel(MigLayout("align 50% 50%, wrap 1, gapy 8", "[center]")).apply {
             components.forEach { add(it, if (it is JProgressBar) "w 320!" else "") }
         })
         content.revalidate()
         content.repaint()
     }
 
-    private fun showTable(index: LineIndex) {
-        val model = LineTableModel(index)
-        val table = LineTable(model)
+    private fun showProblem(title: String, detail: String, hint: String?) {
+        val heading = JLabel(title).apply {
+            putClientProperty("FlatLaf.styleClass", "h3")
+            foreground = UIManager.getColor("Component.error.focusedBorderColor")
+        }
+        val text = JTextArea(detail).apply {
+            isEditable = false
+            isOpaque = false
+            font = UIManager.getFont("monospaced.font") ?: font
+        }
+        val components = listOfNotNull<JComponent>(heading, text, hint?.let { JLabel(it) })
+        showCentered(*components.toTypedArray())
+    }
+
+    private fun showTable(log: LogData) {
+        val model = LogTableModel(log)
+        val table = LogTable(model)
         // The table has its own transfer handler (for copy), which would otherwise swallow file drops.
         table.transferHandler = FileDropHandler(openFiles, table.transferHandler)
         val scrollPane = VirtualScrollPane(table, model)
         scrollPane.onFollowChanged = { if (follow != it) follow = it }
+        table.selectionModel.addListSelectionListener { event ->
+            if (!event.valueIsAdjusting) showDetail(model, table.selectionModel.leadSelectionIndex)
+        }
         this.model = model
         this.scrollPane = scrollPane
+
+        detail.font = table.font.deriveFont(Font.PLAIN)
+        detail.text = ""
+        val split = JSplitPane(JSplitPane.VERTICAL_SPLIT, scrollPane, JScrollPane(
+            detail, ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED, ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER,
+        )).apply {
+            resizeWeight = 0.75
+            isOneTouchExpandable = true
+            border = null
+        }
         content.removeAll()
-        content.add(scrollPane, BorderLayout.CENTER)
+        content.add(split, BorderLayout.CENTER)
         content.revalidate()
         content.repaint()
+        split.setDividerLocation(0.75)
         scrollPane.follow = follow
     }
 
+    private fun showDetail(model: LogTableModel, row: Int) {
+        val record = model.windowStart + row
+        detail.text = if (row < 0 || record >= model.log.recordCount) "" else model.log.recordText(record, MAX_DETAIL_BYTES)
+        detail.caretPosition = 0
+    }
+
     private fun updateStatus() {
-        val index = index ?: return
+        val log = log ?: return
         val numbers = NumberFormat.getIntegerInstance()
+        val unit = if (log is LineIndex) "line" else "record"
+        val count = "${numbers.format(log.recordCount)} $unit${if (log.recordCount == 1) "" else "s"}"
         val mode = if (activity == FileActivity.LIVE) "live" else "static"
-        val lines = if (index.lineCount == 1) "line" else "lines"
-        statusText = "${formatByteSize(index.indexedSize)}  ·  ${numbers.format(index.lineCount)} $lines  ·  " +
-            "$mode  ·  indexed in ${numbers.format(indexMillis)} ms" + (problem?.let { "  ·  $it" } ?: "")
+        statusText = "${formatByteSize(log.indexedSize)}  ·  $count  ·  $mode  ·  indexed in ${numbers.format(indexMillis)} ms" +
+            (problem?.let { "  ·  $it" } ?: "")
         onStatusChanged()
     }
 
-    private fun closeIndex() {
-        index?.close()
-        index = null
+    private fun closeLog() {
+        log?.close()
+        log = null
         model = null
         scrollPane = null
     }
@@ -230,6 +365,6 @@ class LogTab(
     /** Cancels any running work and releases the file. */
     fun dispose() {
         scope.cancel()
-        closeIndex()
+        closeLog()
     }
 }

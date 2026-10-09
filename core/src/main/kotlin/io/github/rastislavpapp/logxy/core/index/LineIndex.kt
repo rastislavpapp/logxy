@@ -6,7 +6,9 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.job
 import kotlinx.coroutines.withContext
-import java.io.Closeable
+import io.github.rastislavpapp.logxy.core.log.AppendedData
+import io.github.rastislavpapp.logxy.core.log.LogData
+import io.github.rastislavpapp.logxy.core.log.Schema
 import java.lang.foreign.Arena
 import java.nio.ByteBuffer
 import java.nio.channels.FileChannel
@@ -26,30 +28,40 @@ data class IndexOptions(
     }
 }
 
-/** Bytes appended to a file, scanned by [LineIndex.scanAppended] and applied with [LineIndex.append]. */
-class AppendedLines internal constructor(internal val from: Long, internal val to: Long, internal val starts: LongChunkList)
+class AppendedLines internal constructor(
+    internal val from: Long,
+    internal val to: Long,
+    internal val starts: LongChunkList,
+) : AppendedData
 
 /**
- * Start offsets of all lines in a file. Lines end with `\n` or `\r\n`; a trailing line without
- * terminator counts as a line, a terminator at the very end does not start an empty one.
+ * Start offsets of all lines in a file: the raw-text view of a log, one record per line. Lines end
+ * with `\n` or `\r\n`; a trailing line without terminator counts as a line, a terminator at the
+ * very end does not start an empty one.
  *
- * Holds the file open for reading line text until [close]d. Not thread-safe: [append] must run on
- * the thread that reads the index; only [scanAppended] may run elsewhere, but not during [append].
+ * Holds the file open for reading line text until [close]d.
  */
 class LineIndex private constructor(
-    val path: Path,
+    override val path: Path,
     private val channel: FileChannel,
     private val starts: LongChunkList,
     indexedSize: Long,
     // Whether bytes appended next start a new line, i.e. the file is empty or ends with a newline.
     private var lastLineComplete: Boolean,
-) : Closeable {
+) : LogData {
 
-    /** Number of bytes covered by the index. */
-    var indexedSize = indexedSize
+    override var indexedSize = indexedSize
         private set
 
+    override val schema get() = Schema.RAW
+
     val lineCount: Int get() = starts.size
+
+    override val recordCount get() = starts.size
+
+    override fun rowValues(record: Int, maxBytes: Int) = arrayOf(lineText(record, maxBytes))
+
+    override fun recordText(record: Int, maxBytes: Int) = lineText(record, maxBytes)
 
     fun lineStart(line: Int): Long = starts[line]
 
@@ -75,15 +87,15 @@ class LineIndex private constructor(
         return String(bytes, 0, utf8Boundary(bytes, maxBytes), Charsets.UTF_8) + "…"
     }
 
-    /** Scans bytes between [indexedSize] and [size]; does not change the index. */
-    fun scanAppended(size: Long): AppendedLines {
+    override fun readAppended(size: Long): AppendedLines {
         val from = indexedSize
         if (size <= from) return AppendedLines(from, from, LongChunkList())
         val scan = scanRange(channel, from..<size, APPEND_BUFFER_SIZE, checkCancelled = {}, progress = null)
         return AppendedLines(from, scan.end, scan.starts)
     }
 
-    fun append(appended: AppendedLines) {
+    override fun append(data: AppendedData) {
+        val appended = data as AppendedLines
         require(appended.from == indexedSize) { "Appended bytes start at ${appended.from}, index ends at $indexedSize" }
         if (appended.to == appended.from) return
         if (lastLineComplete) starts.add(appended.from)

@@ -31,4 +31,22 @@ object NewlineScanner {
             i++
         }
     }
+
+    /** Index of the first `\n` in `buffer[from, to)`, or -1. */
+    fun indexOf(buffer: ByteBuffer, from: Int, to: Int): Int {
+        buffer.order(ByteOrder.LITTLE_ENDIAN)
+        var i = from
+        val wordEnd = to - 7
+        while (i < wordEnd) {
+            val x = buffer.getLong(i) xor NEWLINES
+            val found = (((x and LOW7) + LOW7) or x or LOW7).inv()
+            if (found != 0L) return i + (java.lang.Long.numberOfTrailingZeros(found) ushr 3)
+            i += 8
+        }
+        while (i < to) {
+            if (buffer.get(i) == '\n'.code.toByte()) return i
+            i++
+        }
+        return -1
+    }
 }

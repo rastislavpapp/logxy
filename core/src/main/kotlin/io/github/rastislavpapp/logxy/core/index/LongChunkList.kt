@@ -24,6 +24,11 @@ class LongChunkList {
         return chunks[index ushr SHIFT]!![index and MASK]
     }
 
+    operator fun set(index: Int, value: Long) {
+        if (index !in 0..<size) throw IndexOutOfBoundsException("Index $index, size $size")
+        chunks[index ushr SHIFT]!![index and MASK] = value
+    }
+
     fun last(): Long = get(size - 1)
 
     fun removeLast() {
