@@ -68,6 +68,7 @@ class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
                 field == null -> maxOf(logModel.totalRowCount.toString().length, 3)
                 field.type == ColumnType.TIMESTAMP -> sampleLength(column, 23)
                 field.role == Role.LEVEL -> 5
+                field.role == Role.SOURCE -> sampleWidest(column).coerceIn(6, 32)
                 field.role == Role.THREAD -> 18
                 field.role == Role.LOGGER -> 36
                 else -> 12
@@ -85,6 +86,10 @@ class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
             if (field?.role == Role.LEVEL) tableColumn.minWidth = width
         }
     }
+
+    /** The longest of the first values, e.g. file names. */
+    private fun sampleWidest(column: Int): Int =
+        (0..<minOf(rowCount, 1000)).maxOfOrNull { (getValueAt(it, column) as String).length } ?: 0
 
     /** Timestamps all have the layout's width; measure the first one. */
     private fun sampleLength(column: Int, fallback: Int): Int =

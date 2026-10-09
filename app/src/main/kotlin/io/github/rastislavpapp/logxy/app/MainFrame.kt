@@ -1,7 +1,7 @@
 package io.github.rastislavpapp.logxy.app
 
 import com.formdev.flatlaf.FlatClientProperties
-import io.github.rastislavpapp.logxy.core.session.SessionStatus
+import io.github.rastislavpapp.logxy.core.merge.MergedLog
 import net.miginfocom.swing.MigLayout
 import java.awt.BasicStroke
 import java.awt.BorderLayout
@@ -23,6 +23,7 @@ import javax.swing.Box
 import javax.swing.ButtonGroup
 import javax.swing.Icon
 import javax.swing.JButton
+import javax.swing.JCheckBox
 import javax.swing.JCheckBoxMenuItem
 import javax.swing.JComponent
 import javax.swing.JDialog
@@ -53,7 +54,7 @@ class MainFrame : JFrame("logxy") {
     private val tabs = JTabbedPane()
     private val cards = CardLayout()
     private val center = JPanel(cards)
-    private val statusBar = JPanel(MigLayout("insets 3 8 3 8, fill, gap 0, hidemode 3", "[grow]"))
+    private val statusBar = JPanel(MigLayout("insets 3 8 3 8, fill, gap 0, hidemode 3", "[grow][]"))
     private val fileSlot = Slot(shrinks = true)
     private val filterSlot = Slot(shrinks = false)
     private var lastDirectory: File? = AppState[AppState.LAST_DIRECTORY]?.let(::File)
@@ -128,6 +129,7 @@ class MainFrame : JFrame("logxy") {
             mnemonic = KeyEvent.VK_S
             add(menuItem("Parsers", Icons.settings, null) { showParsers() })
             add(menuItem("Log Level Mapping", Icons.levels, null) { LogLevelMappingDialog(this@MainFrame).isVisible = true })
+            add(severalFilesMenu())
         })
         add(JMenu("View").apply {
             mnemonic = KeyEvent.VK_V
@@ -187,30 +189,96 @@ class MainFrame : JFrame("logxy") {
         openFiles(chooser.selectedFiles.map { it.toPath() })
     }
 
-    fun openFiles(paths: List<Path>) = paths.forEach(::openFile)
+    /** Opens [paths]: one in a tab; several merged or in tabs of their own, as the user prefers. */
+    fun openFiles(paths: List<Path>) {
+        val openable = paths.map { it.toAbsolutePath().normalize() }.distinct().filter(::checkOpenable)
+        when {
+            openable.size == 1 -> openFile(openable.single())
+            openable.size > 1 -> when (severalFilesChoice(openable.size)) {
+                SeveralFiles.MERGE -> openMerged(openable)
+                SeveralFiles.TABS -> openable.forEach(::openFile)
+                null -> Unit
+            }
+        }
+    }
+
+    /** Opens each of [paths] in a tab of its own. */
+    fun openEach(paths: List<Path>) = paths.forEach(::openFile)
 
     fun openFile(path: Path) {
         val absolute = path.toAbsolutePath().normalize()
-        val existing = (0..<tabs.tabCount).firstOrNull { (tabs.getComponentAt(it) as LogTab).path == absolute }
-        if (existing != null) {
-            tabs.selectedIndex = existing
-            return
-        }
-        val problem = when {
-            !Files.exists(absolute) -> "File not found"
-            Files.isDirectory(absolute) -> "Folders cannot be opened, only files"
-            !Files.isRegularFile(absolute) -> "Not a regular file"
-            !Files.isReadable(absolute) -> "No permission to read the file"
-            else -> null
-        }
-        if (problem != null) {
-            JOptionPane.showMessageDialog(this, "$problem:\n$absolute", "Cannot Open File", JOptionPane.ERROR_MESSAGE)
-            return
-        }
-        val tab = LogTab(absolute, ::openFiles) { updateStatus() }
-        tabs.addTab(absolute.fileName.toString(), Icons.logFile, tab, absolute.toString())
+        if (selectTab(listOf(absolute)) || !checkOpenable(absolute)) return
+        addTab(LogTab(listOf(absolute), ::openFiles, ::openEach) { updateStatus() })
+    }
+
+    private fun openMerged(paths: List<Path>) {
+        if (selectTab(paths)) return
+        addTab(LogTab(paths, ::openFiles, ::openEach) { updateStatus() })
+    }
+
+    /** Selects the tab showing exactly [paths], if there is one. */
+    private fun selectTab(paths: List<Path>): Boolean {
+        val existing = (0..<tabs.tabCount).firstOrNull { (tabs.getComponentAt(it) as LogTab).paths.toSet() == paths.toSet() }
+        if (existing != null) tabs.selectedIndex = existing
+        return existing != null
+    }
+
+    private fun addTab(tab: LogTab) {
+        tabs.addTab(tab.title, if (tab.isMerged) Icons.merged else Icons.logFile, tab, tab.description)
         tabs.selectedComponent = tab
         cards.show(center, CARD_TABS)
+    }
+
+    /** Tells the user why [path] cannot be opened, if it cannot. */
+    private fun checkOpenable(path: Path): Boolean {
+        val problem = when {
+            !Files.exists(path) -> "File not found"
+            Files.isDirectory(path) -> "Folders cannot be opened, only files"
+            !Files.isRegularFile(path) -> "Not a regular file"
+            !Files.isReadable(path) -> "No permission to read the file"
+            else -> null
+        }
+        if (problem != null) JOptionPane.showMessageDialog(this, "$problem:\n$path", "Cannot Open File", JOptionPane.ERROR_MESSAGE)
+        return problem == null
+    }
+
+    private enum class SeveralFiles(val key: String, val label: String) {
+        MERGE("merge", "Merge into One View"),
+        TABS("tabs", "Open in Separate Tabs"),
+    }
+
+    /** The remembered choice for opening several files, or the user's answer; null if cancelled. */
+    private fun severalFilesChoice(count: Int): SeveralFiles? {
+        SeveralFiles.entries.firstOrNull { it.key == AppState[AppState.SEVERAL_FILES] }?.let { return it }
+        val remember = JCheckBox("Don't ask again (Settings → Opening Several Files changes it)")
+        val options = SeveralFiles.entries.map { it.label }.toTypedArray()
+        val answer = JOptionPane.showOptionDialog(
+            this, arrayOf("Open $count files:", remember), "Open Files",
+            JOptionPane.DEFAULT_OPTION, JOptionPane.QUESTION_MESSAGE, null, options, options[0],
+        )
+        val choice = SeveralFiles.entries.getOrNull(answer) ?: return null
+        if (remember.isSelected) AppState[AppState.SEVERAL_FILES] = choice.key
+        return choice
+    }
+
+    /** Settings → Opening Several Files: ask, merge, or separate tabs. */
+    private fun severalFilesMenu() = JMenu("Opening Several Files").apply {
+        val group = ButtonGroup()
+        fun item(label: String, key: String?) = JRadioButtonMenuItem(label).apply {
+            group.add(this)
+            addActionListener { AppState[AppState.SEVERAL_FILES] = key }
+        }
+        val items = listOf(item("Ask Each Time", null) to null) + SeveralFiles.entries.map { item(it.label, it.key) to it.key }
+        items.forEach { (item, _) -> add(item) }
+        // The dialog's "Don't ask again" changes the setting too.
+        addMenuListener(object : javax.swing.event.MenuListener {
+            override fun menuSelected(e: javax.swing.event.MenuEvent) {
+                val current = AppState[AppState.SEVERAL_FILES]
+                items.forEach { (item, key) -> item.isSelected = key == current || (key == null && SeveralFiles.entries.none { it.key == current }) }
+            }
+            override fun menuDeselected(e: javax.swing.event.MenuEvent) = Unit
+            override fun menuCanceled(e: javax.swing.event.MenuEvent) = Unit
+        })
     }
 
     private fun closeTab(index: Int) {
@@ -224,17 +292,21 @@ class MainFrame : JFrame("logxy") {
     private fun updateStatus() {
         for (i in 0..<tabs.tabCount) {
             val tab = tabs.getComponentAt(i) as LogTab
-            tabs.setIconAt(i, tabIcon(tab.status))
+            tabs.setIconAt(i, tabIcon(tab))
+            // A merge may have left out files without timestamps.
+            tabs.setTitleAt(i, tab.title)
+            tabs.setToolTipTextAt(i, tab.description)
         }
         val tab = selectedTab()
-        title = if (tab == null) "logxy" else "${tab.path.fileName} — logxy"
+        title = if (tab == null) "logxy" else "${tab.title} — logxy"
         statusBar.removeAll()
         if (tab == null) {
             statusBar.add(JLabel("No file open"))
         } else {
             val status = tab.status
             val numbers = NumberFormat.getIntegerInstance()
-            statusBar.add(JLabel(tab.path.toString()).apply { toolTipText = tab.path.toString() }, "growx, wmin 0")
+            val location = if (tab.isMerged) MergedLog.sourceNames(tab.paths).joinToString(", ") else tab.path.toString()
+            statusBar.add(JLabel(location).apply { toolTipText = "<html>" + tab.description.replace("\n", "<br>") + "</html>" }, "growx, wmin 0")
             fun segment(component: JComponent) {
                 statusBar.add(JSeparator(SwingConstants.VERTICAL), "growy, gap 10 10")
                 statusBar.add(component)
@@ -275,10 +347,13 @@ class MainFrame : JFrame("logxy") {
     }
 
     // Green: the file is being written to; accent: followed, though nothing is written yet.
-    private fun tabIcon(status: SessionStatus) = when {
-        status.live -> DotIcon(Icons.logFile, LIVE_COLOR)
-        status.following -> DotIcon(Icons.logFile, FOLLOW_COLOR)
-        else -> Icons.logFile
+    private fun tabIcon(tab: LogTab): Icon {
+        val icon = if (tab.isMerged) Icons.merged else Icons.logFile
+        return when {
+            tab.status.live -> DotIcon(icon, LIVE_COLOR)
+            tab.status.following -> DotIcon(icon, FOLLOW_COLOR)
+            else -> icon
+        }
     }
 
     /** A place in the menu bar for one tab's controls at a time; when space is short, only one that [shrinks] gives way. */

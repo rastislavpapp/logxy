@@ -1,6 +1,7 @@
 package io.github.rastislavpapp.logxy.app
 
 import io.github.rastislavpapp.logxy.core.log.Records
+import io.github.rastislavpapp.logxy.core.merge.MergedLog
 import io.github.rastislavpapp.logxy.core.parse.LogFormat
 import io.github.rastislavpapp.logxy.core.query.QueryException
 import io.github.rastislavpapp.logxy.core.session.FilteredRows
@@ -29,16 +30,41 @@ import javax.swing.Timer
 import javax.swing.UIManager
 
 private const val MAX_DETAIL_BYTES = 1024 * 1024
+private const val MAX_TITLE_CHARS = 40
 
-/** One open file: shows the records of its [LogSession], with the filter bar and the detail pane. */
+/**
+ * One open file, or several merged: shows the records of its [LogSession], with the filter bar and the
+ * detail pane. [openFiles] opens dropped files; [openEach] opens files in tabs of their own.
+ */
 class LogTab(
-    val path: Path,
+    paths: List<Path>,
     private val openFiles: (List<Path>) -> Unit,
+    private val openEach: (List<Path>) -> Unit,
     private val onStatusChanged: () -> Unit,
 ) : JPanel(BorderLayout()) {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Swing)
-    private val session = LogSession(path, scope, AppSettings, Listener())
+    private val session = LogSession(paths, scope, AppSettings, Listener())
+
+    /** The files shown; for a merge, without those that turned out to have no timestamps. */
+    val paths: List<Path> get() = session.paths
+
+    /** The (first) file. */
+    val path: Path get() = session.paths.first()
+
+    val isMerged get() = session.isMerged
+
+    /** Short name for the tab: the file name, or the merged files' names. */
+    val title: String
+        get() {
+            if (!isMerged) return path.fileName.toString()
+            val names = MergedLog.sourceNames(paths)
+            val all = names.joinToString(" + ")
+            return if (all.length <= MAX_TITLE_CHARS) all else "${names.first()} + ${names.size - 1} more"
+        }
+
+    /** The full path, or one per line for a merge. */
+    val description: String get() = paths.joinToString("\n")
     private val content = JPanel(BorderLayout())
     private val detail = LogDetailArea()
     private val followButton = accentToggle("").apply {
@@ -93,6 +119,7 @@ class LogTab(
 
     /** Auto, raw text, the user's formats (editable), the built-in ones; plus the format in use if it is none of those. */
     private fun showParsers() {
+        if (isMerged) return showMergedParsers()
         val chosen = session.chosenFormat
         val custom = AppSettings.current.formats
         val known = listOf(LogFormat.Raw) + custom + LogFormat.BUILT_IN
@@ -107,17 +134,31 @@ class LogTab(
         showPopupList(parserButton, items)
     }
 
+    /** Merged files always use detected parsers: list them, read-only. */
+    private fun showMergedParsers() {
+        val names = MergedLog.sourceNames(paths)
+        val items = buildList {
+            names.zip(session.formats).forEach { (name, format) -> add(PopupItem("$name: ${format.name}", enabled = false)) }
+            add(PopupItem("To choose a parser, open the file on its own", enabled = false, separatorBefore = true))
+            add(PopupItem("Edit Parsers", Icons.settings) { editParsers(session.format) })
+        }
+        showPopupList(parserButton, items)
+    }
+
     private fun autoLabel() = if (session.formatDetected) "Auto: ${session.format.name}" else "Auto-detect"
 
     private fun editParsers(select: LogFormat) {
-        val dialog = ParsersDialog(SwingUtilities.getWindowAncestor(this), path, offerUse = true, select)
+        val dialog = ParsersDialog(SwingUtilities.getWindowAncestor(this), path, offerUse = !isMerged, select)
         dialog.isVisible = true
         session.useFormat(dialog.formatToUse ?: return)
     }
 
     /** Shows the format in use on the parser button. */
     private fun showFormat() {
-        parserButton.text = session.chosenFormat?.name ?: autoLabel()
+        parserButton.text = when {
+            isMerged -> if (session.formatDetected) "Auto: per file" else "Auto-detect"
+            else -> session.chosenFormat?.name ?: autoLabel()
+        }
     }
 
     private fun showCentered(vararg components: JComponent) {
@@ -138,7 +179,7 @@ class LogTab(
 
     private fun showProgress(fraction: () -> Double) {
         val progressBar = JProgressBar(0, 1000)
-        showCentered(JLabel("Indexing ${path.fileName}…"), progressBar)
+        showCentered(JLabel("Indexing $title…"), progressBar)
         stopProgress()
         progressTimer = Timer(100) { progressBar.value = (fraction() * 1000).toInt() }.apply { start() }
     }
@@ -284,7 +325,11 @@ class LogTab(
             showTable(records)
         }
 
-        override fun notMergeable(paths: List<Path>) = Unit
+        override fun notMergeable(paths: List<Path>) {
+            // Not while the session is still loading the others.
+            SwingUtilities.invokeLater { openEach(paths) }
+            onStatusChanged()
+        }
 
         override fun formatChanged() = showFormat()
 

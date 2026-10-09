@@ -30,6 +30,7 @@ object Icons {
     val group get() = get("general/groups")
     val star get() = get("nodes/star")
     val logFile get() = get("fileTypes/text")
+    val merged get() = get("vcs/merge")
     val theme get() = get("general/layout")
     val run get() = get("run/run")
     val clear get() = get("general/delete")
