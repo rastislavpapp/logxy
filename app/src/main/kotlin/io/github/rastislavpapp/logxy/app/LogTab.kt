@@ -7,6 +7,7 @@ import io.github.rastislavpapp.logxy.core.formatByteSize
 import io.github.rastislavpapp.logxy.core.index.IndexProgress
 import io.github.rastislavpapp.logxy.core.index.LineIndex
 import io.github.rastislavpapp.logxy.core.log.LogData
+import io.github.rastislavpapp.logxy.core.log.ParsedLog
 import io.github.rastislavpapp.logxy.core.parse.FormatMismatchException
 import io.github.rastislavpapp.logxy.core.parse.LogFormat
 import io.github.rastislavpapp.logxy.core.parse.open
@@ -43,6 +44,7 @@ import javax.swing.JTextArea
 import javax.swing.JToggleButton
 import javax.swing.JToolBar
 import javax.swing.ScrollPaneConstants
+import javax.swing.SwingUtilities
 import javax.swing.UIManager
 
 private const val LIVE_POLL_MILLIS = 500L
@@ -59,8 +61,8 @@ private sealed interface FormatChoice {
         override fun toString() = format.name
     }
 
-    data object Custom : FormatChoice {
-        override fun toString() = "Custom…"
+    data object Edit : FormatChoice {
+        override fun toString() = "Edit formats…"
     }
 }
 
@@ -82,12 +84,7 @@ class LogTab(
         toolTipText = "Keep the end of the file in view as it grows"
         addActionListener { follow = isSelected }
     }
-    private val formats = DefaultComboBoxModel<FormatChoice>().apply {
-        addElement(FormatChoice.Auto(null))
-        addElement(FormatChoice.Fixed(LogFormat.Raw))
-        LogFormat.BUILT_IN.forEach { addElement(FormatChoice.Fixed(it)) }
-        addElement(FormatChoice.Custom)
-    }
+    private val formats = DefaultComboBoxModel<FormatChoice>()
     private val formatBox = object : JComboBox<FormatChoice>(formats) {
         // A toolbar would otherwise stretch it across the whole width.
         override fun getMaximumSize(): Dimension = preferredSize
@@ -96,6 +93,7 @@ class LogTab(
         addActionListener { formatChosen() }
     }
     private var updatingFormatBox = false
+    private val settingsListener = { settingsChanged() }
 
     /** The format the user picked, or null to detect it. */
     private var chosenFormat: LogFormat? = null
@@ -128,7 +126,36 @@ class LogTab(
             add(formatBox)
         }, BorderLayout.NORTH)
         add(content, BorderLayout.CENTER)
+        fillFormats()
+        AppSettings.addListener(settingsListener)
         start()
+    }
+
+    /** Auto, raw text, the user's formats, the built-in ones; plus the format in use if it is none of those. */
+    private fun fillFormats() {
+        updatingFormatBox = true
+        try {
+            formats.removeAllElements()
+            formats.addElement(FormatChoice.Auto(null))
+            val known = listOf(LogFormat.Raw) + AppSettings.current.formats + LogFormat.BUILT_IN
+            val inUse = chosenFormat
+            (if (inUse == null || inUse in known) known else known + inUse).forEach { formats.addElement(FormatChoice.Fixed(it)) }
+            formats.addElement(FormatChoice.Edit)
+        } finally {
+            updatingFormatBox = false
+        }
+        showFormat()
+    }
+
+    private fun settingsChanged() {
+        val settings = AppSettings.current
+        (log as? ParsedLog)?.levelMapping = settings.levels
+        model?.fireTableRowsUpdated(0, maxOf(0, (model?.rowCount ?: 0) - 1))
+        // A saved format this tab uses was edited: read the file with the new definition.
+        val edited = chosenFormat?.let { chosen -> settings.formats.firstOrNull { it.name == chosen.name && it != chosen } }
+        if (edited != null) chosenFormat = edited
+        fillFormats()
+        if (edited != null) reload()
     }
 
     private fun start() {
@@ -143,16 +170,12 @@ class LogTab(
         when (val choice = formatBox.selectedItem as FormatChoice) {
             is FormatChoice.Auto -> chosenFormat = null
             is FormatChoice.Fixed -> chosenFormat = choice.format
-            FormatChoice.Custom -> {
-                val custom = askForCustomFormat(this, chosenFormat ?: format)
-                if (custom == null) {
-                    showFormat()
-                    return
-                }
-                val existing = (0..<formats.size).map { formats.getElementAt(it) }
-                    .firstOrNull { it is FormatChoice.Fixed && it.format == custom }
-                if (existing == null) formats.insertElementAt(FormatChoice.Fixed(custom), formats.size - 1)
-                chosenFormat = custom
+            FormatChoice.Edit -> {
+                showFormat()
+                val dialog = FormatsDialog(SwingUtilities.getWindowAncestor(this), path, offerUse = true, chosenFormat ?: format)
+                dialog.isVisible = true
+                chosenFormat = dialog.formatToUse ?: return
+                fillFormats()
             }
         }
         reload()
@@ -195,12 +218,14 @@ class LogTab(
             // Taken before indexing, so a file replaced meanwhile shows up as a change on the first poll.
             val snapshot = withContext(Dispatchers.IO) { FileSnapshot.take(path) }
                 ?: throw IOException("File not found")
-            format = chosenFormat ?: withContext(Dispatchers.IO) { LogFormat.detect(path) }
+            val preferred = AppSettings.current.formats
+            format = chosenFormat ?: withContext(Dispatchers.IO) { LogFormat.detect(path, preferred) }
             showFormat()
             // Hand the result over outside the coroutine, so a cancellation racing with completion cannot leak it.
             val built = AtomicReference<LogData>()
             try {
-                withContext(Dispatchers.IO) { built.set(format.open(path, progress)) }
+                val levels = AppSettings.current.levels
+                withContext(Dispatchers.IO) { built.set(format.open(path, progress, levels)) }
             } catch (e: CancellationException) {
                 built.getAndSet(null)?.close()
                 throw e
@@ -364,6 +389,7 @@ class LogTab(
 
     /** Cancels any running work and releases the file. */
     fun dispose() {
+        AppSettings.removeListener(settingsListener)
         scope.cancel()
         closeLog()
     }

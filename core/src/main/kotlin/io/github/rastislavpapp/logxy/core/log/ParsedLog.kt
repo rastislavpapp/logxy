@@ -63,6 +63,13 @@ class ParsedLog private constructor(
     private val levelField = schema.indexOf(Role.LEVEL)
     private val levels = ArrayList<Level>()
 
+    /** How level texts map to [Level]; may change while the log is open. */
+    var levelMapping: LevelMapping = LevelMapping.DEFAULT
+        set(value) {
+            field = value
+            levels.clear()
+        }
+
     override val recordCount get() = if (segments.isEmpty()) 0 else segmentFirst.last() + segments.last().size
 
     /** Whether timestamps never go backwards from one record to the next. */
@@ -99,7 +106,7 @@ class ParsedLog private constructor(
         val id = segments[segment].bytes[levelField]!![record - segmentFirst[segment]].toInt() and 0xFF
         if (id > Columns.MAX_LEVEL_ID) return null
         val dictionary = dictionaries[levelField]!!
-        while (levels.size < dictionary.size) levels += Level.of(dictionary.text(levels.size))
+        while (levels.size < dictionary.size) levels += levelMapping.of(dictionary.text(levels.size))
         return levels[id]
     }
 

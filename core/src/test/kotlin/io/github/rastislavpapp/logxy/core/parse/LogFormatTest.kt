@@ -36,6 +36,36 @@ class LogFormatTest {
     }
 
     @Test
+    fun `the user's format wins a tie with a built-in one`() {
+        val file = Files.writeString(dir.resolve("e.log"), "2026-10-01 08:00:00.001 [main] INFO  com.example.App - Started\n")
+        val mine = LogFormat.Pattern("Mine", "%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %-5p %c - %m%n")
+        assertEquals(mine, LogFormat.detect(file, preferred = listOf(mine)))
+    }
+
+    @Test
+    fun `detects Spring Boot layouts`() {
+        val boot2 = Files.writeString(dir.resolve("boot2.log"),
+            "2026-10-08 12:00:00.123  INFO 12345 --- [           main] c.e.demo.DemoApplication                 : Started\n")
+        assertEquals("Spring Boot 2", LogFormat.detect(boot2).name)
+        val boot3 = Files.writeString(dir.resolve("boot3.log"),
+            "2026-10-08T12:00:00.123+02:00  WARN 12345 --- [           main] c.e.demo.DemoApplication                 : Slow\n")
+        assertEquals("Spring Boot 3", LogFormat.detect(boot3).name)
+        val boot3named = Files.writeString(dir.resolve("boot3n.log"),
+            "2026-10-08T12:00:00.123+02:00  WARN 12345 --- [demo] [           main] c.e.demo.DemoApplication                 : Slow\n")
+        assertEquals("Spring Boot 3 with application name", LogFormat.detect(boot3named).name)
+    }
+
+    @Test
+    fun `preview shows fields of matching lines`() {
+        val lines = listOf("2026-10-01 08:00:00.001 [main] INFO  a.B - hello", "\tat x.Y(Y.java:1)", "nonsense")
+            .map { it.toByteArray() }
+        val preview = FormatPreview.preview(LogFormat.BUILT_IN[0].compile()!!, lines)
+        assertEquals(listOf("2026-10-01 08:00:00.001", "main", "INFO", "a.B", "hello"), preview[0].values)
+        assertEquals(null to true, preview[1].values to preview[1].continuation)
+        assertEquals(null to false, preview[2].values to preview[2].continuation)
+    }
+
+    @Test
     fun `falls back to raw text`() {
         val file = Files.writeString(dir.resolve("c.log"), "hello\nworld\n")
         assertEquals(LogFormat.Raw, LogFormat.detect(file))

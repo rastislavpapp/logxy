@@ -79,6 +79,16 @@ class MainFrame : JFrame("logxy") {
                 addActionListener { dispose() }
             })
         })
+        add(JMenu("Settings").apply {
+            mnemonic = KeyEvent.VK_S
+            add(JMenuItem("Formats and Level Names…").apply {
+                mnemonic = KeyEvent.VK_F
+                addActionListener {
+                    val tab = tabs.selectedComponent as LogTab?
+                    FormatsDialog(this@MainFrame, tab?.path, offerUse = false, select = null).isVisible = true
+                }
+            })
+        })
         add(JMenu("View").apply {
             mnemonic = KeyEvent.VK_V
             add(JCheckBoxMenuItem("Dark Theme", Themes.current == Theme.DARK).apply {

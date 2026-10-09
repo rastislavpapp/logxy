@@ -79,6 +79,8 @@ class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
                 tableColumn.minWidth = width
                 tableColumn.maxWidth = width
             }
+            // Narrow windows shrink the other columns; a cut level would be unreadable.
+            if (field?.role == Role.LEVEL) tableColumn.minWidth = width
         }
     }
 
