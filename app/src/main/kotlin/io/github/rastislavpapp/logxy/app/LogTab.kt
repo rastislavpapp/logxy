@@ -31,11 +31,9 @@ import kotlinx.coroutines.swing.Swing
 import kotlinx.coroutines.withContext
 import net.miginfocom.swing.MigLayout
 import java.awt.BorderLayout
-import java.awt.Font
 import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.Path
-import java.text.NumberFormat
 import java.util.concurrent.atomic.AtomicReference
 import javax.swing.JButton
 import javax.swing.JComponent
@@ -48,6 +46,7 @@ import javax.swing.JTextArea
 import javax.swing.ScrollPaneConstants
 import javax.swing.SwingUtilities
 import javax.swing.UIManager
+import kotlin.time.Duration.Companion.milliseconds
 
 private const val LIVE_POLL_MILLIS = 500L
 private const val STATIC_POLL_MILLIS = 2000L
@@ -121,19 +120,6 @@ class LogTab(
     /** What the status bar shows for this file. */
     var status = TabStatus(message = "Indexing…")
         private set
-
-    /** [status] as one line of text. */
-    val statusText: String
-        get() {
-            val numbers = NumberFormat.getIntegerInstance()
-            val status = status
-            if (status.records == null) return status.message.orEmpty()
-            val unit = status.unit + if (status.records == 1) "" else "s"
-            val count = if (status.shown == null) "${numbers.format(status.records)} $unit"
-            else "${numbers.format(status.shown)} of ${numbers.format(status.records)} $unit"
-            return "${formatByteSize(status.size ?: 0)}  ·  $count  ·  ${if (status.live) "live" else "static"}${if (status.following) ", following" else ""}  ·  " +
-                "indexed in ${numbers.format(status.indexMillis ?: 0)} ms" + (status.message?.let { "  ·  $it" } ?: "")
-        }
 
     // The controls live outside the tab, and are not updated with it while another tab shows its own.
     override fun updateUI() {
@@ -231,7 +217,7 @@ class LogTab(
         val ticker = scope.launch {
             while (true) {
                 progressBar.value = (progress.fraction * 1000).toInt()
-                delay(100)
+                delay(100.milliseconds)
             }
         }
         try {
