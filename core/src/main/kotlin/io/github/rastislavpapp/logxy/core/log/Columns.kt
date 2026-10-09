@@ -3,6 +3,7 @@ package io.github.rastislavpapp.logxy.core.log
 import io.github.rastislavpapp.logxy.core.index.ByteChunkList
 import io.github.rastislavpapp.logxy.core.index.IntChunkList
 import io.github.rastislavpapp.logxy.core.index.LongChunkList
+import io.github.rastislavpapp.logxy.core.parse.RecordFormat
 
 /**
  * Field values of consecutive records, one primitive list per field. While a segment is being
@@ -91,6 +92,27 @@ internal class Columns(val schema: Schema) {
             require(length == TO_RECORD_END) { "${schema.fields[field].name} must run to the end of the record" }
         }
     }
+
+    /**
+     * Display text of a TIMESTAMP, LEVEL or DICT value of [record], "" if absent; ids are looked up in
+     * [dictionary]. Null for SPAN fields, whose text is in the file.
+     */
+    fun valueText(field: Int, record: Int, format: RecordFormat, dictionary: ByteDictionary?): String? =
+        when (schema.fields[field].type) {
+            ColumnType.TIMESTAMP -> {
+                val nanos = longs[field]!![record]
+                if (nanos == ABSENT_TIMESTAMP) "" else format.formatTimestamp(field, nanos)
+            }
+            ColumnType.LEVEL -> {
+                val id = bytes[field]!![record].toInt() and 0xFF
+                if (id > MAX_LEVEL_ID) "" else dictionary!!.text(id)
+            }
+            ColumnType.DICT -> {
+                val id = ints[field]!![record]
+                if (id < 0) "" else dictionary!!.text(id)
+            }
+            ColumnType.SPAN -> null
+        }
 
     /** Length of a SPAN field: [ABSENT_LENGTH], [TO_RECORD_END], or a length. */
     fun spanLength(field: Int, record: Int): Int = lengths[field]?.get(record) ?: TO_RECORD_END

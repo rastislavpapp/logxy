@@ -144,26 +144,12 @@ class ParsedLog private constructor(
         val bytes = if (needed > 0) read(start, minOf(needed, recordLength)) else EMPTY
 
         return Array(schema.fields.size) { field ->
-            when (schema.fields[field].type) {
-                ColumnType.TIMESTAMP -> {
-                    val nanos = columns.longs[field]!![local]
-                    if (nanos == Columns.ABSENT_TIMESTAMP) "" else format.formatTimestamp(field, nanos)
-                }
-                ColumnType.LEVEL -> {
-                    val id = columns.bytes[field]!![local].toInt() and 0xFF
-                    if (id > Columns.MAX_LEVEL_ID) "" else dictionaries[field]!!.text(id)
-                }
-                ColumnType.DICT -> {
-                    val id = columns.ints[field]!![local]
-                    if (id < 0) "" else dictionaries[field]!!.text(id)
-                }
-                ColumnType.SPAN -> {
-                    val length = columns.spanLength(field, local)
-                    if (length == Columns.ABSENT_LENGTH) "" else {
-                        val relative = columns.ints[field]!![local]
-                        val end = if (length == Columns.TO_RECORD_END) bytes.size else minOf(relative + length, bytes.size)
-                        firstLine(bytes, minOf(relative, end), end, maxBytes)
-                    }
+            columns.valueText(field, local, format, dictionaries[field]) ?: run {
+                val length = columns.spanLength(field, local)
+                if (length == Columns.ABSENT_LENGTH) "" else {
+                    val relative = columns.ints[field]!![local]
+                    val end = if (length == Columns.TO_RECORD_END) bytes.size else minOf(relative + length, bytes.size)
+                    firstLine(bytes, minOf(relative, end), end, maxBytes)
                 }
             }
         }

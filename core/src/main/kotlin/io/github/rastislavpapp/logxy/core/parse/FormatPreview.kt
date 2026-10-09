@@ -1,6 +1,5 @@
 package io.github.rastislavpapp.logxy.core.parse
 
-import io.github.rastislavpapp.logxy.core.log.ColumnType
 import io.github.rastislavpapp.logxy.core.log.Columns
 import java.nio.channels.FileChannel
 import java.nio.file.Path
@@ -43,27 +42,12 @@ object FormatPreview {
             columns.beginRecord(0)
             parser.write(columns)
             val values = fields.indices.map { field ->
-                when (fields[field].type) {
-                    ColumnType.TIMESTAMP -> {
-                        val nanos = columns.longs[field]!![0]
-                        if (nanos == Columns.ABSENT_TIMESTAMP) "" else format.formatTimestamp(field, nanos)
-                    }
-                    ColumnType.LEVEL -> {
-                        val id = columns.bytes[field]!![0].toInt() and 0xFF
-                        if (id > Columns.MAX_LEVEL_ID) "" else columns.dictionaries[field]!!.text(id)
-                    }
-                    ColumnType.DICT -> {
-                        val id = columns.ints[field]!![0]
-                        if (id < 0) "" else columns.dictionaries[field]!!.text(id)
-                    }
-                    ColumnType.SPAN -> {
-                        val length = columns.spanLength(field, 0)
-                        val start = columns.ints[field]!![0]
-                        when (length) {
-                            Columns.ABSENT_LENGTH -> ""
-                            Columns.TO_RECORD_END -> String(line, start, line.size - start, Charsets.UTF_8)
-                            else -> String(line, start, length, Charsets.UTF_8)
-                        }
+                columns.valueText(field, 0, format, columns.dictionaries[field]) ?: run {
+                    val start = columns.ints[field]!![0]
+                    when (val length = columns.spanLength(field, 0)) {
+                        Columns.ABSENT_LENGTH -> ""
+                        Columns.TO_RECORD_END -> String(line, start, line.size - start, Charsets.UTF_8)
+                        else -> String(line, start, length, Charsets.UTF_8)
                     }
                 }
             }
