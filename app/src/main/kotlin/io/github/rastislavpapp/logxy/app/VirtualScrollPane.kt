@@ -217,7 +217,6 @@ class VirtualScrollPane(private val table: JTable, private val window: RowWindow
                     val row = if (toEnd) window.totalRowCount - 1 else 0
                     scrollToRow(row)
                     table.changeSelection(row - window.windowStart, 0, false, extend)
-                    if (toEnd) follow = true
                 }
             })
             val inputMap = table.getInputMap(WHEN_ANCESTOR_OF_FOCUSED_COMPONENT)

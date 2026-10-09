@@ -31,15 +31,13 @@ import kotlinx.coroutines.swing.Swing
 import kotlinx.coroutines.withContext
 import net.miginfocom.swing.MigLayout
 import java.awt.BorderLayout
-import java.awt.Dimension
 import java.awt.Font
 import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.Path
 import java.text.NumberFormat
 import java.util.concurrent.atomic.AtomicReference
-import javax.swing.DefaultComboBoxModel
-import javax.swing.JComboBox
+import javax.swing.JButton
 import javax.swing.JComponent
 import javax.swing.JLabel
 import javax.swing.JPanel
@@ -47,7 +45,6 @@ import javax.swing.JProgressBar
 import javax.swing.JScrollPane
 import javax.swing.JSplitPane
 import javax.swing.JTextArea
-import javax.swing.JToolBar
 import javax.swing.ScrollPaneConstants
 import javax.swing.SwingUtilities
 import javax.swing.UIManager
@@ -56,20 +53,17 @@ private const val LIVE_POLL_MILLIS = 500L
 private const val STATIC_POLL_MILLIS = 2000L
 private const val MAX_DETAIL_BYTES = 1024 * 1024
 
-/** An entry of the format chooser. */
-private sealed interface FormatChoice {
-    data class Auto(val detected: LogFormat?) : FormatChoice {
-        override fun toString() = if (detected == null) "Auto-detect" else "Auto: ${detected.name}"
-    }
-
-    data class Fixed(val format: LogFormat) : FormatChoice {
-        override fun toString() = format.name
-    }
-
-    data object Edit : FormatChoice {
-        override fun toString() = "Edit parsers…"
-    }
-}
+/** The status bar's view of one file; [records] is null while it cannot be shown (indexing, errors). */
+data class TabStatus(
+    val size: Long? = null,
+    val records: Int? = null,
+    val shown: Int? = null,
+    val unit: String = "record",
+    val live: Boolean = false,
+    val following: Boolean = false,
+    val indexMillis: Long? = null,
+    val message: String? = null,
+)
 
 /** One open file: indexes it in the background, shows its records and follows changes to it. */
 class LogTab(
@@ -81,28 +75,27 @@ class LogTab(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Swing)
     private var job: Job? = null
     private val content = JPanel(BorderLayout())
-    private val detail = JTextArea().apply {
-        isEditable = false
-        lineWrap = true
-    }
-    private val followButton = accentToggle("Follow").apply {
-        toolTipText = "Keep the end of the file in view as it grows"
+    private val detail = LogDetailArea()
+    private val followButton = accentToggle("").apply {
+        icon = Icons.follow
+        putClientProperty("JButton.buttonType", "toolBarButton")
+        isFocusable = false
+        toolTipText = "Follow (tail)"
         addActionListener { follow = isSelected }
     }
-    private val formats = DefaultComboBoxModel<FormatChoice>()
-    private val formatBox = object : JComboBox<FormatChoice>(formats) {
-        // A toolbar would otherwise stretch it across the whole width.
-        override fun getMaximumSize(): Dimension = preferredSize
-    }.apply {
-        toolTipText = "How lines are split into columns"
-        addActionListener { formatChosen() }
+    private val reloadButton = JButton(Icons.refresh).apply {
+        toolTipText = "Reload the file (F5)"
+        putClientProperty("JButton.buttonType", "toolBarButton")
+        isFocusable = false
+        addActionListener { reload() }
     }
-    private var updatingFormatBox = false
+    private val parserButton = dropDownButton("Parser: how lines are split into columns", maxWidth = 280) { showParsers() }
     private val settingsListener = { settingsChanged() }
 
     /** The format the user picked, or null to detect it. */
     private var chosenFormat: LogFormat? = null
     private var format: LogFormat = LogFormat.Raw
+    private var formatDetected = false
 
     private var log: LogData? = null
     private var model: LogTableModel? = null
@@ -118,46 +111,96 @@ class LogTab(
 
     private var follow = false
         set(value) {
+            val changed = field != value
             field = value
             followButton.isSelected = value
             scrollPane?.follow = value
+            if (changed) updateStatus()
         }
 
-    /** Right-hand status bar text for this file. */
-    var statusText = "Indexing…"
+    /** What the status bar shows for this file. */
+    var status = TabStatus(message = "Indexing…")
         private set
 
+    /** [status] as one line of text. */
+    val statusText: String
+        get() {
+            val numbers = NumberFormat.getIntegerInstance()
+            val status = status
+            if (status.records == null) return status.message.orEmpty()
+            val unit = status.unit + if (status.records == 1) "" else "s"
+            val count = if (status.shown == null) "${numbers.format(status.records)} $unit"
+            else "${numbers.format(status.shown)} of ${numbers.format(status.records)} $unit"
+            return "${formatByteSize(status.size ?: 0)}  ·  $count  ·  ${if (status.live) "live" else "static"}${if (status.following) ", following" else ""}  ·  " +
+                "indexed in ${numbers.format(status.indexMillis ?: 0)} ms" + (status.message?.let { "  ·  $it" } ?: "")
+        }
+
+    // The controls live outside the tab, and are not updated with it while another tab shows its own.
+    override fun updateUI() {
+        super.updateUI()
+        @Suppress("SENSELESS_COMPARISON")
+        if (filterBar == null) return
+        listOf(fileControls, filterControls).filter { it.parent == null }.forEach { SwingUtilities.updateComponentTreeUI(it) }
+    }
+
+    private fun setStatus(status: TabStatus) {
+        this.status = status
+        onStatusChanged()
+    }
+
+    /** Reload, Follow and the parser; placed by the window, outside this tab. */
+    val fileControls: JComponent = JPanel(MigLayout("insets 0, gap 2")).apply {
+        isOpaque = false
+        add(reloadButton)
+        add(followButton, "gapright 6")
+        add(parserButton, "wmin 120")
+    }
+
+    /** The filter's level, mode and saved filters; placed by the window, outside this tab. */
+    val filterControls: JComponent get() = filterBar.controls
+
     init {
-        add(JPanel(BorderLayout()).apply {
-            add(JToolBar().apply {
-                isFloatable = false
-                add(followButton)
-                addSeparator()
-                add(JLabel("Parser: "))
-                add(formatBox)
-            }, BorderLayout.NORTH)
-            add(filterBar, BorderLayout.CENTER)
-        }, BorderLayout.NORTH)
+        add(filterBar, BorderLayout.NORTH)
         add(content, BorderLayout.CENTER)
-        fillFormats()
+        showFormat()
         AppSettings.addListener(settingsListener)
         start()
     }
 
-    /** Auto, raw text, the user's formats, the built-in ones; plus the format in use if it is none of those. */
-    private fun fillFormats() {
-        updatingFormatBox = true
-        try {
-            formats.removeAllElements()
-            formats.addElement(FormatChoice.Auto(null))
-            val known = listOf(LogFormat.Raw) + AppSettings.current.formats + LogFormat.BUILT_IN
-            val inUse = chosenFormat
-            (if (inUse == null || inUse in known) known else known + inUse).forEach { formats.addElement(FormatChoice.Fixed(it)) }
-            formats.addElement(FormatChoice.Edit)
-        } finally {
-            updatingFormatBox = false
+    /** Auto, raw text, the user's formats (editable), the built-in ones; plus the format in use if it is none of those. */
+    private fun showParsers() {
+        val chosen = chosenFormat
+        val custom = AppSettings.current.formats
+        val known = listOf(LogFormat.Raw) + custom + LogFormat.BUILT_IN
+        val items = buildList {
+            add(PopupItem(autoLabel(), selected = chosen == null) { useFormat(null) })
+            (if (chosen == null || chosen in known) known else known + chosen).forEachIndexed { i, format ->
+                val tools = if (format in custom) listOf(PopupTool(Icons.advanced, "Edit this parser") { editParsers(format) }) else emptyList()
+                add(PopupItem(format.name, selected = format == chosen, separatorBefore = i == 0, tools = tools) { useFormat(format) })
+            }
+            add(PopupItem("Edit Parsers", Icons.settings, separatorBefore = true) { editParsers(chosen ?: format) })
         }
+        showPopupList(parserButton, items)
+    }
+
+    private fun autoLabel() = if (formatDetected) "Auto: ${format.name}" else "Auto-detect"
+
+    private fun useFormat(format: LogFormat?) {
+        if (format == chosenFormat) return
+        chosenFormat = format
         showFormat()
+        reload()
+    }
+
+    private fun editParsers(select: LogFormat) {
+        val dialog = ParsersDialog(SwingUtilities.getWindowAncestor(this), path, offerUse = true, select)
+        dialog.isVisible = true
+        useFormat(dialog.formatToUse ?: return)
+    }
+
+    /** Shows the format in use on the parser button. */
+    private fun showFormat() {
+        parserButton.text = chosenFormat?.name ?: autoLabel()
     }
 
     private fun settingsChanged() {
@@ -167,7 +210,7 @@ class LogTab(
         // A saved format this tab uses was edited: read the file with the new definition.
         val edited = chosenFormat?.let { chosen -> settings.formats.firstOrNull { it.name == chosen.name && it != chosen } }
         if (edited != null) chosenFormat = edited
-        fillFormats()
+        showFormat()
         if (edited != null) reload()
     }
 
@@ -178,47 +221,12 @@ class LogTab(
         }
     }
 
-    private fun formatChosen() {
-        if (updatingFormatBox) return
-        when (val choice = formatBox.selectedItem as FormatChoice) {
-            is FormatChoice.Auto -> chosenFormat = null
-            is FormatChoice.Fixed -> chosenFormat = choice.format
-            FormatChoice.Edit -> {
-                showFormat()
-                val dialog = ParsersDialog(SwingUtilities.getWindowAncestor(this), path, offerUse = true, chosenFormat ?: format)
-                dialog.isVisible = true
-                chosenFormat = dialog.formatToUse ?: return
-                fillFormats()
-            }
-        }
-        reload()
-    }
-
-    /** Selects the entry for the current format without reacting to it. */
-    private fun showFormat() {
-        updatingFormatBox = true
-        try {
-            val chosen = chosenFormat
-            if (chosen == null) {
-                formats.removeElementAt(0)
-                formats.insertElementAt(FormatChoice.Auto(format), 0)
-                formatBox.selectedIndex = 0
-            } else {
-                formatBox.selectedItem = (0..<formats.size).map { formats.getElementAt(it) }
-                    .first { it is FormatChoice.Fixed && it.format == chosen }
-            }
-        } finally {
-            updatingFormatBox = false
-        }
-    }
-
     /** Indexes the file and shows it; returns the snapshot the index corresponds to, or null on error. */
     private suspend fun load(): FileSnapshot? {
         val progress = IndexProgress()
         val progressBar = JProgressBar(0, 1000)
         showCentered(JLabel("Indexing ${path.fileName}…"), progressBar)
-        statusText = "Indexing…"
-        onStatusChanged()
+        setStatus(TabStatus(message = "Indexing…"))
 
         val ticker = scope.launch {
             while (true) {
@@ -233,6 +241,7 @@ class LogTab(
                 ?: throw IOException("File not found")
             val preferred = AppSettings.current.formats
             format = chosenFormat ?: withContext(Dispatchers.IO) { LogFormat.detect(path, preferred) }
+            formatDetected = true
             showFormat()
             // Hand the result over outside the coroutine, so a cancellation racing with completion cannot leak it.
             val built = AtomicReference<LogData>()
@@ -261,13 +270,11 @@ class LogTab(
                 e.message.orEmpty(),
                 "Choose another parser in the toolbar, or Raw text.",
             )
-            statusText = "Parser does not match"
-            onStatusChanged()
+            setStatus(TabStatus(message = "Parser does not match"))
             return null
         } catch (e: Exception) {
             showProblem("Cannot open ${path.fileName}.", e.message ?: e.javaClass.simpleName, null)
-            statusText = "Error"
-            onStatusChanged()
+            setStatus(TabStatus(message = "Error"))
             return null
         } finally {
             ticker.cancel()
@@ -324,12 +331,19 @@ class LogTab(
     }
 
     private fun showCentered(vararg components: JComponent) {
+        // Nothing to filter until the records are there.
+        setFilterVisible(false)
         content.removeAll()
         content.add(JPanel(MigLayout("align 50% 50%, wrap 1, gapy 8", "[center]")).apply {
             components.forEach { add(it, if (it is JProgressBar) "w 320!" else "") }
         })
         content.revalidate()
         content.repaint()
+    }
+
+    private fun setFilterVisible(visible: Boolean) {
+        filterBar.isVisible = visible
+        filterControls.isVisible = visible
     }
 
     private fun showProblem(title: String, detail: String, hint: String?) {
@@ -361,8 +375,8 @@ class LogTab(
         this.scrollPane = scrollPane
         engine = FilterEngine(log)
         filterBar.setSchema(log.schema)
+        setFilterVisible(true)
 
-        detail.font = table.font.deriveFont(Font.PLAIN)
         detail.text = ""
         val split = JSplitPane(JSplitPane.VERTICAL_SPLIT, scrollPane, JScrollPane(
             detail, ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED, ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER,
@@ -373,9 +387,14 @@ class LogTab(
         }
         content.removeAll()
         content.add(split, BorderLayout.CENTER)
-        content.revalidate()
+        content.validate()
         content.repaint()
-        split.setDividerLocation(0.75)
+        split.setDividerLocation(AppState[AppState.DETAIL_DIVIDER]?.toDoubleOrNull()?.coerceIn(0.1, 0.95) ?: 0.75)
+        // Remembered as a proportion, so it fits any window size.
+        split.addPropertyChangeListener(JSplitPane.DIVIDER_LOCATION_PROPERTY) {
+            val height = split.height - split.dividerSize
+            if (height > 0 && split.isShowing) AppState[AppState.DETAIL_DIVIDER] = "%.3f".format(java.util.Locale.ROOT, split.dividerLocation.toDouble() / height)
+        }
         scrollPane.follow = follow
         applyFilter()
     }
@@ -451,16 +470,25 @@ class LogTab(
 
     private fun updateStatus() {
         val log = log ?: return
-        val numbers = NumberFormat.getIntegerInstance()
-        val unit = if (log is LineIndex) "line" else "record"
-        val total = "${numbers.format(log.recordCount)} $unit${if (log.recordCount == 1) "" else "s"}"
-        val shown = model?.filteredRows?.size
-        val count = if (shown == null) total else "${numbers.format(shown)} of $total"
-        val mode = if (activity == FileActivity.LIVE) "live" else "static"
-        statusText = "${formatByteSize(log.indexedSize)}  ·  $count  ·  $mode  ·  indexed in ${numbers.format(indexMillis)} ms" +
-            (problem?.let { "  ·  $it" } ?: "")
-        onStatusChanged()
+        setStatus(
+            TabStatus(
+                size = log.indexedSize,
+                records = log.recordCount,
+                shown = model?.filteredRows?.size,
+                unit = if (log is LineIndex) "line" else "record",
+                live = activity == FileActivity.LIVE,
+                following = follow,
+                indexMillis = indexMillis,
+                message = problem,
+            ),
+        )
     }
+
+    fun reloadFile() = reload()
+
+    fun focusFilter() = filterBar.focusFilter()
+
+    fun clearFilter() = filterBar.clear()
 
     private fun closeLog() {
         filterJob?.cancel()

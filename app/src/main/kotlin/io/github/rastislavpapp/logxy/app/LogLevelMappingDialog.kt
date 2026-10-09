@@ -46,6 +46,7 @@ class LogLevelMappingDialog(owner: Window?) : JDialog(owner, "Log Level Mapping"
             add(JButton("Cancel").apply { addActionListener { dispose() } })
         }
         fitToScreen(0.4)
+        WindowState.install(this, "log-level-mapping")
     }
 
     private fun show(mapping: LevelMapping) {

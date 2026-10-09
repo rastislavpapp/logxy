@@ -72,7 +72,9 @@ class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
                 field.role == Role.LOGGER -> 36
                 else -> 12
             }
-            val width = chars * charWidth + CELL_PADDING
+            // Themes differ in cell margins; without them, timestamps and levels would be cut.
+            val margins = UIManager.getInsets("Table.cellMargins")
+            val width = chars * charWidth + CELL_PADDING + (margins?.let { it.left + it.right } ?: 0)
             tableColumn.preferredWidth = width
             tableColumn.width = width
             if (field == null || field.type == ColumnType.TIMESTAMP) {

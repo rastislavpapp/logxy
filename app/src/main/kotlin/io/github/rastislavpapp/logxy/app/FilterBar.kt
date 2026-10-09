@@ -13,38 +13,50 @@ import java.awt.CardLayout
 import java.awt.event.ActionEvent
 import java.awt.event.KeyEvent
 import javax.swing.AbstractAction
-import javax.swing.ButtonGroup
+import javax.swing.Icon
 import javax.swing.JButton
-import javax.swing.JComboBox
+import javax.swing.JComponent
 import javax.swing.JLabel
-import javax.swing.JMenu
-import javax.swing.JMenuItem
 import javax.swing.JOptionPane
 import javax.swing.JPanel
-import javax.swing.JPopupMenu
 import javax.swing.JScrollPane
 import javax.swing.KeyStroke
 import javax.swing.SwingUtilities
 import javax.swing.UIManager
 
 /**
- * Filter controls above the table: a minimum level, the filter itself (visual or as text), Apply,
- * Clear, and saved filters in a menu. Enter in any of its inputs applies. [onApply] is called to
- * (re)apply; [minimumLevel] and [query] give the state.
+ * The filter of one tab. The panel shows the filter itself (visual or as text) with Apply and Clear;
+ * [controls] holds the minimum level, the mode toggle and saved filters, shown in the window's title bar.
+ * Enter in any input applies. [onApply] is called to (re)apply; [minimumLevel] and [query] give the state.
  */
-class FilterBar(private val onApply: () -> Unit) : JPanel(MigLayout("insets 4 6 4 6, fillx, wrap 1, gapy 3, hidemode 3", "[grow, fill]")) {
+class FilterBar(private val onApply: () -> Unit) : JPanel(MigLayout("insets 6 8 6 8, fillx, gapy 3, hidemode 3", "[grow, fill][]")) {
 
-    private val levels = JComboBox<Any>((listOf<Any>(ALL) + Level.entries.filter { it != Level.UNKNOWN }).toTypedArray()).apply {
-        toolTipText = "Show only records of this level or more severe"
-        addActionListener { onApply() }
-        applyOnEnter(this, onApply)
-    }
-    private val levelLabel = JLabel("Level:")
-    private val levelSuffix = JLabel("and higher")
+    private val levelButton = dropDownButton(
+        "Show only records of this level or more severe",
+        sizedFor = listOf(ALL) + LEVELS.map { "≥ $it" },
+    ) { showLevels() }.apply { text = ALL }
+    private var minimum: Level? = null
+        set(value) {
+            field = value
+            levelButton.text = value?.let { "≥ $it" } ?: ALL
+        }
     private val editor = QueryEditor(onApply)
     private val textArea = QueryTextArea(onApply)
-    private val basicMode = accentToggle("Basic").apply { isSelected = true }
-    private val textMode = accentToggle("Advanced")
+    private val textMode = accentToggle("").apply {
+        icon = Icons.advanced
+        toolTipText = "Advanced: write the filter as an expression, e.g. level >= WARN AND message == \"*timeout*\" (Ctrl+Enter applies)"
+        putClientProperty("JButton.buttonType", "toolBarButton")
+        isFocusable = false
+        addActionListener { switchMode(isSelected) }
+    }
+    private val actions = JPanel(MigLayout("insets 0, gap 2")).apply {
+        isOpaque = false
+        add(toolBarButton(Icons.run, "Apply the filter (Enter, or Ctrl+Enter in Advanced)") { onApply() })
+        add(toolBarButton(Icons.clear, "Remove all conditions (Esc)") { clear() })
+    }
+
+    /** Holds [actions] beside the text; in Basic they sit at the end of the editor's first line instead. */
+    private val actionsColumn = JPanel(MigLayout("insets 0")).apply { isOpaque = false }
     private val modes = CardLayout()
     private val modePanel = JPanel(modes)
     private val error = JLabel().apply {
@@ -52,50 +64,68 @@ class FilterBar(private val onApply: () -> Unit) : JPanel(MigLayout("insets 4 6 
         isVisible = false
     }
 
+    /** Level, mode and saved filters; placed by the window, outside this panel. */
+    val controls: JComponent = JPanel(MigLayout("insets 0, gap 2, hidemode 3")).apply {
+        isOpaque = false
+        add(levelButton, "gapright 6")
+        add(textMode)
+        add(toolBarButton(DropDownIcon(Icons.star), "Saved filters") { showSavedMenu(it) })
+    }
+
     init {
-        ButtonGroup().apply {
-            add(basicMode)
-            add(textMode)
-        }
-        basicMode.toolTipText = "Build the filter from conditions"
-        textMode.toolTipText = "Write the filter as an expression, e.g. level >= WARN AND message == \"*timeout*\" (Ctrl+Enter applies)"
-        basicMode.addActionListener { switchMode(text = false) }
-        textMode.addActionListener { switchMode(text = true) }
+        putClientProperty("FlatLaf.style", "border: 0,0,1,0,\$Component.borderColor")
         modePanel.isOpaque = false
         modePanel.add(editor, "basic")
         modePanel.add(JScrollPane(textArea), "text")
-
-        add(JPanel(MigLayout("insets 0, hidemode 3", "[][][]16[]push[][]16[]")).apply {
-            isOpaque = false
-            add(levelLabel)
-            add(levels)
-            add(levelSuffix)
-            add(basicMode, "split 2, gap 0")
-            add(textMode, "gap 0")
-            add(JButton("Apply").apply {
-                toolTipText = "Apply the filter (Enter, or Ctrl+Enter in Advanced)"
-                addActionListener { onApply() }
-            })
-            add(JButton("Clear").apply { addActionListener { clear() } })
-            add(JButton("Saved filters ▾").apply { addActionListener { showSavedMenu(this) } })
-        })
-        add(modePanel)
-        add(error)
+        add(modePanel, "growx")
+        add(actionsColumn, "aligny top, gapleft 8, wrap")
+        add(error, "span")
         getInputMap(WHEN_ANCESTOR_OF_FOCUSED_COMPONENT).put(KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, 0), "logxyApply")
         actionMap.put("logxyApply", object : AbstractAction() {
             override fun actionPerformed(e: ActionEvent) = onApply()
         })
+        getInputMap(WHEN_ANCESTOR_OF_FOCUSED_COMPONENT).put(KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0), "logxyClear")
+        actionMap.put("logxyClear", object : AbstractAction() {
+            override fun actionPerformed(e: ActionEvent) = clear()
+        })
+        showMode(text = false)
+        if (AppState[AppState.FILTER_MODE] == "advanced") {
+            textMode.isSelected = true
+            showMode(text = true)
+        }
+    }
+
+    private fun showMode(text: Boolean) {
+        modes.show(modePanel, if (text) "text" else "basic")
+        if (text) {
+            editor.trailing = null
+            actionsColumn.add(actions)
+        } else {
+            actionsColumn.remove(actions)
+            editor.trailing = actions
+        }
+    }
+
+    private fun toolBarButton(icon: Icon, tooltip: String, action: (JButton) -> Unit) = JButton(icon).apply {
+        toolTipText = tooltip
+        putClientProperty("JButton.buttonType", "toolBarButton")
+        isFocusable = false
+        addActionListener { action(this) }
     }
 
     /** Fields of the log being filtered: offered in the editors; the level choice needs a level field. */
     fun setSchema(schema: Schema) {
         val hasLevel = schema.indexOf(Role.LEVEL) >= 0
-        listOf(levelLabel, levels, levelSuffix).forEach { it.isVisible = hasLevel }
+        levelButton.isVisible = hasLevel
+        val text = if (textMode.isSelected) runCatching { QueryParser.parse(textArea.text) }.getOrNull() else null
+        text?.let(editor::setQuery)
         editor.setFields(schema.fields)
         textArea.setFields(schema.fields.map { it.name })
+        // The editor starts placeholder rows over on new fields; text without real conditions follows it.
+        if (text != null && editor.query().items.isEmpty()) textArea.text = QueryPrinter.print(editor.query(includeEmpty = true))
     }
 
-    val minimumLevel: Level? get() = if (levels.isVisible) levels.selectedItem as? Level else null
+    val minimumLevel: Level? get() = if (levelButton.isVisible) minimum else null
 
     /** The filter as edited; throws [QueryException] if the text has a syntax error. */
     fun query(): Query.Group = if (textMode.isSelected) QueryParser.parse(textArea.text) else editor.query()
@@ -106,20 +136,26 @@ class FilterBar(private val onApply: () -> Unit) : JPanel(MigLayout("insets 4 6 
         revalidate()
     }
 
+    /** Puts the keyboard focus where the filter is typed. */
+    fun focusFilter() {
+        if (textMode.isSelected) textArea.requestFocusInWindow() else editor.focusFirstValue()
+    }
+
     private fun switchMode(text: Boolean) {
+        AppState[AppState.FILTER_MODE] = if (text) "advanced" else "basic"
         if (text) {
             textArea.text = QueryPrinter.print(editor.query(includeEmpty = true))
             // Put the cursor into the first empty value, ready for typing.
             val empty = textArea.text.indexOf("\"\"")
             textArea.caretPosition = if (empty >= 0) empty + 1 else textArea.text.length
-            modes.show(modePanel, "text")
+            showMode(text = true)
             // Only a showing component can take the focus; the card becomes visible on the next layout.
             SwingUtilities.invokeLater { textArea.requestFocusInWindow() }
             showError(null)
         } else {
             try {
                 editor.setQuery(QueryParser.parse(textArea.text))
-                modes.show(modePanel, "basic")
+                showMode(text = false)
                 showError(null)
             } catch (e: QueryException) {
                 textMode.isSelected = true
@@ -129,35 +165,50 @@ class FilterBar(private val onApply: () -> Unit) : JPanel(MigLayout("insets 4 6 
         revalidate()
     }
 
-    private fun clear() {
-        levels.selectedItem = ALL
+    fun clear() {
+        minimum = null
         editor.clear()
         textArea.text = ""
         onApply()
     }
 
+    private fun showLevels() {
+        fun choose(level: Level?) {
+            minimum = level
+            onApply()
+        }
+        val items = buildList {
+            add(PopupItem(ALL, selected = minimum == null) { choose(null) })
+            LEVELS.forEachIndexed { i, level ->
+                add(PopupItem("≥ $level", selected = minimum == level, separatorBefore = i == 0) { choose(level) })
+            }
+            add(PopupItem("Log Level Mapping", Icons.levels, separatorBefore = true) {
+                LogLevelMappingDialog(SwingUtilities.getWindowAncestor(this@FilterBar)).isVisible = true
+            })
+        }
+        showPopupList(levelButton, items)
+    }
+
     private fun showSavedMenu(button: JButton) {
         val filters = AppSettings.current.filters
-        JPopupMenu().apply {
-            if (filters.isEmpty()) add(JMenuItem("No saved filters").apply { isEnabled = false })
-            filters.forEach { filter -> add(JMenuItem(filter.name).apply { addActionListener { load(filter) } }) }
-            addSeparator()
-            add(JMenuItem("Save current filter as…").apply { addActionListener { save() } })
-            add(JMenu("Delete").apply {
-                isEnabled = filters.isNotEmpty()
-                filters.forEach { filter -> add(JMenuItem(filter.name).apply { addActionListener { delete(filter) } }) }
-            })
-        }.show(button, 0, button.height)
+        val items = buildList {
+            if (filters.isEmpty()) add(PopupItem("No saved filters", enabled = false))
+            filters.forEach { filter ->
+                add(PopupItem(filter.name, tools = listOf(PopupTool(Icons.clear, "Delete this filter") { delete(filter) })) { load(filter) })
+            }
+            add(PopupItem("Save Current Filter As", Icons.add, separatorBefore = true) { save() })
+        }
+        showPopupList(button, items)
     }
 
     private fun load(filter: SavedFilter) {
-        levels.selectedItem = filter.minimumLevel ?: ALL
+        minimum = filter.minimumLevel
         textArea.text = filter.query
         try {
             editor.setQuery(QueryParser.parse(filter.query))
         } catch (_: QueryException) {
             textMode.isSelected = true
-            modes.show(modePanel, "text")
+            showMode(text = true)
         }
         onApply()
     }
@@ -195,6 +246,7 @@ class FilterBar(private val onApply: () -> Unit) : JPanel(MigLayout("insets 4 6 
     }
 
     private companion object {
-        const val ALL = "All"
+        const val ALL = "All levels"
+        val LEVELS = Level.entries.filter { it != Level.UNKNOWN }
     }
 }

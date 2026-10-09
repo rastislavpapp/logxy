@@ -6,63 +6,76 @@ import java.awt.GraphicsConfiguration
 import java.awt.GraphicsEnvironment
 import java.awt.Rectangle
 import java.awt.Toolkit
+import java.awt.Window
 import java.awt.event.ComponentAdapter
 import java.awt.event.ComponentEvent
 import java.awt.event.WindowAdapter
 import java.awt.event.WindowEvent
 import java.nio.file.Files
 import java.util.Properties
-import javax.swing.JFrame
 import javax.swing.SwingUtilities
 
-/** Remembers the main window's position, size, monitor and maximized state between runs. */
+/** Remembers windows' position, size, monitor and (for frames) maximized state between runs, each under its own key. */
 object WindowState {
+
+    const val MAIN = "main"
 
     private val path = Settings.directory().resolve("window.properties")
 
-    /** Restores the saved state (call before showing [frame]) and saves it when the window closes. */
-    fun install(frame: JFrame) {
-        restore(frame)
-        var normalBounds = frame.bounds
-        // Bounds to return to when un-maximized; window managers forget them if the window started maximized.
-        var restoreBounds = frame.bounds
-        frame.addWindowStateListener { e ->
-            val wasMaximized = e.oldState and Frame.MAXIMIZED_BOTH == Frame.MAXIMIZED_BOTH
-            val isMaximized = e.newState and Frame.MAXIMIZED_BOTH == Frame.MAXIMIZED_BOTH
-            if (!wasMaximized && isMaximized) restoreBounds = normalBounds
-            if (wasMaximized && !isMaximized) {
-                val target = restoreBounds
-                SwingUtilities.invokeLater { frame.bounds = target }
-            }
-        }
-        frame.addComponentListener(object : ComponentAdapter() {
+    /**
+     * Restores the state saved under [key] and saves it when the window closes. Call before showing
+     * [window], after giving it its default size, which applies when nothing was saved yet.
+     */
+    fun install(window: Window, key: String) {
+        restore(window, key)
+        var normalBounds = window.bounds
+        window.addComponentListener(object : ComponentAdapter() {
             override fun componentMoved(e: ComponentEvent) = remember()
             override fun componentResized(e: ComponentEvent) = remember()
 
             // Maximized bounds are not worth keeping: un-maximizing should return to the normal ones.
             private fun remember() {
-                if (frame.isShowing && frame.extendedState and Frame.MAXIMIZED_BOTH == 0) normalBounds = frame.bounds
+                if (window.isShowing && !isMaximized(window)) normalBounds = window.bounds
             }
         })
-        frame.addWindowListener(object : WindowAdapter() {
-            override fun windowClosing(e: WindowEvent) = save(frame, normalBounds)
-            override fun windowClosed(e: WindowEvent) = save(frame, normalBounds)
+        window.addWindowListener(object : WindowAdapter() {
+            override fun windowClosing(e: WindowEvent) = save(window, key, normalBounds)
+            override fun windowClosed(e: WindowEvent) = save(window, key, normalBounds)
         })
+        if (window is Frame) restoreUnmaximized(window) { normalBounds }
     }
 
-    private fun restore(frame: JFrame) {
-        val properties = Properties()
+    private fun isMaximized(window: Window) = window is Frame && window.extendedState and Frame.MAXIMIZED_BOTH == Frame.MAXIMIZED_BOTH
+
+    private fun restoreUnmaximized(frame: Frame, normalBounds: () -> Rectangle) {
+        // Bounds to return to when un-maximized; window managers forget them if the window started maximized.
+        var restoreBounds = frame.bounds
+        frame.addWindowStateListener { e ->
+            val wasMaximized = e.oldState and Frame.MAXIMIZED_BOTH == Frame.MAXIMIZED_BOTH
+            val isMaximized = e.newState and Frame.MAXIMIZED_BOTH == Frame.MAXIMIZED_BOTH
+            if (!wasMaximized && isMaximized) restoreBounds = normalBounds()
+            if (wasMaximized && !isMaximized) {
+                val target = restoreBounds
+                SwingUtilities.invokeLater { frame.bounds = target }
+            }
+        }
+    }
+
+    private fun load(): Properties = Properties().apply {
+        if (Files.exists(path)) Files.newBufferedReader(path).use { load(it) }
+    }
+
+    private fun restore(window: Window, key: String) {
         try {
-            if (!Files.exists(path)) return
-            Files.newBufferedReader(path).use { properties.load(it) }
-            val saved = Rectangle(
-                properties.getProperty("x").toInt(), properties.getProperty("y").toInt(),
-                properties.getProperty("width").toInt(), properties.getProperty("height").toInt(),
-            )
-            val screen = screenFor(saved, properties.getProperty("screen"))
+            val properties = load()
+            // The main window's entries had no prefix before other windows were remembered too.
+            fun value(name: String) = properties.getProperty("$key.$name") ?: if (key == MAIN) properties.getProperty(name) else null
+            val x = value("x") ?: return
+            val saved = Rectangle(x.toInt(), value("y")!!.toInt(), value("width")!!.toInt(), value("height")!!.toInt())
+            val screen = screenFor(saved, value("screen"))
             val area = usableArea(screen)
-            frame.bounds = if (area.intersects(saved)) fitInto(saved, area) else centeredIn(saved, area)
-            if (properties.getProperty("maximized").toBoolean()) frame.extendedState = Frame.MAXIMIZED_BOTH
+            window.bounds = if (area.intersects(saved)) fitInto(saved, area) else centeredIn(saved, area)
+            if (window is Frame && value("maximized").toBoolean()) window.extendedState = Frame.MAXIMIZED_BOTH
         } catch (e: Exception) {
             System.err.println("Cannot restore the window from $path: $e")
         }
@@ -104,15 +117,16 @@ object WindowState {
         return Rectangle(area.x + (area.width - fitted.width) / 2, area.y + (area.height - fitted.height) / 2, fitted.width, fitted.height)
     }
 
-    private fun save(frame: JFrame, normalBounds: Rectangle) {
-        val properties = Properties()
-        properties["x"] = normalBounds.x.toString()
-        properties["y"] = normalBounds.y.toString()
-        properties["width"] = normalBounds.width.toString()
-        properties["height"] = normalBounds.height.toString()
-        properties["maximized"] = (frame.extendedState and Frame.MAXIMIZED_BOTH == Frame.MAXIMIZED_BOTH).toString()
-        properties["screen"] = frame.graphicsConfiguration.device.iDstring
+    private fun save(window: Window, key: String, normalBounds: Rectangle) {
         try {
+            val properties = load()
+            listOf("x", "y", "width", "height", "maximized", "screen").forEach { properties.remove(it) }
+            properties["$key.x"] = normalBounds.x.toString()
+            properties["$key.y"] = normalBounds.y.toString()
+            properties["$key.width"] = normalBounds.width.toString()
+            properties["$key.height"] = normalBounds.height.toString()
+            properties["$key.screen"] = window.graphicsConfiguration.device.iDstring
+            if (window is Frame) properties["$key.maximized"] = isMaximized(window).toString()
             Files.createDirectories(path.parent)
             Files.newBufferedWriter(path).use { properties.store(it, "logxy window state") }
         } catch (e: Exception) {

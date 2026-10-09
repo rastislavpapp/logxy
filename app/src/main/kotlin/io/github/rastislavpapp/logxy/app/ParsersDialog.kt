@@ -79,6 +79,7 @@ class ParsersDialog(owner: Window?, private val previewFile: Path?, private val 
             add(buttons(), "growx")
         }
         fitToScreen(0.75)
+        WindowState.install(this, "parsers")
 
         val index = (0..<entries.size).firstOrNull { entries[it].format == select } ?: 0
         if (entries.size > 0) list.selectedIndex = index

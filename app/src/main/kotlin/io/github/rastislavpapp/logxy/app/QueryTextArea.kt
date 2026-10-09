@@ -1,6 +1,5 @@
 package io.github.rastislavpapp.logxy.app
 
-import com.formdev.flatlaf.FlatLaf
 import io.github.rastislavpapp.logxy.core.log.Level
 import io.github.rastislavpapp.logxy.core.query.QueryException
 import io.github.rastislavpapp.logxy.core.query.QueryOp
@@ -11,7 +10,6 @@ import org.fife.ui.autocomplete.DefaultCompletionProvider
 import org.fife.ui.rsyntaxtextarea.AbstractTokenMakerFactory
 import org.fife.ui.rsyntaxtextarea.RSyntaxDocument
 import org.fife.ui.rsyntaxtextarea.RSyntaxTextArea
-import org.fife.ui.rsyntaxtextarea.Theme
 import org.fife.ui.rsyntaxtextarea.Token
 import org.fife.ui.rsyntaxtextarea.TokenMakerBase
 import org.fife.ui.rsyntaxtextarea.TokenMakerFactory
@@ -19,12 +17,10 @@ import org.fife.ui.rsyntaxtextarea.parser.AbstractParser
 import org.fife.ui.rsyntaxtextarea.parser.DefaultParseResult
 import org.fife.ui.rsyntaxtextarea.parser.DefaultParserNotice
 import org.fife.ui.rsyntaxtextarea.parser.ParseResult
-import java.awt.Font
 import java.awt.event.ActionEvent
 import java.awt.event.KeyEvent
 import javax.swing.AbstractAction
 import javax.swing.KeyStroke
-import javax.swing.UIManager
 import javax.swing.text.Segment
 
 private const val SYNTAX_STYLE = "text/x-logxy-query"
@@ -78,11 +74,7 @@ class QueryTextArea(private val onApply: () -> Unit) : RSyntaxTextArea(3, 60) {
     @Suppress("SENSELESS_COMPARISON")
     private fun applyTheme() {
         if (completions == null) return
-        val name = if (FlatLaf.isLafDark()) "dark.xml" else "default.xml"
-        javaClass.getResourceAsStream("/org/fife/ui/rsyntaxtextarea/themes/$name")?.use { Theme.load(it).apply(this) }
-        val base = UIManager.getFont("monospaced.font") ?: Font(Font.MONOSPACED, Font.PLAIN, UIManager.getFont("TextArea.font").size)
-        font = Font(base.name, base.style, base.size)
-        background = UIManager.getColor("TextArea.background")
+        applyEditorTheme()
     }
 
     /** Underlines the first syntax error; field names are checked when the filter is applied. */

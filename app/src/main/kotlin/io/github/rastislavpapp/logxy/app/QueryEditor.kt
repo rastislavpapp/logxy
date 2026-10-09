@@ -105,10 +105,20 @@ class QueryEditor(private val onApply: () -> Unit) : JPanel(MigLayout("insets 0,
         isOpaque = false
     }
 
+    /** Shown at the end of the first line: the first condition, or the top group's header. */
+    var trailing: JComponent? = null
+        set(value) {
+            field?.let { it.parent?.remove(it) }
+            field = value
+            changed()
+        }
+
     fun setFields(fields: List<Field>) {
         val query = query(includeEmpty = true)
+        // Rows without values only stand in for conditions: start them over on the new fields (Line, not Message, for raw text).
+        val blank = query(includeEmpty = false).items.isEmpty()
         this.fields = fields
-        setQuery(query)
+        setQuery(if (blank) Query.EMPTY else query)
     }
 
     fun setQuery(query: Query.Group) {
@@ -131,7 +141,19 @@ class QueryEditor(private val onApply: () -> Unit) : JPanel(MigLayout("insets 0,
 
     private fun fieldType(name: String) = fields.firstOrNull { it.name.equals(name, ignoreCase = true) }?.type
 
-    private fun smallButton(text: String, tooltip: String, action: (JButton) -> Unit) = JButton(text).apply {
+    /** Puts the keyboard focus into the first condition's value. */
+    fun focusFirstValue() {
+        fun first(container: java.awt.Container): JTextField? = container.components.firstNotNullOfOrNull { child ->
+            when {
+                child is JTextField && child.isShowing -> child
+                child is java.awt.Container -> first(child)
+                else -> null
+            }
+        }
+        first(root)?.requestFocusInWindow()
+    }
+
+    private fun smallButton(text: String, tooltip: String, icon: javax.swing.Icon? = null, action: (JButton) -> Unit) = JButton(text, icon).apply {
         toolTipText = tooltip
         putClientProperty("JButton.buttonType", "toolBarButton")
         addActionListener { action(this) }
@@ -141,6 +163,13 @@ class QueryEditor(private val onApply: () -> Unit) : JPanel(MigLayout("insets 0,
         "insets ${if (framed) "0 10 8 10" else "0"}, wrap 1, gapy 2, fillx, hidemode 3"
 
     private fun changed() {
+        trailing?.let { trailing ->
+            val (line, index) = root.firstLine()
+            if (trailing.parent !== line) {
+                trailing.parent?.remove(trailing)
+                line.add(trailing, "gapleft 8", index)
+            }
+        }
         // The editor grows with its rows, so everything up to the window must lay out again.
         (topLevelAncestor as? JComponent ?: this).revalidate()
         topLevelAncestor?.validate()
@@ -159,20 +188,28 @@ class QueryEditor(private val onApply: () -> Unit) : JPanel(MigLayout("insets 0,
 
         private val match = JComboBox(Match.entries.toTypedArray()).apply {
             selectedItem = Match.of(group)
-            addActionListener { updateHeader() }
+            addActionListener {
+                updateHeader()
+                changed()
+            }
             applyOnEnter(this, onApply)
         }
-        private val header = JPanel(MigLayout("insets 0", "[]push[]")).apply {
+        private val header = JPanel(MigLayout("insets 0", "[]push[][]")).apply {
             isOpaque = false
             add(match)
-            if (!isRoot) add(smallButton("×", "Remove this group") { removeFromParent(this@GroupView) })
+            if (!isRoot) add(smallButton("", "Remove this group", Icons.closeSmall) {
+                val counted = query(includeEmpty = false) != null
+                removeFromParent(this@GroupView)
+                if (counted) onApply()
+            })
         }
 
         // Sits right after the last item, where new ones are added.
         private val footer = JPanel(MigLayout("insets 0", "[][]push")).apply {
             isOpaque = false
-            add(smallButton("+ Condition", "Add a condition${if (isRoot) "" else " to this group"}") { addItem(group = false) })
-            add(smallButton("+ Group", "Add a group of conditions, matching all, any or none of them") { addItem(group = true) })
+            // wmin pref: the buttons must never shrink into "Conditi…".
+            add(smallButton("", "Add a condition${if (isRoot) "" else " to this group"}", Icons.add) { addItem(group = false) }, "wmin pref")
+            add(smallButton("( )", "Add a group of conditions, matching all, any or none of them") { addItem(group = true) }, "wmin pref")
         }
         private val items = JPanel(MigLayout("insets 0, wrap 1, gapy 2, fillx", "[grow, fill]"))
 
@@ -235,6 +272,16 @@ class QueryEditor(private val onApply: () -> Unit) : JPanel(MigLayout("insets 0,
         }
 
         fun isEmpty() = items.componentCount == 0
+
+        /** The panel of the first line and where to add to its end; a nested group's × stays last. */
+        fun firstLine(): Pair<JComponent, Int> {
+            if (header.isVisible) return header to (if (isRoot) -1 else 1)
+            return when (val first = items.components.firstOrNull()) {
+                is GroupView -> first.firstLine()
+                is RuleView -> first to -1
+                else -> header to -1
+            }
+        }
 
         fun addItem(group: Boolean) {
             if (group) {
@@ -320,8 +367,13 @@ class QueryEditor(private val onApply: () -> Unit) : JPanel(MigLayout("insets 0,
             add(op)
             add(text, "wmin 60")
             add(case)
-            add(smallButton("( )", "Put this condition into a group, to combine it with others") { group.wrapInGroup(this) })
-            add(smallButton("×", "Remove this condition") { group.removeItem(this) })
+            add(smallButton("( )", "Create a group from this condition") { group.wrapInGroup(this) })
+            add(smallButton("", "Remove this condition", Icons.closeSmall) {
+                // Only a condition with a value filtered anything.
+                val counted = rule(includeEmpty = false) != null
+                group.removeItem(this)
+                if (counted) onApply()
+            })
             load(rule)
         }
 
