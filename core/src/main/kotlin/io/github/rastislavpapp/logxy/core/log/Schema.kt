@@ -18,7 +18,13 @@ enum class ColumnType {
 /** What a field means, independent of the format it came from. */
 enum class Role { TIMESTAMP, LEVEL, MESSAGE, THREAD, LOGGER, EXCEPTION }
 
-class Field(val name: String, val type: ColumnType, val role: Role? = null)
+class Field(
+    val name: String,
+    val type: ColumnType,
+    val role: Role? = null,
+    /** For SPAN fields: every value runs to the end of its record (e.g. a message with its stack trace). */
+    val toRecordEnd: Boolean = false,
+)
 
 class Schema(val fields: List<Field>) {
 

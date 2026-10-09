@@ -132,8 +132,8 @@ class ParsedLog private constructor(
         // One read covers every span shown in the row.
         var needed = 0
         for (field in schema.fields.indices) {
-            val lengths = columns.lengths[field] ?: continue
-            val length = lengths[local]
+            if (schema.fields[field].type != ColumnType.SPAN) continue
+            val length = columns.spanLength(field, local)
             if (length == Columns.ABSENT_LENGTH) continue
             val relative = columns.ints[field]!![local]
             val spanLength = if (length == Columns.TO_RECORD_END) recordLength - relative else length
@@ -156,7 +156,7 @@ class ParsedLog private constructor(
                     if (id < 0) "" else dictionaries[field]!!.text(id)
                 }
                 ColumnType.SPAN -> {
-                    val length = columns.lengths[field]!![local]
+                    val length = columns.spanLength(field, local)
                     if (length == Columns.ABSENT_LENGTH) "" else {
                         val relative = columns.ints[field]!![local]
                         val end = if (length == Columns.TO_RECORD_END) bytes.size else minOf(relative + length, bytes.size)
@@ -229,7 +229,7 @@ class ParsedLog private constructor(
                     val id = source.ints[field]!![i]
                     if (id >= 0) target.setDictId(field, remaps[field]!![id])
                 }
-                ColumnType.SPAN -> target.setSpan(field, source.ints[field]!![i], source.lengths[field]!![i])
+                ColumnType.SPAN -> target.setSpan(field, source.ints[field]!![i], source.spanLength(field, i))
             }
         }
     }

@@ -90,7 +90,7 @@ internal class ParsedSnapshot(
         override fun levelId(field: Int) = columns!!.bytes[field]!![local].toInt() and 0xFF
         override fun dictId(field: Int) = columns!!.ints[field]!![local]
         override fun spanStart(field: Int) = columns!!.ints[field]!![local]
-        override fun spanLength(field: Int) = columns!!.lengths[field]!![local]
+        override fun spanLength(field: Int) = columns!!.spanLength(field, local)
     }
 }
 

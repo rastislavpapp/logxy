@@ -53,7 +53,7 @@ object FormatPreview {
                         if (id < 0) "" else columns.dictionaries[field]!!.text(id)
                     }
                     ColumnType.SPAN -> {
-                        val length = columns.lengths[field]!![0]
+                        val length = columns.spanLength(field, 0)
                         val start = columns.ints[field]!![0]
                         when (length) {
                             Columns.ABSENT_LENGTH -> ""

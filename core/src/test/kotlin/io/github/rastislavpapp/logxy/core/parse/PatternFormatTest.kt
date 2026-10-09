@@ -27,6 +27,15 @@ class PatternFormatTest {
     }
 
     @Test
+    fun `only a message at the end runs to the record end`() {
+        val atEnd = PatternFormat("%d{HH:mm:ss.SSS} [%t] %-5p - %m%n").schema.fields
+        assertTrue(atEnd.single { it.role == Role.MESSAGE }.toRecordEnd)
+        assertFalse(atEnd.single { it.role == Role.THREAD }.toRecordEnd)
+        val inside = PatternFormat("%d{HH:mm:ss.SSS} %m [%t]%n").schema.fields
+        assertFalse(inside.single { it.role == Role.MESSAGE }.toRecordEnd)
+    }
+
+    @Test
     fun `matches first lines but not stack trace lines`() {
         val pattern = "%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %-5p %c - %m%n"
         assertTrue(matches(pattern, "2026-10-01 08:00:00.001 [main] INFO  com.example.App - Started"))

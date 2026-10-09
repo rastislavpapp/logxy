@@ -16,7 +16,9 @@ internal class Columns(val schema: Schema) {
 
     /** Dictionary ids for DICT fields; start offsets relative to the record for SPAN fields. */
     val ints = arrayOfNulls<IntChunkList>(schema.fields.size)
-    val lengths = arrayOfNulls<IntChunkList>(schema.fields.size)
+
+    /** Lengths of SPAN fields; none for those that always run to the record end, see [spanLength]. */
+    private val lengths = arrayOfNulls<IntChunkList>(schema.fields.size)
     val dictionaries = arrayOfNulls<ByteDictionary>(schema.fields.size)
 
     /** False once a record's timestamp was earlier than the one before it. */
@@ -37,7 +39,7 @@ internal class Columns(val schema: Schema) {
                 }
                 ColumnType.SPAN -> {
                     ints[i] = IntChunkList()
-                    lengths[i] = IntChunkList()
+                    if (!field.toRecordEnd) lengths[i] = IntChunkList()
                 }
             }
         }
@@ -82,8 +84,16 @@ internal class Columns(val schema: Schema) {
     /** [length] may be [TO_RECORD_END]. */
     fun setSpan(field: Int, relativeStart: Int, length: Int) {
         ints[field]!![size - 1] = relativeStart
-        lengths[field]!![size - 1] = length
+        val lengths = lengths[field]
+        if (lengths != null) {
+            lengths[size - 1] = length
+        } else {
+            require(length == TO_RECORD_END) { "${schema.fields[field].name} must run to the end of the record" }
+        }
     }
+
+    /** Length of a SPAN field: [ABSENT_LENGTH], [TO_RECORD_END], or a length. */
+    fun spanLength(field: Int, record: Int): Int = lengths[field]?.get(record) ?: TO_RECORD_END
 
     fun removeLast() {
         starts.removeLast()

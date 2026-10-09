@@ -32,6 +32,11 @@ class PatternFormat(val pattern: String, private val zone: ZoneId = ZoneId.syste
         compile(pattern, literal)
         if (literal.isNotEmpty()) tokens += Literal(literal.toString().toByteArray())
         require(fields.isNotEmpty()) { "The pattern has no fields" }
+        // A message at the end runs to the end of the record, stack traces included.
+        val last = tokens.last()
+        if (last is FieldToken && last.kind == Kind.MESSAGE) {
+            fields[last.field] = fields[last.field].let { Field(it.name, it.type, it.role, toRecordEnd = true) }
+        }
         schema = Schema(fields)
     }
 
