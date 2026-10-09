@@ -191,13 +191,19 @@ class LogTab(
 
     private fun settingsChanged() {
         val settings = AppSettings.current
-        (log as? ParsedLog)?.levelMapping = settings.levels
+        val parsed = log as? ParsedLog
+        val levelsChanged = parsed != null && parsed.levelMapping != settings.levels
+        parsed?.levelMapping = settings.levels
         model?.fireTableRowsUpdated(0, maxOf(0, (model?.rowCount ?: 0) - 1))
         // A saved format this tab uses was edited: read the file with the new definition.
         val edited = chosenFormat?.let { chosen -> settings.formats.firstOrNull { it.name == chosen.name && it != chosen } }
         if (edited != null) chosenFormat = edited
         showFormat()
-        if (edited != null) reload()
+        if (edited != null) {
+            reload()
+        } else if (levelsChanged && activeFilter != null) {
+            runFilter(keepView = true)
+        }
     }
 
     private fun start() {

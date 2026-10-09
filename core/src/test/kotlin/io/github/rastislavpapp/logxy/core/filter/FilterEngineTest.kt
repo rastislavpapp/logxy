@@ -4,6 +4,7 @@ import io.github.rastislavpapp.logxy.core.index.IndexOptions
 import io.github.rastislavpapp.logxy.core.index.IndexProgress
 import io.github.rastislavpapp.logxy.core.index.LineIndex
 import io.github.rastislavpapp.logxy.core.log.Level
+import io.github.rastislavpapp.logxy.core.log.LevelMapping
 import io.github.rastislavpapp.logxy.core.log.LogData
 import io.github.rastislavpapp.logxy.core.log.ParsedLog
 import io.github.rastislavpapp.logxy.core.parse.PatternFormat
@@ -129,6 +130,17 @@ class FilterEngineTest {
             assertEquals(listOf(0), engine.rows(TextCondition("Line", TextOp.EQUALS, "alpha")))
             assertEquals(listOf(3), engine.rows(TextCondition("Line", TextOp.EQUALS, "last")))
             assertEquals(listOf(), engine.rows(LevelCondition.atLeast("Level", Level.INFO)))
+        }
+    }
+
+    @Test
+    fun `a changed level mapping applies to cached level conditions`() {
+        parse(sample).use { log ->
+            val engine = FilterEngine(log)
+            val warnOrWorse = LevelCondition.atLeast("Level", Level.WARN)
+            assertEquals(listOf(2, 3, 5), engine.rows(warnOrWorse))
+            log.levelMapping = LevelMapping(Level.BUILT_IN_NAMES + ("INFO" to Level.ERROR))
+            assertEquals(listOf(1, 2, 3, 5), engine.rows(warnOrWorse))
         }
     }
 
