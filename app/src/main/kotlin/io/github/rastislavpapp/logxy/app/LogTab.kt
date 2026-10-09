@@ -105,6 +105,10 @@ class LogTab(
     private var engine: FilterEngine? = null
     private var activeFilter: Filter? = null
     private var filterJob: Job? = null
+
+    // How much of the log the shown filter result covers: records, and bytes (the last record may grow without new ones).
+    private var filteredRecords = 0
+    private var filteredBytes = 0L
     private var activity = FileActivity.STATIC
     private var indexMillis = 0L
     private var problem: String? = null
@@ -313,7 +317,7 @@ class LogTab(
                         log.append(appended)
                         model?.recordsAppended(oldRecordCount)
                         refreshDetail(oldRecordCount - 1)
-                        if (activeFilter != null) runFilter(keepView = true) else scrollPane?.rowsAppended()
+                        if (activeFilter != null) catchUpFilter() else scrollPane?.rowsAppended()
                         if (activity == FileActivity.STATIC) {
                             activity = FileActivity.LIVE
                             follow = true
@@ -456,12 +460,12 @@ class LogTab(
         return if (parts.isEmpty()) null else Filter.And(parts)
     }
 
-    /** Runs [activeFilter]; with [keepView], keeps the rows on screen where they are (new records while tailing). */
+    /** Runs [activeFilter] over all records; with [keepView], keeps the rows on screen where they are. */
     private fun runFilter(keepView: Boolean) {
         filterJob?.cancel()
         val filter = activeFilter
         if (filter == null) {
-            if (model?.filteredRows != null || !keepView) showRows(null, keepView)
+            if (model?.isFiltered == true || !keepView) showRows(null, keepView)
             return
         }
         val evaluation = try {
@@ -473,6 +477,35 @@ class LogTab(
         filterJob = scope.launch {
             val result = evaluation.run()
             showRows(result.rows, keepView)
+            filteredRecords = result.recordCount
+            filteredBytes = result.indexedSize
+            // Still the current job (a replaced one would have been cancelled), but done.
+            filterJob = null
+            catchUpFilter()
+        }
+    }
+
+    /**
+     * Filters what was appended since the shown result, keeping the result for older records. Never
+     * cancels a running filter: whichever finishes calls this again, so nothing appended is missed.
+     */
+    private fun catchUpFilter() {
+        val filter = activeFilter ?: return
+        val log = log ?: return
+        val model = model ?: return
+        if (filterJob?.isActive == true || !model.isFiltered || filteredBytes >= log.indexedSize) return
+        // The last record covered may have grown since, so it is filtered again.
+        val from = maxOf(0, filteredRecords - 1)
+        val evaluation = engine?.prepare(filter, from) ?: return
+        filterJob = scope.launch {
+            val result = evaluation.run()
+            model.replaceRowsFrom(from, result.rows)
+            filteredRecords = result.recordCount
+            filteredBytes = result.indexedSize
+            scrollPane?.rowsAppended()
+            updateStatus()
+            filterJob = null
+            catchUpFilter()
         }
     }
 
@@ -502,7 +535,7 @@ class LogTab(
             TabStatus(
                 size = log.indexedSize,
                 records = log.recordCount,
-                shown = model?.filteredRows?.size,
+                shown = model?.filteredRowCount,
                 unit = if (log is LineIndex) "line" else "record",
                 live = activity == FileActivity.LIVE,
                 following = follow,
@@ -520,6 +553,8 @@ class LogTab(
 
     private fun closeLog() {
         filterJob?.cancel()
+        filteredRecords = 0
+        filteredBytes = 0L
         log?.close()
         log = null
         model = null

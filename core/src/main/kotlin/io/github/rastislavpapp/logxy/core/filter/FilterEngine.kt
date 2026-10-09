@@ -16,8 +16,11 @@ import java.nio.ByteBuffer
 import java.nio.channels.FileChannel
 import java.util.Collections
 
-/** The records a filter lets through, in order. */
-class FilterResult(val rows: IntArray, val recordCount: Int)
+/**
+ * The records from [from] on that a filter lets through, in order, out of the first [recordCount]
+ * records, which ended at [indexedSize] bytes of the file.
+ */
+class FilterResult(val rows: IntArray, val from: Int, val recordCount: Int, val indexedSize: Long)
 
 /**
  * Evaluates [Filter]s over one log into bitsets, one bit per record. Dictionary fields test each
@@ -40,10 +43,11 @@ class FilterEngine(private val log: LogData, private val maxCacheBytes: Long = D
     private var cachedLevels: LevelMapping? = null
 
     /**
-     * Snapshots the log for [filter]. Call on the thread that owns the log; the returned evaluation
-     * may run on any thread. Throws IllegalArgumentException for an invalid regex.
+     * Snapshots the log for [filter], to evaluate records from [from] on (e.g. only appended ones).
+     * Call on the thread that owns the log; the returned evaluation may run on any thread. Throws
+     * IllegalArgumentException for an invalid regex.
      */
-    fun prepare(filter: Filter): Evaluation {
+    fun prepare(filter: Filter, from: Int = 0): Evaluation {
         val snapshot = when (log) {
             is ParsedLog -> log.filterSnapshot()
             is LineIndex -> log.filterSnapshot()
@@ -53,7 +57,7 @@ class FilterEngine(private val log: LogData, private val maxCacheBytes: Long = D
             cache.keys.removeIf { it is LevelCondition }
             cachedLevels = snapshot.levels
         }
-        return Evaluation(compile(filter, snapshot), snapshot)
+        return Evaluation(compile(filter, snapshot), snapshot, from.coerceIn(0, snapshot.count))
     }
 
     /** Caches [entry], dropping the least recently used others while the cache is over [maxCacheBytes]. */
@@ -74,15 +78,23 @@ class FilterEngine(private val log: LogData, private val maxCacheBytes: Long = D
         is Condition -> Leaf.of(filter, snapshot)
     }
 
-    inner class Evaluation internal constructor(private val root: Node, private val snapshot: RecordSnapshot) {
+    inner class Evaluation internal constructor(
+        private val root: Node,
+        private val snapshot: RecordSnapshot,
+        private val from: Int,
+    ) {
         private val words = (snapshot.count + 63) / 64
-        private val all = LongArray(words) { -1L }.also { bits ->
-            if (snapshot.count % 64 != 0) bits[words - 1] = (1L shl (snapshot.count % 64)) - 1
+
+        /** The records evaluated: from [from] to the end of the snapshot. */
+        private val all = LongArray(words).also { bits ->
+            for (w in from / 64..<words) bits[w] = -1L
+            if (from % 64 != 0) bits[from / 64] = -1L shl (from % 64)
+            if (snapshot.count % 64 != 0) bits[words - 1] = bits[words - 1] and (1L shl (snapshot.count % 64)) - 1
         }
 
         /** Computes the matching records; cancelling the calling coroutine stops it. */
         suspend fun run(): FilterResult = withContext(Dispatchers.Default) {
-            FilterResult(rows(evaluate(root, null)), snapshot.count)
+            FilterResult(rows(evaluate(root, null)), from, snapshot.count, snapshot.end)
         }
 
         /** The records of [candidates] (all if null) that match [node]. */
@@ -141,7 +153,11 @@ class FilterEngine(private val log: LogData, private val maxCacheBytes: Long = D
 
         private suspend fun compute(leaf: Leaf, need: LongArray): LongArray = coroutineScope {
             val out = LongArray(words)
-            (0..<words step CHUNK_WORDS).map { first ->
+            // Only chunks with records to test, e.g. just the appended ones while tailing.
+            val chunks = (0..<words step CHUNK_WORDS).filter { first ->
+                (first..<minOf(words, first + CHUNK_WORDS)).any { need[it] != 0L }
+            }
+            chunks.map { first ->
                 async {
                     ensureActive()
                     val cursor = snapshot.cursor()
@@ -163,7 +179,7 @@ class FilterEngine(private val log: LogData, private val maxCacheBytes: Long = D
         private fun rows(bits: LongArray): IntArray {
             val rows = IntArray(bits.sumOf { java.lang.Long.bitCount(it) })
             var i = 0
-            for (w in bits.indices) {
+            for (w in from / 64..<bits.size) {
                 var mask = bits[w]
                 while (mask != 0L) {
                     rows[i++] = w * 64 + java.lang.Long.numberOfTrailingZeros(mask)

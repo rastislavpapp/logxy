@@ -161,6 +161,36 @@ class FilterEngineTest {
         }
     }
 
+    @Test
+    fun `evaluation from a record on matches the full result from there`() {
+        val levels = listOf("DEBUG", "INFO ", "WARN ", "ERROR")
+        val content = buildString {
+            for (i in 0..<300) {
+                append("2026-10-01 08:00:00.000 [t-${i % 5}] ${levels[i % 4]} app.L - message $i${if (i % 7 == 0) " needle" else ""}\n")
+            }
+        }
+        parse(content).use { log ->
+            val filters = listOf(
+                LevelCondition.atLeast("Level", Level.WARN),
+                TextCondition("Message", TextOp.EQUALS, "*needle*"),
+                Filter.Or(listOf(TextCondition("Thread", TextOp.EQUALS, "t-1"), TextCondition("Message", TextOp.EQUALS, "*needle*"))),
+                Filter.Not(TextCondition("Thread", TextOp.EQUALS, "t-2")),
+            )
+            val cached = FilterEngine(log)
+            for (filter in filters) {
+                val full = cached.rows(filter)
+                for (from in listOf(0, 1, 63, 64, 65, 128, 299, 300, 400)) {
+                    val expected = full.filter { it >= from }
+                    for (engine in listOf(cached, FilterEngine(log))) {
+                        val result = runBlocking { engine.prepare(filter, from).run() }
+                        assertEquals(expected, result.rows.toList(), "$filter from $from")
+                        assertEquals(minOf(from, 300), result.from)
+                    }
+                }
+            }
+        }
+    }
+
     private fun grow(log: LogData, file: Path, text: String) {
         Files.writeString(file, text, StandardOpenOption.APPEND)
         log.append(log.readAppended(Files.size(file)))
