@@ -25,6 +25,7 @@ const val WINDOW_ROWS = 1_000_000
 private const val EDGE_ROWS = 50_000
 
 private val UPWARD_KEYS = setOf(KeyEvent.VK_UP, KeyEvent.VK_KP_UP, KeyEvent.VK_PAGE_UP, KeyEvent.VK_HOME)
+private val DOWNWARD_KEYS = setOf(KeyEvent.VK_DOWN, KeyEvent.VK_KP_DOWN, KeyEvent.VK_PAGE_DOWN)
 
 /** A table model that shows [WINDOW_ROWS] rows of a larger list, starting at [windowStart]. */
 interface RowWindow {
@@ -63,9 +64,14 @@ class VirtualScrollPane(private val table: JTable, private val window: RowWindow
 
     var onFollowChanged: (Boolean) -> Unit = {}
 
+    /** Whether the user scrolling to the end turns [follow] back on. */
+    var resumeFollowAtEnd: () -> Boolean = { false }
+
     private val visibleRows get() = maxOf(1, viewport.extentSize.height / table.rowHeight)
 
     private val topRow get() = window.windowStart + viewport.viewPosition.y / table.rowHeight
+
+    private val atEnd get() = topRow + visibleRows >= window.totalRowCount
 
     init {
         val headerSpacer = object : JComponent() {
@@ -82,18 +88,25 @@ class VirtualScrollPane(private val table: JTable, private val window: RowWindow
             if (!updatingScrollBar) {
                 if (it.value + visibleRows < window.totalRowCount) follow = false
                 scrollToRow(it.value)
+                resumeFollowIfAtEnd()
             }
         }
         scrollPane.addMouseWheelListener(::onWheel)
         table.addKeyListener(object : KeyAdapter() {
             override fun keyPressed(e: KeyEvent) {
                 if (e.keyCode in UPWARD_KEYS) follow = false
+                // Listeners run before the key's action has moved the view.
+                if (e.keyCode in DOWNWARD_KEYS) SwingUtilities.invokeLater(::resumeFollowIfAtEnd)
             }
         })
         installJumpActions()
     }
 
     fun scrollToEnd() = scrollToRow(window.totalRowCount)
+
+    private fun resumeFollowIfAtEnd() {
+        if (!follow && atEnd && resumeFollowAtEnd()) follow = true
+    }
 
     /** Call after the list was replaced, e.g. by a new filter result; shows the top. */
     fun rowsReplaced() {
@@ -205,6 +218,7 @@ class VirtualScrollPane(private val table: JTable, private val window: RowWindow
         wheelRemainder = rows - whole
         if (rows < 0) follow = false
         if (whole != 0) scrollToRow(topRow + whole)
+        if (rows > 0) resumeFollowIfAtEnd()
         e.consume()
     }
 
@@ -217,6 +231,7 @@ class VirtualScrollPane(private val table: JTable, private val window: RowWindow
                     val row = if (toEnd) window.totalRowCount - 1 else 0
                     scrollToRow(row)
                     table.changeSelection(row - window.windowStart, 0, false, extend)
+                    if (toEnd) resumeFollowIfAtEnd()
                 }
             })
             val inputMap = table.getInputMap(WHEN_ANCESTOR_OF_FOCUSED_COMPONENT)

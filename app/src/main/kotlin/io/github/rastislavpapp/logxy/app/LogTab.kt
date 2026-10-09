@@ -367,6 +367,7 @@ class LogTab(
         table.transferHandler = FileDropHandler(openFiles, table.transferHandler)
         val scrollPane = VirtualScrollPane(table, model)
         scrollPane.onFollowChanged = { if (follow != it) follow = it }
+        scrollPane.resumeFollowAtEnd = { activity == FileActivity.LIVE }
         table.selectionModel.addListSelectionListener { event ->
             if (!event.valueIsAdjusting) showDetail(model, table.selectionModel.leadSelectionIndex)
         }
