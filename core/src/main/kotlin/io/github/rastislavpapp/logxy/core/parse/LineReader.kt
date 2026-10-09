@@ -1,5 +1,6 @@
 package io.github.rastislavpapp.logxy.core.parse
 
+import io.github.rastislavpapp.logxy.core.readFully
 import io.github.rastislavpapp.logxy.core.Bytes
 import io.github.rastislavpapp.logxy.core.index.NewlineScanner
 import java.nio.ByteBuffer
@@ -96,12 +97,7 @@ internal class LineReader(
     private fun fill(): Int {
         val want = minOf((buffer.size - filled).toLong(), end - (bufferStart + filled)).toInt()
         wrapped.clear().position(filled).limit(filled + want)
-        var total = 0
-        while (wrapped.hasRemaining()) {
-            val read = channel.read(wrapped, bufferStart + filled + total)
-            if (read < 0) break
-            total += read
-        }
+        val total = channel.readFully(wrapped, bufferStart + filled)
         filled += total
         onRead(total)
         return total

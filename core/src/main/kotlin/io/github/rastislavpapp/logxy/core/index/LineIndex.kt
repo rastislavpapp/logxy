@@ -1,5 +1,6 @@
 package io.github.rastislavpapp.logxy.core.index
 
+import io.github.rastislavpapp.logxy.core.readFully
 import io.github.rastislavpapp.logxy.core.Bytes
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -92,7 +93,7 @@ class LineIndex private constructor(
         val fullLength = lineLimit(line) - start
         // Read two bytes past the limit to see whether only the terminator is beyond it.
         val bytes = ByteArray(minOf(fullLength, maxBytes + 2L).toInt())
-        var length = readFully(bytes, start)
+        var length = channel.readFully(ByteBuffer.wrap(bytes), start)
         if (length.toLong() == fullLength) length = Bytes.trimLineEnd(bytes, 0, length)
         return Bytes.utf8Text(bytes, 0, length, maxBytes)
     }
@@ -113,14 +114,6 @@ class LineIndex private constructor(
         lastLineComplete = starts.size > 0 && starts.last() == appended.to
         if (lastLineComplete) starts.removeLast()
         indexedSize = appended.to
-    }
-
-    private fun readFully(target: ByteArray, position: Long): Int {
-        val buffer = ByteBuffer.wrap(target)
-        while (buffer.hasRemaining()) {
-            if (channel.read(buffer, position + buffer.position()) < 0) break
-        }
-        return buffer.position()
     }
 
     override fun close() {
@@ -181,10 +174,7 @@ class LineIndex private constructor(
                 while (position < end) {
                     checkCancelled()
                     buffer.clear().limit(minOf(bufferSize.toLong(), end - position).toInt())
-                    while (buffer.hasRemaining()) {
-                        if (channel.read(buffer, position + buffer.position()) < 0) break
-                    }
-                    val read = buffer.position()
+                    val read = channel.readFully(buffer, position)
                     if (read == 0) return RangeScan(starts, position, complete = false)
                     NewlineScanner.scan(buffer, 0, read, position, starts)
                     position += read

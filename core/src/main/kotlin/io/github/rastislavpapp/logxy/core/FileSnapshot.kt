@@ -67,10 +67,7 @@ class FileSnapshot(
 
         private fun readHead(path: Path): ByteArray = FileChannel.open(path, StandardOpenOption.READ).use { channel ->
             val buffer = ByteBuffer.allocate(HEAD_SIZE)
-            while (buffer.hasRemaining()) {
-                if (channel.read(buffer) < 0) break
-            }
-            buffer.array().copyOf(buffer.position())
+            buffer.array().copyOf(channel.readFully(buffer, 0))
         }
     }
 }

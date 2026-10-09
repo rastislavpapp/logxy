@@ -1,5 +1,6 @@
 package io.github.rastislavpapp.logxy.core.filter
 
+import io.github.rastislavpapp.logxy.core.readFully
 import io.github.rastislavpapp.logxy.core.Bytes
 import io.github.rastislavpapp.logxy.core.log.ColumnType
 import io.github.rastislavpapp.logxy.core.log.Columns
@@ -310,12 +311,8 @@ internal class SpanReader(private val channel: FileChannel, private val fileEnd:
         if (bufferStart >= 0 && from >= bufferStart && to <= bufferStart + loaded) return (from - bufferStart).toInt()
         val length = (to - from).toInt()
         if (length > buffer.size) buffer = ByteArray(length)
-        val wrapped = ByteBuffer.wrap(buffer, 0, minOf(buffer.size.toLong(), fileEnd - from).toInt())
-        while (wrapped.hasRemaining()) {
-            if (channel.read(wrapped, from + wrapped.position()) < 0) break
-        }
+        loaded = channel.readFully(ByteBuffer.wrap(buffer, 0, minOf(buffer.size.toLong(), fileEnd - from).toInt()), from)
         bufferStart = from
-        loaded = wrapped.position()
         return 0
     }
 

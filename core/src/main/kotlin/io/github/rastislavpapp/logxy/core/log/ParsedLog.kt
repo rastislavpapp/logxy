@@ -1,5 +1,6 @@
 package io.github.rastislavpapp.logxy.core.log
 
+import io.github.rastislavpapp.logxy.core.readFully
 import io.github.rastislavpapp.logxy.core.Bytes
 import io.github.rastislavpapp.logxy.core.index.IndexOptions
 import io.github.rastislavpapp.logxy.core.filter.ParsedSnapshot
@@ -261,11 +262,9 @@ class ParsedLog private constructor(
     private fun recordEnd(record: Int): Long = if (record + 1 < recordCount) recordStart(record + 1) else indexedSize
 
     private fun read(position: Long, length: Int): ByteArray {
-        val buffer = ByteBuffer.allocate(length)
-        while (buffer.hasRemaining()) {
-            if (channel.read(buffer, position + buffer.position()) < 0) break
-        }
-        return if (buffer.position() == length) buffer.array() else buffer.array().copyOf(buffer.position())
+        val bytes = ByteArray(length)
+        val read = channel.readFully(ByteBuffer.wrap(bytes), position)
+        return if (read == length) bytes else bytes.copyOf(read)
     }
 
     override fun close() {
