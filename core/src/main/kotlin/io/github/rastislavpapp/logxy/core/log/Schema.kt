@@ -16,7 +16,7 @@ enum class ColumnType {
 }
 
 /** What a field means, independent of the format it came from. */
-enum class Role { TIMESTAMP, LEVEL, MESSAGE, THREAD, LOGGER, EXCEPTION }
+enum class Role { TIMESTAMP, LEVEL, MESSAGE, THREAD, LOGGER, EXCEPTION, SOURCE }
 
 class Field(
     val name: String,

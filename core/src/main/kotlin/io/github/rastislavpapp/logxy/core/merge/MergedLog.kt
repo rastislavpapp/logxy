@@ -1,0 +1,164 @@
+package io.github.rastislavpapp.logxy.core.merge
+
+import io.github.rastislavpapp.logxy.core.filter.RecordSnapshot
+import io.github.rastislavpapp.logxy.core.index.ByteChunkList
+import io.github.rastislavpapp.logxy.core.index.IntChunkList
+import io.github.rastislavpapp.logxy.core.log.Columns
+import io.github.rastislavpapp.logxy.core.log.Level
+import io.github.rastislavpapp.logxy.core.log.LogData
+import io.github.rastislavpapp.logxy.core.log.Records
+import io.github.rastislavpapp.logxy.core.log.Role
+import io.github.rastislavpapp.logxy.core.log.Schema
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.nio.file.Path
+
+/**
+ * Several logs as one, their records interleaved by timestamp. Each log keeps its own order: the merge
+ * takes the earliest next record of any log, so a log's slightly out-of-order lines stay as written.
+ * A record without timestamp counts as the time of the record before it. Records appended later are
+ * merged among themselves and added at the end, so shown records never move.
+ *
+ * Every part must have a timestamp field. Not thread-safe, like [LogData]; filters read it through
+ * [MergedFilter].
+ */
+class MergedLog private constructor(
+    val parts: List<LogData>,
+    /** Shown in the source field: file names, with as much of the path as needed to tell them apart. */
+    val names: List<String>,
+) : Records {
+
+    private val merged = MergedSchema(parts.map { it.schema })
+    private val timestampFields = IntArray(parts.size) { parts[it].schema.indexOf(Role.TIMESTAMP) }
+
+    // Per merged record: its part and its record there. Per part: where each of its records is.
+    private val partOf = ByteChunkList()
+    private val recordOf = IntChunkList()
+    private val positions = List(parts.size) { IntChunkList() }
+
+    /** Per part, the time of its last merged record, for records without one. */
+    private val lastTimes = LongArray(parts.size) { Long.MIN_VALUE }
+
+    init {
+        require(parts.size in 2..MAX_PARTS) { "Can merge 2 to $MAX_PARTS logs, not ${parts.size}" }
+        require(timestampFields.all { it >= 0 }) { "Every merged log needs a timestamp" }
+    }
+
+    override val schema: Schema get() = merged.schema
+    override val isRaw get() = false
+    override val recordCount get() = partOf.size
+
+    /** Bytes of all parts covered. */
+    val indexedSize: Long get() = parts.sumOf { it.indexedSize }
+
+    fun part(position: Int): Int = partOf[position].toInt() and 0xFF
+
+    fun record(position: Int): Int = recordOf[position]
+
+    /** Where [record] of [part] is shown; it must have been merged. */
+    fun position(part: Int, record: Int): Int = positions[part][record]
+
+    /** How many records of [part] are merged so far. */
+    fun mergedCount(part: Int): Int = positions[part].size
+
+    /** The first record of [part] shown at [position] or later; [mergedCount] if none. */
+    fun firstRecordFrom(part: Int, position: Int): Int {
+        val list = positions[part]
+        var low = 0
+        var high = list.size
+        while (low < high) {
+            val middle = (low + high) ushr 1
+            if (list[middle] < position) low = middle + 1 else high = middle
+        }
+        return low
+    }
+
+    internal fun partField(part: Int, field: Int) = merged.partField(part, field)
+
+    override fun level(record: Int): Level? = parts[part(record)].level(record(record))
+
+    override fun rowValues(record: Int, maxBytes: Int): Array<String> {
+        val part = part(record)
+        val values = parts[part].rowValues(record(record), maxBytes)
+        return Array(schema.fields.size) { field ->
+            if (field == MergedSchema.SOURCE) names[part] else merged.partField(part, field).let { if (it < 0) "" else values[it] }
+        }
+    }
+
+    override fun recordText(record: Int, maxBytes: Int): String = parts[part(record)].recordText(record(record), maxBytes)
+
+    /**
+     * Merges the records the parts got since the last merge and adds them at the end. Returns false if
+     * a part now has fewer records than were merged (its last record was parsed differently); then the
+     * merge cannot be continued and must be built again. Call on the owner thread after appending.
+     */
+    fun appendNew(): Boolean {
+        if (parts.indices.any { parts[it].recordCount < mergedCount(it) }) return false
+        merge(parts.map { it.filterSnapshot() })
+        return true
+    }
+
+    private fun merge(snapshots: List<RecordSnapshot>) {
+        val count = parts.size
+        val cursors = snapshots.map { it.cursor() }
+        val next = IntArray(count) { mergedCount(it) }
+        val heads = LongArray(count)
+        val done = BooleanArray(count)
+
+        fun loadHead(part: Int) {
+            if (next[part] >= snapshots[part].count) {
+                done[part] = true
+                return
+            }
+            val cursor = cursors[part]
+            cursor.moveTo(next[part])
+            val time = cursor.timestamp(timestampFields[part])
+            heads[part] = if (time == Columns.ABSENT_TIMESTAMP) lastTimes[part] else time
+        }
+
+        for (part in 0..<count) loadHead(part)
+        while (true) {
+            // Few parts: a linear scan beats a heap. Ties go to the earlier part.
+            var best = -1
+            for (part in 0..<count) {
+                if (!done[part] && (best < 0 || heads[part] < heads[best])) best = part
+            }
+            if (best < 0) break
+            positions[best].add(partOf.size)
+            partOf.add(best.toByte())
+            recordOf.add(next[best])
+            lastTimes[best] = heads[best]
+            next[best]++
+            loadHead(best)
+        }
+    }
+
+    companion object {
+        /** Parts are stored as unsigned bytes. */
+        const val MAX_PARTS = 255
+
+        /**
+         * Merges [parts], which must all have a timestamp field. Call on the thread that owns them; the
+         * merge itself runs on [Dispatchers.Default].
+         */
+        suspend fun build(parts: List<LogData>): MergedLog {
+            val log = MergedLog(parts, sourceNames(parts.map { it.path }))
+            val snapshots = parts.map { it.filterSnapshot() }
+            withContext(Dispatchers.Default) { log.merge(snapshots) }
+            return log
+        }
+
+        /** File names, prefixed with as many parent folders as needed to make them unique. */
+        fun sourceNames(paths: List<Path>): List<String> {
+            var depth = 1
+            while (true) {
+                val names = paths.map { path ->
+                    val count = minOf(depth, path.nameCount)
+                    path.subpath(path.nameCount - count, path.nameCount).joinToString("/")
+                }
+                if (names.toSet().size == names.size || depth >= paths.maxOf { it.nameCount }) return names
+                depth++
+            }
+        }
+    }
+}
