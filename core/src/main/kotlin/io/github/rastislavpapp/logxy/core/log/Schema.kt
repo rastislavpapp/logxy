@@ -23,7 +23,7 @@ class Field(
     val type: ColumnType,
     val role: Role? = null,
     /** For SPAN fields: every value runs to the end of its record (e.g. a message with its stack trace). */
-    val toRecordEnd: Boolean = false,
+    internal val toRecordEnd: Boolean = false,
 )
 
 class Schema(val fields: List<Field>) {
