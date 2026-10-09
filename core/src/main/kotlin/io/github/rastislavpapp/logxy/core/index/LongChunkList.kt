@@ -40,7 +40,17 @@ class LongChunkList {
     }
 
     fun addAll(other: LongChunkList) {
-        for (i in 0..<other.size) add(other[i])
+        require(other !== this) { "Cannot add a list to itself" }
+        var copied = 0
+        while (copied < other.size) {
+            val offset = size and MASK
+            if (offset == 0) startChunk()
+            val sourceOffset = copied and MASK
+            val count = minOf(CHUNK_SIZE - offset, CHUNK_SIZE - sourceOffset, other.size - copied)
+            System.arraycopy(other.chunks[copied ushr SHIFT]!!, sourceOffset, current, offset, count)
+            size += count
+            copied += count
+        }
     }
 
     private fun startChunk() {

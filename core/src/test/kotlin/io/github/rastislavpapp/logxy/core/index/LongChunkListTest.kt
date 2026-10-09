@@ -31,6 +31,37 @@ class LongChunkListTest {
     }
 
     @Test
+    fun `addAll copies across chunk boundaries of both lists`() {
+        val sizes = listOf(0, 1, 65_535, 65_536, 65_537, 200_000)
+        for (targetSize in listOf(0, 3, 65_530, 65_536)) {
+            for (sourceSize in sizes) {
+                val target = LongChunkList()
+                for (i in 0..<targetSize) target.add(-i.toLong())
+                val source = LongChunkList()
+                for (i in 0..<sourceSize) source.add(i * 7L)
+                target.addAll(source)
+                assertEquals(targetSize + sourceSize, target.size)
+                for (i in 0..<targetSize) assertEquals(-i.toLong(), target[i])
+                for (i in 0..<sourceSize) assertEquals(i * 7L, target[targetSize + i])
+            }
+        }
+    }
+
+    @Test
+    fun `addAll after removeLast across a chunk boundary`() {
+        val target = LongChunkList()
+        for (i in 0..65_536) target.add(i.toLong())
+        target.removeLast()
+        target.removeLast()
+        val source = LongChunkList()
+        for (i in 0..<10) source.add(-i.toLong())
+        target.addAll(source)
+        assertEquals(65_545, target.size)
+        assertEquals(65_534L, target[65_534])
+        for (i in 0..<10) assertEquals(-i.toLong(), target[65_535 + i])
+    }
+
+    @Test
     fun `out of range access fails`() {
         val list = LongChunkList()
         list.add(1)
