@@ -14,7 +14,7 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import java.nio.ByteBuffer
 import java.nio.channels.FileChannel
-import java.util.concurrent.ConcurrentHashMap
+import java.util.Collections
 
 /** The records a filter lets through, in order. */
 class FilterResult(val rows: IntArray, val recordCount: Int)
@@ -25,12 +25,17 @@ class FilterResult(val rows: IntArray, val recordCount: Int)
  * Leaf results are cached per condition, so changing one condition or appending records only
  * computes what is new.
  */
-class FilterEngine(private val log: LogData) {
+class FilterEngine(private val log: LogData, private val maxCacheBytes: Long = DEFAULT_CACHE_BYTES) {
 
     /** Bits of one condition for the [coverage] rows it was computed for; other bits are unknown. */
-    private class Entry(val bits: LongArray, val coverage: LongArray)
+    private class Entry(val bits: LongArray, val coverage: LongArray) {
+        val bytes get() = (bits.size + coverage.size) * 8L
+    }
 
-    private val cache = ConcurrentHashMap<Condition, Entry>()
+    // In access order, so the conditions used least recently are dropped first.
+    private val cache: MutableMap<Condition, Entry> = Collections.synchronizedMap(LinkedHashMap(16, 0.75f, true))
+
+    internal val cachedConditions get() = cache.size
     @Volatile
     private var cachedLevels: LevelMapping? = null
 
@@ -49,6 +54,17 @@ class FilterEngine(private val log: LogData) {
             cachedLevels = snapshot.levels
         }
         return Evaluation(compile(filter, snapshot), snapshot)
+    }
+
+    /** Caches [entry], dropping the least recently used others while the cache is over [maxCacheBytes]. */
+    private fun store(condition: Condition, entry: Entry) = synchronized(cache) {
+        cache[condition] = entry
+        var bytes = cache.values.sumOf { it.bytes }
+        val oldest = cache.values.iterator()
+        while (bytes > maxCacheBytes && cache.size > 1) {
+            bytes -= oldest.next().bytes
+            oldest.remove()
+        }
     }
 
     private fun compile(filter: Filter, snapshot: RecordSnapshot): Node = when (filter) {
@@ -118,7 +134,7 @@ class FilterEngine(private val log: LogData) {
                     val last = snapshot.count - 1
                     coverage[last ushr 6] = coverage[last ushr 6] and (1L shl (last and 63)).inv()
                 }
-                cache[leaf.condition] = Entry(bits, coverage)
+                store(leaf.condition, Entry(bits, coverage))
             }
             return LongArray(words) { (bits?.getOrElse(it) { 0L } ?: 0L) and candidates[it] }
         }
@@ -161,6 +177,9 @@ class FilterEngine(private val log: LogData) {
     private companion object {
         /** Records per parallel task: 4096 words of 64. */
         const val CHUNK_WORDS = 4096
+
+        /** About 25 conditions on 40M records. */
+        const val DEFAULT_CACHE_BYTES = 256L * 1024 * 1024
     }
 }
 

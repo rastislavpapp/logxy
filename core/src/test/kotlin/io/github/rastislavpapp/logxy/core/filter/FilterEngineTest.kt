@@ -20,6 +20,7 @@ import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertTrue
 
 class FilterEngineTest {
 
@@ -141,6 +142,22 @@ class FilterEngineTest {
             assertEquals(listOf(2, 3, 5), engine.rows(warnOrWorse))
             log.levelMapping = LevelMapping(Level.BUILT_IN_NAMES + ("INFO" to Level.ERROR))
             assertEquals(listOf(1, 2, 3, 5), engine.rows(warnOrWorse))
+        }
+    }
+
+    @Test
+    fun `the cache stays within its budget and dropped conditions are computed again`() {
+        parse(sample).use { log ->
+            // Six records: one word of bits and one of coverage, 16 bytes per condition.
+            val engine = FilterEngine(log, maxCacheBytes = 40)
+            val threads = listOf("main", "worker-1", "worker-2", "nobody")
+            val expected = listOf(listOf(1, 4), listOf(2, 5), listOf(3), listOf())
+            repeat(2) {
+                for ((thread, rows) in threads.zip(expected)) {
+                    assertEquals(rows, engine.rows(TextCondition("Thread", TextOp.EQUALS, thread)))
+                    assertTrue(engine.cachedConditions <= 2)
+                }
+            }
         }
     }
 
