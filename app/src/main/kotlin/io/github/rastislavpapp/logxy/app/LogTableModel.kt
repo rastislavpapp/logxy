@@ -4,6 +4,7 @@ import io.github.rastislavpapp.logxy.core.log.Field
 import io.github.rastislavpapp.logxy.core.log.Level
 import io.github.rastislavpapp.logxy.core.log.LogData
 import io.github.rastislavpapp.logxy.core.log.Role
+import io.github.rastislavpapp.logxy.core.session.FilteredRows
 import javax.swing.table.AbstractTableModel
 
 /** Longest value prefix shown in the table; the rest is cut off. */
@@ -27,16 +28,12 @@ class LogTableModel(val log: LogData) : AbstractTableModel(), RowWindow {
     private val cachedRows = IntArray(CACHE_SIZE) { -1 }
     private val cachedValues = arrayOfNulls<Array<String>>(CACHE_SIZE)
 
-    /** Records shown, in order, in the first [filteredSize] elements (the rest is room to grow); null shows all. */
-    private var filtered: IntArray? = null
-    private var filteredSize = 0
+    /** Records shown, in order; null shows all. Owned by the session, which changes it and then tells the model. */
+    private var filtered: FilteredRows? = null
 
     val isFiltered get() = filtered != null
 
-    /** Number of records a filter lets through, or null without a filter. */
-    val filteredRowCount: Int? get() = if (filtered != null) filteredSize else null
-
-    override val totalRowCount get() = if (filtered != null) filteredSize else log.recordCount
+    override val totalRowCount get() = filtered?.size ?: log.recordCount
 
     override var windowStart = 0
         set(value) {
@@ -46,10 +43,9 @@ class LogTableModel(val log: LogData) : AbstractTableModel(), RowWindow {
 
     override fun getRowCount() = minOf(totalRowCount, WINDOW_ROWS)
 
-    /** Shows only [rows] (sorted record numbers), or all records if null. */
-    fun showRows(rows: IntArray?) {
+    /** Shows only [rows], or all records if null. */
+    fun showRows(rows: FilteredRows?) {
         filtered = rows
-        filteredSize = rows?.size ?: 0
         windowStart = 0
         fireTableDataChanged()
     }
@@ -63,32 +59,20 @@ class LogTableModel(val log: LogData) : AbstractTableModel(), RowWindow {
     /** Position of [record] among the shown rows, or of the first shown record after it; -1 if none. */
     fun indexOfRecord(record: Int): Int {
         val rows = filtered ?: return if (record < log.recordCount) record else -1
-        val found = rows.binarySearch(record, 0, filteredSize)
-        val index = if (found >= 0) found else -found - 1
-        return if (index < filteredSize) index else -1
+        return rows.indexOf(record)
     }
 
-    /**
-     * Replaces the shown records from record [from] on with [rows] (sorted, all `>= from`): a filter
-     * result for records appended since the last one, and for the last one, which may have changed.
-     */
-    fun replaceRowsFrom(from: Int, rows: IntArray) {
-        var current = filtered ?: return
-        val found = current.binarySearch(from, 0, filteredSize)
-        val cut = if (found >= 0) found else -found - 1
-        val oldSize = filteredSize
-        val newSize = cut + rows.size
-        if (newSize > current.size) current = current.copyOf(maxOf(newSize, current.size * 2)).also { filtered = it }
-        System.arraycopy(rows, 0, current, cut, rows.size)
-        filteredSize = newSize
-        // Only the part of the window from the cut on changed.
+    /** Call after the filtered rows changed from position [firstChanged] on; there were [oldSize] before. */
+    fun rowsChangedFrom(firstChanged: Int, oldSize: Int) {
+        val newSize = filtered?.size ?: return
+        // Only the part of the window from the first change on is affected.
         val oldRows = (oldSize - windowStart).coerceIn(0, WINDOW_ROWS)
         val newRows = (newSize - windowStart).coerceIn(0, WINDOW_ROWS)
         if (newRows > oldRows) fireTableRowsInserted(oldRows, newRows - 1)
         if (newRows < oldRows) fireTableRowsDeleted(newRows, oldRows - 1)
-        val firstChanged = (cut - windowStart).coerceAtLeast(0)
-        val lastChanged = minOf(oldRows, newRows) - 1
-        if (firstChanged <= lastChanged) fireTableRowsUpdated(firstChanged, lastChanged)
+        val first = (firstChanged - windowStart).coerceAtLeast(0)
+        val last = minOf(oldRows, newRows) - 1
+        if (first <= last) fireTableRowsUpdated(first, last)
     }
 
     override fun getColumnCount() = columnFields.size + if (showsLineNumbers) 1 else 0
@@ -127,7 +111,7 @@ class LogTableModel(val log: LogData) : AbstractTableModel(), RowWindow {
 
     /**
      * Call after records were appended to the log, which had [oldRecordCount] records before. With
-     * a filter, call [replaceRowsFrom] with the result for the new records too.
+     * a filter, call [rowsChangedFrom] once the filtered rows for the new records are there.
      */
     fun recordsAppended(oldRecordCount: Int) {
         // The previous last record may have been incomplete and now has more text.

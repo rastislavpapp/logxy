@@ -1,6 +1,7 @@
 package io.github.rastislavpapp.logxy.app
 
 import com.formdev.flatlaf.FlatClientProperties
+import io.github.rastislavpapp.logxy.core.session.SessionStatus
 import net.miginfocom.swing.MigLayout
 import java.awt.BasicStroke
 import java.awt.BorderLayout
@@ -274,7 +275,7 @@ class MainFrame : JFrame("logxy") {
     }
 
     // Green: the file is being written to; accent: followed, though nothing is written yet.
-    private fun tabIcon(status: TabStatus) = when {
+    private fun tabIcon(status: SessionStatus) = when {
         status.live -> DotIcon(Icons.logFile, LIVE_COLOR)
         status.following -> DotIcon(Icons.logFile, FOLLOW_COLOR)
         else -> Icons.logFile
