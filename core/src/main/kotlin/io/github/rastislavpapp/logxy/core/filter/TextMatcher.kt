@@ -2,64 +2,147 @@ package io.github.rastislavpapp.logxy.core.filter
 
 import java.util.regex.Pattern
 
-/** Tests text against a [TextCondition], straight on UTF-8 bytes where possible. */
+/**
+ * Tests text against a [TextCondition]. Wildcard patterns made of `*` and literal text (the usual
+ * "contains", "starts with", "is") are matched straight on UTF-8 bytes; others go through a regex.
+ */
 internal class TextMatcher(condition: TextCondition) {
 
-    private val op = condition.op
-    private val value = condition.value
+    private val negated = condition.op == TextOp.NOT_EQUALS || condition.op == TextOp.NOT_MATCHES
     private val ignoreCase = condition.ignoreCase
-    private val needle = value.toByteArray(Charsets.UTF_8)
-    private val asciiNeedle = needle.all { it >= 0 }
-    private val lowerNeedle = ByteArray(needle.size) { lower(needle[it]) }
-    private val regex: Pattern? = if (op == TextOp.MATCHES) {
-        Pattern.compile(value, if (ignoreCase) Pattern.CASE_INSENSITIVE or Pattern.UNICODE_CASE else 0)
+    private val glob = if (condition.op == TextOp.EQUALS || condition.op == TextOp.NOT_EQUALS) Glob.parse(condition.value) else null
+
+    /** Literal segments between `*`s, for byte matching; null if the pattern needs the regex. */
+    private val segments: List<ByteArray>? = glob
+        ?.takeIf { g -> !g.hasAnyOne && (!ignoreCase || g.segments.all { s -> s.all { it.code < 128 } }) }
+        ?.segments?.map { segment -> segment.toByteArray(Charsets.UTF_8).also { if (ignoreCase) lowerInPlace(it) } }
+
+    private val regex: Pattern = if (glob != null) {
+        Pattern.compile(glob.toRegex(), Pattern.DOTALL or caseFlags())
     } else {
-        null
+        Pattern.compile(condition.value, caseFlags())
     }
 
-    // Byte comparison is exact for case-sensitive tests and for ASCII needles ignoring ASCII case.
-    private val bytewise = op != TextOp.MATCHES && (!ignoreCase || asciiNeedle)
+    private fun caseFlags() = if (ignoreCase) Pattern.CASE_INSENSITIVE or Pattern.UNICODE_CASE else 0
 
-    fun matches(text: String): Boolean = when (op) {
-        TextOp.EQUALS -> text.equals(value, ignoreCase)
-        TextOp.NOT_EQUALS -> !text.equals(value, ignoreCase)
-        TextOp.CONTAINS -> text.contains(value, ignoreCase)
-        TextOp.STARTS_WITH -> text.startsWith(value, ignoreCase)
-        TextOp.MATCHES -> regex!!.matcher(text).find()
+    /** What an absent value counts as: only negated conditions accept it. */
+    val matchesAbsent get() = negated
+
+    fun matches(text: String): Boolean {
+        val matcher = regex.matcher(text)
+        return (if (glob != null) matcher.matches() else matcher.find()) != negated
     }
-
-    /** What an absent value counts as. */
-    val matchesAbsent get() = op == TextOp.NOT_EQUALS
 
     fun matches(bytes: ByteArray, from: Int, to: Int): Boolean {
-        if (!bytewise) return matches(String(bytes, from, to - from, Charsets.UTF_8))
-        return when (op) {
-            TextOp.EQUALS -> to - from == needle.size && regionMatches(bytes, from)
-            TextOp.NOT_EQUALS -> !(to - from == needle.size && regionMatches(bytes, from))
-            TextOp.STARTS_WITH -> to - from >= needle.size && regionMatches(bytes, from)
-            TextOp.CONTAINS -> contains(bytes, from, to)
-            TextOp.MATCHES -> error("not bytewise")
-        }
+        val segments = segments ?: return matches(String(bytes, from, to - from, Charsets.UTF_8))
+        return globMatches(segments, bytes, from, to) != negated
     }
 
-    private fun contains(bytes: ByteArray, from: Int, to: Int): Boolean {
-        if (needle.isEmpty()) return true
-        val first = lowerNeedle[0]
+    private fun globMatches(segments: List<ByteArray>, bytes: ByteArray, from: Int, to: Int): Boolean {
+        val glob = glob!!
+        if (segments.size == 1 && !glob.leadingStar && !glob.trailingStar) {
+            return to - from == segments[0].size && regionMatches(bytes, from, segments[0])
+        }
+        var position = from
+        var end = to
+        var first = 0
+        var last = segments.lastIndex
+        if (!glob.leadingStar) {
+            if (to - from < segments[0].size || !regionMatches(bytes, from, segments[0])) return false
+            position += segments[0].size
+            first = 1
+        }
+        if (!glob.trailingStar) {
+            val tail = segments[last]
+            end = to - tail.size
+            if (end < position || !regionMatches(bytes, end, tail)) return false
+            last--
+        }
+        for (i in first..last) {
+            val found = indexOf(bytes, segments[i], position, end)
+            if (found < 0) return false
+            position = found + segments[i].size
+        }
+        return true
+    }
+
+    private fun indexOf(bytes: ByteArray, needle: ByteArray, from: Int, to: Int): Int {
+        if (needle.isEmpty()) return from
         for (i in from..to - needle.size) {
-            val b = if (ignoreCase) lower(bytes[i]) else bytes[i]
-            if (b == (if (ignoreCase) first else needle[0]) && regionMatches(bytes, i)) return true
+            if (regionMatches(bytes, i, needle)) return i
         }
-        return false
+        return -1
     }
 
-    private fun regionMatches(bytes: ByteArray, at: Int): Boolean {
+    private fun regionMatches(bytes: ByteArray, at: Int, needle: ByteArray): Boolean {
         if (ignoreCase) {
-            for (i in needle.indices) if (lower(bytes[at + i]) != lowerNeedle[i]) return false
+            for (i in needle.indices) if (lower(bytes[at + i]) != needle[i]) return false
         } else {
             for (i in needle.indices) if (bytes[at + i] != needle[i]) return false
         }
         return true
     }
 
+    private fun lowerInPlace(bytes: ByteArray) {
+        for (i in bytes.indices) bytes[i] = lower(bytes[i])
+    }
+
     private fun lower(b: Byte): Byte = if (b in 'A'.code.toByte()..'Z'.code.toByte()) (b + 32).toByte() else b
+}
+
+/**
+ * A wildcard pattern: `*` matches any run of characters (also line breaks), `?` exactly one;
+ * a backslash makes the next `*`, `?` or backslash literal.
+ */
+internal class Glob private constructor(
+    /** Text between `*`s, with [ANY_ONE] for `?`. */
+    val segments: List<String>,
+    val leadingStar: Boolean,
+    val trailingStar: Boolean,
+) {
+    val hasAnyOne = segments.any { ANY_ONE in it }
+
+    fun toRegex(): String = segments.joinToString(".*", prefix = if (leadingStar) ".*" else "", postfix = if (trailingStar) ".*" else "") { segment ->
+        segment.split(ANY_ONE).joinToString(".") { if (it.isEmpty()) "" else Pattern.quote(it) }
+    }
+
+    companion object {
+        /** Stands for `?` inside [segments]; a code point that does not occur in logs. */
+        const val ANY_ONE = '￿'
+
+        fun parse(pattern: String): Glob {
+            val segments = ArrayList<String>()
+            val current = StringBuilder()
+            var i = 0
+            var leadingStar = false
+            var trailingStar = false
+            while (i < pattern.length) {
+                val c = pattern[i]
+                when {
+                    c == '\\' && i + 1 < pattern.length && pattern[i + 1] in "*?\\" -> {
+                        current.append(pattern[i + 1])
+                        i += 2
+                        continue
+                    }
+                    c == '*' -> {
+                        if (segments.isEmpty() && current.isEmpty()) leadingStar = true else segments += current.toString()
+                        current.clear()
+                        trailingStar = true
+                    }
+                    c == '?' -> {
+                        current.append(ANY_ONE)
+                        trailingStar = false
+                    }
+                    else -> {
+                        current.append(c)
+                        trailingStar = false
+                    }
+                }
+                i++
+            }
+            if (current.isNotEmpty() || !trailingStar) segments += current.toString()
+            if (segments.isEmpty()) segments += ""
+            return Glob(segments, leadingStar, trailingStar)
+        }
+    }
 }

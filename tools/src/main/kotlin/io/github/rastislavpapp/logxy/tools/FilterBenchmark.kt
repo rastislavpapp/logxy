@@ -23,14 +23,14 @@ fun benchmarkFiltering(file: Path) {
 
     val warn = LevelCondition.atLeast("Level", Level.WARN)
     val error = LevelCondition.atLeast("Level", Level.ERROR)
-    val timeout = TextCondition("Message", TextOp.CONTAINS, "timeout")
+    val timeout = TextCondition("Message", TextOp.EQUALS, "*timeout*")
     val filters = listOf(
         "level >= WARN" to warn,
         "thread = main" to TextCondition("Thread", TextOp.EQUALS, "main"),
         "ERROR and logger starts with com.example.order" to
-            Filter.And(listOf(error, TextCondition("Logger", TextOp.STARTS_WITH, "com.example.order"))),
+            Filter.And(listOf(error, TextCondition("Logger", TextOp.EQUALS, "com.example.order*"))),
         "message contains 'timeout' (whole file)" to timeout,
-        "ERROR and message contains 'timeout'" to Filter.And(listOf(error, TextCondition("Message", TextOp.CONTAINS, "Timeout", ignoreCase = true))),
+        "ERROR and message contains 'timeout'" to Filter.And(listOf(error, TextCondition("Message", TextOp.EQUALS, "*Timeout*", ignoreCase = true))),
         "not (level >= WARN) or thread = main" to
             Filter.Or(listOf(Filter.Not(warn), TextCondition("Thread", TextOp.EQUALS, "main"))),
         "message matches regex 'order \\d{6}:'" to TextCondition("Message", TextOp.MATCHES, "order \\d{6}:"),

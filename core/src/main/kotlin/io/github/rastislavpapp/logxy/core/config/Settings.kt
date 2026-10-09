@@ -10,10 +10,14 @@ import java.nio.file.StandardCopyOption
 import java.util.Collections
 import java.util.Properties
 
-/** The user's saved formats (parsers) and level names. */
+/** A named filter: the minimum level (null for all) and the query text. */
+data class SavedFilter(val name: String, val minimumLevel: Level?, val query: String)
+
+/** The user's saved formats (parsers), level names and filters. */
 data class Settings(
     val formats: List<LogFormat> = emptyList(),
     val levels: LevelMapping = LevelMapping.DEFAULT,
+    val filters: List<SavedFilter> = emptyList(),
 ) {
     companion object {
         /** `%APPDATA%\logxy` on Windows, `$XDG_CONFIG_HOME/logxy` or `~/.config/logxy` elsewhere. */
@@ -36,6 +40,9 @@ data class Settings(
          * format.1.layout=%d [%t] %-5p %c - %m%n
          * level-names=custom
          * level.NOTE=INFO
+         * filter.1.name=Slow DB
+         * filter.1.level=WARN
+         * filter.1.query=logger == "com.example.db*"
          * ```
          * Level names are stored only once the user changed them, and then completely. A missing file
          * means default settings; entries that cannot be read are skipped.
@@ -45,10 +52,7 @@ data class Settings(
             val properties = Properties()
             Files.newBufferedReader(path).use { properties.load(it) }
 
-            val formatNumbers = properties.stringPropertyNames()
-                .mapNotNull { Regex("""format\.(\d+)\.name""").matchEntire(it)?.groupValues?.get(1)?.toInt() }
-                .sorted()
-            val formats = formatNumbers.mapNotNull { n ->
+            val formats = numbered(properties, "format").mapNotNull { n ->
                 val name = properties.getProperty("format.$n.name")?.trim().orEmpty()
                 val layout = properties.getProperty("format.$n.layout") ?: return@mapNotNull null
                 if (name.isEmpty()) return@mapNotNull null
@@ -66,8 +70,14 @@ data class Settings(
                 }
                 .toMap()
             val custom = properties.getProperty("level-names") == "custom"
+            val filters = numbered(properties, "filter").mapNotNull { n ->
+                val name = properties.getProperty("filter.$n.name")?.trim().orEmpty()
+                if (name.isEmpty()) return@mapNotNull null
+                val level = properties.getProperty("filter.$n.level")?.trim()?.uppercase()
+                SavedFilter(name, Level.entries.firstOrNull { it.name == level }, properties.getProperty("filter.$n.query").orEmpty())
+            }
             // Without the marker, level entries only add to the built-in names (as first released).
-            return Settings(formats, LevelMapping(if (custom) levels else Level.BUILT_IN_NAMES + levels))
+            return Settings(formats, LevelMapping(if (custom) levels else Level.BUILT_IN_NAMES + levels), filters)
         }
 
         /** Writes [settings] to [path], replacing the file only once the new one is complete. */
@@ -89,6 +99,11 @@ data class Settings(
                 }
                 properties["format.$n.name"] = format.name
             }
+            settings.filters.forEachIndexed { i, filter ->
+                properties["filter.${i + 1}.name"] = filter.name
+                properties["filter.${i + 1}.level"] = filter.minimumLevel?.name.orEmpty()
+                properties["filter.${i + 1}.query"] = filter.query
+            }
             if (settings.levels != LevelMapping.DEFAULT) {
                 properties["level-names"] = "custom"
                 settings.levels.names.forEach { (text, level) -> properties["level.$text"] = level.name }
@@ -109,6 +124,11 @@ data class Settings(
         }
 
         const val DEFAULT_TIMESTAMP = "yyyy-MM-dd HH:mm:ss.SSS"
+
+        /** The N of all `prefix.N.name` keys, in order. */
+        private fun numbered(properties: Properties, prefix: String): List<Int> = properties.stringPropertyNames()
+            .mapNotNull { Regex("""${Regex.escape(prefix)}\.(\d+)\.name""").matchEntire(it)?.groupValues?.get(1)?.toInt() }
+            .sorted()
     }
 }
 

@@ -6,7 +6,13 @@ import io.github.rastislavpapp.logxy.core.FileSnapshot
 import io.github.rastislavpapp.logxy.core.formatByteSize
 import io.github.rastislavpapp.logxy.core.index.IndexProgress
 import io.github.rastislavpapp.logxy.core.index.LineIndex
+import io.github.rastislavpapp.logxy.core.filter.Filter
+import io.github.rastislavpapp.logxy.core.filter.FilterEngine
+import io.github.rastislavpapp.logxy.core.filter.LevelCondition
 import io.github.rastislavpapp.logxy.core.log.LogData
+import io.github.rastislavpapp.logxy.core.log.Role
+import io.github.rastislavpapp.logxy.core.query.QueryCompiler
+import io.github.rastislavpapp.logxy.core.query.QueryException
 import io.github.rastislavpapp.logxy.core.log.ParsedLog
 import io.github.rastislavpapp.logxy.core.parse.FormatMismatchException
 import io.github.rastislavpapp.logxy.core.parse.LogFormat
@@ -41,7 +47,6 @@ import javax.swing.JProgressBar
 import javax.swing.JScrollPane
 import javax.swing.JSplitPane
 import javax.swing.JTextArea
-import javax.swing.JToggleButton
 import javax.swing.JToolBar
 import javax.swing.ScrollPaneConstants
 import javax.swing.SwingUtilities
@@ -80,7 +85,7 @@ class LogTab(
         isEditable = false
         lineWrap = true
     }
-    private val followButton = JToggleButton("Follow").apply {
+    private val followButton = accentToggle("Follow").apply {
         toolTipText = "Keep the end of the file in view as it grows"
         addActionListener { follow = isSelected }
     }
@@ -101,7 +106,12 @@ class LogTab(
 
     private var log: LogData? = null
     private var model: LogTableModel? = null
+    private var table: LogTable? = null
     private var scrollPane: VirtualScrollPane? = null
+    private val filterBar = FilterBar(::applyFilter)
+    private var engine: FilterEngine? = null
+    private var activeFilter: Filter? = null
+    private var filterJob: Job? = null
     private var activity = FileActivity.STATIC
     private var indexMillis = 0L
     private var problem: String? = null
@@ -118,12 +128,15 @@ class LogTab(
         private set
 
     init {
-        add(JToolBar().apply {
-            isFloatable = false
-            add(followButton)
-            addSeparator()
-            add(JLabel("Parser: "))
-            add(formatBox)
+        add(JPanel(BorderLayout()).apply {
+            add(JToolBar().apply {
+                isFloatable = false
+                add(followButton)
+                addSeparator()
+                add(JLabel("Parser: "))
+                add(formatBox)
+            }, BorderLayout.NORTH)
+            add(filterBar, BorderLayout.CENTER)
         }, BorderLayout.NORTH)
         add(content, BorderLayout.CENTER)
         fillFormats()
@@ -283,7 +296,7 @@ class LogTab(
                         val oldRecordCount = log.recordCount
                         log.append(appended)
                         model?.recordsAppended(oldRecordCount)
-                        scrollPane?.rowsAppended()
+                        if (activeFilter != null) runFilter(keepView = true) else scrollPane?.rowsAppended()
                         if (activity == FileActivity.STATIC) {
                             activity = FileActivity.LIVE
                             follow = true
@@ -344,7 +357,10 @@ class LogTab(
             if (!event.valueIsAdjusting) showDetail(model, table.selectionModel.leadSelectionIndex)
         }
         this.model = model
+        this.table = table
         this.scrollPane = scrollPane
+        engine = FilterEngine(log)
+        filterBar.setSchema(log.schema)
 
         detail.font = table.font.deriveFont(Font.PLAIN)
         detail.text = ""
@@ -361,19 +377,85 @@ class LogTab(
         content.repaint()
         split.setDividerLocation(0.75)
         scrollPane.follow = follow
+        applyFilter()
     }
 
     private fun showDetail(model: LogTableModel, row: Int) {
-        val record = model.windowStart + row
-        detail.text = if (row < 0 || record >= model.log.recordCount) "" else model.log.recordText(record, MAX_DETAIL_BYTES)
+        detail.text = if (row < 0 || row >= model.rowCount) "" else model.log.recordText(model.recordAt(row), MAX_DETAIL_BYTES)
         detail.caretPosition = 0
+    }
+
+    /** Applies the filter bar's level and query to this file's records. */
+    private fun applyFilter() {
+        val log = log ?: return
+        activeFilter = try {
+            buildFilter(log)
+        } catch (e: QueryException) {
+            filterBar.showError(e.message)
+            return
+        }
+        filterBar.showError(null)
+        runFilter(keepView = false)
+    }
+
+    private fun buildFilter(log: LogData): Filter? {
+        val parts = ArrayList<Filter>()
+        val levelField = log.schema.fields.firstOrNull { it.role == Role.LEVEL }
+        filterBar.minimumLevel?.let { minimum -> if (levelField != null) parts += LevelCondition.atLeast(levelField.name, minimum) }
+        val query = filterBar.query()
+        val compiled = QueryCompiler(log.schema).compile(query)
+        // Only placeholders (empty values): nothing to filter.
+        if (compiled != Filter.And(emptyList())) parts += compiled
+        return if (parts.isEmpty()) null else Filter.And(parts)
+    }
+
+    /** Runs [activeFilter]; with [keepView], keeps the rows on screen where they are (new records while tailing). */
+    private fun runFilter(keepView: Boolean) {
+        filterJob?.cancel()
+        val filter = activeFilter
+        if (filter == null) {
+            if (model?.filteredRows != null || !keepView) showRows(null, keepView)
+            return
+        }
+        val evaluation = try {
+            engine?.prepare(filter) ?: return
+        } catch (e: IllegalArgumentException) {
+            filterBar.showError(e.message)
+            return
+        }
+        filterJob = scope.launch {
+            val result = evaluation.run()
+            showRows(result.rows, keepView)
+        }
+    }
+
+    private fun showRows(rows: IntArray?, keepView: Boolean) {
+        val model = model ?: return
+        val table = table ?: return
+        val scrollPane = scrollPane ?: return
+        val selected = table.selectedRow.takeIf { it >= 0 }?.let { model.recordAt(it) }
+        val top = if (model.totalRowCount > 0) model.recordAtIndex(scrollPane.firstVisibleRow) else null
+        model.showRows(rows)
+        scrollPane.rowsReplaced()
+        val selectedIndex = selected?.let { record -> model.indexOfRecord(record).takeIf { it >= 0 && model.recordAtIndex(it) == record } }
+        if (!follow) {
+            if (keepView && top != null) {
+                scrollPane.scrollToRow(maxOf(0, model.indexOfRecord(top)))
+            } else if (selectedIndex != null) {
+                scrollPane.selectRow(selectedIndex)
+            }
+        }
+        if (selectedIndex != null) scrollPane.selectRow(selectedIndex, scroll = false)
+        updateStatus()
     }
 
     private fun updateStatus() {
         val log = log ?: return
         val numbers = NumberFormat.getIntegerInstance()
         val unit = if (log is LineIndex) "line" else "record"
-        val count = "${numbers.format(log.recordCount)} $unit${if (log.recordCount == 1) "" else "s"}"
+        val total = "${numbers.format(log.recordCount)} $unit${if (log.recordCount == 1) "" else "s"}"
+        val shown = model?.filteredRows?.size
+        val count = if (shown == null) total else "${numbers.format(shown)} of $total"
         val mode = if (activity == FileActivity.LIVE) "live" else "static"
         statusText = "${formatByteSize(log.indexedSize)}  ·  $count  ·  $mode  ·  indexed in ${numbers.format(indexMillis)} ms" +
             (problem?.let { "  ·  $it" } ?: "")
@@ -381,10 +463,13 @@ class LogTab(
     }
 
     private fun closeLog() {
+        filterJob?.cancel()
         log?.close()
         log = null
         model = null
+        table = null
         scrollPane = null
+        engine = null
     }
 
     /** Cancels any running work and releases the file. */

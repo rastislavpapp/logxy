@@ -22,6 +22,10 @@ class SettingsTest {
                 LogFormat.Regex("Tricky: = and \\ ž", """^(?<timestamp>\S+) \\d+ = (?<message>.*)$""", "HH:mm:ss"),
             ),
             levels = LevelMapping(Level.BUILT_IN_NAMES - "CONFIG" + mapOf("note" to Level.INFO, "40" to Level.ERROR)),
+            filters = listOf(
+                SavedFilter("Slow DB", Level.WARN, """logger == "com.example.db*" AND message =~ "\d+ ms""""),
+                SavedFilter("Everything", null, ""),
+            ),
         )
         val file = dir.resolve("nested/dir/logxy.properties")
         Settings.save(file, settings)

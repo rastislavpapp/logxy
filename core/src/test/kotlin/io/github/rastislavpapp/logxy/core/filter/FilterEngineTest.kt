@@ -53,11 +53,11 @@ class FilterEngineTest {
             val engine = FilterEngine(log)
             assertEquals(listOf(2, 3, 5), engine.rows(LevelCondition.atLeast("Level", Level.WARN)))
             assertEquals(listOf(1, 4), engine.rows(TextCondition("Thread", TextOp.EQUALS, "main")))
-            assertEquals(listOf(3, 5), engine.rows(TextCondition("Logger", TextOp.STARTS_WITH, "app.H")))
+            assertEquals(listOf(3, 5), engine.rows(TextCondition("Logger", TextOp.EQUALS, "app.H*")))
             assertEquals(listOf(2), engine.rows(TimeCondition("Timestamp", nanos("2026-10-01T08:00:01"), nanos("2026-10-01T08:00:02") - 1)))
             assertEquals(listOf(1, 2, 3, 4, 5), engine.rows(PresenceCondition("Timestamp")))
             assertEquals(listOf(0), engine.rows(PresenceCondition("Thread", present = false)))
-            assertEquals(listOf(3), engine.rows(TextCondition("Timestamp", TextOp.CONTAINS, ":02.")))
+            assertEquals(listOf(3), engine.rows(TextCondition("Timestamp", TextOp.EQUALS, "*:02.*")))
         }
     }
 
@@ -65,10 +65,10 @@ class FilterEngineTest {
     fun `message text includes continuation lines`() {
         parse(sample).use { log ->
             val engine = FilterEngine(log)
-            assertEquals(listOf(2), engine.rows(TextCondition("Message", TextOp.CONTAINS, "SQLException")))
-            assertEquals(listOf(5), engine.rows(TextCondition("Message", TextOp.CONTAINS, "billing", ignoreCase = true)))
-            assertEquals(listOf(), engine.rows(TextCondition("Message", TextOp.CONTAINS, "billing")))
-            assertEquals(listOf(1), engine.rows(TextCondition("Message", TextOp.CONTAINS, "ŽLUŤOUČKÝ", ignoreCase = true)))
+            assertEquals(listOf(2), engine.rows(TextCondition("Message", TextOp.EQUALS, "*SQLException*")))
+            assertEquals(listOf(5), engine.rows(TextCondition("Message", TextOp.EQUALS, "*billing*", ignoreCase = true)))
+            assertEquals(listOf(), engine.rows(TextCondition("Message", TextOp.EQUALS, "*billing*")))
+            assertEquals(listOf(1), engine.rows(TextCondition("Message", TextOp.EQUALS, "*ŽLUŤOUČKÝ*", ignoreCase = true)))
             assertEquals(listOf(3, 5), engine.rows(TextCondition("Message", TextOp.MATCHES, "(?i)slow|timeout")))
             assertEquals(listOf(0), engine.rows(TextCondition("Message", TextOp.EQUALS, "banner before any record")))
         }
@@ -93,6 +93,27 @@ class FilterEngineTest {
     }
 
     @Test
+    fun `wildcards and regexes`() {
+        parse(sample).use { log ->
+            val engine = FilterEngine(log)
+            assertEquals(listOf(2), engine.rows(TextCondition("Message", TextOp.EQUALS, "query*boom*", ignoreCase = true)))
+            assertEquals(listOf(1, 4), engine.rows(TextCondition("Logger", TextOp.EQUALS, "app.M??n")))
+            assertEquals(listOf(2, 3, 5), engine.rows(TextCondition("Thread", TextOp.EQUALS, "worker-?")))
+            assertEquals(listOf(0, 1, 4), engine.rows(TextCondition("Thread", TextOp.NOT_EQUALS, "worker-*")))
+            assertEquals(listOf(4), engine.rows(TextCondition("Message", TextOp.EQUALS, "*ick")))
+            assertEquals(listOf(), engine.rows(TextCondition("Message", TextOp.EQUALS, "*ICK")))
+            assertEquals(listOf(1), engine.rows(TextCondition("Message", TextOp.EQUALS, "*KůŇ", ignoreCase = true)))
+            assertEquals(listOf(0, 1, 2, 4), engine.rows(TextCondition("Message", TextOp.NOT_MATCHES, "slow|timeout", ignoreCase = true)))
+            assertEquals(listOf(3), engine.rows(TextCondition("Message", TextOp.MATCHES, "/orders$")))
+        }
+        val file = Files.writeString(dir.resolve("stars.log"), "a*b\naxb\n")
+        runBlocking { LineIndex.build(file) }.use { log ->
+            assertEquals(listOf(0), FilterEngine(log).rows(TextCondition("Line", TextOp.EQUALS, "a\\*b")))
+            assertEquals(listOf(0, 1), FilterEngine(log).rows(TextCondition("Line", TextOp.EQUALS, "a*b")))
+        }
+    }
+
+    @Test
     fun `invalid regex is reported when preparing`() {
         parse(sample).use { log ->
             assertFailsWith<IllegalArgumentException> { FilterEngine(log).prepare(TextCondition("Message", TextOp.MATCHES, "(")) }
@@ -104,7 +125,7 @@ class FilterEngineTest {
         val file = Files.writeString(dir.resolve("raw.log"), "alpha\r\nbeta\ngamma alpha\nlast")
         runBlocking { LineIndex.build(file) }.use { log ->
             val engine = FilterEngine(log)
-            assertEquals(listOf(0, 2), engine.rows(TextCondition("Line", TextOp.CONTAINS, "alpha")))
+            assertEquals(listOf(0, 2), engine.rows(TextCondition("Line", TextOp.EQUALS, "*alpha*")))
             assertEquals(listOf(0), engine.rows(TextCondition("Line", TextOp.EQUALS, "alpha")))
             assertEquals(listOf(3), engine.rows(TextCondition("Line", TextOp.EQUALS, "last")))
             assertEquals(listOf(), engine.rows(LevelCondition.atLeast("Level", Level.INFO)))
@@ -126,9 +147,9 @@ class FilterEngineTest {
         }
         val file = Files.writeString(dir.resolve("random.log"), records(0, 20_000))
         val filters = listOf(
-            Filter.And(listOf(LevelCondition.atLeast("Level", Level.WARN), TextCondition("Message", TextOp.CONTAINS, "needle"))),
+            Filter.And(listOf(LevelCondition.atLeast("Level", Level.WARN), TextCondition("Message", TextOp.EQUALS, "*needle*"))),
             Filter.Or(listOf(TextCondition("Thread", TextOp.EQUALS, "t-3"), Filter.Not(TextCondition("Logger", TextOp.EQUALS, "log.L1")))),
-            Filter.And(listOf(TextCondition("Message", TextOp.CONTAINS, "NEEDLE", ignoreCase = true), TimeCondition("Timestamp", from = nanos("2026-10-01T02:00:00")))),
+            Filter.And(listOf(TextCondition("Message", TextOp.EQUALS, "*NEEDLE*", ignoreCase = true), TimeCondition("Timestamp", from = nanos("2026-10-01T02:00:00")))),
         )
         fun expected(log: LogData, filter: Filter): List<Int> = (0..<log.recordCount).filter { matches(log as ParsedLog, it, filter) }
 
@@ -164,8 +185,11 @@ class FilterEngineTest {
                 log.rowValues(record, 1000)[field]
             }
             when (filter.op) {
-                TextOp.EQUALS -> text.equals(filter.value, filter.ignoreCase)
-                TextOp.CONTAINS -> text.contains(filter.value, filter.ignoreCase)
+                TextOp.EQUALS -> if (filter.value.startsWith("*") && filter.value.endsWith("*")) {
+                    text.contains(filter.value.trim('*'), filter.ignoreCase)
+                } else {
+                    text.equals(filter.value, filter.ignoreCase)
+                }
                 else -> error("unused")
             }
         }

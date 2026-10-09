@@ -39,6 +39,14 @@
             <groupId>com.miglayout</groupId>
             <artifactId>miglayout-swing</artifactId>
         </dependency>
+        <dependency>
+            <groupId>com.fifesoft</groupId>
+            <artifactId>rsyntaxtextarea</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.fifesoft</groupId>
+            <artifactId>autocomplete</artifactId>
+        </dependency>
     </dependencies>
 
     <build>

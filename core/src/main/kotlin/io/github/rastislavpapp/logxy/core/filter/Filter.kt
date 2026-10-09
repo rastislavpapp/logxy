@@ -14,9 +14,10 @@ sealed interface Condition : Filter {
     val field: String
 }
 
-enum class TextOp { EQUALS, NOT_EQUALS, CONTAINS, STARTS_WITH, MATCHES }
+/** [EQUALS] and [NOT_EQUALS] take wildcard patterns (see [Glob]), [MATCHES] and [NOT_MATCHES] regexes (found anywhere). */
+enum class TextOp { EQUALS, NOT_EQUALS, MATCHES, NOT_MATCHES }
 
-/** Compares the field's text, as shown in the table. Absent values match only [TextOp.NOT_EQUALS]. */
+/** Compares the field's text, as shown in the table. Absent values match only the negated ops. */
 data class TextCondition(
     override val field: String,
     val op: TextOp,

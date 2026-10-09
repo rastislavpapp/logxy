@@ -95,6 +95,25 @@ class VirtualScrollPane(private val table: JTable, private val window: RowWindow
 
     fun scrollToEnd() = scrollToRow(window.totalRowCount)
 
+    /** Call after the list was replaced, e.g. by a new filter result; shows the top. */
+    fun rowsReplaced() {
+        scrollPane.validate()
+        setViewY(0)
+        updateScrollBar()
+        if (follow) scrollToEnd()
+    }
+
+    /** Index of the topmost visible row in the whole list. */
+    val firstVisibleRow get() = topRow
+
+    /** Selects [row] of the whole list; with [scroll], first scrolls it into the middle of the view. */
+    fun selectRow(row: Int, scroll: Boolean = true) {
+        if (row < 0 || row >= window.totalRowCount) return
+        if (scroll) scrollToRow(row - visibleRows / 2)
+        val local = row - window.windowStart
+        if (local in 0..<table.rowCount) table.selectionModel.setSelectionInterval(local, local)
+    }
+
     /** Call after rows were appended to the list. */
     fun rowsAppended() {
         if (follow) scrollToEnd() else updateScrollBar()
