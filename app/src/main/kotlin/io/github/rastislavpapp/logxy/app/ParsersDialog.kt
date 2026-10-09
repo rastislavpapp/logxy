@@ -1,22 +1,17 @@
 package io.github.rastislavpapp.logxy.app
 
 import io.github.rastislavpapp.logxy.core.config.Settings
-import io.github.rastislavpapp.logxy.core.log.Level
-import io.github.rastislavpapp.logxy.core.log.LevelMapping
 import io.github.rastislavpapp.logxy.core.parse.FormatPreview
 import io.github.rastislavpapp.logxy.core.parse.LogFormat
 import io.github.rastislavpapp.logxy.core.parse.PreviewLine
 import net.miginfocom.swing.MigLayout
 import java.awt.Component
-import java.awt.Dimension
 import java.awt.Window
 import java.nio.file.Path
 import javax.swing.ButtonGroup
-import javax.swing.DefaultCellEditor
 import javax.swing.DefaultListCellRenderer
 import javax.swing.DefaultListModel
 import javax.swing.JButton
-import javax.swing.JComboBox
 import javax.swing.JDialog
 import javax.swing.JLabel
 import javax.swing.JList
@@ -25,7 +20,6 @@ import javax.swing.JPanel
 import javax.swing.JRadioButton
 import javax.swing.JScrollPane
 import javax.swing.JSplitPane
-import javax.swing.JTabbedPane
 import javax.swing.JTable
 import javax.swing.JTextField
 import javax.swing.ListSelectionModel
@@ -39,13 +33,13 @@ import javax.swing.table.DefaultTableCellRenderer
 private const val PREVIEW_LINES = 200
 
 /**
- * Edits the saved formats, with a preview of [previewFile] read by the format being edited, and the
- * extra level names. Returns the format to use for the file if the user asked for that.
+ * Edits the saved parsers (formats), with a preview of [previewFile] read by the one being edited.
+ * Returns the parser to use for the file if the user asked for that.
  */
-class FormatsDialog(owner: Window?, private val previewFile: Path?, private val offerUse: Boolean, select: LogFormat?) :
-    JDialog(owner, "Formats and Level Names", ModalityType.APPLICATION_MODAL) {
+class ParsersDialog(owner: Window?, private val previewFile: Path?, private val offerUse: Boolean, select: LogFormat?) :
+    JDialog(owner, "Parsers", ModalityType.APPLICATION_MODAL) {
 
-    /** Set when the dialog closed with "Use for this file". */
+    /** Set when the dialog closed with "Save and Use for This File". */
     var formatToUse: LogFormat? = null
         private set
 
@@ -60,7 +54,7 @@ class FormatsDialog(owner: Window?, private val previewFile: Path?, private val 
     private val timestampField = JTextField(30)
     private val status = JLabel(" ")
     private val deleteButton = JButton("Delete").apply {
-        toolTipText = "Built-in formats cannot be deleted"
+        toolTipText = "Built-in parsers cannot be deleted"
         addActionListener { deleteSelected() }
     }
     private val previewModel = PreviewModel()
@@ -75,43 +69,22 @@ class FormatsDialog(owner: Window?, private val previewFile: Path?, private val 
     private val previewTimer = Timer(250) { updatePreview() }.apply { isRepeats = false }
     private var loadingEditor = false
 
-    private val levelRows = AppSettings.current.levels.aliases.map { (text, level) -> arrayOf<Any>(text, level) }.toMutableList()
-    private val levelModel = LevelModel()
 
     init {
         AppSettings.current.formats.forEach { entries.addElement(Entry(it, builtIn = false)) }
         LogFormat.BUILT_IN.forEach { entries.addElement(Entry(it, builtIn = true)) }
 
         contentPane = JPanel(MigLayout("fill, insets dialog", "[grow]", "[grow][]")).apply {
-            add(JTabbedPane().apply {
-                addTab("Formats", formatsTab())
-                addTab("Level names", levelsTab())
-            }, "grow, wrap")
+            add(parsersPanel(), "grow, wrap")
             add(buttons(), "growx")
         }
-        fitToScreen()
-        setLocationRelativeTo(owner)
+        fitToScreen(0.75)
 
         val index = (0..<entries.size).firstOrNull { entries[it].format == select } ?: 0
         if (entries.size > 0) list.selectedIndex = index
     }
 
-    /** Sized from the content (which FlatLaf scales on HiDPI screens), roomy, but never off the screen. */
-    private fun fitToScreen() {
-        pack()
-        val configuration = owner?.graphicsConfiguration ?: graphicsConfiguration
-        val insets = toolkit.getScreenInsets(configuration)
-        val screen = configuration.bounds
-        val maxWidth = screen.width - insets.left - insets.right
-        val maxHeight = screen.height - insets.top - insets.bottom
-        size = Dimension(
-            maxOf(width, maxWidth * 3 / 4).coerceAtMost(maxWidth),
-            maxOf(height, maxHeight * 3 / 4).coerceAtMost(maxHeight),
-        )
-        minimumSize = Dimension(minOf(preferredSize.width, maxWidth) / 2, minOf(preferredSize.height, maxHeight) / 2)
-    }
-
-    private fun formatsTab(): JPanel {
+    private fun parsersPanel(): JPanel {
         list.selectionMode = ListSelectionModel.SINGLE_SELECTION
         list.cellRenderer = object : DefaultListCellRenderer() {
             override fun getListCellRendererComponent(
@@ -172,34 +145,6 @@ class FormatsDialog(owner: Window?, private val previewFile: Path?, private val 
         }
     }
 
-    private fun levelsTab(): JPanel {
-        val table = JTable(levelModel).apply {
-            columnModel.getColumn(1).cellEditor = DefaultCellEditor(JComboBox(Level.entries.toTypedArray()))
-            rowHeight = maxOf(rowHeight, JComboBox<Level>().preferredSize.height)
-        }
-        val builtIn = "Built-in: TRACE/FINEST/FINER, DEBUG/FINE, INFO/CONFIG/NOTICE, WARN/WARNING, " +
-            "ERROR/ERR/SEVERE, FATAL/CRITICAL/CRIT. Names below are added to these or override them."
-        return JPanel(MigLayout("fill, insets 8", "[grow]", "[][grow][]")).apply {
-            add(JLabel(builtIn).apply { foreground = UIManager.getColor("Label.disabledForeground") }, "wrap")
-            add(JScrollPane(table), "grow, wrap")
-            add(JButton("Add").apply {
-                addActionListener {
-                    levelRows += arrayOf<Any>("", Level.INFO)
-                    levelModel.fireTableRowsInserted(levelRows.size - 1, levelRows.size - 1)
-                    table.editCellAt(levelRows.size - 1, 0)
-                    table.editorComponent?.requestFocusInWindow()
-                }
-            }, "split 2")
-            add(JButton("Remove").apply {
-                addActionListener {
-                    if (table.isEditing) table.cellEditor.stopCellEditing()
-                    table.selectedRows.sortedDescending().forEach { levelRows.removeAt(it) }
-                    levelModel.fireTableDataChanged()
-                }
-            })
-        }
-    }
-
     private fun buttons() = JPanel(MigLayout("insets 0", "[grow][][][]")).apply {
         add(JLabel("Saved in ${AppSettings.location}").apply {
             foreground = UIManager.getColor("Label.disabledForeground")
@@ -212,7 +157,7 @@ class FormatsDialog(owner: Window?, private val previewFile: Path?, private val 
         }
         add(JButton("Save").apply {
             addActionListener { if (save()) dispose() }
-            this@FormatsDialog.rootPane.defaultButton = this
+            this@ParsersDialog.rootPane.defaultButton = this
         })
         add(JButton("Cancel").apply { addActionListener { dispose() } })
     }
@@ -235,7 +180,7 @@ class FormatsDialog(owner: Window?, private val previewFile: Path?, private val 
             timestampField.text = (format as? LogFormat.Regex)?.timestampPattern ?: Settings.DEFAULT_TIMESTAMP
             val editable = entry != null && !entry.builtIn
             deleteButton.isEnabled = editable
-            deleteButton.toolTipText = if (entry?.builtIn == true) "Built-in formats cannot be deleted" else null
+            deleteButton.toolTipText = if (entry?.builtIn == true) "Built-in parsers cannot be deleted" else null
             listOf(nameField, patternChoice, regexChoice, layoutField).forEach { it.isEnabled = editable }
             timestampField.isEnabled = editable && regexChoice.isSelected
         } finally {
@@ -279,7 +224,7 @@ class FormatsDialog(owner: Window?, private val previewFile: Path?, private val 
         val lines = FormatPreview.preview(compiled, sample)
         previewModel.show(compiled.schema.fields.map { it.name }, lines)
         status.text = when {
-            previewFile == null -> "Open a file to preview the format on it."
+            previewFile == null -> "Open a file to preview the parser on it."
             lines.isEmpty() -> "The file is empty."
             else -> {
                 val matched = lines.count { it.values != null }
@@ -311,7 +256,7 @@ class FormatsDialog(owner: Window?, private val previewFile: Path?, private val 
         return (sequenceOf(base) + generateSequence(2) { it + 1 }.map { "$base $it" }).first { it !in names }
     }
 
-    private fun newFormat() = LogFormat.Pattern(uniqueName("My format"), "%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %-5p %c - %m%n")
+    private fun newFormat() = LogFormat.Pattern(uniqueName("My parser"), "%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %-5p %c - %m%n")
 
     private fun copyOf(format: LogFormat): LogFormat = when (format) {
         is LogFormat.Pattern -> format.copy(name = uniqueName("${format.name} copy"))
@@ -324,7 +269,7 @@ class FormatsDialog(owner: Window?, private val previewFile: Path?, private val 
         val formats = (0..<entries.size).map { entries[it] }.filterNot { it.builtIn }.map { it.format }
         val problem = formats.firstNotNullOfOrNull { format ->
             when {
-                format.name.isBlank() -> "A format has no name."
+                format.name.isBlank() -> "A parser has no name."
                 formats.count { it.name == format.name } > 1 || LogFormat.BUILT_IN.any { it.name == format.name } ->
                     "The name “${format.name}” is used more than once."
                 else -> try {
@@ -339,11 +284,8 @@ class FormatsDialog(owner: Window?, private val previewFile: Path?, private val 
             JOptionPane.showMessageDialog(this, problem, "Cannot Save", JOptionPane.ERROR_MESSAGE)
             return false
         }
-        val levels = levelRows
-            .filter { (it[0] as String).isNotBlank() }
-            .associate { (it[0] as String).trim() to it[1] as Level }
         return try {
-            AppSettings.update(Settings(formats, LevelMapping(levels)))
+            AppSettings.update(AppSettings.current.copy(formats = formats))
             true
         } catch (e: Exception) {
             JOptionPane.showMessageDialog(this, "Cannot write ${AppSettings.location}:\n${e.message}", "Cannot Save", JOptionPane.ERROR_MESSAGE)
@@ -395,19 +337,6 @@ class FormatsDialog(owner: Window?, private val previewFile: Path?, private val 
                 }
             }
             return this
-        }
-    }
-
-    private inner class LevelModel : AbstractTableModel() {
-        override fun getRowCount() = levelRows.size
-        override fun getColumnCount() = 2
-        override fun getColumnName(column: Int) = if (column == 0) "Level name in the log" else "Means"
-        override fun getColumnClass(column: Int) = if (column == 0) String::class.java else Level::class.java
-        override fun isCellEditable(row: Int, column: Int) = true
-        override fun getValueAt(row: Int, column: Int) = levelRows[row][column]
-        override fun setValueAt(value: Any?, row: Int, column: Int) {
-            levelRows[row][column] = value ?: return
-            fireTableCellUpdated(row, column)
         }
     }
 }

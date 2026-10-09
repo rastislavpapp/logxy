@@ -62,7 +62,7 @@ private sealed interface FormatChoice {
     }
 
     data object Edit : FormatChoice {
-        override fun toString() = "Edit formats…"
+        override fun toString() = "Edit parsers…"
     }
 }
 
@@ -122,7 +122,7 @@ class LogTab(
             isFloatable = false
             add(followButton)
             addSeparator()
-            add(JLabel("Format: "))
+            add(JLabel("Parser: "))
             add(formatBox)
         }, BorderLayout.NORTH)
         add(content, BorderLayout.CENTER)
@@ -172,7 +172,7 @@ class LogTab(
             is FormatChoice.Fixed -> chosenFormat = choice.format
             FormatChoice.Edit -> {
                 showFormat()
-                val dialog = FormatsDialog(SwingUtilities.getWindowAncestor(this), path, offerUse = true, chosenFormat ?: format)
+                val dialog = ParsersDialog(SwingUtilities.getWindowAncestor(this), path, offerUse = true, chosenFormat ?: format)
                 dialog.isVisible = true
                 chosenFormat = dialog.formatToUse ?: return
                 fillFormats()
@@ -244,11 +244,11 @@ class LogTab(
             throw e
         } catch (e: FormatMismatchException) {
             showProblem(
-                "${path.fileName} does not match the format “${format.name}”.",
+                "${path.fileName} does not match the parser “${format.name}”.",
                 e.message.orEmpty(),
-                "Choose another format in the toolbar, or Raw text.",
+                "Choose another parser in the toolbar, or Raw text.",
             )
-            statusText = "Format does not match"
+            statusText = "Parser does not match"
             onStatusChanged()
             return null
         } catch (e: Exception) {

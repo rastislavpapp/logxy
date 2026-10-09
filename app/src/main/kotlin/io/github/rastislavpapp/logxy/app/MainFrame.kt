@@ -82,12 +82,16 @@ class MainFrame : JFrame("logxy") {
         })
         add(JMenu("Settings").apply {
             mnemonic = KeyEvent.VK_S
-            add(JMenuItem("Formats and Level Names…").apply {
-                mnemonic = KeyEvent.VK_F
+            add(JMenuItem("Parsers…").apply {
+                mnemonic = KeyEvent.VK_P
                 addActionListener {
                     val tab = tabs.selectedComponent as LogTab?
-                    FormatsDialog(this@MainFrame, tab?.path, offerUse = false, select = null).isVisible = true
+                    ParsersDialog(this@MainFrame, tab?.path, offerUse = false, select = null).isVisible = true
                 }
+            })
+            add(JMenuItem("Log Level Mapping…").apply {
+                mnemonic = KeyEvent.VK_L
+                addActionListener { LogLevelMappingDialog(this@MainFrame).isVisible = true }
             })
         })
         add(JMenu("View").apply {

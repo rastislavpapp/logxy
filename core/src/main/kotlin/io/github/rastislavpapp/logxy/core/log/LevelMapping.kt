@@ -1,18 +1,18 @@
 package io.github.rastislavpapp.logxy.core.log
 
-/** Maps level texts to [Level]: the user's [aliases] first, then the built-in names of [Level.of]. */
-class LevelMapping(aliases: Map<String, Level> = emptyMap()) {
+/** Maps level texts, ignoring case and surrounding spaces, to [Level]; unknown texts map to [Level.UNKNOWN]. */
+class LevelMapping(names: Map<String, Level>) {
 
-    val aliases: Map<String, Level> = aliases.mapKeys { normalize(it.key) }
+    val names: Map<String, Level> = names.mapKeys { normalize(it.key) }
 
-    fun of(text: String): Level = aliases[normalize(text)] ?: Level.of(text)
+    fun of(text: String): Level = names[normalize(text)] ?: Level.UNKNOWN
 
-    override fun equals(other: Any?) = other is LevelMapping && other.aliases == aliases
+    override fun equals(other: Any?) = other is LevelMapping && other.names == names
 
-    override fun hashCode() = aliases.hashCode()
+    override fun hashCode() = names.hashCode()
 
     companion object {
-        val DEFAULT = LevelMapping()
+        val DEFAULT = LevelMapping(Level.BUILT_IN_NAMES)
 
         fun normalize(text: String) = text.trim().uppercase()
     }

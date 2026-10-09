@@ -10,7 +10,7 @@ import java.nio.file.StandardCopyOption
 import java.util.Collections
 import java.util.Properties
 
-/** The user's saved formats and extra level names. */
+/** The user's saved formats (parsers) and level names. */
 data class Settings(
     val formats: List<LogFormat> = emptyList(),
     val levels: LevelMapping = LevelMapping.DEFAULT,
@@ -34,9 +34,11 @@ data class Settings(
          * format.1.name=My app
          * format.1.type=pattern
          * format.1.layout=%d [%t] %-5p %c - %m%n
+         * level-names=custom
          * level.NOTE=INFO
          * ```
-         * A missing file means no settings; entries that cannot be read are skipped.
+         * Level names are stored only once the user changed them, and then completely. A missing file
+         * means default settings; entries that cannot be read are skipped.
          */
         fun load(path: Path): Settings {
             if (!Files.exists(path)) return Settings()
@@ -63,7 +65,9 @@ data class Settings(
                     level?.let { key.removePrefix("level.") to it }
                 }
                 .toMap()
-            return Settings(formats, LevelMapping(levels))
+            val custom = properties.getProperty("level-names") == "custom"
+            // Without the marker, level entries only add to the built-in names (as first released).
+            return Settings(formats, LevelMapping(if (custom) levels else Level.BUILT_IN_NAMES + levels))
         }
 
         /** Writes [settings] to [path], replacing the file only once the new one is complete. */
@@ -85,7 +89,10 @@ data class Settings(
                 }
                 properties["format.$n.name"] = format.name
             }
-            settings.levels.aliases.forEach { (text, level) -> properties["level.$text"] = level.name }
+            if (settings.levels != LevelMapping.DEFAULT) {
+                properties["level-names"] = "custom"
+                settings.levels.names.forEach { (text, level) -> properties["level.$text"] = level.name }
+            }
 
             Files.createDirectories(path.toAbsolutePath().parent)
             val temporary = Files.createTempFile(path.toAbsolutePath().parent, "logxy", ".tmp")

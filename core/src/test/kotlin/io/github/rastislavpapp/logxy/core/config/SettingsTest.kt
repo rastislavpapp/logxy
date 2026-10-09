@@ -8,6 +8,7 @@ import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 
 class SettingsTest {
 
@@ -20,7 +21,7 @@ class SettingsTest {
             formats = (1..12).map { LogFormat.Pattern("Format $it", "%d [%t] %-5p %c - %m%n") } + listOf(
                 LogFormat.Regex("Tricky: = and \\ ž", """^(?<timestamp>\S+) \\d+ = (?<message>.*)$""", "HH:mm:ss"),
             ),
-            levels = LevelMapping(mapOf("note" to Level.INFO, "40" to Level.ERROR)),
+            levels = LevelMapping(Level.BUILT_IN_NAMES - "CONFIG" + mapOf("note" to Level.INFO, "40" to Level.ERROR)),
         )
         val file = dir.resolve("nested/dir/logxy.properties")
         Settings.save(file, settings)
@@ -47,15 +48,25 @@ class SettingsTest {
         """.trimIndent())
         val settings = Settings.load(file)
         assertEquals(listOf<LogFormat>(LogFormat.Pattern("Good", "%m%n")), settings.formats)
-        assertEquals(mapOf("NOTE" to Level.INFO), settings.levels.aliases)
+        assertEquals(LevelMapping(Level.BUILT_IN_NAMES + ("NOTE" to Level.INFO)), settings.levels)
     }
 
     @Test
-    fun `user level names win over built-in ones`() {
+    fun `default level names are not written`() {
+        val file = dir.resolve("logxy.properties")
+        Settings.save(file, Settings())
+        assertFalse(Files.readString(file).contains("level"))
+        assertEquals(LevelMapping.DEFAULT, Settings.load(file).levels)
+    }
+
+    @Test
+    fun `edited level names replace the built-in ones`() {
         val mapping = LevelMapping(mapOf("Warning" to Level.ERROR, "note" to Level.INFO))
         assertEquals(Level.ERROR, mapping.of(" WARNING "))
         assertEquals(Level.INFO, mapping.of("Note"))
-        assertEquals(Level.DEBUG, mapping.of("fine"))
-        assertEquals(Level.UNKNOWN, mapping.of("whatever"))
+        assertEquals(Level.UNKNOWN, mapping.of("fine"))
+        val file = dir.resolve("logxy.properties")
+        Settings.save(file, Settings(levels = mapping))
+        assertEquals(mapping, Settings.load(file).levels)
     }
 }

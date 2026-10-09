@@ -41,7 +41,7 @@ internal object FormatCheck {
         }
         val example = firstMismatch ?: firstContent ?: return
         val which = if (mismatches == REAL_LINES) "None of the first $REAL_LINES entries" else "No entry"
-        throw FormatMismatchException("$which in the file matches the format. First one:\n$example")
+        throw FormatMismatchException("$which in the file matches the parser. First one:\n$example")
     }
 
     private fun shown(bytes: ByteArray, from: Int, to: Int) =
