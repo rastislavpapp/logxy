@@ -56,6 +56,7 @@ class MainFrame : JFrame("logxy") {
         minimumSize = Dimension(480, 320)
         size = Dimension(1200, 800)
         setLocationRelativeTo(null)
+        WindowState.install(this)
         updateStatus()
     }
 

@@ -17,15 +17,16 @@ data class Settings(
 ) {
     companion object {
         /** `%APPDATA%\logxy` on Windows, `$XDG_CONFIG_HOME/logxy` or `~/.config/logxy` elsewhere. */
-        fun defaultPath(): Path {
+        fun directory(): Path {
             val appData = System.getenv("APPDATA")
-            val directory = when {
+            return when {
                 System.getProperty("os.name").startsWith("Windows") && appData != null -> Path.of(appData, "logxy")
                 else -> (System.getenv("XDG_CONFIG_HOME")?.let { Path.of(it) }
                     ?: Path.of(System.getProperty("user.home"), ".config")).resolve("logxy")
             }
-            return directory.resolve("logxy.properties")
         }
+
+        fun defaultPath(): Path = directory().resolve("logxy.properties")
 
         /**
          * Reads settings from a properties file, e.g.:
