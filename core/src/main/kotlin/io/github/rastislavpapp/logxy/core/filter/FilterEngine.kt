@@ -22,13 +22,34 @@ import java.util.Collections
  */
 class FilterResult(val rows: IntArray, val from: Int, val recordCount: Int, val indexedSize: Long)
 
+/** Evaluates [Filter]s over [io.github.rastislavpapp.logxy.core.log.Records]. Use it on the thread that owns them. */
+interface RecordFilter {
+    /**
+     * Prepares [filter] for the records from [from] on, e.g. only appended ones. Throws
+     * IllegalArgumentException for an invalid regex.
+     */
+    fun prepare(filter: Filter, from: Int = 0): PreparedFilter
+
+    /**
+     * The first record whose result may differ from a result computed when there were [coveredRecords]
+     * records: records that were still growing then (the last one of a log) and everything after.
+     */
+    fun changedFrom(coveredRecords: Int): Int
+}
+
+/** A filter ready to run; [run] may be called on any thread. */
+fun interface PreparedFilter {
+    /** Computes the matching records; cancelling the calling coroutine stops it. */
+    suspend fun run(): FilterResult
+}
+
 /**
  * Evaluates [Filter]s over one log into bitsets, one bit per record. Dictionary fields test each
  * distinct value once; text in the file is only read for records the cheaper conditions left open.
  * Leaf results are cached per condition, so changing one condition or appending records only
  * computes what is new.
  */
-class FilterEngine(private val log: LogData, private val maxCacheBytes: Long = DEFAULT_CACHE_BYTES) {
+class FilterEngine(private val log: LogData, private val maxCacheBytes: Long = DEFAULT_CACHE_BYTES) : RecordFilter {
 
     /** Bits of one condition for the [coverage] rows it was computed for; other bits are unknown. */
     private class Entry(val bits: LongArray, val coverage: LongArray) {
@@ -47,7 +68,7 @@ class FilterEngine(private val log: LogData, private val maxCacheBytes: Long = D
      * Call on the thread that owns the log; the returned evaluation may run on any thread. Throws
      * IllegalArgumentException for an invalid regex.
      */
-    fun prepare(filter: Filter, from: Int = 0): Evaluation {
+    override fun prepare(filter: Filter, from: Int): Evaluation {
         val snapshot = log.filterSnapshot()
         if (snapshot.levels != cachedLevels) {
             cache.keys.removeIf { it is LevelCondition }
@@ -55,6 +76,9 @@ class FilterEngine(private val log: LogData, private val maxCacheBytes: Long = D
         }
         return Evaluation(compile(filter, snapshot), snapshot, from.coerceIn(0, snapshot.count))
     }
+
+    // Only the last record of a log grows.
+    override fun changedFrom(coveredRecords: Int) = maxOf(0, coveredRecords - 1)
 
     /** Caches [entry], dropping the least recently used others while the cache is over [maxCacheBytes]. */
     private fun store(condition: Condition, entry: Entry) = synchronized(cache) {
@@ -78,7 +102,7 @@ class FilterEngine(private val log: LogData, private val maxCacheBytes: Long = D
         private val root: Node,
         private val snapshot: RecordSnapshot,
         private val from: Int,
-    ) {
+    ) : PreparedFilter {
         private val words = (snapshot.count + 63) / 64
 
         /** The records evaluated: from [from] to the end of the snapshot. */
@@ -88,8 +112,7 @@ class FilterEngine(private val log: LogData, private val maxCacheBytes: Long = D
             if (snapshot.count % 64 != 0) bits[words - 1] = bits[words - 1] and (1L shl (snapshot.count % 64)) - 1
         }
 
-        /** Computes the matching records; cancelling the calling coroutine stops it. */
-        suspend fun run(): FilterResult = withContext(Dispatchers.Default) {
+        override suspend fun run(): FilterResult = withContext(Dispatchers.Default) {
             FilterResult(rows(evaluate(root, null)), from, snapshot.count, snapshot.end)
         }
 

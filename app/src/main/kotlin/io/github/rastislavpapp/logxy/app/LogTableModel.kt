@@ -2,7 +2,7 @@ package io.github.rastislavpapp.logxy.app
 
 import io.github.rastislavpapp.logxy.core.log.Field
 import io.github.rastislavpapp.logxy.core.log.Level
-import io.github.rastislavpapp.logxy.core.log.LogData
+import io.github.rastislavpapp.logxy.core.log.Records
 import io.github.rastislavpapp.logxy.core.log.Role
 import io.github.rastislavpapp.logxy.core.session.FilteredRows
 import javax.swing.table.AbstractTableModel
@@ -14,15 +14,15 @@ private const val TAB_WIDTH = 4
 private const val CACHE_SIZE = 1024
 
 /**
- * Rows of a [LogData], all records or only those a filter let through. Raw logs get a line number
+ * Rows of [Records], all records or only those a filter let through. Raw logs get a line number
  * column; for parsed logs the message column is moved last, so it takes the remaining width.
  */
-class LogTableModel(val log: LogData) : AbstractTableModel(), RowWindow {
+class LogTableModel(val records: Records) : AbstractTableModel(), RowWindow {
 
-    val showsLineNumbers = log.isRaw
+    val showsLineNumbers = records.isRaw
 
     /** Field index of each column after the line number column. */
-    private val columnFields: List<Int> = log.schema.fields.indices.sortedBy { log.schema.fields[it].role == Role.MESSAGE }
+    private val columnFields: List<Int> = records.schema.fields.indices.sortedBy { records.schema.fields[it].role == Role.MESSAGE }
 
     // Direct-mapped cache: repaints ask for the same few visible rows over and over.
     private val cachedRows = IntArray(CACHE_SIZE) { -1 }
@@ -33,7 +33,7 @@ class LogTableModel(val log: LogData) : AbstractTableModel(), RowWindow {
 
     val isFiltered get() = filtered != null
 
-    override val totalRowCount get() = filtered?.size ?: log.recordCount
+    override val totalRowCount get() = filtered?.size ?: records.recordCount
 
     override var windowStart = 0
         set(value) {
@@ -58,7 +58,7 @@ class LogTableModel(val log: LogData) : AbstractTableModel(), RowWindow {
 
     /** Position of [record] among the shown rows, or of the first shown record after it; -1 if none. */
     fun indexOfRecord(record: Int): Int {
-        val rows = filtered ?: return if (record < log.recordCount) record else -1
+        val rows = filtered ?: return if (record < records.recordCount) record else -1
         return rows.indexOf(record)
     }
 
@@ -78,7 +78,7 @@ class LogTableModel(val log: LogData) : AbstractTableModel(), RowWindow {
     override fun getColumnCount() = columnFields.size + if (showsLineNumbers) 1 else 0
 
     /** The schema field shown in [column], or null for the line number column. */
-    fun fieldAt(column: Int): Field? = fieldIndex(column)?.let { log.schema.fields[it] }
+    fun fieldAt(column: Int): Field? = fieldIndex(column)?.let { records.schema.fields[it] }
 
     private fun fieldIndex(column: Int): Int? = if (showsLineNumbers) {
         if (column == 0) null else columnFields[column - 1]
@@ -97,12 +97,12 @@ class LogTableModel(val log: LogData) : AbstractTableModel(), RowWindow {
     }
 
     /** Canonical level of the record shown in [row], if the format has levels. */
-    fun level(row: Int): Level? = log.level(recordAt(row))
+    fun level(row: Int): Level? = records.level(recordAt(row))
 
     private fun values(record: Int): Array<String> {
         val slot = record and (CACHE_SIZE - 1)
         if (cachedRows[slot] == record) return cachedValues[slot]!!
-        val values = log.rowValues(record, MAX_DISPLAY_BYTES)
+        val values = records.rowValues(record, MAX_DISPLAY_BYTES)
         for (i in values.indices) values[i] = expandTabs(values[i])
         cachedRows[slot] = record
         cachedValues[slot] = values

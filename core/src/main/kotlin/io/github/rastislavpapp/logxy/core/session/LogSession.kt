@@ -6,6 +6,8 @@ import io.github.rastislavpapp.logxy.core.FileSnapshot
 import io.github.rastislavpapp.logxy.core.filter.Filter
 import io.github.rastislavpapp.logxy.core.filter.FilterEngine
 import io.github.rastislavpapp.logxy.core.filter.LevelCondition
+import io.github.rastislavpapp.logxy.core.filter.PreparedFilter
+import io.github.rastislavpapp.logxy.core.filter.RecordFilter
 import io.github.rastislavpapp.logxy.core.index.IndexProgress
 import io.github.rastislavpapp.logxy.core.log.Level
 import io.github.rastislavpapp.logxy.core.log.LogData
@@ -101,7 +103,7 @@ class LogSession(
     var log: LogData? = null
         private set
 
-    private var engine: FilterEngine? = null
+    private var engine: RecordFilter? = null
     private var activeFilter: Filter? = null
     private var filterJob: Job? = null
 
@@ -315,7 +317,7 @@ class LogSession(
     }
 
     /** Runs [evaluation] of [activeFilter] over all records, or shows all records without a filter. */
-    private fun runFilter(keepView: Boolean, evaluation: FilterEngine.Evaluation?) {
+    private fun runFilter(keepView: Boolean, evaluation: PreparedFilter?) {
         filterJob?.cancel()
         if (evaluation == null) {
             if (shown != null || !keepView) {
@@ -348,9 +350,10 @@ class LogSession(
         val log = log ?: return
         val rows = shown ?: return
         if (filterJob?.isActive == true || filteredBytes >= log.indexedSize) return
-        // The last record covered may have grown since, so it is filtered again.
-        val from = maxOf(0, filteredRecords - 1)
-        val evaluation = engine?.prepare(filter, from) ?: return
+        // Records covered then may have grown since (the last one of a log), so they are filtered again.
+        val engine = engine ?: return
+        val from = engine.changedFrom(filteredRecords)
+        val evaluation = engine.prepare(filter, from)
         filterJob = scope.launch {
             val result = evaluation.run()
             val oldSize = rows.size

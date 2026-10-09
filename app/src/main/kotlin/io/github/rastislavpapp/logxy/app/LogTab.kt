@@ -208,7 +208,7 @@ class LogTab(
     }
 
     private fun showDetail(model: LogTableModel, row: Int) {
-        detail.text = if (row < 0 || row >= model.rowCount) "" else model.log.recordText(model.recordAt(row), MAX_DETAIL_BYTES)
+        detail.text = if (row < 0 || row >= model.rowCount) "" else model.records.recordText(model.recordAt(row), MAX_DETAIL_BYTES)
         detail.caretPosition = 0
     }
 
@@ -217,7 +217,7 @@ class LogTab(
         val model = model ?: return
         val row = table?.selectionModel?.leadSelectionIndex ?: return
         if (row !in 0..<model.rowCount || model.recordAt(row) != record) return
-        val text = model.log.recordText(record, MAX_DETAIL_BYTES)
+        val text = model.records.recordText(record, MAX_DETAIL_BYTES)
         if (text == detail.text) return
         val caret = detail.caretPosition
         detail.text = text
