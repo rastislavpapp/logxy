@@ -110,21 +110,22 @@ class LogTableModel(val records: Records) : AbstractTableModel(), RowWindow {
     }
 
     /**
-     * Call after records were appended to the log, which had [oldRecordCount] records before. With
-     * a filter, call [rowsChangedFrom] once the filtered rows for the new records are there.
+     * Call after records were appended; there were [oldRecordCount] before, and the records at [changed]
+     * may have more text now. With a filter, call [rowsChangedFrom] once the filtered rows for the new
+     * records are there.
      */
-    fun recordsAppended(oldRecordCount: Int) {
-        // The previous last record may have been incomplete and now has more text.
-        val lastRecord = oldRecordCount - 1
-        if (lastRecord >= 0) {
-            val slot = lastRecord and (CACHE_SIZE - 1)
-            if (cachedRows[slot] == lastRecord) cachedRows[slot] = -1
+    fun recordsAppended(oldRecordCount: Int, changed: IntArray) {
+        for (record in changed) {
+            val slot = record and (CACHE_SIZE - 1)
+            if (cachedRows[slot] == record) cachedRows[slot] = -1
         }
         if (filtered != null) return
         val oldRows = minOf(oldRecordCount, WINDOW_ROWS)
         if (rowCount > oldRows) fireTableRowsInserted(oldRows, rowCount - 1)
-        val lastRow = lastRecord - windowStart
-        if (lastRow in 0..<rowCount) fireTableRowsUpdated(lastRow, lastRow)
+        for (record in changed) {
+            val row = record - windowStart
+            if (row in 0..<rowCount) fireTableRowsUpdated(row, row)
+        }
     }
 
     // Labels do not render tabs, so expand them to tab stops.

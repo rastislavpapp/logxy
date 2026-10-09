@@ -6,9 +6,11 @@ import io.github.rastislavpapp.logxy.core.filter.FilterEngine
 import io.github.rastislavpapp.logxy.core.filter.LevelCondition
 import io.github.rastislavpapp.logxy.core.filter.TextCondition
 import io.github.rastislavpapp.logxy.core.filter.TextOp
-import io.github.rastislavpapp.logxy.core.index.IndexProgress
 import io.github.rastislavpapp.logxy.core.log.Level
 import io.github.rastislavpapp.logxy.core.log.LogData
+import io.github.rastislavpapp.logxy.core.log.Records
+import io.github.rastislavpapp.logxy.core.merge.MergedFilter
+import io.github.rastislavpapp.logxy.core.merge.MergedLog
 import io.github.rastislavpapp.logxy.core.parse.LogFormat
 import io.github.rastislavpapp.logxy.core.query.Query
 import io.github.rastislavpapp.logxy.core.query.QueryOp
@@ -55,13 +57,15 @@ class LogSessionTest {
     }
 
     private class Recorder : SessionListener {
-        val loads = Channel<LogData>(Channel.UNLIMITED)
+        val loads = Channel<Records>(Channel.UNLIMITED)
         val problem = CompletableDeferred<String>()
-        override fun indexing(progress: IndexProgress) {}
+        val notMergeable = CompletableDeferred<List<Path>>()
+        override fun indexing(fraction: () -> Double) {}
         override fun problem(title: String, detail: String, hint: String?) { problem.complete(title) }
-        override fun loaded(log: LogData) { loads.trySend(log) }
+        override fun loaded(records: Records) { loads.trySend(records) }
+        override fun notMergeable(paths: List<Path>) { notMergeable.complete(paths) }
         override fun formatChanged() {}
-        override fun recordsAppended(oldRecordCount: Int) {}
+        override fun recordsAppended(oldRecordCount: Int, changed: IntArray) {}
         override fun rowsReplaced(rows: FilteredRows?, keepView: Boolean) {}
         override fun rowsExtended(firstChanged: Int, oldSize: Int) {}
         override fun levelMappingChanged() {}
@@ -78,24 +82,30 @@ class LogSessionTest {
         Files.writeString(file, text, StandardOpenOption.APPEND)
     }
 
-    private suspend fun open(file: Path, recorder: Recorder): Pair<LogSession, LogData> {
-        val session = withContext(ui) { LogSession(file, scope, NoSettings, recorder).also { it.start() } }
+    private suspend fun open(file: Path, recorder: Recorder) = open(listOf(file), recorder)
+
+    private suspend fun open(files: List<Path>, recorder: Recorder): Pair<LogSession, Records> {
+        val session = withContext(ui) { LogSession(files, scope, NoSettings, recorder).also { it.start() } }
         return session to withTimeout(10_000) { recorder.loads.receive() }
     }
 
     /**
-     * Waits until the session has read all of [file] and shows what a fresh evaluation of [filter]
+     * Waits until the session has read all of [files] and shows what a fresh evaluation of [filter]
      * gives, with the status counting it.
      */
-    private suspend fun awaitShown(session: LogSession, file: Path, filter: Filter): List<Int> = withTimeout(10_000) {
+    private suspend fun awaitShown(session: LogSession, file: Path, filter: Filter) = awaitShown(session, listOf(file), filter)
+
+    private suspend fun awaitShown(session: LogSession, files: List<Path>, filter: Filter): List<Int> = withTimeout(10_000) {
         var done = false
         var expected = emptyList<Int>()
         while (!done) {
             delay(50)
             withContext(ui) {
-                expected = FilterEngine(session.log!!).prepare(filter).run().rows.toList()
+                val records = session.records!!
+                val fresh = if (records is MergedLog) MergedFilter(records) else FilterEngine(records as LogData)
+                expected = fresh.prepare(filter).run().rows.toList()
                 val shown = session.shown?.let { rows -> List(rows.size) { rows[it] } }
-                done = session.log!!.indexedSize == Files.size(file) && shown == expected && session.status.shown == expected.size
+                done = session.status.size == files.sumOf { Files.size(it) } && shown == expected && session.status.shown == expected.size
             }
         }
         expected
@@ -140,6 +150,41 @@ class LogSessionTest {
         Files.writeString(file, lines(3))
         val second = withTimeout(10_000) { recorder.loads.receive() }
         assertEquals(3, withContext(ui) { second.recordCount })
+    }
+
+    @Test
+    fun `merged files follow appends to all of them, filtered`() = runBlocking {
+        val a = Files.writeString(dir.resolve("a.log"), lines(300))
+        val b = Files.writeString(dir.resolve("b.log"), lines(200))
+        val (session, records) = open(listOf(a, b), Recorder())
+        assertTrue(records is MergedLog)
+        assertEquals(500, withContext(ui) { records.recordCount })
+        val query = Query.Group(all = true, items = listOf(Query.Rule("Source", QueryOp.EQUALS, "b.log")))
+        withContext(ui) { session.applyFilter(Level.WARN, query) }
+        val bWarnOrWorse = Filter.And(listOf(LevelCondition.atLeast("Level", Level.WARN), TextCondition("Source", TextOp.EQUALS, "b.log")))
+        assertEquals(100, awaitShown(session, listOf(a, b), bWarnOrWorse).size)
+        repeat(4) { round ->
+            append(a, lines(50))
+            // b gets a record whose level only arrives with the next batch.
+            append(b, lines(30) + if (round % 2 == 0) "2026-10-01 08:00:00.000 [main] WA" else "")
+            delay(300)
+            if (round % 2 == 0) append(b, "RN  app.L - completed ${n++}\n")
+            awaitShown(session, listOf(a, b), bWarnOrWorse)
+        }
+        assertEquals(500 + 4 * 80 + 2, withContext(ui) { session.records!!.recordCount })
+    }
+
+    @Test
+    fun `files without timestamps are left out of a merge`() = runBlocking {
+        val a = Files.writeString(dir.resolve("a.log"), lines(10))
+        val b = Files.writeString(dir.resolve("b.log"), lines(10))
+        val raw = Files.writeString(dir.resolve("notes.txt"), "just\nsome\ntext\n")
+        val recorder = Recorder()
+        val (session, records) = open(listOf(a, raw, b), recorder)
+        assertEquals(listOf(raw), withTimeout(1000) { recorder.notMergeable.await() })
+        assertTrue(records is MergedLog)
+        assertEquals(listOf(a, b), withContext(ui) { session.paths })
+        assertEquals(20, withContext(ui) { records.recordCount })
     }
 
     @Test

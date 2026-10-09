@@ -1,7 +1,6 @@
 package io.github.rastislavpapp.logxy.app
 
-import io.github.rastislavpapp.logxy.core.index.IndexProgress
-import io.github.rastislavpapp.logxy.core.log.LogData
+import io.github.rastislavpapp.logxy.core.log.Records
 import io.github.rastislavpapp.logxy.core.parse.LogFormat
 import io.github.rastislavpapp.logxy.core.query.QueryException
 import io.github.rastislavpapp.logxy.core.session.FilteredRows
@@ -137,11 +136,11 @@ class LogTab(
         filterControls.isVisible = visible
     }
 
-    private fun showProgress(progress: IndexProgress) {
+    private fun showProgress(fraction: () -> Double) {
         val progressBar = JProgressBar(0, 1000)
         showCentered(JLabel("Indexing ${path.fileName}…"), progressBar)
         stopProgress()
-        progressTimer = Timer(100) { progressBar.value = (progress.fraction * 1000).toInt() }.apply { start() }
+        progressTimer = Timer(100) { progressBar.value = (fraction() * 1000).toInt() }.apply { start() }
     }
 
     private fun stopProgress() {
@@ -163,8 +162,8 @@ class LogTab(
         showCentered(*components.toTypedArray())
     }
 
-    private fun showTable(log: LogData) {
-        val model = LogTableModel(log)
+    private fun showTable(records: Records) {
+        val model = LogTableModel(records)
         val table = LogTable(model)
         // The table has its own transfer handler (for copy), which would otherwise swallow file drops.
         table.transferHandler = FileDropHandler(openFiles, table.transferHandler)
@@ -177,7 +176,7 @@ class LogTab(
         this.model = model
         this.table = table
         this.scrollPane = scrollPane
-        filterBar.setSchema(log.schema)
+        filterBar.setSchema(records.schema)
         setFilterVisible(true)
 
         detail.text = ""
@@ -226,7 +225,7 @@ class LogTab(
 
     /** Applies the filter bar's level and query to this file's records. */
     private fun applyFilter() {
-        if (session.log == null) return
+        if (session.records == null) return
         try {
             session.applyFilter(filterBar.minimumLevel, filterBar.query())
             filterBar.showError(null)
@@ -268,11 +267,11 @@ class LogTab(
     }
 
     private inner class Listener : SessionListener {
-        override fun indexing(progress: IndexProgress) {
+        override fun indexing(fraction: () -> Double) {
             model = null
             table = null
             scrollPane = null
-            showProgress(progress)
+            showProgress(fraction)
         }
 
         override fun problem(title: String, detail: String, hint: String?) {
@@ -280,16 +279,18 @@ class LogTab(
             showProblem(title, detail, hint)
         }
 
-        override fun loaded(log: LogData) {
+        override fun loaded(records: Records) {
             stopProgress()
-            showTable(log)
+            showTable(records)
         }
+
+        override fun notMergeable(paths: List<Path>) = Unit
 
         override fun formatChanged() = showFormat()
 
-        override fun recordsAppended(oldRecordCount: Int) {
-            model?.recordsAppended(oldRecordCount)
-            refreshDetail(oldRecordCount - 1)
+        override fun recordsAppended(oldRecordCount: Int, changed: IntArray) {
+            model?.recordsAppended(oldRecordCount, changed)
+            changed.forEach(::refreshDetail)
             if (session.shown == null) scrollPane?.rowsAppended()
         }
 
