@@ -11,7 +11,8 @@ interface AppendedData
  * and parsed logs.
  *
  * Not thread-safe: [append] and all readers must run on one thread; only [readAppended] may run
- * on another, but not during [append].
+ * on another, but not during [append]. Filters read a snapshot on other threads, see
+ * [io.github.rastislavpapp.logxy.core.filter.FilterEngine].
  */
 interface LogData : Closeable {
     val path: Path

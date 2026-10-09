@@ -1,6 +1,8 @@
 package io.github.rastislavpapp.logxy.core.log
 
 import io.github.rastislavpapp.logxy.core.index.IndexOptions
+import io.github.rastislavpapp.logxy.core.filter.ParsedSnapshot
+import io.github.rastislavpapp.logxy.core.filter.RecordSnapshot
 import io.github.rastislavpapp.logxy.core.index.IndexProgress
 import io.github.rastislavpapp.logxy.core.parse.FormatCheck
 import io.github.rastislavpapp.logxy.core.parse.LineReader
@@ -109,6 +111,15 @@ class ParsedLog private constructor(
         while (levels.size < dictionary.size) levels += levelMapping.of(dictionary.text(levels.size))
         return levels[id]
     }
+
+    internal fun filterSnapshot(): RecordSnapshot = ParsedSnapshot(
+        schema, recordCount, indexedSize, channel,
+        segments = segments.toList(),
+        first = segmentFirst.copyOf(),
+        texts = Array(schema.fields.size) { field -> dictionaries[field]?.let { d -> List(d.size) { d.text(it) } } },
+        levels = levelMapping,
+        format = format,
+    )
 
     override fun rowValues(record: Int, maxBytes: Int): Array<String> {
         val segment = segmentOf(record)

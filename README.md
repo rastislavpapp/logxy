@@ -17,6 +17,8 @@ Test data and benchmarks:
 ```sh
 ./mvnw -q -pl tools exec:java -Dexec.args="generate /path/to/test.log 2g"
 ./mvnw -q -pl tools exec:java -Dexec.args="benchmark /path/to/test.log"
+./mvnw -q -pl tools exec:java -Dexec.args="parse /path/to/test.log"
+./mvnw -q -pl tools exec:java -Dexec.args="filter /path/to/test.log"
 ./mvnw -q -pl tools exec:java -Dexec.args="simulate /path/to/live.log --rate 50 --rotate-at 1m"
 ```
 

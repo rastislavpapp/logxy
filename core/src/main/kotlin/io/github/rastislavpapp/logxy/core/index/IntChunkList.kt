@@ -6,6 +6,8 @@ package io.github.rastislavpapp.logxy.core.index
  */
 class IntChunkList {
 
+    // Volatile: filters read the list on other threads while the owner thread appends (see LogData).
+    @Volatile
     private var chunks = arrayOfNulls<IntArray>(16)
     private var current = EMPTY
 

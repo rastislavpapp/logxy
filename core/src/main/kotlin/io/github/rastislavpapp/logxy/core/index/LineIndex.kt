@@ -6,6 +6,8 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.job
 import kotlinx.coroutines.withContext
+import io.github.rastislavpapp.logxy.core.filter.LineSnapshot
+import io.github.rastislavpapp.logxy.core.filter.RecordSnapshot
 import io.github.rastislavpapp.logxy.core.log.AppendedData
 import io.github.rastislavpapp.logxy.core.log.LogData
 import io.github.rastislavpapp.logxy.core.log.Schema
@@ -60,6 +62,8 @@ class LineIndex private constructor(
     override val recordCount get() = starts.size
 
     override fun rowValues(record: Int, maxBytes: Int) = arrayOf(lineText(record, maxBytes))
+
+    internal fun filterSnapshot(): RecordSnapshot = LineSnapshot(lineCount, indexedSize, channel, starts)
 
     override fun recordText(record: Int, maxBytes: Int) = lineText(record, maxBytes)
 
