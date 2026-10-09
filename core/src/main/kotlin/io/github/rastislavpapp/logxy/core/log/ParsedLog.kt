@@ -1,5 +1,6 @@
 package io.github.rastislavpapp.logxy.core.log
 
+import io.github.rastislavpapp.logxy.core.Bytes
 import io.github.rastislavpapp.logxy.core.index.IndexOptions
 import io.github.rastislavpapp.logxy.core.filter.ParsedSnapshot
 import io.github.rastislavpapp.logxy.core.filter.RecordSnapshot
@@ -171,12 +172,8 @@ class ParsedLog private constructor(
         val start = recordStart(record)
         val length = recordEnd(record) - start
         val bytes = read(start, minOf(length, maxBytes + 2L).toInt())
-        var end = bytes.size
-        if (end.toLong() == length) {
-            if (end > 0 && bytes[end - 1] == LF) end--
-            if (end > 0 && bytes[end - 1] == CR) end--
-        }
-        return cut(bytes, 0, end, maxBytes)
+        val end = if (bytes.size.toLong() == length) Bytes.trimLineEnd(bytes, 0, bytes.size) else bytes.size
+        return Bytes.utf8Text(bytes, 0, end, maxBytes)
     }
 
     override fun readAppended(size: Long): AppendedData {
@@ -280,8 +277,6 @@ class ParsedLog private constructor(
     companion object {
         private const val BUFFER_SIZE = 1024 * 1024
         private const val RESYNC_BUFFER_SIZE = 64 * 1024
-        private const val LF = '\n'.code.toByte()
-        private const val CR = '\r'.code.toByte()
         private val EMPTY = ByteArray(0)
 
         /**
@@ -425,16 +420,8 @@ class ParsedLog private constructor(
         /** The first line of `bytes[from, to)`, cut at [maxBytes]. */
         private fun firstLine(bytes: ByteArray, from: Int, to: Int, maxBytes: Int): String {
             var end = from
-            while (end < to && bytes[end] != LF) end++
-            if (end > from && bytes[end - 1] == CR) end--
-            return cut(bytes, from, end, maxBytes)
-        }
-
-        private fun cut(bytes: ByteArray, from: Int, to: Int, maxBytes: Int): String {
-            if (to - from <= maxBytes) return String(bytes, from, to - from, Charsets.UTF_8)
-            var end = from + maxBytes
-            while (end > from && (bytes[end].toInt() and 0xC0) == 0x80) end--
-            return String(bytes, from, end - from, Charsets.UTF_8) + "…"
+            while (end < to && bytes[end] != Bytes.LF) end++
+            return Bytes.utf8Text(bytes, from, Bytes.trimLineEnd(bytes, from, end), maxBytes)
         }
     }
 }

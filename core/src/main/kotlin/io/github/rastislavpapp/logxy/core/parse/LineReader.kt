@@ -1,5 +1,6 @@
 package io.github.rastislavpapp.logxy.core.parse
 
+import io.github.rastislavpapp.logxy.core.Bytes
 import io.github.rastislavpapp.logxy.core.index.NewlineScanner
 import java.nio.ByteBuffer
 import java.nio.channels.FileChannel
@@ -79,7 +80,8 @@ internal class LineReader(
         }
         scanned = position
         nextLineStart = bufferStart + position
-        if (lineTo > lineFrom && buffer[lineTo - 1] == '\r'.code.toByte()) lineTo--
+        // The line ends before its \n, so only a \r can be left.
+        lineTo = Bytes.trimLineEnd(buffer, lineFrom, lineTo)
         return true
     }
 

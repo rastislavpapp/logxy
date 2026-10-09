@@ -1,5 +1,6 @@
 package io.github.rastislavpapp.logxy.core.filter
 
+import io.github.rastislavpapp.logxy.core.Bytes
 import java.util.regex.Pattern
 
 /**
@@ -67,6 +68,7 @@ internal class TextMatcher(condition: TextCondition) {
     }
 
     private fun indexOf(bytes: ByteArray, needle: ByteArray, from: Int, to: Int): Int {
+        if (!ignoreCase) return Bytes.indexOf(bytes, needle, from, to)
         if (needle.isEmpty()) return from
         for (i in from..to - needle.size) {
             if (regionMatches(bytes, i, needle)) return i

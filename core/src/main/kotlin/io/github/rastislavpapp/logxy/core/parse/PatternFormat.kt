@@ -1,5 +1,6 @@
 package io.github.rastislavpapp.logxy.core.parse
 
+import io.github.rastislavpapp.logxy.core.Bytes
 import io.github.rastislavpapp.logxy.core.log.ColumnType
 import io.github.rastislavpapp.logxy.core.log.Columns
 import io.github.rastislavpapp.logxy.core.log.Field
@@ -177,7 +178,7 @@ class PatternFormat(val pattern: String, private val zone: ZoneId = ZoneId.syste
             for (k in tokenArray.indices) {
                 when (val token = tokenArray[k]) {
                     is Literal -> {
-                        if (!regionMatches(bytes, position, to, token.bytes)) return false
+                        if (!Bytes.regionMatches(bytes, position, to, token.bytes)) return false
                         position += token.bytes.size
                     }
                     is FieldToken -> {
@@ -192,8 +193,8 @@ class PatternFormat(val pattern: String, private val zone: ZoneId = ZoneId.syste
                         val next = nextLiteral[k]
                         val end = when {
                             next == null -> to
-                            token.kind == Kind.MESSAGE -> lastIndexOf(bytes, next, position, to)
-                            else -> indexOf(bytes, next, minOf(position + token.minWidth, to), to)
+                            token.kind == Kind.MESSAGE -> Bytes.lastIndexOf(bytes, next, position, to)
+                            else -> Bytes.indexOf(bytes, next, minOf(position + token.minWidth, to), to)
                         }
                         if (end < 0) return false
                         var start = position
@@ -259,28 +260,6 @@ class PatternFormat(val pattern: String, private val zone: ZoneId = ZoneId.syste
                 if (pattern[i] == closeChar && --depth == 0) return i
             }
             throw IllegalArgumentException("Unclosed '$openChar' at position ${open + 1}")
-        }
-
-        fun regionMatches(bytes: ByteArray, at: Int, to: Int, expected: ByteArray): Boolean {
-            if (at + expected.size > to) return false
-            for (i in expected.indices) if (bytes[at + i] != expected[i]) return false
-            return true
-        }
-
-        fun indexOf(bytes: ByteArray, needle: ByteArray, from: Int, to: Int): Int {
-            val first = needle[0]
-            for (i in from..to - needle.size) {
-                if (bytes[i] == first && regionMatches(bytes, i, to, needle)) return i
-            }
-            return -1
-        }
-
-        fun lastIndexOf(bytes: ByteArray, needle: ByteArray, from: Int, to: Int): Int {
-            val first = needle[0]
-            for (i in to - needle.size downTo from) {
-                if (bytes[i] == first && regionMatches(bytes, i, to, needle)) return i
-            }
-            return -1
         }
 
         /** Stack trace lines often fit a layout loosely; real levels are short words. */

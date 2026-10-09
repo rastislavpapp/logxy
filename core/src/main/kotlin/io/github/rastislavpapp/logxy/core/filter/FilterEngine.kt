@@ -1,5 +1,6 @@
 package io.github.rastislavpapp.logxy.core.filter
 
+import io.github.rastislavpapp.logxy.core.Bytes
 import io.github.rastislavpapp.logxy.core.log.ColumnType
 import io.github.rastislavpapp.logxy.core.log.Columns
 import io.github.rastislavpapp.logxy.core.log.LevelMapping
@@ -275,10 +276,7 @@ private class Leaf(
                         val to = if (length == Columns.TO_RECORD_END) c.end else from + length
                         val offset = reader!!.load(from, to)
                         var end = offset + (to - from).toInt()
-                        if (length == Columns.TO_RECORD_END) {
-                            if (end > offset && reader.buffer[end - 1] == '\n'.code.toByte()) end--
-                            if (end > offset && reader.buffer[end - 1] == '\r'.code.toByte()) end--
-                        }
+                        if (length == Columns.TO_RECORD_END) end = Bytes.trimLineEnd(reader.buffer, offset, end)
                         matcher.matches(reader.buffer, offset, minOf(end, reader.loaded))
                     }
                 }

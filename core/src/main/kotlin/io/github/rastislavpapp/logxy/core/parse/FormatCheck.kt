@@ -1,5 +1,6 @@
 package io.github.rastislavpapp.logxy.core.parse
 
+import io.github.rastislavpapp.logxy.core.Bytes
 import java.nio.channels.FileChannel
 
 /** The file's first entries do not fit the chosen format. */
@@ -57,17 +58,11 @@ internal object FormatCheck {
         var i = from
         while (i < to && (bytes[i] == ' '.code.toByte() || bytes[i] == '\t'.code.toByte())) i++
         if (i == to || i > from) return true
-        if (startsWith(bytes, from, to, "Caused by:") || startsWith(bytes, from, to, "Suppressed:")) return true
+        if (Bytes.startsWith(bytes, from, to, "Caused by:") || Bytes.startsWith(bytes, from, to, "Suppressed:")) return true
         // An exception header such as "java.lang.IllegalStateException: message".
         var end = from
         while (end < to && bytes[end] != ':'.code.toByte() && bytes[end] != ' '.code.toByte()) end++
         val name = String(bytes, from, end - from, Charsets.ISO_8859_1)
         return '.' in name && (name.endsWith("Exception") || name.endsWith("Error") || name.endsWith("Throwable"))
-    }
-
-    private fun startsWith(bytes: ByteArray, from: Int, to: Int, prefix: String): Boolean {
-        if (to - from < prefix.length) return false
-        for (i in prefix.indices) if (bytes[from + i] != prefix[i].code.toByte()) return false
-        return true
     }
 }

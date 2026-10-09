@@ -1,5 +1,6 @@
 package io.github.rastislavpapp.logxy.core.index
 
+import io.github.rastislavpapp.logxy.core.Bytes
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -92,12 +93,8 @@ class LineIndex private constructor(
         // Read two bytes past the limit to see whether only the terminator is beyond it.
         val bytes = ByteArray(minOf(fullLength, maxBytes + 2L).toInt())
         var length = readFully(bytes, start)
-        if (length.toLong() == fullLength) {
-            if (length > 0 && bytes[length - 1] == LF) length--
-            if (length > 0 && bytes[length - 1] == CR) length--
-        }
-        if (length <= maxBytes) return String(bytes, 0, length, Charsets.UTF_8)
-        return String(bytes, 0, utf8Boundary(bytes, maxBytes), Charsets.UTF_8) + "…"
+        if (length.toLong() == fullLength) length = Bytes.trimLineEnd(bytes, 0, length)
+        return Bytes.utf8Text(bytes, 0, length, maxBytes)
     }
 
     override fun readAppended(size: Long): AppendedLines {
@@ -216,14 +213,5 @@ class LineIndex private constructor(
         }
 
         private const val APPEND_BUFFER_SIZE = 256 * 1024
-        private const val LF = '\n'.code.toByte()
-        private const val CR = '\r'.code.toByte()
-
-        /** Largest cut point `<= limit` that does not split a UTF-8 sequence; `bytes` must extend past `limit`. */
-        private fun utf8Boundary(bytes: ByteArray, limit: Int): Int {
-            var cut = limit
-            while (cut > 0 && (bytes[cut].toInt() and 0xC0) == 0x80) cut--
-            return cut
-        }
     }
 }
