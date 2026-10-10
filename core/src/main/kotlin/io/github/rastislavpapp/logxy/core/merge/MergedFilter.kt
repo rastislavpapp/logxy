@@ -39,9 +39,7 @@ class MergedFilter(private val log: MergedLog) : RecordFilter {
         return object : PreparedFilter {
             override suspend fun run(): FilterResult {
                 val results = coroutineScope { evaluations.map { async { it.run() } }.awaitAll() }
-                val rows = withContext(Dispatchers.Default) {
-                    mergeSorted(results.mapIndexed { part, result -> toPositions(part, result.rows, merged[part]) })
-                }
+                val rows = withContext(Dispatchers.Default) { toPositions(results.map { it.rows }, merged, start, count) }
                 return FilterResult(rows, start, count, indexedSize)
             }
 
@@ -59,22 +57,29 @@ class MergedFilter(private val log: MergedLog) : RecordFilter {
         return from
     }
 
-    private fun toPositions(part: Int, rows: IntArray, merged: Int): IntArray {
-        var count = 0
-        while (count < rows.size && rows[count] < merged) count++
-        return IntArray(count) { log.position(part, rows[it]) }
-    }
-
-    /** One sorted array of sorted [lists]; there are few of them. */
-    private fun mergeSorted(lists: List<IntArray>): IntArray {
-        val out = IntArray(lists.sumOf { it.size })
-        val next = IntArray(lists.size)
-        for (i in out.indices) {
-            var best = -1
-            for (list in lists.indices) {
-                if (next[list] < lists[list].size && (best < 0 || lists[list][next[list]] < lists[best][next[best]])) best = list
+    /**
+     * The merged positions, in order, of each part's sorted [rows], leaving out records beyond its [merged]
+     * count. Positions are distinct and in [start, count), so a bitset sorts them in linear time.
+     */
+    private fun toPositions(rows: List<IntArray>, merged: IntArray, start: Int, count: Int): IntArray {
+        val bits = LongArray((count - start + 63) / 64)
+        var total = 0
+        for ((part, partRows) in rows.withIndex()) {
+            for (row in partRows) {
+                if (row >= merged[part]) break
+                val bit = log.position(part, row) - start
+                bits[bit ushr 6] = bits[bit ushr 6] or (1L shl bit)
+                total++
             }
-            out[i] = lists[best][next[best]++]
+        }
+        val out = IntArray(total)
+        var i = 0
+        for (w in bits.indices) {
+            var mask = bits[w]
+            while (mask != 0L) {
+                out[i++] = start + w * 64 + java.lang.Long.numberOfTrailingZeros(mask)
+                mask = mask and (mask - 1)
+            }
         }
         return out
     }
