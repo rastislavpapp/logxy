@@ -176,11 +176,11 @@ class FilterEngine(private val log: LogData, private val maxCacheBytes: Long = D
             val chunks = (0..<words step CHUNK_WORDS).filter { first ->
                 (first..<minOf(words, first + CHUNK_WORDS)).any { need[it] != 0L }
             }
-            chunks.map { first ->
+            chunks.mapIndexed { task, first ->
                 async {
                     ensureActive()
                     val cursor = snapshot.cursor()
-                    val reader = if (leaf.readsFile) SpanReader(snapshot.channel, snapshot.end) else null
+                    val reader = if (leaf.readsFile) SpanReader(snapshot.channels.forTask(task), snapshot.end) else null
                     for (w in first..<minOf(words, first + CHUNK_WORDS)) {
                         var mask = need[w]
                         while (mask != 0L) {

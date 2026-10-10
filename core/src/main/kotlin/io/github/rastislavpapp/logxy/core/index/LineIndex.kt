@@ -1,5 +1,6 @@
 package io.github.rastislavpapp.logxy.core.index
 
+import io.github.rastislavpapp.logxy.core.ReadChannels
 import io.github.rastislavpapp.logxy.core.readFully
 import io.github.rastislavpapp.logxy.core.Bytes
 import kotlinx.coroutines.Dispatchers
@@ -19,7 +20,6 @@ import java.lang.foreign.Arena
 import java.nio.ByteBuffer
 import java.nio.channels.FileChannel
 import java.nio.file.Path
-import java.nio.file.StandardOpenOption
 
 data class IndexOptions(
     val parallelism: Int = Runtime.getRuntime().availableProcessors(),
@@ -52,7 +52,7 @@ class AppendedLines internal constructor(
  */
 class LineIndex private constructor(
     override val path: Path,
-    private val channel: FileChannel,
+    private val channels: ReadChannels,
     private val starts: LongChunkList,
     indexedSize: Long,
     // Whether bytes appended next start a new line, i.e. the file is empty or ends with a newline.
@@ -77,7 +77,7 @@ class LineIndex private constructor(
 
     override fun rowValues(record: Int, maxBytes: Int) = arrayOf(lineText(record, maxBytes))
 
-    override fun filterSnapshot(): RecordSnapshot = LineSnapshot(lineCount, indexedSize, channel, starts)
+    override fun filterSnapshot(): RecordSnapshot = LineSnapshot(lineCount, indexedSize, channels, starts)
 
     override fun recordText(record: Int, maxBytes: Int) = lineText(record, maxBytes)
 
@@ -96,7 +96,7 @@ class LineIndex private constructor(
         val fullLength = lineLimit(line) - start
         // Read two bytes past the limit to see whether only the terminator is beyond it.
         val bytes = ByteArray(minOf(fullLength, maxBytes + 2L).toInt())
-        var length = channel.readFully(ByteBuffer.wrap(bytes), start)
+        var length = channels.main.readFully(ByteBuffer.wrap(bytes), start)
         if (length.toLong() == fullLength) length = Bytes.trimLineEnd(bytes, 0, length)
         return Bytes.utf8Text(bytes, 0, length, maxBytes)
     }
@@ -104,7 +104,7 @@ class LineIndex private constructor(
     override fun readAppended(size: Long): AppendedLines {
         val from = indexedSize
         if (size <= from) return AppendedLines(from, from, LongChunkList())
-        val scan = scanRange(channel, from..<size, APPEND_BUFFER_SIZE, checkCancelled = {}, progress = null)
+        val scan = scanRange(channels.main, from..<size, APPEND_BUFFER_SIZE, checkCancelled = {}, progress = null)
         return AppendedLines(from, scan.end, scan.starts)
     }
 
@@ -120,7 +120,7 @@ class LineIndex private constructor(
     }
 
     override fun close() {
-        channel.close()
+        channels.close()
     }
 
     companion object {
@@ -131,21 +131,21 @@ class LineIndex private constructor(
             progress: IndexProgress = IndexProgress(),
             options: IndexOptions = IndexOptions(),
         ): LineIndex = withContext(Dispatchers.IO) {
-            val channel = FileChannel.open(path, StandardOpenOption.READ)
+            val channels = ReadChannels.open(path)
             try {
-                val size = channel.size()
+                val size = channels.main.size()
                 progress.totalBytes = size
                 val ranges = splitIntoRanges(size, options)
-                val scans = ranges.map { range ->
+                val scans = ranges.mapIndexed { i, range ->
                     async {
                         val job = coroutineContext.job
-                        scanRange(channel, range, options.bufferSize, { job.ensureActive() }, progress)
+                        scanRange(channels.forTask(i), range, options.bufferSize, { job.ensureActive() }, progress)
                     }
                 }.awaitAll()
                 ensureActive()
-                merge(path, channel, size, scans)
+                merge(path, channels, size, scans)
             } catch (e: Throwable) {
-                channel.close()
+                channels.close()
                 throw e
             }
         }
@@ -187,7 +187,7 @@ class LineIndex private constructor(
             return RangeScan(starts, end, complete = true)
         }
 
-        private fun merge(path: Path, channel: FileChannel, size: Long, scans: List<RangeScan>): LineIndex {
+        private fun merge(path: Path, channels: ReadChannels, size: Long, scans: List<RangeScan>): LineIndex {
             val starts = LongChunkList()
             starts.add(0)
             var indexedSize = size
@@ -202,7 +202,7 @@ class LineIndex private constructor(
             while (starts.size > 0 && starts.last() > indexedSize) starts.removeLast()
             val lastLineComplete = starts.size > 0 && starts.last() == indexedSize
             if (lastLineComplete) starts.removeLast()
-            return LineIndex(path, channel, starts, indexedSize, lastLineComplete)
+            return LineIndex(path, channels, starts, indexedSize, lastLineComplete)
         }
 
         private const val APPEND_BUFFER_SIZE = 256 * 1024

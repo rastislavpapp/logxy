@@ -1,11 +1,11 @@
 package io.github.rastislavpapp.logxy.core.filter
 
+import io.github.rastislavpapp.logxy.core.ReadChannels
 import io.github.rastislavpapp.logxy.core.index.LongChunkList
 import io.github.rastislavpapp.logxy.core.log.Columns
 import io.github.rastislavpapp.logxy.core.log.LevelMapping
 import io.github.rastislavpapp.logxy.core.log.Schema
 import io.github.rastislavpapp.logxy.core.parse.RecordFormat
-import java.nio.channels.FileChannel
 
 /**
  * The first [count] records of a log, taken on the thread that owns it and readable from any thread:
@@ -17,7 +17,7 @@ internal abstract class RecordSnapshot(
     val count: Int,
     /** File offset where the last record ends. */
     val end: Long,
-    val channel: FileChannel,
+    val channels: ReadChannels,
 ) {
     /** Dictionary texts of LEVEL and DICT fields, by id. */
     abstract fun dictionaryTexts(field: Int): List<String>
@@ -47,13 +47,13 @@ internal class ParsedSnapshot(
     schema: Schema,
     count: Int,
     end: Long,
-    channel: FileChannel,
+    channels: ReadChannels,
     private val segments: List<Columns>,
     private val first: IntArray,
     private val texts: Array<List<String>?>,
     override val levels: LevelMapping,
     private val format: RecordFormat,
-) : RecordSnapshot(schema, count, end, channel) {
+) : RecordSnapshot(schema, count, end, channels) {
 
     override fun dictionaryTexts(field: Int) = texts[field]!!
 
@@ -98,9 +98,9 @@ internal class ParsedSnapshot(
 internal class LineSnapshot(
     count: Int,
     end: Long,
-    channel: FileChannel,
+    channels: ReadChannels,
     private val starts: LongChunkList,
-) : RecordSnapshot(Schema.RAW, count, end, channel) {
+) : RecordSnapshot(Schema.RAW, count, end, channels) {
 
     override fun dictionaryTexts(field: Int) = throw UnsupportedOperationException("Raw logs have no dictionaries")
 

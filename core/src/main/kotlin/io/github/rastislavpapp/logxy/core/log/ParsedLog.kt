@@ -1,5 +1,6 @@
 package io.github.rastislavpapp.logxy.core.log
 
+import io.github.rastislavpapp.logxy.core.ReadChannels
 import io.github.rastislavpapp.logxy.core.readFully
 import io.github.rastislavpapp.logxy.core.Bytes
 import io.github.rastislavpapp.logxy.core.index.IndexOptions
@@ -19,7 +20,6 @@ import kotlinx.coroutines.withContext
 import java.nio.ByteBuffer
 import java.nio.channels.FileChannel
 import java.nio.file.Path
-import java.nio.file.StandardOpenOption
 
 /** Where the indexed data ends, so appended bytes can continue it. */
 private class Tail(
@@ -49,7 +49,7 @@ private class AppendedRecords(
  */
 class ParsedLog private constructor(
     override val path: Path,
-    private val channel: FileChannel,
+    private val channels: ReadChannels,
     val format: RecordFormat,
     private val segments: ArrayList<Columns>,
     private val dictionaries: Array<ByteDictionary?>,
@@ -115,7 +115,7 @@ class ParsedLog private constructor(
     }
 
     override fun filterSnapshot(): RecordSnapshot = ParsedSnapshot(
-        schema, recordCount, indexedSize, channel,
+        schema, recordCount, indexedSize, channels,
         segments = segments.toList(),
         first = segmentFirst.copyOf(),
         texts = Array(schema.fields.size) { field -> dictionaries[field]?.let { d -> List(d.size) { d.text(it) } } },
@@ -169,7 +169,7 @@ class ParsedLog private constructor(
         val columns = Columns(schema)
         if (size <= indexedSize) return AppendedRecords(from, from, columns, false, tail)
         val hasPrevious = recordCount - (if (removeLast) 1 else 0) > 0
-        val result = parseRange(channel, from, size, format.newParser(), columns, hasPrevious, {}, null)
+        val result = parseRange(channels.main, from, size, format.newParser(), columns, hasPrevious, {}, null)
         return AppendedRecords(from, result.end, columns, removeLast, result.tail)
     }
 
@@ -248,12 +248,12 @@ class ParsedLog private constructor(
 
     private fun read(position: Long, length: Int): ByteArray {
         val bytes = ByteArray(length)
-        val read = channel.readFully(ByteBuffer.wrap(bytes), position)
+        val read = channels.main.readFully(ByteBuffer.wrap(bytes), position)
         return if (read == length) bytes else bytes.copyOf(read)
     }
 
     override fun close() {
-        channel.close()
+        channels.close()
     }
 
     private class RangeResult(val end: Long, val truncated: Boolean, val lines: Int, val tail: Tail)
@@ -273,8 +273,9 @@ class ParsedLog private constructor(
             progress: IndexProgress = IndexProgress(),
             options: IndexOptions = IndexOptions(),
         ): ParsedLog = withContext(Dispatchers.IO) {
-            val channel = FileChannel.open(path, StandardOpenOption.READ)
+            val channels = ReadChannels.open(path)
             try {
+                val channel = channels.main
                 val size = channel.size()
                 progress.totalBytes = size
                 FormatCheck.check(channel, size, format.newParser())
@@ -284,7 +285,7 @@ class ParsedLog private constructor(
                 val bounds = LongArray(count + 1)
                 bounds[count] = size
                 (1..<count).map { i ->
-                    async { bounds[i] = resync(channel, size / count * i, size, format.newParser()) }
+                    async { bounds[i] = resync(channels.forTask(i), size / count * i, size, format.newParser()) }
                 }.awaitAll()
                 for (i in 1..count) bounds[i] = bounds[i].coerceIn(bounds[i - 1], size)
 
@@ -293,7 +294,7 @@ class ParsedLog private constructor(
                         val job = coroutineContext.job
                         val columns = Columns(format.schema)
                         val result = parseRange(
-                            channel, bounds[i], bounds[i + 1], format.newParser(), columns,
+                            channels.forTask(i), bounds[i], bounds[i + 1], format.newParser(), columns,
                             hasPrevious = false, check = { job.ensureActive() }, progress = progress,
                         )
                         columns to result
@@ -312,9 +313,9 @@ class ParsedLog private constructor(
                     if (result.truncated) break
                 }
                 val dictionaries = mergeDictionaries(format.schema, segments)
-                ParsedLog(path, channel, format, segments, dictionaries, indexedSize, tail)
+                ParsedLog(path, channels, format, segments, dictionaries, indexedSize, tail)
             } catch (e: Throwable) {
-                channel.close()
+                channels.close()
                 throw e
             }
         }
