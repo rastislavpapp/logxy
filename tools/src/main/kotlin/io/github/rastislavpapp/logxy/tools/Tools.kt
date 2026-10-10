@@ -8,7 +8,7 @@ private const val USAGE = """Usage:
   benchmark <file> [--iterations N]     compare line-indexing strategies on a file
   parse <file> [--iterations N]         measure parsing with the detected format
   filter <file>                         measure typical filters on the parsed file
-  merge <file> <file>... [--iterations N]
+  merge <file> <file>... [--iterations N] [--read-channels N]
                                         measure merging files and filtering the merged view
   simulate <file> [--rate N] [--rotate-at SIZE]
                                         append lines like a running application (N per second, default 20),
@@ -29,7 +29,11 @@ fun main(args: Array<String>) {
             benchmarkParsing(Path.of(positional[1]), option("iterations")?.toInt() ?: 3)
         "filter" if positional.size == 2 -> benchmarkFiltering(Path.of(positional[1]))
         "merge" if positional.size >= 3 ->
-            benchmarkMerging(positional.drop(1).map { Path.of(it) }, option("iterations")?.toInt() ?: 3)
+            benchmarkMerging(
+                positional.drop(1).map { Path.of(it) },
+                option("iterations")?.toInt() ?: 3,
+                option("read-channels")?.toInt(),
+            )
         "simulate" if positional.size == 2 ->
             simulateLogging(Path.of(positional[1]), option("rate")?.toInt() ?: 20, option("rotate-at")?.let(::parseSize))
         "icons" if positional.size == 1 ->

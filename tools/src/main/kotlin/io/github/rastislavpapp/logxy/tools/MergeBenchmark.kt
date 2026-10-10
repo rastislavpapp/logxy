@@ -4,6 +4,7 @@ import io.github.rastislavpapp.logxy.core.filter.LevelCondition
 import io.github.rastislavpapp.logxy.core.filter.TextCondition
 import io.github.rastislavpapp.logxy.core.filter.TextOp
 import io.github.rastislavpapp.logxy.core.formatByteSize
+import io.github.rastislavpapp.logxy.core.index.IndexOptions
 import io.github.rastislavpapp.logxy.core.log.Level
 import io.github.rastislavpapp.logxy.core.log.ParsedLog
 import io.github.rastislavpapp.logxy.core.merge.MergedFilter
@@ -12,12 +13,22 @@ import io.github.rastislavpapp.logxy.core.parse.LogFormat
 import kotlinx.coroutines.runBlocking
 import java.nio.file.Path
 
-/** Parses [files], then measures merging them, the heap the merge adds, and filtering the merged view. */
-fun benchmarkMerging(files: List<Path>, iterations: Int) {
-    val parts = files.map { file ->
-        val compiled = LogFormat.detect(file).compile() ?: error("No built-in format matches $file")
-        runBlocking { ParsedLog.build(file, compiled) }.also { println("$file: %,d records".format(it.recordCount)) }
+/**
+ * Parses [files] one after another, as a session does, then measures merging them, the heap the merge
+ * adds, and filtering the merged view. [readChannels] is per file, see [IndexOptions.readChannels].
+ */
+fun benchmarkMerging(files: List<Path>, iterations: Int, readChannels: Int?) {
+    val options = IndexOptions().let { if (readChannels == null) it else it.copy(readChannels = readChannels) }
+    println("read channels per file: ${options.readChannels}")
+    val (parts, parseSeconds) = measured {
+        files.map { file ->
+            val compiled = LogFormat.detect(file).compile() ?: error("No built-in format matches $file")
+            val (log, seconds) = measured { runBlocking { ParsedLog.build(file, compiled, options = options) } }
+            println("$file: %,d records in %.3f s".format(log.recordCount, seconds))
+            log
+        }
     }
+    println("parse all: %.3f s".format(parseSeconds))
     val runtime = Runtime.getRuntime()
     fun heap(): Long {
         System.gc()
