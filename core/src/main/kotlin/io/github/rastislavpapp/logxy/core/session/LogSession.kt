@@ -3,6 +3,7 @@ package io.github.rastislavpapp.logxy.core.session
 import io.github.rastislavpapp.logxy.core.FileActivity
 import io.github.rastislavpapp.logxy.core.FileChange
 import io.github.rastislavpapp.logxy.core.FileSnapshot
+import io.github.rastislavpapp.logxy.core.formatByteSize
 import io.github.rastislavpapp.logxy.core.filter.Filter
 import io.github.rastislavpapp.logxy.core.filter.FilterEngine
 import io.github.rastislavpapp.logxy.core.filter.LevelCondition
@@ -323,6 +324,19 @@ class LogSession(
             listener.problem("Cannot open ${current.path.fileName}.", e.message ?: e.javaClass.simpleName, null)
             setStatus(SessionStatus(message = "Error"))
             return false
+        } catch (e: OutOfMemoryError) {
+            // Drop every reference to what was indexed, so the memory is free again for other tabs.
+            opened.forEach { it.close() }
+            opened.clear()
+            sources.forEach { it.log = null }
+            val what = if (isMerged) "these ${sources.size} files" else "${current.path.fileName}"
+            listener.problem(
+                "Not enough memory to open $what.",
+                "Logxy can use up to ${formatByteSize(Runtime.getRuntime().maxMemory())} of memory.",
+                if (isMerged) "Merge fewer files, or close other tabs." else "Close other tabs, or choose a parser that fits the file.",
+            )
+            setStatus(SessionStatus(message = "Out of memory"))
+            return false
         }
     }
 
@@ -454,14 +468,14 @@ class LogSession(
             }
             val result = try {
                 evaluation.run()
-            } catch (e: Exception) {
-                if (e is CancellationException) throw e
+            } catch (e: Throwable) {
+                if (e is CancellationException || (e !is Exception && e !is OutOfMemoryError)) throw e
                 // Keep the previous result, but stop showing the filter as running.
                 indicator.cancel()
                 filtering = false
                 running = null
                 filterJob = null
-                problem = e.message ?: e.javaClass.simpleName
+                problem = if (e is OutOfMemoryError) "Not enough memory to filter" else e.message ?: e.javaClass.simpleName
                 updateStatus()
                 return@launch
             }

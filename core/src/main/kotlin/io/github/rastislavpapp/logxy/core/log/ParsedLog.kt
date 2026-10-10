@@ -9,11 +9,13 @@ import io.github.rastislavpapp.logxy.core.filter.RecordSnapshot
 import io.github.rastislavpapp.logxy.core.index.IndexProgress
 import io.github.rastislavpapp.logxy.core.parse.FormatCheck
 import io.github.rastislavpapp.logxy.core.parse.LineReader
+import io.github.rastislavpapp.logxy.core.parse.MdcMap
 import io.github.rastislavpapp.logxy.core.parse.RecordFormat
 import io.github.rastislavpapp.logxy.core.parse.RecordParser
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.job
 import kotlinx.coroutines.withContext
@@ -46,18 +48,23 @@ private class AppendedRecords(
  * that was parsed in parallel; dictionary ids are shared across segments. Lines that do not start a
  * record continue the previous one (stack traces); such lines before the first record become records
  * of their own, with only a message.
+ *
+ * [schema] differs from the format's: a DICT field whose values turn out mostly distinct (e.g. a
+ * misdetected layout) is a SPAN, and each key found in an MDC map while indexing gets a field of its
+ * own, read from the map; keys that first appear in appended records do not.
  */
 class ParsedLog private constructor(
     override val path: Path,
     private val channels: ReadChannels,
     val format: RecordFormat,
+    /** How [Columns] store the fields: the format's schema, with DICT fields stored as spans where needed. */
+    private val storage: Schema,
+    override val schema: Schema,
     private val segments: ArrayList<Columns>,
     private val dictionaries: Array<ByteDictionary?>,
     indexedSize: Long,
     private var tail: Tail,
 ) : LogData() {
-
-    override val schema: Schema = format.schema
 
     override var indexedSize = indexedSize
         private set
@@ -118,7 +125,7 @@ class ParsedLog private constructor(
         schema, recordCount, indexedSize, channels,
         segments = segments.toList(),
         first = segmentFirst.copyOf(),
-        texts = Array(schema.fields.size) { field -> dictionaries[field]?.let { d -> List(d.size) { d.text(it) } } },
+        texts = Array(schema.fields.size) { field -> dictionaries.getOrNull(field)?.let { d -> List(d.size) { d.text(it) } } },
         levels = levelMapping,
         format = format,
     )
@@ -133,17 +140,20 @@ class ParsedLog private constructor(
 
         // One read covers every span shown in the row.
         var needed = 0
-        for (field in schema.fields.indices) {
-            if (schema.fields[field].type != ColumnType.SPAN) continue
+        for (field in storage.fields.indices) {
+            if (storage.fields[field].type != ColumnType.SPAN) continue
             val length = columns.spanLength(field, local)
             if (length == Columns.ABSENT_LENGTH) continue
             val relative = columns.ints[field]!![local]
             val spanLength = if (length == Columns.TO_RECORD_END) recordLength - relative else length
-            needed = maxOf(needed, relative + minOf(spanLength, maxBytes + 2))
+            // Values of map keys may be anywhere in the map.
+            needed = maxOf(needed, relative + if (storage.fields[field].isMap) spanLength else minOf(spanLength, maxBytes + 2))
         }
         val bytes = if (needed > 0) read(start, minOf(needed, recordLength)) else EMPTY
 
         return Array(schema.fields.size) { field ->
+            val key = schema.fields[field].mapKey
+            if (key != null) return@Array mapValue(columns, local, key, bytes, maxBytes)
             columns.valueText(field, local, format, dictionaries[field]) ?: run {
                 val length = columns.spanLength(field, local)
                 if (length == Columns.ABSENT_LENGTH) "" else {
@@ -153,6 +163,18 @@ class ParsedLog private constructor(
                 }
             }
         }
+    }
+
+    private fun mapValue(columns: Columns, local: Int, key: MapKey, bytes: ByteArray, maxBytes: Int): String {
+        val length = columns.spanLength(key.field, local)
+        if (length == Columns.ABSENT_LENGTH) return ""
+        val from = columns.ints[key.field]!![local]
+        val to = if (length == Columns.TO_RECORD_END) bytes.size else minOf(from + length, bytes.size)
+        if (from >= to) return ""
+        val entries = MdcMap.entries(bytes, from, to)
+        if (entries < 0) return ""
+        val value = MdcMap.valueOf(bytes, MdcMap.from(entries), MdcMap.to(entries), key.prefix)
+        return if (value < 0) "" else Bytes.utf8Text(bytes, MdcMap.from(value), MdcMap.to(value), maxBytes)
     }
 
     override fun recordText(record: Int, maxBytes: Int): String {
@@ -166,7 +188,7 @@ class ParsedLog private constructor(
     override fun readAppended(size: Long): AppendedData {
         val removeLast = !tail.lastLineComplete && tail.lastLineStartedRecord
         val from = if (tail.lastLineComplete) indexedSize else tail.lastLineStart
-        val columns = Columns(schema)
+        val columns = Columns(storage)
         if (size <= indexedSize) return AppendedRecords(from, from, columns, false, tail)
         val hasPrevious = recordCount - (if (removeLast) 1 else 0) > 0
         val result = parseRange(channels.main, from, size, format.newParser(), columns, hasPrevious, {}, null)
@@ -181,12 +203,12 @@ class ParsedLog private constructor(
         if (appended.removeLast) segments.last().removeLast()
         val source = appended.columns
         if (source.size > 0 && segments.isEmpty()) {
-            segments += Columns(schema)
+            segments += Columns(storage)
             segmentFirst = firstRecords()
         }
         if (source.size > 0) {
             val target = segments.last()
-            val remaps = Array(schema.fields.size) { field ->
+            val remaps = Array(storage.fields.size) { field ->
                 val local = source.dictionaries[field] ?: return@Array null
                 local.idsIn(dictionaries[field]!!)
             }
@@ -198,7 +220,7 @@ class ParsedLog private constructor(
 
     private fun copyRecord(source: Columns, i: Int, target: Columns, remaps: Array<IntArray?>) {
         target.beginRecord(source.starts[i])
-        for ((field, definition) in schema.fields.withIndex()) {
+        for ((field, definition) in storage.fields.withIndex()) {
             when (definition.type) {
                 ColumnType.TIMESTAMP -> {
                     val nanos = source.longs[field]!![i]
@@ -289,17 +311,7 @@ class ParsedLog private constructor(
                 }.awaitAll()
                 for (i in 1..count) bounds[i] = bounds[i].coerceIn(bounds[i - 1], size)
 
-                val parsed = (0..<count).map { i ->
-                    async {
-                        val job = coroutineContext.job
-                        val columns = Columns(format.schema)
-                        val result = parseRange(
-                            channels.forTask(i), bounds[i], bounds[i + 1], format.newParser(), columns,
-                            hasPrevious = false, check = { job.ensureActive() }, progress = progress,
-                        )
-                        columns to result
-                    }
-                }.awaitAll()
+                val (storage, parsed) = parseAll(channels, bounds, format, progress)
                 ensureActive()
 
                 val segments = ArrayList<Columns>()
@@ -312,13 +324,95 @@ class ParsedLog private constructor(
                     // The file was truncated while parsing; later ranges are unreliable.
                     if (result.truncated) break
                 }
-                val dictionaries = mergeDictionaries(format.schema, segments)
-                ParsedLog(path, channels, format, segments, dictionaries, indexedSize, tail)
+                val dictionaries = mergeDictionaries(storage, segments)
+                val schema = withMapKeys(storage, mapKeys(storage, segments))
+                ParsedLog(path, channels, format, storage, schema, segments, dictionaries, indexedSize, tail)
             } catch (e: Throwable) {
                 channels.close()
                 throw e
             }
         }
+
+        /** Thrown by a range whose [Columns.overflowed]; ends the other ranges too. */
+        private class DictionaryOverflow(val field: Int) : Exception(null, null, false, false)
+
+        /** The ranges between [bounds], and the schema they were parsed with. */
+        private suspend fun parseAll(
+            channels: ReadChannels,
+            bounds: LongArray,
+            format: RecordFormat,
+            progress: IndexProgress,
+        ): Pair<Schema, List<Pair<Columns, RangeResult>>> {
+            var schema = format.schema
+            while (true) {
+                try {
+                    return schema to parseRanges(channels, bounds, format, schema, progress)
+                } catch (e: DictionaryOverflow) {
+                    // Noticed early on, so starting over costs little.
+                    schema = schema.asSpan(e.field)
+                    progress.reset()
+                }
+            }
+        }
+
+        private suspend fun parseRanges(
+            channels: ReadChannels,
+            bounds: LongArray,
+            format: RecordFormat,
+            schema: Schema,
+            progress: IndexProgress,
+        ): List<Pair<Columns, RangeResult>> = coroutineScope {
+            (0..<bounds.size - 1).map { i ->
+                async {
+                    val job = coroutineContext.job
+                    val columns = Columns(schema)
+                    val check = {
+                        job.ensureActive()
+                        if (columns.overflowed >= 0) throw DictionaryOverflow(columns.overflowed)
+                    }
+                    val result = parseRange(
+                        channels.forTask(i), bounds[i], bounds[i + 1], format.newParser(), columns,
+                        hasPrevious = false, check = check, progress = progress,
+                    )
+                    columns to result
+                }
+            }.awaitAll()
+        }
+
+        /** Per field, the keys found in it if it is a map that can be split, sorted. */
+        private fun mapKeys(storage: Schema, segments: List<Columns>): Array<List<String>?> =
+            Array(storage.fields.size) { field ->
+                if (!storage.fields[field].isMap) return@Array null
+                val keys = sortedSetOf<String>()
+                for (segment in segments) {
+                    val found = segment.mapKeys[field] ?: return@Array null
+                    repeat(found.size) { keys += found.text(it) }
+                    segment.mapKeys[field] = null
+                }
+                if (keys.size > Columns.MAX_MAP_KEYS) null else keys.toList()
+            }
+
+        /** [storage] with a field for each of [keys]; a map split into its keys is hidden. */
+        private fun withMapKeys(storage: Schema, keys: Array<List<String>?>): Schema {
+            if (keys.all { it == null }) return storage
+            val fields = ArrayList(storage.fields)
+            for ((field, mapKeys) in keys.withIndex()) {
+                if (mapKeys == null) continue
+                val map = storage.fields[field]
+                fields[field] = Field(map.name, map.type, map.role, map.toRecordEnd, hidden = true, isMap = true)
+                for (key in mapKeys) {
+                    val base = "${map.name}[$key]"
+                    val name = (sequenceOf(base) + generateSequence(2) { it + 1 }.map { "$base $it" })
+                        .first { candidate -> fields.none { it.name.equals(candidate, ignoreCase = true) } }
+                    fields += Field(name, ColumnType.SPAN, mapKey = MapKey(field, key))
+                }
+            }
+            return Schema(fields)
+        }
+
+        private fun Schema.asSpan(field: Int) = Schema(
+            fields.mapIndexed { i, f -> if (i == field) Field(f.name, ColumnType.SPAN, f.role, isMap = f.isMap) else f },
+        )
 
         /** The start of the first record at or after [from]; [end] if there is none. */
         private fun resync(channel: FileChannel, from: Long, end: Long, parser: RecordParser): Long {

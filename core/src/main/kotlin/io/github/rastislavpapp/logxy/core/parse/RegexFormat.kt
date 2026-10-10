@@ -67,7 +67,7 @@ class RegexFormat(
                     ColumnType.TIMESTAMP ->
                         if (timestampParser.parse(bytes, from, to) == to) out.setTimestamp(field, timestampParser.nanos)
                     ColumnType.LEVEL -> out.setLevel(field, bytes, from, to)
-                    ColumnType.DICT -> out.setDict(field, bytes, from, to)
+                    ColumnType.DICT -> out.setText(field, bytes, lineFrom, from, to)
                     ColumnType.SPAN -> {
                         val toEnd = field == messageField && to == lineTo
                         out.setSpan(field, start, if (toEnd) Columns.TO_RECORD_END else end - start)

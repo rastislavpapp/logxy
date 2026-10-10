@@ -24,7 +24,19 @@ class Field(
     val role: Role? = null,
     /** For SPAN fields: every value runs to the end of its record (e.g. a message with its stack trace). */
     internal val toRecordEnd: Boolean = false,
+    /** Shown through other fields instead of as a column, e.g. an MDC map split into its keys. */
+    val hidden: Boolean = false,
+    /** A SPAN holding a whole MDC map, see [io.github.rastislavpapp.logxy.core.parse.MdcMap]. */
+    internal val isMap: Boolean = false,
+    /** For a field taken from a map: the map's field and the entry's key. Its values are read from the map. */
+    internal val mapKey: MapKey? = null,
 )
+
+/** A key of an MDC map field; see [Field.mapKey]. */
+class MapKey internal constructor(internal val field: Int, val key: String) {
+    /** `key=`, as an entry starts. */
+    internal val prefix = "$key=".toByteArray()
+}
 
 class Schema(val fields: List<Field>) {
 

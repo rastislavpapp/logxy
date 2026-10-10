@@ -41,6 +41,7 @@ sealed interface LogFormat {
                 "Spring Boot 3 with application name",
                 "%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} %5p %pid --- [%X{application}] [%t] %-40.40logger{39} : %m%n",
             ),
+            Pattern("date [thread] LEVEL logger {MDC} - message", "%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %-5p %c %X - %m%n"),
         )
 
         private class Scored(val format: LogFormat, val matches: Int, val preferred: Boolean, val fields: Int)

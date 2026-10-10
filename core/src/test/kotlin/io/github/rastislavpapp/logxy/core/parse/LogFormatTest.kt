@@ -1,10 +1,10 @@
 package io.github.rastislavpapp.logxy.core.parse
 
-import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import org.junit.jupiter.api.io.TempDir
 
 class LogFormatTest {
 
@@ -69,5 +69,14 @@ class LogFormatTest {
     fun `falls back to raw text`() {
         val file = Files.writeString(dir.resolve("c.log"), "hello\nworld\n")
         assertEquals(LogFormat.Raw, LogFormat.detect(file))
+    }
+
+    @Test
+    fun `detects a log4j2 layout with the MDC map`() {
+        val file = Files.writeString(dir.resolve("mdc.log"), """
+            2026-10-01 08:00:00.001 [main] INFO  com.example.App {} - Started
+            2026-10-01 08:00:00.002 [http-1] INFO  com.example.Api {breadcrumbId=ID-1, tenant=acme} - GET /a - done
+        """.trimIndent())
+        assertEquals("date [thread] LEVEL logger {MDC} - message", LogFormat.detect(file).name)
     }
 }

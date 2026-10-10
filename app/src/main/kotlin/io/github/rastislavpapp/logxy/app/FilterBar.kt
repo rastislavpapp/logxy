@@ -117,8 +117,9 @@ class FilterBar(private val onApply: () -> Unit) : JPanel(MigLayout("insets 6 8 
         levelButton.isVisible = hasLevel
         val text = if (textMode.isSelected) runCatching { QueryParser.parse(textArea.text) }.getOrNull() else null
         text?.let(editor::setQuery)
-        editor.setFields(schema.fields)
-        textArea.setFields(schema.fields.map { it.name })
+        val fields = schema.fields.filter { !it.hidden }
+        editor.setFields(fields)
+        textArea.setFields(fields.map { it.name })
         // The editor starts placeholder rows over on new fields; text without real conditions follows it.
         if (text != null && editor.query().items.isEmpty()) textArea.text = QueryPrinter.print(editor.query(includeEmpty = true))
     }

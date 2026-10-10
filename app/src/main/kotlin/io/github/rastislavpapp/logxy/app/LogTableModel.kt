@@ -22,7 +22,9 @@ class LogTableModel(val records: Records) : AbstractTableModel(), RowWindow {
     val showsLineNumbers = records.isRaw
 
     /** Field index of each column after the line number column. */
-    private val columnFields: List<Int> = records.schema.fields.indices.sortedBy { records.schema.fields[it].role == Role.MESSAGE }
+    private val columnFields: List<Int> = records.schema.fields.indices
+        .filter { !records.schema.fields[it].hidden }
+        .sortedBy { records.schema.fields[it].role == Role.MESSAGE }
 
     // Direct-mapped cache: repaints ask for the same few visible rows over and over.
     private val cachedRows = IntArray(CACHE_SIZE) { -1 }

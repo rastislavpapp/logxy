@@ -3,6 +3,7 @@ package io.github.rastislavpapp.logxy.core.log
 import io.github.rastislavpapp.logxy.core.index.ByteChunkList
 import io.github.rastislavpapp.logxy.core.index.IntChunkList
 import io.github.rastislavpapp.logxy.core.index.LongChunkList
+import io.github.rastislavpapp.logxy.core.parse.MdcMap
 import io.github.rastislavpapp.logxy.core.parse.RecordFormat
 
 /**
@@ -21,6 +22,13 @@ internal class Columns(val schema: Schema) {
     /** Lengths of SPAN fields; none for those that always run to the record end, see [spanLength]. */
     private val lengths = arrayOfNulls<IntChunkList>(schema.fields.size)
     val dictionaries = arrayOfNulls<ByteDictionary>(schema.fields.size)
+
+    /** Keys seen in each map field; null once one of its values was no map or there were too many keys. */
+    val mapKeys = Array(schema.fields.size) { if (schema.fields[it].isMap) ByteDictionary() else null }
+
+    /** A DICT field whose values turned out mostly distinct, so a dictionary costs more than it saves; -1 if none. */
+    var overflowed = -1
+        private set
 
     /** False once a record's timestamp was earlier than the one before it. */
     var timestampsSorted = true
@@ -70,8 +78,15 @@ internal class Columns(val schema: Schema) {
         bytes[field]!![size - 1] = id.toByte()
     }
 
-    fun setDict(field: Int, source: ByteArray, from: Int, to: Int) {
-        ints[field]!![size - 1] = dictionaries[field]!!.idOf(source, from, to)
+    /** A value of a field the format declares DICT, stored as a span if the log made it one, see [ParsedLog]. */
+    fun setText(field: Int, source: ByteArray, lineFrom: Int, from: Int, to: Int) {
+        if (schema.fields[field].type == ColumnType.SPAN) setSpan(field, from - lineFrom, to - from) else setDict(field, source, from, to)
+    }
+
+    private fun setDict(field: Int, source: ByteArray, from: Int, to: Int) {
+        val id = dictionaries[field]!!.idOf(source, from, to)
+        ints[field]!![size - 1] = id
+        if (id >= MIN_OVERFLOW_VALUES && id.toLong() * MAX_DISTINCT_SHARE >= size) overflowed = field
     }
 
     fun setLevelId(field: Int, id: Int) {
@@ -80,6 +95,18 @@ internal class Columns(val schema: Schema) {
 
     fun setDictId(field: Int, id: Int) {
         ints[field]!![size - 1] = id
+    }
+
+    /** Notes the keys of the map in `source[from, to)`, if it is one, see [MdcMap]. */
+    fun addMapKeys(field: Int, source: ByteArray, from: Int, to: Int) {
+        val keys = mapKeys[field] ?: return
+        val entries = MdcMap.entries(source, from, to)
+        if (entries < 0) {
+            mapKeys[field] = null
+            return
+        }
+        MdcMap.forEachKey(source, MdcMap.from(entries), MdcMap.to(entries)) { keyFrom, keyTo -> keys.idOf(source, keyFrom, keyTo) }
+        if (keys.size > MAX_MAP_KEYS) mapKeys[field] = null
     }
 
     /** [length] may be [TO_RECORD_END]. */
@@ -132,6 +159,13 @@ internal class Columns(val schema: Schema) {
         const val ABSENT_LEVEL: Byte = -1
         const val ABSENT_LENGTH = -1
         const val TO_RECORD_END = -2
+
+        // About where a dictionary entry (key bytes, list and table slots) outweighs the 4 bytes a span costs extra.
+        private const val MIN_OVERFLOW_VALUES = 10_000
+        private const val MAX_DISTINCT_SHARE = 16
+
+        /** More distinct keys than this, e.g. ids used as keys, and a map stays one column. */
+        const val MAX_MAP_KEYS = 32
 
         /** Level ids are stored as unsigned bytes; 255 means absent. */
         const val MAX_LEVEL_ID = 254

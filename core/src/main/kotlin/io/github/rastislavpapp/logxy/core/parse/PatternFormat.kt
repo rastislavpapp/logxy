@@ -20,11 +20,20 @@ class PatternFormat(val pattern: String, private val zone: ZoneId = ZoneId.syste
 
     private sealed interface Token
     private class Literal(val bytes: ByteArray) : Token
-    private class FieldToken(val field: Int, val kind: Kind, val minWidth: Int) : Token
+    private class FieldToken(
+        val field: Int,
+        val kind: Kind,
+        val minWidth: Int,
+        /** `key=` of `%X{key}`, for taking the value out of a whole MDC map written there (log4j2's braces only). */
+        val mdcKey: ByteArray? = null,
+    ) : Token
 
     private val tokens = ArrayList<Token>()
     private val fields = ArrayList<Field>()
     private val timestamps = HashMap<Int, TimestampFormat>()
+
+    /** Fields of `%X` without a key or with several, i.e. an MDC map. */
+    private val mdcMaps = ArrayList<Int>()
 
     override val schema: Schema
 
@@ -33,6 +42,9 @@ class PatternFormat(val pattern: String, private val zone: ZoneId = ZoneId.syste
         compile(pattern, literal)
         if (literal.isNotEmpty()) tokens += Literal(literal.toString().toByteArray())
         require(fields.isNotEmpty()) { "The pattern has no fields" }
+        if (mdcMaps.size > 1) {
+            for ((n, field) in mdcMaps.withIndex()) fields[field] = Field("$MDC[$n]", ColumnType.SPAN, isMap = true)
+        }
         // A message at the end runs to the end of the record, stack traces included.
         val last = tokens.last()
         if (last is FieldToken && last.kind == Kind.MESSAGE) {
@@ -115,7 +127,7 @@ class PatternFormat(val pattern: String, private val zone: ZoneId = ZoneId.syste
             "M", "method" -> Triple("Method", Kind.DICT, null)
             "F", "file" -> Triple("File", Kind.DICT, null)
             "L", "line" -> Triple("Line", Kind.SPAN, null)
-            "X", "mdc", "MDC" -> Triple(options.firstOrNull()?.ifEmpty { null } ?: "MDC", Kind.SPAN, null)
+            in MDC_WORDS -> Triple(options.firstOrNull()?.takeIf { it.isNotEmpty() && ',' !in it } ?: MDC, Kind.SPAN, null)
             "K", "map", "MAP" -> Triple(options.firstOrNull()?.ifEmpty { null } ?: "Map", Kind.SPAN, null)
             "x", "NDC" -> Triple("NDC", Kind.SPAN, null)
             "pid", "processId" -> Triple("PID", Kind.DICT, null)
@@ -129,6 +141,7 @@ class PatternFormat(val pattern: String, private val zone: ZoneId = ZoneId.syste
             else -> throw IllegalArgumentException("Unsupported conversion %$word")
         }
         val index = fields.size
+        if (word in MDC_WORDS && options.firstOrNull().let { it.isNullOrEmpty() || ',' in it }) mdcMaps += index
         if (kind == Kind.TIMESTAMP) timestamps[index] = timestampFormat(options)
         val type = when (kind) {
             Kind.TIMESTAMP -> ColumnType.TIMESTAMP
@@ -138,8 +151,11 @@ class PatternFormat(val pattern: String, private val zone: ZoneId = ZoneId.syste
         }
         val unique = (sequenceOf(name) + generateSequence(2) { it + 1 }.map { "$name $it" })
             .first { candidate -> fields.none { it.name == candidate } }
-        fields += Field(unique, type, role)
-        tokens += FieldToken(index, kind, minWidth)
+        val mdcKeys = if (word in MDC_WORDS) options.firstOrNull().orEmpty() else null
+        // `%X{a,b}` writes a map of those keys, like `%X` of all.
+        val isMap = mdcKeys != null && (mdcKeys.isEmpty() || ',' in mdcKeys)
+        fields += Field(unique, type, role, isMap = isMap)
+        tokens += FieldToken(index, kind, minWidth, mdcKeys?.takeIf { !isMap }?.let { "$it=".toByteArray() })
     }
 
     private fun timestampFormat(options: List<String>): TimestampFormat {
@@ -227,8 +243,22 @@ class PatternFormat(val pattern: String, private val zone: ZoneId = ZoneId.syste
                 when (token.kind) {
                     Kind.TIMESTAMP -> out.setTimestamp(field, timestampParsers[field]!!.nanos)
                     Kind.LEVEL -> out.setLevel(field, bytes, starts[k], ends[k])
-                    Kind.DICT -> out.setDict(field, bytes, starts[k], ends[k])
-                    Kind.SPAN -> out.setSpan(field, starts[k] - lineFrom, ends[k] - starts[k])
+                    Kind.DICT -> out.setText(field, bytes, lineFrom, starts[k], ends[k])
+                    Kind.SPAN -> {
+                        val key = token.mdcKey
+                        val entries = if (key != null && ends[k] > starts[k] && bytes[starts[k]] == OPEN_BRACE) {
+                            MdcMap.entries(bytes, starts[k], ends[k])
+                        } else {
+                            -1L
+                        }
+                        if (entries >= 0) {
+                            val value = MdcMap.valueOf(bytes, MdcMap.from(entries), MdcMap.to(entries), key!!)
+                            if (value >= 0) out.setSpan(field, MdcMap.from(value) - lineFrom, MdcMap.to(value) - MdcMap.from(value))
+                        } else {
+                            out.setSpan(field, starts[k] - lineFrom, ends[k] - starts[k])
+                            if (out.schema.fields[field].isMap) out.addMapKeys(field, bytes, starts[k], ends[k])
+                        }
+                    }
                     Kind.MESSAGE -> {
                         val toEnd = k == tokenArray.lastIndex
                         out.setSpan(field, starts[k] - lineFrom, if (toEnd) Columns.TO_RECORD_END else ends[k] - starts[k])
@@ -240,6 +270,9 @@ class PatternFormat(val pattern: String, private val zone: ZoneId = ZoneId.syste
 
     private companion object {
         const val SPACE = ' '.code.toByte()
+        const val MDC = "MDC"
+        val MDC_WORDS = setOf("X", "mdc", "MDC")
+        const val OPEN_BRACE = '{'.code.toByte()
 
         /** Converters that only decorate their content, e.g. with ANSI colors. */
         val WRAPPERS = setOf(

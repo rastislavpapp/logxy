@@ -57,4 +57,12 @@ class PatternFormatTest {
         assertFailsWith<IllegalArgumentException> { PatternFormat("%t%c - %m") }
         assertFailsWith<IllegalArgumentException> { PatternFormat("%d{HH:mm %m") }
     }
+
+    @Test
+    fun `each MDC map gets a column, numbered if there are several`() {
+        val one = PatternFormat("%d{HH:mm:ss.SSS} %X{user} %X - %m%n").schema.fields.map { it.name }
+        assertEquals(listOf("Timestamp", "user", "MDC", "Message"), one)
+        val two = PatternFormat("%d{HH:mm:ss.SSS} %X [%t] %X{a,b} - %m%n").schema.fields.map { it.name }
+        assertEquals(listOf("Timestamp", "MDC[0]", "Thread", "MDC[1]", "Message"), two)
+    }
 }

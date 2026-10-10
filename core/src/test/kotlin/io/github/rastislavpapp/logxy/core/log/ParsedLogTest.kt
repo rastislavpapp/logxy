@@ -1,13 +1,15 @@
 package io.github.rastislavpapp.logxy.core.log
 
+import io.github.rastislavpapp.logxy.core.filter.FilterEngine
+import io.github.rastislavpapp.logxy.core.filter.PresenceCondition
+import io.github.rastislavpapp.logxy.core.filter.TextCondition
+import io.github.rastislavpapp.logxy.core.filter.TextOp
 import io.github.rastislavpapp.logxy.core.index.IndexOptions
 import io.github.rastislavpapp.logxy.core.index.IndexProgress
 import io.github.rastislavpapp.logxy.core.parse.FormatMismatchException
 import io.github.rastislavpapp.logxy.core.parse.PatternFormat
-import io.github.rastislavpapp.logxy.core.parse.RegexFormat
 import io.github.rastislavpapp.logxy.core.parse.RecordFormat
-import kotlinx.coroutines.runBlocking
-import org.junit.jupiter.api.io.TempDir
+import io.github.rastislavpapp.logxy.core.parse.RegexFormat
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardOpenOption
@@ -17,6 +19,8 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
+import kotlinx.coroutines.runBlocking
+import org.junit.jupiter.api.io.TempDir
 
 class ParsedLogTest {
 
@@ -163,6 +167,83 @@ class ParsedLogTest {
         parse("2026-10-01 08:00:00.001 INFO [main] hello world\n\tmore\n", regex).use { log ->
             assertEquals(listOf("2026-10-01 08:00:00.001", "INFO", "main", "hello world"), log.rows()[0])
             assertEquals("2026-10-01 08:00:00.001 INFO [main] hello world\n\tmore", log.recordText(0, 1000))
+        }
+    }
+
+    @Test
+    fun `a field with mostly distinct values is stored as a span`() {
+        val content = (0..<30_000).joinToString("") { i ->
+            "2026-10-01 08:00:00.000 [worker-${i % 7}] INFO  app.Logger$i - Message $i\n"
+        }
+        for (options in listOf(IndexOptions(parallelism = 1), IndexOptions(parallelism = 2, minRangeSize = 1))) {
+            val progress = IndexProgress()
+            val file = Files.writeString(dir.resolve("distinct-${options.parallelism}.log"), content)
+            runBlocking { ParsedLog.build(file, format, progress, options) }.use { log ->
+                assertEquals(ColumnType.SPAN, log.schema.fields[3].type)
+                assertEquals(ColumnType.DICT, log.schema.fields[1].type)
+                assertEquals(30_000, log.recordCount)
+                assertEquals(listOf("2026-10-01 08:00:00.000", "worker-4", "INFO", "app.Logger12345", "Message 12345"), log.rows()[12345])
+                val rows = runBlocking { FilterEngine(log).prepare(TextCondition("Logger", TextOp.EQUALS, "app.Logger2999?")).run() }.rows
+                assertEquals((29_990..<30_000).toList(), rows.toList())
+                assertEquals(Files.size(file), progress.bytesDone)
+            }
+        }
+    }
+
+    @Test
+    fun `a named MDC field shows only its value, also when the whole map was written there`() {
+        val mdc = PatternFormat("%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %-5p %c %X{breadcrumbId} - %m%n", ZoneOffset.UTC)
+        val content = """
+            2026-10-01 08:00:00.001 [main] INFO  a.B {breadcrumbId=ID-1, tenant=acme} - map with the key
+            2026-10-01 08:00:00.002 [main] INFO  a.B {tenant=acme, breadcrumbId=ID-2} - key not first
+            2026-10-01 08:00:00.003 [main] INFO  a.B {tenant=acme} - map without the key
+            2026-10-01 08:00:00.004 [main] INFO  a.B {} - empty map
+            2026-10-01 08:00:00.005 [main] INFO  a.B ID-9 - just the value
+            2026-10-01 08:00:00.006 [main] INFO  a.B  - no value
+        """.trimIndent() + "\n"
+        parse(content, mdc).use { log ->
+            assertEquals(listOf("ID-1", "ID-2", "", "", "ID-9", ""), log.rows().map { it[4] })
+            assertEquals(listOf("map with the key", "key not first"), log.rows().take(2).map { it[5] })
+        }
+    }
+
+    private val mdc = PatternFormat("%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %-5p %c %X - %m%n", ZoneOffset.UTC)
+
+    @Test
+    fun `an MDC map is split into a column per key`() {
+        val content = """
+            2026-10-01 08:00:00.001 [main] INFO  a.B {} - nothing
+            2026-10-01 08:00:00.002 [http-1] INFO  a.B {breadcrumbId=ID-1, tenant=acme} - both
+            2026-10-01 08:00:00.003 [http-2] INFO  a.B {tenant=globex} - one
+            java.lang.IllegalStateException: boom
+        """.trimIndent() + "\n"
+        for (options in listOf(IndexOptions(parallelism = 1), IndexOptions(parallelism = 3, minRangeSize = 1))) {
+            parse(content, mdc, options).use { log ->
+                val visible = log.schema.fields.filter { !it.hidden }.map { it.name }
+                assertEquals(listOf("Timestamp", "Thread", "Level", "Logger", "Message", "MDC[breadcrumbId]", "MDC[tenant]"), visible)
+                val names = log.schema.fields.map { it.name }
+                val rows = log.rows().map { row -> listOf(row[names.indexOf("MDC[breadcrumbId]")], row[names.indexOf("MDC[tenant]")]) }
+                assertEquals(listOf(listOf("", ""), listOf("ID-1", "acme"), listOf("", "globex")), rows)
+
+                fun matching(condition: io.github.rastislavpapp.logxy.core.filter.Condition) =
+                    runBlocking { FilterEngine(log).prepare(condition).run() }.rows.toList()
+                assertEquals(listOf(1, 2), matching(TextCondition("MDC[tenant]", TextOp.EQUALS, "*")))
+                assertEquals(listOf(2), matching(TextCondition("MDC[tenant]", TextOp.MATCHES, "^glo")))
+                assertEquals(listOf(0, 2), matching(TextCondition("MDC[breadcrumbId]", TextOp.NOT_EQUALS, "ID-1")))
+                assertEquals(listOf(1), matching(PresenceCondition("MDC[breadcrumbId]")))
+            }
+        }
+    }
+
+    @Test
+    fun `an MDC field stays one column if a value is no map or there are too many keys`() {
+        val notMap = "2026-10-01 08:00:00.001 [main] INFO  a.B {a=1} - map\n" +
+            "2026-10-01 08:00:00.002 [main] INFO  a.B plain - not a map\n"
+        parse(notMap, mdc).use { log -> assertEquals(listOf("MDC"), log.schema.fields.filter { it.name == "MDC" && !it.hidden }.map { it.name }) }
+        val manyKeys = (0..Columns.MAX_MAP_KEYS).joinToString("") { "2026-10-01 08:00:00.001 [main] INFO  a.B {key$it=1} - x\n" }
+        parse(manyKeys, mdc).use { log ->
+            assertEquals(6, log.schema.fields.size)
+            assertFalse(log.schema.fields.any { it.hidden })
         }
     }
 }

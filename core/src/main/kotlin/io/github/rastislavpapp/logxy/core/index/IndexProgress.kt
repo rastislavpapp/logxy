@@ -18,4 +18,8 @@ class IndexProgress {
     internal fun add(bytes: Long) {
         done.addAndGet(bytes)
     }
+
+    internal fun reset() {
+        done.set(0)
+    }
 }

@@ -71,7 +71,8 @@ class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
                 field.role == Role.SOURCE -> sampleWidest(column).coerceIn(6, 32)
                 field.role == Role.THREAD -> 18
                 field.role == Role.LOGGER -> 36
-                else -> 12
+                // E.g. MDC keys: short values (ids, numbers) leave more room for the message.
+                else -> sampleWidest(column).coerceIn(maxOf(4, field.name.length), 20)
             }
             // Themes differ in cell margins; without them, timestamps and levels would be cut.
             val margins = UIManager.getInsets("Table.cellMargins")

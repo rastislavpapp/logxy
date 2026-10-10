@@ -6,12 +6,13 @@ import io.github.rastislavpapp.logxy.core.filter.PresenceCondition
 import io.github.rastislavpapp.logxy.core.filter.TextCondition
 import io.github.rastislavpapp.logxy.core.filter.TextOp
 import io.github.rastislavpapp.logxy.core.index.IndexProgress
+import io.github.rastislavpapp.logxy.core.log.ColumnType
+import io.github.rastislavpapp.logxy.core.log.Field
 import io.github.rastislavpapp.logxy.core.log.Level
 import io.github.rastislavpapp.logxy.core.log.ParsedLog
 import io.github.rastislavpapp.logxy.core.log.Role
+import io.github.rastislavpapp.logxy.core.log.Schema
 import io.github.rastislavpapp.logxy.core.parse.PatternFormat
-import kotlinx.coroutines.runBlocking
-import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardOpenOption
@@ -19,6 +20,8 @@ import java.time.ZoneOffset
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlinx.coroutines.runBlocking
+import org.junit.jupiter.api.io.TempDir
 
 class MergedLogTest {
 
@@ -154,5 +157,27 @@ class MergedLogTest {
         block(this)
     } finally {
         parts.forEach { it.close() }
+    }
+
+    @Test
+    fun `a field stored as a span in one log matches the same field of another`() {
+        val dict = Schema(listOf(Field("Logger", ColumnType.DICT, Role.LOGGER), Field("Thread", ColumnType.DICT)))
+        val span = Schema(listOf(Field("Logger", ColumnType.SPAN, Role.LOGGER), Field("thread", ColumnType.SPAN)))
+        assertEquals(listOf("Source", "Logger", "Thread"), MergedSchema(listOf(dict, span)).schema.fields.map { it.name })
+    }
+
+    @Test
+    fun `MDC keys of several files share columns`() {
+        val mdc = PatternFormat("%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %-5p %c %X - %m%n", ZoneOffset.UTC)
+        val a = parse("mdc-a.log", mdc, "2026-10-01 10:00:01.000 [main] INFO  app.A {tenant=acme, user=1} - A1")
+        val b = parse("mdc-b.log", mdc, "2026-10-01 10:00:02.000 [main] INFO  app.B {tenant=globex} - B1")
+        merge(a, b).use { log ->
+            assertEquals(
+                listOf("Source", "Timestamp", "Thread", "Level", "Logger", "Message", "MDC[tenant]", "MDC[user]"),
+                log.schema.fields.filter { !it.hidden }.map { it.name },
+            )
+            assertEquals(listOf("acme", "globex"), log.column("MDC[tenant]"))
+            assertEquals(listOf(1), log.rows(TextCondition("MDC[tenant]", TextOp.EQUALS, "glob*")))
+        }
     }
 }

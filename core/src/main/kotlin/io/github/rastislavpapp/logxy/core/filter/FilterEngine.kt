@@ -6,6 +6,8 @@ import io.github.rastislavpapp.logxy.core.log.ColumnType
 import io.github.rastislavpapp.logxy.core.log.Columns
 import io.github.rastislavpapp.logxy.core.log.LevelMapping
 import io.github.rastislavpapp.logxy.core.log.LogData
+import io.github.rastislavpapp.logxy.core.log.MapKey
+import io.github.rastislavpapp.logxy.core.parse.MdcMap
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -281,6 +283,7 @@ private class Leaf(
                         (condition is PresenceCondition && !condition.present),
                 )
             }
+            snapshot.schema.fields[field].mapKey?.let { key -> return mapKeyLeaf(condition, key) }
             return when (condition) {
                 is PresenceCondition -> Leaf(condition, 0, false) { c, _ -> present(c, field, type) == condition.present }
                 is LevelCondition -> {
@@ -331,6 +334,32 @@ private class Leaf(
                     }
                 }
             }
+        }
+
+        /** A field read from an MDC map: like a span, but the value is found in the map's text. */
+        private fun mapKeyLeaf(condition: Condition, key: MapKey): Leaf = when (condition) {
+            is PresenceCondition -> Leaf(condition, 2, true) { c, reader -> (mapValue(c, reader!!, key) >= 0) == condition.present }
+            is TextCondition -> {
+                val matcher = TextMatcher(condition)
+                Leaf(condition, 2, true) { c, reader ->
+                    val value = mapValue(c, reader!!, key)
+                    if (value < 0) matcher.matchesAbsent else matcher.matches(reader.buffer, MdcMap.from(value), MdcMap.to(value))
+                }
+            }
+            is LevelCondition, is TimeCondition -> Leaf(condition, 0, false) { _, _ -> false }
+        }
+
+        /** The range of [key]'s value in the reader's buffer, packed as by [MdcMap]; -1 if the record has none. */
+        private fun mapValue(c: RecordCursor, reader: SpanReader, key: MapKey): Long {
+            val length = c.spanLength(key.field)
+            if (length == Columns.ABSENT_LENGTH) return -1
+            val from = c.start + c.spanStart(key.field)
+            val to = if (length == Columns.TO_RECORD_END) c.end else from + length
+            val offset = reader.load(from, to)
+            val end = minOf(offset + (to - from).toInt(), reader.loaded)
+            val entries = MdcMap.entries(reader.buffer, offset, end)
+            if (entries < 0) return -1
+            return MdcMap.valueOf(reader.buffer, MdcMap.from(entries), MdcMap.to(entries), key.prefix)
         }
 
         private fun present(c: RecordCursor, field: Int, type: ColumnType) = when (type) {
