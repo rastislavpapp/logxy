@@ -205,7 +205,7 @@ class MainFrame : JFrame("logxy") {
             .filter(::checkOpenable)
         if (openable.isEmpty()) return
         if (current == null && openable.size == 1) return openFile(openable.single())
-        when (openChoice(openable, current != null)) {
+        when (openChoice(openable, current?.paths)) {
             OpenChoice.MERGE_INTO_CURRENT -> mergeWithCurrent(current!!, openable, keepCurrent = false)
             OpenChoice.MERGE_WITH_CURRENT_IN_NEW -> mergeWithCurrent(current!!, openable, keepCurrent = true)
             OpenChoice.MERGE -> openMerged(openable)
@@ -271,15 +271,19 @@ class MainFrame : JFrame("logxy") {
 
     private enum class OpenChoice { MERGE_INTO_CURRENT, MERGE_WITH_CURRENT_IN_NEW, MERGE, TABS }
 
-    /** Asks how to open [paths], offering to merge them with the current tab if [hasCurrent]; null if cancelled. */
-    private fun openChoice(paths: List<Path>, hasCurrent: Boolean): OpenChoice? {
+    /**
+     * Asks how to open [paths], offering to merge them with the [current] tab's files if there is one;
+     * null if cancelled. Merges of more files than [MergedLog.MAX_PARTS] are not offered.
+     */
+    private fun openChoice(paths: List<Path>, current: List<Path>?): OpenChoice? {
         val several = paths.size > 1
+        val hasCurrent = current != null
         val choices = buildList {
-            if (hasCurrent) {
+            if (current != null && current.size + paths.size <= MergedLog.MAX_PARTS) {
                 add(OpenChoice.MERGE_INTO_CURRENT to "Merge into current tab")
                 add(OpenChoice.MERGE_WITH_CURRENT_IN_NEW to "Merge with current tab in a new tab")
             }
-            if (several) add(OpenChoice.MERGE to if (hasCurrent) "Merge only these files" else "Merge into one view")
+            if (several && paths.size <= MergedLog.MAX_PARTS) add(OpenChoice.MERGE to if (hasCurrent) "Merge only these files" else "Merge into one view")
             add(OpenChoice.TABS to if (several) "Open in separate tabs" else "Open in a new tab")
         }
         val group = ButtonGroup()
