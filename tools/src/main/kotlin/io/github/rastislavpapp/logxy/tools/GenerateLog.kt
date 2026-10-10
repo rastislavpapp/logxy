@@ -18,17 +18,25 @@ private val TIMESTAMP_SECONDS: DateTimeFormatter =
 
 /**
  * Writes log4j-style lines (`%d [%t] %-5p %c - %m%n`, or `%d [%t] %-5p %c %X - %m%n` with [mdc])
- * with occasional stack traces until [size] bytes.
+ * with occasional stack traces until [size] bytes. With [errors] or [warnings], exactly that many
+ * records of the level are written, at random places.
  */
-fun generateLog(file: Path, size: Long, seed: Long, mdc: Boolean = false) {
-    val generator = LogGenerator(SplittableRandom(seed), mdc)
+fun generateLog(file: Path, size: Long, seed: Long, mdc: Boolean = false, errors: Int? = null, warnings: Int? = null) {
+    val random = SplittableRandom(seed)
+    val placed = listOfNotNull(errors?.let { "ERROR" to it }, warnings?.let { "WARN" to it })
+    // Byte offsets at which a placed record is written next, sorted.
+    val places = placed.flatMap { (level, count) -> List(count) { random.nextLong(size) to level } }.sortedBy { it.first }
+    var nextPlace = 0
+    val generator = LogGenerator(random, mdc, excluded = placed.map { it.first }.toSet())
     val started = System.nanoTime()
     var written = 0L
     var lines = 0L
     Files.createDirectories(file.parent)
     BufferedOutputStream(Files.newOutputStream(file), 1 shl 20).use { out ->
         while (written < size) {
-            val record = generator.next().toByteArray()
+            val level = places.getOrNull(nextPlace)?.takeIf { it.first <= written }?.second
+            if (level != null) nextPlace++
+            val record = generator.next(level).toByteArray()
             out.write(record)
             written += record.size
             lines++
@@ -38,7 +46,12 @@ fun generateLog(file: Path, size: Long, seed: Long, mdc: Boolean = false) {
     println("Wrote ${formatByteSize(written)} ($lines records) to $file in %.1f s".format(seconds))
 }
 
-internal class LogGenerator(private val random: SplittableRandom, private val mdc: Boolean = false) {
+internal class LogGenerator(
+    private val random: SplittableRandom,
+    private val mdc: Boolean = false,
+    /** Levels never picked at random. */
+    private val excluded: Set<String> = emptySet(),
+) {
 
     private val threads = List(40) { i ->
         when (i % 4) {
@@ -69,9 +82,9 @@ internal class LogGenerator(private val random: SplittableRandom, private val md
     private var cachedSecond = -1L
     private var cachedSecondText = ""
 
-    fun next(): String {
+    fun next(forcedLevel: String? = null): String {
         timeMillis += random.nextInt(0, 6)
-        val level = pickLevel()
+        val level = forcedLevel ?: pickLevel()
         val sb = StringBuilder(200)
         val thread = random.nextInt(threads.size)
         sb.append(timestamp()).append(" [").append(threads[thread]).append("] ")
@@ -87,7 +100,7 @@ internal class LogGenerator(private val random: SplittableRandom, private val md
     private fun pickLevel(): String {
         var roll = random.nextInt(100)
         for ((level, weight) in LEVELS) {
-            if (roll < weight) return level
+            if (roll < weight) return if (level in excluded) "INFO" else level
             roll -= weight
         }
         return "INFO"

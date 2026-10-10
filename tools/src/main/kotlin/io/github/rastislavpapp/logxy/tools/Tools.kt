@@ -4,9 +4,10 @@ import java.nio.file.Path
 import kotlin.system.exitProcess
 
 private const val USAGE = """Usage:
-  generate <file> <size> [--seed N] [--mdc]
+  generate <file> <size> [--seed N] [--mdc] [--errors N] [--warnings N]
                                         write a log4j-style test log, size like 500m or 2g;
-                                        --mdc adds a log4j2 %X map such as {breadcrumbId=..., tenant=...}
+                                        --mdc adds a log4j2 %X map such as {breadcrumbId=..., tenant=...};
+                                        --errors and --warnings write exactly N such records, at random places
   benchmark <file> [--iterations N]     compare line-indexing strategies on a file
   parse <file> [--iterations N] [--pattern LAYOUT]
                                         measure parsing with the detected format, or the given pattern layout
@@ -29,7 +30,10 @@ fun main(args: Array<String>) {
 
     when (positional.firstOrNull()) {
         "generate" if positional.size == 3 ->
-            generateLog(Path.of(positional[1]), parseSize(positional[2]), option("seed")?.toLong() ?: 1L, flag("mdc"))
+            generateLog(
+                Path.of(positional[1]), parseSize(positional[2]), option("seed")?.toLong() ?: 1L, flag("mdc"),
+                option("errors")?.toInt(), option("warnings")?.toInt(),
+            )
         "benchmark" if positional.size == 2 ->
             benchmarkIndexing(Path.of(positional[1]), option("iterations")?.toInt() ?: 5)
         "parse" if positional.size == 2 ->
