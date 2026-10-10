@@ -67,7 +67,8 @@ val jpackage = tasks.register<Exec>("jpackage") {
         // jpackage only accepts numeric versions.
         "--app-version", version.toString().removeSuffix("-SNAPSHOT"),
         "--vendor", "Rastislav Papp",
-        "--description", "Fast desktop viewer for large log files",
+        // Windows shows this as the process name in Task Manager.
+        "--description", "logxy",
         "--icon", icon.path,
         "--input", jpackageInput.get().destinationDir.path,
         "--main-jar", "logxy.jar",
@@ -78,6 +79,11 @@ val jpackage = tasks.register<Exec>("jpackage") {
     // jpackage refuses to overwrite an existing image.
     val fs = objects.newInstance<Services>().fs
     doFirst { fs.delete { delete(image) } }
+    if (platform.startsWith("windows")) {
+        // By default the launcher restarts itself in a child process to put the app dir on PATH; logxy needs no DLLs from there.
+        val cfg = image.get().file("logxy/app/logxy.cfg").asFile
+        doLast { cfg.writeText(cfg.readText().replace("[Application]", "[Application]\nwin.norestart=true")) }
+    }
 }
 
 fun AbstractArchiveTask.nativeArchive(extension: String) {
