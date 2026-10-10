@@ -305,7 +305,8 @@ class LogSession(
             listener.problem(
                 "${current.path.fileName} does not match the parser “${current.format.name}”.",
                 e.message.orEmpty(),
-                "Choose another parser in the toolbar, or Raw text.",
+                if (isMerged) "Open the file on its own to choose another parser, or edit the parser."
+                else "Choose another parser in the toolbar, or Raw text.",
             )
             setStatus(SessionStatus(message = "Parser does not match"))
             return false
