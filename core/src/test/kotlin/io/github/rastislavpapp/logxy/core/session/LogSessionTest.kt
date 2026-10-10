@@ -103,9 +103,13 @@ class LogSessionTest {
             withContext(ui) {
                 val records = session.records!!
                 val fresh = if (records is MergedLog) MergedFilter(records) else FilterEngine(records as LogData)
-                expected = fresh.prepare(filter).run().rows.toList()
+                // run() frees the UI thread, so the session may read appended data meanwhile: only a result covering all of it counts.
+                val result = fresh.prepare(filter).run()
+                expected = result.rows.toList()
+                val size = files.sumOf { Files.size(it) }
                 val shown = session.shown?.let { rows -> List(rows.size) { rows[it] } }
-                done = session.status.size == files.sumOf { Files.size(it) } && shown == expected && session.status.shown == expected.size && !session.status.filtering
+                done = result.indexedSize == size && session.status.size == size && shown == expected &&
+                    session.status.shown == expected.size && !session.status.filtering
             }
         }
         expected
