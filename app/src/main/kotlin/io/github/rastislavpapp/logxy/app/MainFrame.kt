@@ -321,7 +321,7 @@ class MainFrame : JFrame("logxy") {
         } else {
             val status = tab.status
             val numbers = NumberFormat.getIntegerInstance()
-            val location = if (tab.isMerged) MergedLog.sourceNames(tab.paths).joinToString(", ") else tab.path.toString()
+            val location = if (tab.isMerged) tab.sourceNames.joinToString(", ") else tab.path.toString()
             statusBar.add(JLabel(location).apply { toolTipText = "<html>" + tab.description.replace("\n", "<br>") + "</html>" }, "growx, wmin 0")
             fun segment(component: JComponent) {
                 statusBar.add(JSeparator(SwingConstants.VERTICAL), "growy, gap 10 10")

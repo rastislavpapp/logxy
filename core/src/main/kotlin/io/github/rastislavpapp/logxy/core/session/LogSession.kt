@@ -113,11 +113,19 @@ class LogSession(
     }
 
     private var sources = paths.map { Source(it) }
+        set(value) {
+            field = value
+            sourceNames = MergedLog.sourceNames(paths)
+        }
     private var job: Job? = null
     private val settingsListener = { settingsChanged() }
 
     /** The files shown; files of a merge that turned out to have no timestamps are left out. */
     val paths: List<Path> get() = sources.map { it.path }
+
+    /** Short names of [paths], as the source field of a merge shows them. */
+    var sourceNames: List<String> = MergedLog.sourceNames(paths)
+        private set
 
     /** Several files merged into one view. */
     val isMerged get() = sources.size > 1

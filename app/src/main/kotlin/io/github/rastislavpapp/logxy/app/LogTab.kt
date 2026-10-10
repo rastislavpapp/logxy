@@ -2,7 +2,6 @@ package io.github.rastislavpapp.logxy.app
 
 import io.github.rastislavpapp.logxy.core.config.SavedFilter
 import io.github.rastislavpapp.logxy.core.log.Records
-import io.github.rastislavpapp.logxy.core.merge.MergedLog
 import io.github.rastislavpapp.logxy.core.parse.LogFormat
 import io.github.rastislavpapp.logxy.core.query.QueryException
 import io.github.rastislavpapp.logxy.core.session.FilteredRows
@@ -57,11 +56,14 @@ class LogTab(
 
     val isMerged get() = session.isMerged
 
+    /** Short names of [paths], as the merge's source column shows them. */
+    val sourceNames: List<String> get() = session.sourceNames
+
     /** Short name for the tab: the file name, or the merged files' names. */
     val title: String
         get() {
             if (!isMerged) return path.fileName.toString()
-            val names = MergedLog.sourceNames(paths)
+            val names = sourceNames
             val all = names.joinToString(" + ")
             return if (all.length <= MAX_TITLE_CHARS) all else "${names.first()} + ${names.size - 1} more"
         }
@@ -141,7 +143,7 @@ class LogTab(
 
     /** Merged files always use detected parsers: list them, read-only. */
     private fun showMergedParsers() {
-        val names = MergedLog.sourceNames(paths)
+        val names = sourceNames
         val items = buildList {
             names.zip(session.formats).forEach { (name, format) -> add(PopupItem("$name: ${format.name}", enabled = false)) }
             add(PopupItem("To choose a parser, open the file on its own", enabled = false, separatorBefore = true))
