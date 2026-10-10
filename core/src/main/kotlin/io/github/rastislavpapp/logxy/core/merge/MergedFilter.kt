@@ -35,12 +35,17 @@ class MergedFilter(private val log: MergedLog) : RecordFilter {
         val evaluations = log.parts.indices.map { part ->
             engines[part].prepare(partFilter(filter, part), log.firstRecordFrom(part, start))
         }
-        return PreparedFilter {
-            val results = coroutineScope { evaluations.map { async { it.run() } }.awaitAll() }
-            val rows = withContext(Dispatchers.Default) {
-                mergeSorted(results.mapIndexed { part, result -> toPositions(part, result.rows, merged[part]) })
+        val weights = merged.map { it.toDouble() / maxOf(1, merged.sum()) }
+        return object : PreparedFilter {
+            override suspend fun run(): FilterResult {
+                val results = coroutineScope { evaluations.map { async { it.run() } }.awaitAll() }
+                val rows = withContext(Dispatchers.Default) {
+                    mergeSorted(results.mapIndexed { part, result -> toPositions(part, result.rows, merged[part]) })
+                }
+                return FilterResult(rows, start, count, indexedSize)
             }
-            FilterResult(rows, start, count, indexedSize)
+
+            override val progress get() = evaluations.indices.sumOf { evaluations[it].progress * weights[it] }
         }
     }
 

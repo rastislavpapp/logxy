@@ -314,10 +314,14 @@ class MainFrame : JFrame("logxy") {
             status.message?.let { segment(JLabel(it).apply { foreground = UIManager.getColor("Label.disabledForeground") }) }
             if (status.records != null) {
                 val unit = status.unit + if (status.records == 1) "" else "s"
-                val text = if (status.shown == null) "${numbers.format(status.records)} $unit"
-                else "${numbers.format(status.shown)} of ${numbers.format(status.records)} $unit"
-                segment(JLabel(text, if (status.shown != null) Icons.filter else null, SwingConstants.LEADING).apply {
-                    toolTipText = if (status.shown != null) "A filter is active" else null
+                val text = when {
+                    status.filtering -> "Filtering ${numbers.format(status.records)} $unit…"
+                    status.shown == null -> "${numbers.format(status.records)} $unit"
+                    else -> "${numbers.format(status.shown)} of ${numbers.format(status.records)} $unit"
+                }
+                val filtered = status.filtering || status.shown != null
+                segment(JLabel(text, if (filtered) Icons.filter else null, SwingConstants.LEADING).apply {
+                    toolTipText = if (filtered) "A filter is active" else null
                 })
             }
             status.size?.let { segment(JLabel(io.github.rastislavpapp.logxy.core.formatByteSize(it))) }

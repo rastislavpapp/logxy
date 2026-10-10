@@ -83,6 +83,7 @@ class LogTab(
     private val parserButton = dropDownButton("Parser: how lines are split into columns", maxWidth = 280) { showParsers() }
     private val filterBar = FilterBar(::applyFilter)
     private var progressTimer: Timer? = null
+    private var filterTimer: Timer? = null
 
     private var model: LogTableModel? = null
     private var table: LogTable? = null
@@ -294,6 +295,15 @@ class LogTab(
         if (selectedIndex != null) scrollPane.selectRow(selectedIndex, scroll = false)
     }
 
+    /** Follows a slow filter's progress on the filter bar while [filtering]. */
+    private fun showFilterProgress(filtering: Boolean) {
+        if (filtering == (filterTimer != null)) return
+        filterTimer?.stop()
+        filterTimer = null
+        filterBar.showProgress(if (filtering) session.filterProgress else null)
+        if (filtering) filterTimer = Timer(50) { filterBar.showProgress(session.filterProgress) }.apply { start() }
+    }
+
     fun reloadFile() = session.reload()
 
     fun focusFilter() = filterBar.focusFilter()
@@ -303,6 +313,7 @@ class LogTab(
     /** Cancels any running work and releases the file. */
     fun dispose() {
         stopProgress()
+        showFilterProgress(false)
         session.dispose()
         scope.cancel()
     }
@@ -355,6 +366,9 @@ class LogTab(
             scrollPane?.follow = follow
         }
 
-        override fun statusChanged(status: SessionStatus) = onStatusChanged()
+        override fun statusChanged(status: SessionStatus) {
+            showFilterProgress(status.filtering)
+            onStatusChanged()
+        }
     }
 }

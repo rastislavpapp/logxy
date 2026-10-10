@@ -77,6 +77,28 @@ class FilterEngineTest {
     }
 
     @Test
+    fun `progress ends at one, also when conditions leave nothing to read or are cached`() {
+        parse(sample).use { log ->
+            val engine = FilterEngine(log)
+            val message = TextCondition("Message", TextOp.EQUALS, "*Slow*")
+            val filters = listOf(
+                message,
+                // No FATAL records: the message is never read.
+                Filter.And(listOf(LevelCondition.atLeast("Level", Level.FATAL), message)),
+                Filter.Or(listOf(message, TextCondition("Message", TextOp.EQUALS, "*Tick*"))),
+                TextCondition("Thread", TextOp.EQUALS, "main"),
+                message,
+            )
+            for (filter in filters) {
+                val evaluation = engine.prepare(filter)
+                assertEquals(0.0, evaluation.progress)
+                runBlocking { evaluation.run() }
+                assertEquals(1.0, evaluation.progress, "$filter")
+            }
+        }
+    }
+
+    @Test
     fun `combinations and absent values`() {
         parse(sample).use { log ->
             val engine = FilterEngine(log)

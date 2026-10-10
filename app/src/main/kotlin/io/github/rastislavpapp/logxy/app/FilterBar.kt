@@ -10,6 +10,7 @@ import io.github.rastislavpapp.logxy.core.query.QueryParser
 import io.github.rastislavpapp.logxy.core.query.QueryPrinter
 import net.miginfocom.swing.MigLayout
 import java.awt.CardLayout
+import java.awt.Graphics
 import java.awt.event.ActionEvent
 import java.awt.event.KeyEvent
 import javax.swing.AbstractAction
@@ -63,6 +64,7 @@ class FilterBar(private val onApply: () -> Unit) : JPanel(MigLayout("insets 6 8 
         foreground = UIManager.getColor("Component.error.focusedBorderColor")
         isVisible = false
     }
+    private var progress: Double? = null
 
     /** Level, mode and saved filters; placed by the window, outside this panel. */
     val controls: JComponent = JPanel(MigLayout("insets 0, gap 2, hidemode 3")).apply {
@@ -129,6 +131,21 @@ class FilterBar(private val onApply: () -> Unit) : JPanel(MigLayout("insets 6 8 
 
     /** The filter as edited; throws [QueryException] if the text has a syntax error. */
     fun query(): Query.Group = if (textMode.isSelected) QueryParser.parse(textArea.text) else editor.query()
+
+    /** Shows how far a slow filter got, from 0 to 1; null hides it. */
+    fun showProgress(fraction: Double?) {
+        if (fraction == progress) return
+        progress = fraction
+        repaint(0, height - PROGRESS_HEIGHT, width, PROGRESS_HEIGHT)
+    }
+
+    // Painted over the bottom inset and border rather than laid out, so showing it moves nothing.
+    override fun paint(g: Graphics) {
+        super.paint(g)
+        val fraction = progress ?: return
+        g.color = UIManager.getColor("Component.accentColor")
+        g.fillRect(0, height - PROGRESS_HEIGHT, (width * fraction.coerceIn(0.0, 1.0)).toInt(), PROGRESS_HEIGHT)
+    }
 
     fun showError(message: String?) {
         error.text = message
@@ -247,6 +264,7 @@ class FilterBar(private val onApply: () -> Unit) : JPanel(MigLayout("insets 6 8 
 
     private companion object {
         const val ALL = "All levels"
+        const val PROGRESS_HEIGHT = 3
         val LEVELS = Level.entries.filter { it != Level.UNKNOWN }
     }
 }

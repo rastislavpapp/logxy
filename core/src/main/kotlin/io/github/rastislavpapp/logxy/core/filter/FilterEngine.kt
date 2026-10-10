@@ -15,6 +15,7 @@ import kotlinx.coroutines.withContext
 import java.nio.ByteBuffer
 import java.nio.channels.FileChannel
 import java.util.Collections
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * The records from [from] on that a filter lets through, in order, out of the first [recordCount]
@@ -38,9 +39,12 @@ interface RecordFilter {
 }
 
 /** A filter ready to run; [run] may be called on any thread. */
-fun interface PreparedFilter {
+interface PreparedFilter {
     /** Computes the matching records; cancelling the calling coroutine stops it. */
     suspend fun run(): FilterResult
+
+    /** How far [run] got, from 0 to 1; readable from any thread. */
+    val progress: Double
 }
 
 /**
@@ -104,6 +108,22 @@ class FilterEngine(private val log: LogData, private val maxCacheBytes: Long = D
         private val from: Int,
     ) : PreparedFilter {
         private val words = (snapshot.count + 63) / 64
+        private val chunkCount = (words + CHUNK_WORDS - 1) / CHUNK_WORDS
+
+        // Progress counts chunks of the conditions that read the file, as the others take next to no time.
+        private val readsFile = leaves(root).any { it.readsFile }
+        private fun counted(leaf: Leaf) = leaf.readsFile || !readsFile
+        private val totalChunks = leaves(root).count(::counted).toLong() * chunkCount
+        private val doneChunks = AtomicLong()
+
+        override val progress get() = if (totalChunks == 0L) 1.0 else doneChunks.get().toDouble() / totalChunks
+
+        private fun leaves(node: Node): List<Leaf> = when (node) {
+            is AndNode -> node.parts.flatMap(::leaves)
+            is OrNode -> node.parts.flatMap(::leaves)
+            is NotNode -> leaves(node.part)
+            is Leaf -> listOf(node)
+        }
 
         /** The records evaluated: from [from] to the end of the snapshot. */
         private val all = LongArray(words).also { bits ->
@@ -153,8 +173,10 @@ class FilterEngine(private val log: LogData, private val maxCacheBytes: Long = D
                 if (need[w] != 0L) anyNeeded = true
             }
             var bits = entry?.bits
+            var computedChunks = 0
             if (anyNeeded) {
-                val computed = compute(leaf, need)
+                val (computed, chunks) = compute(leaf, need)
+                computedChunks = chunks
                 val oldCoverage = entry?.coverage
                 bits = LongArray(words) {
                     ((bits?.getOrElse(it) { 0L } ?: 0L) and (oldCoverage?.getOrElse(it) { 0L } ?: 0L)) or computed[it]
@@ -167,10 +189,13 @@ class FilterEngine(private val log: LogData, private val maxCacheBytes: Long = D
                 }
                 store(leaf.condition, Entry(bits, coverage))
             }
+            // Chunks without candidates (cached, or ruled out by other conditions) are done right away.
+            if (counted(leaf)) doneChunks.addAndGet((chunkCount - computedChunks).toLong())
             return LongArray(words) { (bits?.getOrElse(it) { 0L } ?: 0L) and candidates[it] }
         }
 
-        private suspend fun compute(leaf: Leaf, need: LongArray): LongArray = coroutineScope {
+        /** The bits of [leaf] for the [need]ed records, and how many chunks that took. */
+        private suspend fun compute(leaf: Leaf, need: LongArray): Pair<LongArray, Int> = coroutineScope {
             val out = LongArray(words)
             // Only chunks with records to test, e.g. just the appended ones while tailing.
             val chunks = (0..<words step CHUNK_WORDS).filter { first ->
@@ -190,9 +215,10 @@ class FilterEngine(private val log: LogData, private val maxCacheBytes: Long = D
                             mask = mask and (mask - 1)
                         }
                     }
+                    if (counted(leaf)) doneChunks.incrementAndGet()
                 }
             }.awaitAll()
-            out
+            out to chunks.size
         }
 
         private fun rows(bits: LongArray): IntArray {

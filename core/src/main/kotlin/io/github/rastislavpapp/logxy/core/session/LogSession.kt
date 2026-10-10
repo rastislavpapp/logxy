@@ -43,6 +43,8 @@ data class SessionStatus(
     val unit: String = "record",
     val live: Boolean = false,
     val following: Boolean = false,
+    /** A filter over all records is taking a while; [shown] is still the previous result. */
+    val filtering: Boolean = false,
     val indexMillis: Long? = null,
     val message: String? = null,
 )
@@ -148,6 +150,11 @@ class LogSession(
     // How much of the records the shown filter result covers: records, and bytes (the last record may grow without new ones).
     private var filteredRecords = 0
     private var filteredBytes = 0L
+    private var filtering = false
+    private var running: PreparedFilter? = null
+
+    /** How far the filter over all records got, from 0 to 1, while [SessionStatus.filtering]. */
+    val filterProgress: Double get() = running?.progress ?: 0.0
 
     private var indexMillis = 0L
     private var problem: String? = null
@@ -403,15 +410,27 @@ class LogSession(
     private fun runFilter(keepView: Boolean, evaluation: PreparedFilter?) {
         filterJob?.cancel()
         if (evaluation == null) {
-            if (shown != null || !keepView) {
+            if (shown != null || !keepView || filtering) {
+                filtering = false
+                running = null
                 shown = null
                 listener.rowsReplaced(null, keepView)
                 updateStatus()
             }
             return
         }
+        running = evaluation
         filterJob = scope.launch {
+            // Only slow filters say so; fast ones would just flash it.
+            val indicator = launch {
+                delay(FILTERING_INDICATOR_MILLIS)
+                filtering = true
+                updateStatus()
+            }
             val result = evaluation.run()
+            indicator.cancel()
+            filtering = false
+            running = null
             val rows = FilteredRows(result.rows)
             shown = rows
             filteredRecords = result.recordCount
@@ -466,6 +485,7 @@ class LogSession(
                 unit = if (records.isRaw) "line" else "record",
                 live = isLive,
                 following = follow,
+                filtering = filtering,
                 indexMillis = indexMillis,
                 message = problem,
             ),
@@ -476,6 +496,8 @@ class LogSession(
         filterJob?.cancel()
         filteredRecords = 0
         filteredBytes = 0L
+        filtering = false
+        running = null
         shown = null
         activeFilter = null
         for (source in sources) {
@@ -489,5 +511,6 @@ class LogSession(
     private companion object {
         const val LIVE_POLL_MILLIS = 500L
         const val STATIC_POLL_MILLIS = 2000L
+        const val FILTERING_INDICATOR_MILLIS = 200L
     }
 }
