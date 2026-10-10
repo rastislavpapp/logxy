@@ -105,7 +105,7 @@ class QueryEditor(private val onApply: () -> Unit) : JPanel(MigLayout("insets 0,
         isOpaque = false
     }
 
-    /** Shown at the end of the first line: the first condition, or the top group's header. */
+    /** Shown at the end of the top group's header. */
     var trailing: JComponent? = null
         set(value) {
             field?.let { it.parent?.remove(it) }
@@ -159,15 +159,12 @@ class QueryEditor(private val onApply: () -> Unit) : JPanel(MigLayout("insets 0,
         addActionListener { action(this) }
     }
 
-    private fun layoutConstraints(framed: Boolean) =
-        "insets ${if (framed) "0 10 8 10" else "0"}, wrap 1, gapy 2, fillx, hidemode 3"
-
     private fun changed() {
+        root.updateRemovable()
         trailing?.let { trailing ->
-            val (line, index) = root.firstLine()
-            if (trailing.parent !== line) {
+            if (trailing.parent !== root.header) {
                 trailing.parent?.remove(trailing)
-                line.add(trailing, "gapleft 8", index)
+                root.header.add(trailing, "cell 1 0")
             }
         }
         // The editor grows with its rows, so everything up to the window must lay out again.
@@ -181,27 +178,21 @@ class QueryEditor(private val onApply: () -> Unit) : JPanel(MigLayout("insets 0,
      * so the AND/OR combo sits where a fieldset's legend would.
      */
     private inner class GroupView(group: Query.Group, private val isRoot: Boolean) :
-        // hidemode 3: a hidden header takes no space at all.
-        JPanel(MigLayout(layoutConstraints(framed = !isRoot), "[grow, fill]")) {
-
-        private var framed = !isRoot
+        JPanel(MigLayout("insets 0 10 8 10, wrap 1, gapy 2, fillx", "[grow, fill]")) {
 
         private val match = JComboBox(Match.entries.toTypedArray()).apply {
             selectedItem = Match.of(group)
-            addActionListener {
-                updateHeader()
-                changed()
-            }
+            addActionListener { changed() }
             applyOnEnter(this, onApply)
         }
-        private val header = JPanel(MigLayout("insets 0", "[]push[][]")).apply {
+        val header = JPanel(MigLayout("insets 0", "[]push[]")).apply {
             isOpaque = false
             add(match)
             if (!isRoot) add(smallButton("", "Remove this group", Icons.closeSmall) {
                 val counted = query(includeEmpty = false) != null
                 removeFromParent(this@GroupView)
                 if (counted) onApply()
-            })
+            }, "cell 1 0")
         }
 
         // Sits right after the last item, where new ones are added.
@@ -225,25 +216,16 @@ class QueryEditor(private val onApply: () -> Unit) : JPanel(MigLayout("insets 0,
                     is Query.Group -> items.add(GroupView(item, isRoot = false))
                 }
             }
-            updateHeader()
-        }
-
-        // The top level shows how it combines its items, and its frame, only once there is something to combine.
-        private fun updateHeader() {
-            header.isVisible = !isRoot || items.componentCount > 1 || match.selectedItem != Match.ALL
-            if (framed != header.isVisible) {
-                framed = header.isVisible
-                (layout as MigLayout).layoutConstraints = layoutConstraints(framed)
-            }
         }
 
         override fun paintComponent(g: Graphics) {
             super.paintComponent(g)
-            if (!framed) return
             val g2 = g.create() as Graphics2D
             try {
                 g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
                 g2.color = UIManager.getColor("Component.borderColor")
+                // Strokes are centred on the path: without the half pixel, the left edge at x = 0 is half outside and fades or vanishes when scaled.
+                g2.translate(0.5, 0.5)
                 val top = header.y + header.height / 2
                 val right = width - 1
                 val bottom = height - 1
@@ -260,7 +242,7 @@ class QueryEditor(private val onApply: () -> Unit) : JPanel(MigLayout("insets 0,
                 })
                 // The top edge, broken where the header's components sit.
                 var x = arc
-                header.components.filter { it.isVisible }.sortedBy { it.x }.forEach { c ->
+                header.components.sortedBy { it.x }.forEach { c ->
                     val gapStart = header.x + c.x - 4
                     if (gapStart > x) g2.drawLine(x, top, gapStart, top)
                     x = maxOf(x, header.x + c.x + c.width + 4)
@@ -273,14 +255,10 @@ class QueryEditor(private val onApply: () -> Unit) : JPanel(MigLayout("insets 0,
 
         fun isEmpty() = items.componentCount == 0
 
-        /** The panel of the first line and where to add to its end; a nested group's × stays last. */
-        fun firstLine(): Pair<JComponent, Int> {
-            if (header.isVisible) return header to (if (isRoot) -1 else 1)
-            return when (val first = items.components.firstOrNull()) {
-                is GroupView -> first.firstLine()
-                is RuleView -> first to -1
-                else -> header to -1
-            }
+        // The top level keeps one condition, so its only one has no ×; hidden still takes its space, keeping rows aligned.
+        fun updateRemovable() {
+            val single = isRoot && items.componentCount == 1
+            items.components.forEach { (it as? RuleView)?.remove?.isVisible = !single }
         }
 
         fun addItem(group: Boolean) {
@@ -291,7 +269,6 @@ class QueryEditor(private val onApply: () -> Unit) : JPanel(MigLayout("insets 0,
                 items.add(rule)
                 rule.focusValue()
             }
-            updateHeader()
             changed()
         }
 
@@ -301,7 +278,6 @@ class QueryEditor(private val onApply: () -> Unit) : JPanel(MigLayout("insets 0,
             val query = rule.rule(includeEmpty = true) ?: return
             items.remove(rule)
             items.add(GroupView(Query.Group(all = false, items = listOf(query)), isRoot = false), index)
-            updateHeader()
             changed()
         }
 
@@ -312,7 +288,6 @@ class QueryEditor(private val onApply: () -> Unit) : JPanel(MigLayout("insets 0,
                 if (!isRoot) return removeFromParent(this)
                 items.add(RuleView(defaultRule(), this))
             }
-            updateHeader()
             changed()
         }
 
@@ -348,6 +323,12 @@ class QueryEditor(private val onApply: () -> Unit) : JPanel(MigLayout("insets 0,
         private val level = JComboBox(Level.entries.filter { it != Level.UNKNOWN }.toTypedArray())
         private val case = accentToggle("Aa").apply { toolTipText = "Match exact case" }
         private var valueSlot: JComponent = text
+        val remove = smallButton("", "Remove this condition", Icons.closeSmall) {
+            // Only a condition with a value filtered anything.
+            val counted = rule(includeEmpty = false) != null
+            group.removeItem(this)
+            if (counted) onApply()
+        }
 
         init {
             isOpaque = false
@@ -368,12 +349,7 @@ class QueryEditor(private val onApply: () -> Unit) : JPanel(MigLayout("insets 0,
             add(text, "wmin 60")
             add(case)
             add(smallButton("( )", "Create a group from this condition") { group.wrapInGroup(this) })
-            add(smallButton("", "Remove this condition", Icons.closeSmall) {
-                // Only a condition with a value filtered anything.
-                val counted = rule(includeEmpty = false) != null
-                group.removeItem(this)
-                if (counted) onApply()
-            })
+            add(remove)
             load(rule)
         }
 

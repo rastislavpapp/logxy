@@ -97,12 +97,11 @@ class LogTab(
     /** What the status bar shows for this file. */
     val status: SessionStatus get() = session.status
 
-    // The controls live outside the tab, and are not updated with it while another tab shows its own.
+    // The file controls live outside the tab, and are not updated with it while another tab shows its own.
     override fun updateUI() {
         super.updateUI()
         @Suppress("SENSELESS_COMPARISON")
-        if (filterBar == null) return
-        listOf(fileControls, filterControls).filter { it.parent == null }.forEach { SwingUtilities.updateComponentTreeUI(it) }
+        if (fileControls != null && fileControls.parent == null) SwingUtilities.updateComponentTreeUI(fileControls)
     }
 
     /** Reload, Follow and the parser; placed by the window, outside this tab. */
@@ -112,9 +111,6 @@ class LogTab(
         add(followButton, "gapright 6")
         add(parserButton, "wmin 120")
     }
-
-    /** The filter's level, mode and saved filters; placed by the window, outside this tab. */
-    val filterControls: JComponent get() = filterBar.controls
 
     init {
         add(filterBar, BorderLayout.NORTH)
@@ -181,7 +177,6 @@ class LogTab(
 
     private fun setFilterVisible(visible: Boolean) {
         filterBar.isVisible = visible
-        filterControls.isVisible = visible
     }
 
     private fun showProgress(fraction: () -> Double) {

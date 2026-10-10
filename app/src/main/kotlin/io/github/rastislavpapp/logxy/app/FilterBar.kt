@@ -16,7 +16,6 @@ import java.awt.event.KeyEvent
 import javax.swing.AbstractAction
 import javax.swing.Icon
 import javax.swing.JButton
-import javax.swing.JComponent
 import javax.swing.JLabel
 import javax.swing.JOptionPane
 import javax.swing.JPanel
@@ -26,11 +25,11 @@ import javax.swing.SwingUtilities
 import javax.swing.UIManager
 
 /**
- * The filter of one tab. The panel shows the filter itself (visual or as text) with Apply and Clear;
- * [controls] holds the minimum level, the mode toggle and saved filters, shown in the window's title bar.
+ * The filter of one tab: the minimum level, the filter itself (visual or as text), Apply, the mode toggle,
+ * saved filters and Clear.
  * Enter in any input applies. [onApply] is called to (re)apply; [minimumLevel] and [query] give the state.
  */
-class FilterBar(private val onApply: () -> Unit) : JPanel(MigLayout("insets 6 8 6 8, fillx, gapy 3, hidemode 3", "[grow, fill][]")) {
+class FilterBar(private val onApply: () -> Unit) : JPanel(MigLayout("insets 6 8 6 8, fillx, gapy 3, hidemode 3", "[grow, fill]0[]")) {
 
     private val levelButton = dropDownButton(
         "Show only records of this level or more severe",
@@ -50,10 +49,13 @@ class FilterBar(private val onApply: () -> Unit) : JPanel(MigLayout("insets 6 8 
         isFocusable = false
         addActionListener { switchMode(isSelected) }
     }
-    private val actions = JPanel(MigLayout("insets 0, gap 2")).apply {
+    private val actions = JPanel(MigLayout("insets 0, gap 2, hidemode 3")).apply {
         isOpaque = false
+        add(levelButton, "gapright 6")
         add(toolBarButton(Icons.run, "Apply the filter (Enter, or Ctrl+Enter in Advanced)") { onApply() })
-        add(toolBarButton(Icons.clear, "Remove all conditions (Esc)") { clear() })
+        add(textMode)
+        add(toolBarButton(DropDownIcon(Icons.star), "Saved filters") { showSavedMenu(it) })
+        add(toolBarButton(Icons.closeSmall, "Remove all conditions (Esc)") { clear() })
     }
 
     /** Holds [actions] beside the text; in Basic they sit at the end of the editor's first line instead. */
@@ -65,14 +67,6 @@ class FilterBar(private val onApply: () -> Unit) : JPanel(MigLayout("insets 6 8 
         isVisible = false
     }
     private var progress: Double? = null
-
-    /** Level, mode and saved filters; placed by the window, outside this panel. */
-    val controls: JComponent = JPanel(MigLayout("insets 0, gap 2, hidemode 3")).apply {
-        isOpaque = false
-        add(levelButton, "gapright 6")
-        add(textMode)
-        add(toolBarButton(DropDownIcon(Icons.star), "Saved filters") { showSavedMenu(it) })
-    }
 
     init {
         putClientProperty("FlatLaf.style", "border: 0,0,1,0,\$Component.borderColor")
@@ -106,6 +100,8 @@ class FilterBar(private val onApply: () -> Unit) : JPanel(MigLayout("insets 6 8 
             actionsColumn.remove(actions)
             editor.trailing = actions
         }
+        // Hidden when empty, so its gap does not widen the space right of the editor.
+        actionsColumn.isVisible = text
     }
 
     private fun toolBarButton(icon: Icon, tooltip: String, action: (JButton) -> Unit) = JButton(icon).apply {

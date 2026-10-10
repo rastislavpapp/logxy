@@ -56,8 +56,7 @@ class MainFrame : JFrame("logxy") {
     private val cards = CardLayout()
     private val center = JPanel(cards)
     private val statusBar = JPanel(MigLayout("insets 3 8 3 8, fill, gap 0, hidemode 3", "[grow][]"))
-    private val fileSlot = Slot(shrinks = true)
-    private val filterSlot = Slot(shrinks = false)
+    private val fileSlot = Slot()
     private var lastDirectory: File? = AppState[AppState.LAST_DIRECTORY]?.let(::File)
 
     init {
@@ -82,7 +81,6 @@ class MainFrame : JFrame("logxy") {
         tabs.putClientProperty(FlatClientProperties.TABBED_PANE_TAB_CLOSE_CALLBACK, IntConsumer { closeTab(it) })
         tabs.addChangeListener {
             fileSlot.show(selectedTab()?.fileControls)
-            filterSlot.show(selectedTab()?.filterControls)
             updateStatus()
         }
         rootPane.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(KeyStroke.getKeyStroke(KeyEvent.VK_F, shortcut), "logxyEditFilter")
@@ -146,7 +144,7 @@ class MainFrame : JFrame("logxy") {
             mnemonic = KeyEvent.VK_H
             add(menuItem("About logxy", Icons.logo(16), null) { showAbout(this@MainFrame) })
         })
-        // The selected tab's controls; the space between them drags the window.
+        // The selected tab's controls; the space after them drags the window.
         add(Box.createHorizontalStrut(12))
         add(fileSlot)
         add(object : JPanel() {
@@ -158,7 +156,6 @@ class MainFrame : JFrame("logxy") {
             isOpaque = false
             putClientProperty(FlatClientProperties.COMPONENT_TITLE_BAR_CAPTION, true)
         })
-        add(filterSlot)
     }
 
     private fun themeMenu() = JMenu("Theme").apply {
@@ -376,15 +373,14 @@ class MainFrame : JFrame("logxy") {
         }
     }
 
-    /** A place in the menu bar for one tab's controls at a time; when space is short, only one that [shrinks] gives way. */
-    private class Slot(private val shrinks: Boolean) : JPanel(BorderLayout()) {
+    /** A place in the menu bar for one tab's controls at a time; it gives way when space is short. */
+    private class Slot : JPanel(BorderLayout()) {
         init {
             isOpaque = false
         }
 
         // The menu bar's box layout would otherwise stretch or squeeze it.
         override fun getMaximumSize(): Dimension = preferredSize
-        override fun getMinimumSize(): Dimension = if (shrinks) super.getMinimumSize() else preferredSize
 
         fun show(controls: JComponent?) {
             removeAll()
