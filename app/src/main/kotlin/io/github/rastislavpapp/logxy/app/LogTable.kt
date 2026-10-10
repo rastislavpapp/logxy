@@ -45,11 +45,24 @@ class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
         if (logModel != null) updateLook()
     }
 
+    // Columns are created again when the model's columns change, e.g. some are hidden.
+    override fun createDefaultColumnsFromModel() {
+        super.createDefaultColumnsFromModel()
+        // Also called from JTable's constructor, before the model is set.
+        @Suppress("SENSELESS_COMPARISON")
+        if (logModel != null) setUpColumns()
+    }
+
     private fun updateLook() {
         val base = UIManager.getFont("monospaced.font") ?: Font(Font.MONOSPACED, Font.PLAIN, UIManager.getFont("Table.font").size)
         // A plain Font, not a FontUIResource, so a theme switch does not replace it.
         font = Font(base.name, base.style, base.size)
         rowHeight = getFontMetrics(font).height + 4
+        setUpColumns()
+    }
+
+    /** Renderers and widths by what each column shows. */
+    private fun setUpColumns() {
         val charWidth = getFontMetrics(font).charWidth('0')
 
         for (column in 0..<columnModel.columnCount) {

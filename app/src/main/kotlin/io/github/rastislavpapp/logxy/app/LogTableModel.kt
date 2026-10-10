@@ -15,16 +15,30 @@ private const val CACHE_SIZE = 1024
 
 /**
  * Rows of [Records], all records or only those a filter let through. Raw logs get a line number
- * column; for parsed logs the message column is moved last, so it takes the remaining width.
+ * column; for parsed logs the message column is moved last, so it takes the remaining width. Fields
+ * named in [hiddenColumns] are left out.
  */
 class LogTableModel(val records: Records) : AbstractTableModel(), RowWindow {
 
     val showsLineNumbers = records.isRaw
 
+    /** Fields that can be shown as columns, in column order. */
+    val columnChoices: List<Field> = records.schema.fields
+        .filter { !it.hidden }
+        .sortedBy { it.role == Role.MESSAGE }
+
+    var hiddenColumns: Set<String> = emptySet()
+        set(value) {
+            if (field == value) return
+            field = value
+            columnFields = fieldsShown()
+            fireTableStructureChanged()
+        }
+
     /** Field index of each column after the line number column. */
-    private val columnFields: List<Int> = records.schema.fields.indices
-        .filter { !records.schema.fields[it].hidden }
-        .sortedBy { records.schema.fields[it].role == Role.MESSAGE }
+    private var columnFields: List<Int> = fieldsShown()
+
+    private fun fieldsShown() = columnChoices.filter { it.name !in hiddenColumns }.map { records.schema.fields.indexOf(it) }
 
     // Direct-mapped cache: repaints ask for the same few visible rows over and over.
     private val cachedRows = IntArray(CACHE_SIZE) { -1 }

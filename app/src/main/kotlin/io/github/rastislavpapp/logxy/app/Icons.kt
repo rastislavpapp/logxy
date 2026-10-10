@@ -38,6 +38,7 @@ object Icons {
     val run get() = get("run/run")
     val clear get() = get("general/delete")
     val advanced get() = get("general/edit")
+    val columns get() = get("nodes/dataColumn")
 }
 
 /** [icon] with a small dot in its lower right corner, e.g. to mark a file that is being written to. */

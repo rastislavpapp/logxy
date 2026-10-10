@@ -17,9 +17,12 @@ import net.miginfocom.swing.MigLayout
 import java.awt.BorderLayout
 import java.nio.file.Path
 import javax.swing.JButton
+import javax.swing.JCheckBoxMenuItem
 import javax.swing.JComponent
 import javax.swing.JLabel
+import javax.swing.JMenuItem
 import javax.swing.JPanel
+import javax.swing.JPopupMenu
 import javax.swing.JProgressBar
 import javax.swing.JScrollPane
 import javax.swing.JSplitPane
@@ -86,6 +89,16 @@ class LogTab(
         addActionListener { session.reload() }
     }
     private val parserButton = dropDownButton("Parser: how lines are split into columns", maxWidth = 280) { showParsers() }
+    private val columnsButton = JButton(DropDownIcon(Icons.columns)).apply {
+        toolTipText = "Columns to show"
+        putClientProperty("JButton.buttonType", "toolBarButton")
+        isFocusable = false
+        isEnabled = false
+        addActionListener { showColumns() }
+    }
+
+    /** Names of the columns the user hid; kept when the file is read again. */
+    private var hiddenColumns = emptySet<String>()
     private val filterBar = FilterBar(::applyFilter)
     private var progressTimer: Timer? = null
     private var filterTimer: Timer? = null
@@ -110,6 +123,7 @@ class LogTab(
         add(reloadButton)
         add(followButton, "gapright 6")
         add(parserButton, "wmin 120")
+        add(columnsButton)
     }
 
     init {
@@ -146,6 +160,40 @@ class LogTab(
             add(PopupItem("Edit Parsers", Icons.settings) { editParsers(session.format) })
         }
         showPopupList(parserButton, items)
+    }
+
+    /** Checks for the columns to show; the menu stays open while they are toggled. */
+    private fun showColumns() {
+        val model = model ?: return
+        val popup = JPopupMenu()
+        val boxes = model.columnChoices.map { field ->
+            JCheckBoxMenuItem(field.name, field.name !in hiddenColumns).apply {
+                putClientProperty("CheckBoxMenuItem.doNotCloseOnMouseClick", true)
+            }
+        }
+        // At least one column stays: the last checked one cannot be unchecked.
+        fun enableBoxes() {
+            val single = boxes.count { it.isSelected } == 1
+            boxes.forEach { it.isEnabled = !single || !it.isSelected }
+        }
+        fun update() {
+            hiddenColumns = boxes.filter { !it.isSelected }.map { it.text }.toSet()
+            model.hiddenColumns = hiddenColumns
+            enableBoxes()
+        }
+        boxes.forEach { box ->
+            box.addActionListener { update() }
+            popup.add(box)
+        }
+        popup.addSeparator()
+        popup.add(JMenuItem("Show All").apply {
+            addActionListener {
+                boxes.forEach { it.isSelected = true }
+                update()
+            }
+        })
+        enableBoxes()
+        popup.show(columnsButton, 0, columnsButton.height)
     }
 
     private fun autoLabel() = if (session.formatDetected) "Auto: ${session.format.name}" else "Auto-detect"
@@ -207,7 +255,10 @@ class LogTab(
 
     private fun showTable(records: Records) {
         val model = LogTableModel(records)
+        // Columns hidden before stay hidden, unless that would hide them all (the file changed meanwhile).
+        model.hiddenColumns = hiddenColumns.takeIf { hidden -> model.columnChoices.any { it.name !in hidden } }.orEmpty()
         val table = LogTable(model)
+        columnsButton.isEnabled = true
         // The table has its own transfer handler (for copy), which would otherwise swallow file drops.
         table.transferHandler = FileDropHandler(openFiles, table.transferHandler)
         val scrollPane = VirtualScrollPane(table, model)
@@ -324,6 +375,7 @@ class LogTab(
 
     private inner class Listener : SessionListener {
         override fun indexing(fraction: () -> Double) {
+            columnsButton.isEnabled = false
             model = null
             table = null
             scrollPane = null
