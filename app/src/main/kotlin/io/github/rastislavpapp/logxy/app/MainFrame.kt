@@ -23,7 +23,6 @@ import javax.swing.Box
 import javax.swing.ButtonGroup
 import javax.swing.Icon
 import javax.swing.JButton
-import javax.swing.JCheckBox
 import javax.swing.JCheckBoxMenuItem
 import javax.swing.JComponent
 import javax.swing.JDialog
@@ -35,6 +34,7 @@ import javax.swing.JMenuBar
 import javax.swing.JMenuItem
 import javax.swing.JOptionPane
 import javax.swing.JPanel
+import javax.swing.JRadioButton
 import javax.swing.JRadioButtonMenuItem
 import javax.swing.JSeparator
 import javax.swing.JTabbedPane
@@ -129,7 +129,6 @@ class MainFrame : JFrame("logxy") {
             mnemonic = KeyEvent.VK_S
             add(menuItem("Parsers", Icons.settings, null) { showParsers() })
             add(menuItem("Log Level Mapping", Icons.levels, null) { LogLevelMappingDialog(this@MainFrame).isVisible = true })
-            add(severalFilesMenu())
         })
         add(JMenu("View").apply {
             mnemonic = KeyEvent.VK_V
@@ -189,16 +188,24 @@ class MainFrame : JFrame("logxy") {
         openFiles(chooser.selectedFiles.map { it.toPath() })
     }
 
-    /** Opens [paths]: one in a tab; several merged or in tabs of their own, as the user prefers. */
+    /**
+     * Opens [paths]: a single file into a tab if none is open; otherwise the user chooses between merging
+     * them, with the current tab or into a new one, and tabs of their own.
+     */
     fun openFiles(paths: List<Path>) {
-        val openable = paths.map { it.toAbsolutePath().normalize() }.distinct().filter(::checkOpenable)
-        when {
-            openable.size == 1 -> openFile(openable.single())
-            openable.size > 1 -> when (severalFilesChoice(openable.size)) {
-                SeveralFiles.MERGE -> openMerged(openable)
-                SeveralFiles.TABS -> openable.forEach(::openFile)
-                null -> Unit
-            }
+        val current = selectedTab()
+        val openable = paths.map { it.toAbsolutePath().normalize() }.distinct()
+            // Files the current tab already shows have nothing to add.
+            .filter { current == null || it !in current.paths }
+            .filter(::checkOpenable)
+        if (openable.isEmpty()) return
+        if (current == null && openable.size == 1) return openFile(openable.single())
+        when (openChoice(openable, current != null)) {
+            OpenChoice.MERGE_INTO_CURRENT -> mergeWithCurrent(current!!, openable, keepCurrent = false)
+            OpenChoice.MERGE_WITH_CURRENT_IN_NEW -> mergeWithCurrent(current!!, openable, keepCurrent = true)
+            OpenChoice.MERGE -> openMerged(openable)
+            OpenChoice.TABS -> openable.forEach(::openFile)
+            null -> Unit
         }
     }
 
@@ -214,6 +221,21 @@ class MainFrame : JFrame("logxy") {
     private fun openMerged(paths: List<Path>) {
         if (selectTab(paths)) return
         addTab(LogTab(paths, ::openFiles, ::openEach) { updateStatus() })
+    }
+
+    /**
+     * Merges [tab]'s files with [paths] under its filter: in a new tab next to it if [keepCurrent],
+     * else in its place.
+     */
+    private fun mergeWithCurrent(tab: LogTab, paths: List<Path>, keepCurrent: Boolean) {
+        val merged = tab.paths + paths
+        if (selectTab(merged)) return
+        val index = tabs.indexOfComponent(tab)
+        val mergedTab = LogTab(merged, ::openFiles, ::openEach, tab.filter) { updateStatus() }
+        val at = if (keepCurrent) index + 1 else index
+        tabs.insertTab(mergedTab.title, Icons.merged, mergedTab, mergedTab.description, at)
+        tabs.selectedIndex = at
+        if (!keepCurrent) closeTab(index + 1)
     }
 
     /** Selects the tab showing exactly [paths], if there is one. */
@@ -242,43 +264,28 @@ class MainFrame : JFrame("logxy") {
         return problem == null
     }
 
-    private enum class SeveralFiles(val key: String, val label: String) {
-        MERGE("merge", "Merge into One View"),
-        TABS("tabs", "Open in Separate Tabs"),
-    }
+    private enum class OpenChoice { MERGE_INTO_CURRENT, MERGE_WITH_CURRENT_IN_NEW, MERGE, TABS }
 
-    /** The remembered choice for opening several files, or the user's answer; null if cancelled. */
-    private fun severalFilesChoice(count: Int): SeveralFiles? {
-        SeveralFiles.entries.firstOrNull { it.key == AppState[AppState.SEVERAL_FILES] }?.let { return it }
-        val remember = JCheckBox("Don't ask again (Settings → Opening Several Files changes it)")
-        val options = SeveralFiles.entries.map { it.label }.toTypedArray()
-        val answer = JOptionPane.showOptionDialog(
-            this, arrayOf("Open $count files:", remember), "Open Files",
-            JOptionPane.DEFAULT_OPTION, JOptionPane.QUESTION_MESSAGE, null, options, options[0],
-        )
-        val choice = SeveralFiles.entries.getOrNull(answer) ?: return null
-        if (remember.isSelected) AppState[AppState.SEVERAL_FILES] = choice.key
-        return choice
-    }
-
-    /** Settings → Opening Several Files: ask, merge, or separate tabs. */
-    private fun severalFilesMenu() = JMenu("Opening Several Files").apply {
-        val group = ButtonGroup()
-        fun item(label: String, key: String?) = JRadioButtonMenuItem(label).apply {
-            group.add(this)
-            addActionListener { AppState[AppState.SEVERAL_FILES] = key }
-        }
-        val items = listOf(item("Ask Each Time", null) to null) + SeveralFiles.entries.map { item(it.label, it.key) to it.key }
-        items.forEach { (item, _) -> add(item) }
-        // The dialog's "Don't ask again" changes the setting too.
-        addMenuListener(object : javax.swing.event.MenuListener {
-            override fun menuSelected(e: javax.swing.event.MenuEvent) {
-                val current = AppState[AppState.SEVERAL_FILES]
-                items.forEach { (item, key) -> item.isSelected = key == current || (key == null && SeveralFiles.entries.none { it.key == current }) }
+    /** Asks how to open [paths], offering to merge them with the current tab if [hasCurrent]; null if cancelled. */
+    private fun openChoice(paths: List<Path>, hasCurrent: Boolean): OpenChoice? {
+        val several = paths.size > 1
+        val choices = buildList {
+            if (hasCurrent) {
+                add(OpenChoice.MERGE_INTO_CURRENT to "Merge into current tab")
+                add(OpenChoice.MERGE_WITH_CURRENT_IN_NEW to "Merge with current tab in a new tab")
             }
-            override fun menuDeselected(e: javax.swing.event.MenuEvent) = Unit
-            override fun menuCanceled(e: javax.swing.event.MenuEvent) = Unit
-        })
+            if (several) add(OpenChoice.MERGE to if (hasCurrent) "Merge only these files" else "Merge into one view")
+            add(OpenChoice.TABS to if (several) "Open in separate tabs" else "Open in a new tab")
+        }
+        val group = ButtonGroup()
+        val radios = choices.mapIndexed { i, (_, label) -> JRadioButton(label, i == 0).also(group::add) }
+        val options = JPanel(MigLayout("insets 8 0 0 0, wrap 1, gapy 2")).apply { radios.forEach(::add) }
+        val message = if (several) "Open ${paths.size} files:" else "Open ${paths.single().fileName}:"
+        val answer = JOptionPane.showConfirmDialog(
+            this, arrayOf(message, options), "Open Files", JOptionPane.OK_CANCEL_OPTION, JOptionPane.QUESTION_MESSAGE,
+        )
+        if (answer != JOptionPane.OK_OPTION) return null
+        return choices[radios.indexOfFirst { it.isSelected }].first
     }
 
     private fun closeTab(index: Int) {

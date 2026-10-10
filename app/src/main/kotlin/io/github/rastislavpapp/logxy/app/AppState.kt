@@ -33,7 +33,4 @@ object AppState {
     const val LAST_DIRECTORY = "lastDirectory"
     const val DETAIL_DIVIDER = "detail.divider"
     const val FILTER_MODE = "filter.mode"
-
-    /** What opening several files at once does: `merge`, `tabs`, or ask (unset). */
-    const val SEVERAL_FILES = "open.severalFiles"
 }

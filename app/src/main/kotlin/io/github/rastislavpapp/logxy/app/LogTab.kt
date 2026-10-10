@@ -1,5 +1,6 @@
 package io.github.rastislavpapp.logxy.app
 
+import io.github.rastislavpapp.logxy.core.config.SavedFilter
 import io.github.rastislavpapp.logxy.core.log.Records
 import io.github.rastislavpapp.logxy.core.merge.MergedLog
 import io.github.rastislavpapp.logxy.core.parse.LogFormat
@@ -34,12 +35,14 @@ private const val MAX_TITLE_CHARS = 40
 
 /**
  * One open file, or several merged: shows the records of its [LogSession], with the filter bar and the
- * detail pane. [openFiles] opens dropped files; [openEach] opens files in tabs of their own.
+ * detail pane. [openFiles] opens dropped files; [openEach] opens files in tabs of their own. [filter]
+ * is applied once the records are there.
  */
 class LogTab(
     paths: List<Path>,
     private val openFiles: (List<Path>) -> Unit,
     private val openEach: (List<Path>) -> Unit,
+    filter: SavedFilter? = null,
     private val onStatusChanged: () -> Unit,
 ) : JPanel(BorderLayout()) {
 
@@ -115,6 +118,7 @@ class LogTab(
         add(filterBar, BorderLayout.NORTH)
         add(content, BorderLayout.CENTER)
         showFormat()
+        filter?.let(filterBar::load)
         session.start()
     }
 
@@ -309,6 +313,9 @@ class LogTab(
     fun focusFilter() = filterBar.focusFilter()
 
     fun clearFilter() = filterBar.clear()
+
+    /** The filter as edited in this tab. */
+    val filter: SavedFilter get() = filterBar.current()
 
     /** Cancels any running work and releases the file. */
     fun dispose() {

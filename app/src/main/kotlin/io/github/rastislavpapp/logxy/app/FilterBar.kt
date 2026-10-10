@@ -218,7 +218,12 @@ class FilterBar(private val onApply: () -> Unit) : JPanel(MigLayout("insets 6 8 
         showPopupList(button, items)
     }
 
-    private fun load(filter: SavedFilter) {
+    /** The filter as edited, unnamed; Advanced text is kept as typed, even if it does not parse. */
+    fun current(): SavedFilter =
+        SavedFilter("", minimum, if (textMode.isSelected) textArea.text else QueryPrinter.print(editor.query()))
+
+    /** Shows [filter] and applies it. */
+    fun load(filter: SavedFilter) {
         minimum = filter.minimumLevel
         textArea.text = filter.query
         try {
