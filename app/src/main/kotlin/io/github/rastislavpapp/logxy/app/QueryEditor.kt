@@ -458,12 +458,15 @@ class QueryEditor(private val onApply: () -> Unit) : JPanel(MigLayout("insets 0,
             val selected = op.selectedItem as RuleOp? ?: return null
             val name = field.selectedItem as String
             val value = text.text
-            if (!selected.usesLevel && value.isEmpty() && !includeEmpty) return null
+            // "is not" nothing keeps the records that have a value.
+            val notEmpty = selected == RuleOp.IS_NOT && value.isEmpty()
+            if (!selected.usesLevel && value.isEmpty() && !includeEmpty && !notEmpty) return null
             val exact = case.isSelected
             val equals = if (exact) QueryOp.EQUALS_CASE else QueryOp.EQUALS
             val notEquals = if (exact) QueryOp.NOT_EQUALS_CASE else QueryOp.NOT_EQUALS
             val levelName = (level.selectedItem as Level).name
             // An empty row reads as `field == ""`, a placeholder that filters nothing.
+            if (notEmpty) return Query.Rule(name, notEquals, "")
             if (value.isEmpty() && !selected.usesLevel) {
                 val placeholderOp = if (selected == RuleOp.MATCHES || selected == RuleOp.NOT_MATCHES) QueryOp.MATCHES else equals
                 return Query.Rule(name, placeholderOp, "")

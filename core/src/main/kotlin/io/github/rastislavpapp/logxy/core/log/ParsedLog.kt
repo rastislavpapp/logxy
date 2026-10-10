@@ -72,6 +72,7 @@ class ParsedLog private constructor(
     private var segmentFirst = firstRecords()
     private var lastSegment = 0
     private val levelField = schema.indexOf(Role.LEVEL)
+    private val timestampField = schema.indexOf(Role.TIMESTAMP)
     private val levels = ArrayList<Level>()
 
     override val isRaw get() = false
@@ -119,6 +120,13 @@ class ParsedLog private constructor(
         val dictionary = dictionaries[levelField]!!
         while (levels.size < dictionary.size) levels += levelMapping.of(dictionary.text(levels.size))
         return levels[id]
+    }
+
+    override fun timestamp(record: Int): Long? {
+        if (timestampField < 0) return null
+        val segment = segmentOf(record)
+        val nanos = segments[segment].longs[timestampField]!![record - segmentFirst[segment]]
+        return if (nanos == Columns.ABSENT_TIMESTAMP) null else nanos
     }
 
     override fun filterSnapshot(): RecordSnapshot = ParsedSnapshot(

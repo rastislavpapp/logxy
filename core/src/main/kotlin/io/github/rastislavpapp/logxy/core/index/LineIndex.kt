@@ -74,6 +74,8 @@ class LineIndex private constructor(
 
     override fun level(record: Int): Level? = null
 
+    override fun timestamp(record: Int): Long? = null
+
     val lineCount: Int get() = starts.size
 
     override val recordCount get() = starts.size

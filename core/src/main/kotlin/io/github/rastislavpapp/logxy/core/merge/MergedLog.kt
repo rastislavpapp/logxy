@@ -77,6 +77,8 @@ class MergedLog private constructor(
 
     override fun level(record: Int): Level? = parts[part(record)].level(record(record))
 
+    override fun timestamp(record: Int): Long? = parts[part(record)].timestamp(record(record))
+
     override fun rowValues(record: Int, maxBytes: Int): Array<String> {
         val part = part(record)
         val values = parts[part].rowValues(record(record), maxBytes)

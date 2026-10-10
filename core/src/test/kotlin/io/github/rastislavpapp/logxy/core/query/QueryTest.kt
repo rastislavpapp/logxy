@@ -2,6 +2,7 @@ package io.github.rastislavpapp.logxy.core.query
 
 import io.github.rastislavpapp.logxy.core.filter.Filter
 import io.github.rastislavpapp.logxy.core.filter.LevelCondition
+import io.github.rastislavpapp.logxy.core.filter.PresenceCondition
 import io.github.rastislavpapp.logxy.core.filter.TextCondition
 import io.github.rastislavpapp.logxy.core.filter.TextOp
 import io.github.rastislavpapp.logxy.core.filter.TimeCondition
@@ -92,9 +93,27 @@ class QueryTest {
     }
 
     @Test
+    fun `an empty value is a placeholder, except for not equals`() {
+        assertEquals(Filter.And(emptyList()), compiler.compile(QueryParser.parse("""thread == "" AND message =~ """"")))
+        assertEquals(
+            Filter.And(listOf(Filter.And(listOf(PresenceCondition("Thread"), TextCondition("Thread", TextOp.NOT_EQUALS, "", ignoreCase = true))))),
+            compiler.compile(QueryParser.parse("""thread != """"")),
+        )
+    }
+
+    @Test
     fun `time literals`() {
         assertEquals(1_791_504_000_000_000_000L, TimeLiteral.parse("2026-10-09", ZoneOffset.UTC))
         assertEquals(1_791_533_415_250_000_000L, TimeLiteral.parse("2026-10-09T08:10:15,25", ZoneOffset.UTC))
         assertEquals(29_400_000_000_000L, TimeLiteral.parse("08:10", ZoneOffset.UTC))
+    }
+
+    @Test
+    fun `formatted time literals parse back`() {
+        val zone = java.time.ZoneId.of("Europe/Bratislava")
+        assertEquals("2026-10-09 10:10:15.250", TimeLiteral.format(1_791_533_415_250_000_000L, zone))
+        for (nanos in listOf(1_791_533_415_250_000_000L, 1_791_533_415_000_000_123L, 29_400_000_000_000L)) {
+            assertEquals(nanos, TimeLiteral.parse(TimeLiteral.format(nanos, zone), zone))
+        }
     }
 }

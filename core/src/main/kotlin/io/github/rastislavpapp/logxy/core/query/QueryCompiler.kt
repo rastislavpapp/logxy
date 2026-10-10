@@ -2,6 +2,7 @@ package io.github.rastislavpapp.logxy.core.query
 
 import io.github.rastislavpapp.logxy.core.filter.Filter
 import io.github.rastislavpapp.logxy.core.filter.LevelCondition
+import io.github.rastislavpapp.logxy.core.filter.PresenceCondition
 import io.github.rastislavpapp.logxy.core.filter.TextCondition
 import io.github.rastislavpapp.logxy.core.filter.TextOp
 import io.github.rastislavpapp.logxy.core.filter.TimeCondition
@@ -9,6 +10,7 @@ import io.github.rastislavpapp.logxy.core.log.ColumnType
 import io.github.rastislavpapp.logxy.core.log.Level
 import io.github.rastislavpapp.logxy.core.log.Schema
 import java.time.DateTimeException
+import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
@@ -19,7 +21,10 @@ import java.util.regex.PatternSyntaxException
 /** Turns a [Query] into an engine [Filter] for logs with [schema]; throws [QueryException] for what does not fit. */
 class QueryCompiler(private val schema: Schema, private val zone: ZoneId = ZoneId.systemDefault()) {
 
-    /** Conditions with an empty value are placeholders and ignored, like groups left with nothing in them. */
+    /**
+     * Conditions with an empty value are placeholders and ignored, like groups left with nothing in them;
+     * except `!= ""`, which keeps records with a non-empty value.
+     */
     fun compile(query: Query): Filter = compileOrNull(query) ?: Filter.And(emptyList())
 
     private fun compileOrNull(query: Query): Filter? {
@@ -29,7 +34,7 @@ class QueryCompiler(private val schema: Schema, private val zone: ZoneId = ZoneI
                 if (items.isEmpty()) return null
                 if (query.all) Filter.And(items) else Filter.Or(items)
             }
-            is Query.Rule -> if (query.value.isEmpty()) return null else rule(query)
+            is Query.Rule -> if (query.value.isEmpty() && !query.op.excludesEmpty) return null else rule(query)
         }
         return if (query.negated) Filter.Not(filter) else filter
     }
@@ -58,6 +63,8 @@ class QueryCompiler(private val schema: Schema, private val zone: ZoneId = ZoneI
             QueryOp.NOT_MATCHES -> TextOp.NOT_MATCHES to true
             else -> error("comparison handled above")
         }
+        // Absent values match negated conditions, so they need ruling out too.
+        if (rule.value.isEmpty()) return Filter.And(listOf(PresenceCondition(name), TextCondition(name, op, "", ignoreCase)))
         if (op == TextOp.MATCHES || op == TextOp.NOT_MATCHES) {
             try {
                 Pattern.compile(rule.value)
@@ -118,6 +125,15 @@ object TimeLiteral {
             throw QueryException("Invalid time “$text”: ${e.message}")
         }
         throw QueryException("Invalid time “$text”; write e.g. 2026-10-09 08:30:00.000, 2026-10-09 or 08:30")
+    }
+
+    /** [nanos] as [parse] reads it back: date, time and as many fraction digits as needed, at least milliseconds. */
+    fun format(nanos: Long, zone: ZoneId): String {
+        val time = Instant.ofEpochSecond(Math.floorDiv(nanos, 1_000_000_000L), Math.floorMod(nanos, 1_000_000_000L)).atZone(zone)
+        val fraction = "%09d".format(time.nano).trimEnd('0').padEnd(3, '0')
+        return "%04d-%02d-%02d %02d:%02d:%02d.%s".format(
+            time.year, time.monthValue, time.dayOfMonth, time.hour, time.minute, time.second, fraction,
+        )
     }
 
     private fun toNanos(date: LocalDate, hour: String, minute: String, second: String, fraction: String, zone: ZoneId): Long {

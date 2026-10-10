@@ -14,6 +14,9 @@ interface Records {
     /** Canonical level of [record], or null if there is no level or the record lacks one. */
     fun level(record: Int): Level?
 
+    /** Epoch nanoseconds of [record]'s timestamp, or null if there is none. */
+    fun timestamp(record: Int): Long?
+
     /** Display text of every field of [record], each cut to its first line and at most [maxBytes]. */
     fun rowValues(record: Int, maxBytes: Int): Array<String>
 

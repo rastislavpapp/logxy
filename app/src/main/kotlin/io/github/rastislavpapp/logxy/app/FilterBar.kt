@@ -129,6 +129,23 @@ class FilterBar(private val onApply: () -> Unit) : JPanel(MigLayout("insets 6 8 
     /** The filter as edited; throws [QueryException] if the text has a syntax error. */
     fun query(): Query.Group = if (textMode.isSelected) QueryParser.parse(textArea.text) else editor.query()
 
+    /** Adds [rule] to the filter, joined with AND, and applies it. */
+    fun addRule(rule: Query.Rule) {
+        val current = try {
+            query()
+        } catch (e: QueryException) {
+            showError("Fix the filter first: ${e.message}")
+            return
+        }
+        val combined = when {
+            current.items.isEmpty() -> Query.Group(all = true, items = listOf(rule))
+            current.all && !current.negated -> current.copy(items = current.items + rule)
+            else -> Query.Group(all = true, items = listOf(current, rule))
+        }
+        if (textMode.isSelected) textArea.text = QueryPrinter.print(combined) else editor.setQuery(combined)
+        onApply()
+    }
+
     /** Shows how far a slow filter got, from 0 to 1; null hides it. */
     fun showProgress(fraction: Double?) {
         if (fraction == progress) return

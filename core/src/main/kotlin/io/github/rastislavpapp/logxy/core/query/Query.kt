@@ -45,6 +45,9 @@ enum class QueryOp(val symbol: String) {
     BELOW("<");
 
     val comparison get() = this == AT_LEAST || this == ABOVE || this == AT_MOST || this == BELOW
+
+    /** With an empty value, keeps records that have a non-empty one; other ops make an empty value a placeholder. */
+    val excludesEmpty get() = this == NOT_EQUALS || this == NOT_EQUALS_CASE
 }
 
 /** A problem in a query, at `[offset, offset + length)` of its text when known. */

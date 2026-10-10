@@ -10,6 +10,8 @@ import io.github.rastislavpapp.logxy.core.parse.FormatMismatchException
 import io.github.rastislavpapp.logxy.core.parse.PatternFormat
 import io.github.rastislavpapp.logxy.core.parse.RecordFormat
 import io.github.rastislavpapp.logxy.core.parse.RegexFormat
+import io.github.rastislavpapp.logxy.core.query.QueryCompiler
+import io.github.rastislavpapp.logxy.core.query.QueryParser
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardOpenOption
@@ -231,6 +233,9 @@ class ParsedLogTest {
                 assertEquals(listOf(2), matching(TextCondition("MDC[tenant]", TextOp.MATCHES, "^glo")))
                 assertEquals(listOf(0, 2), matching(TextCondition("MDC[breadcrumbId]", TextOp.NOT_EQUALS, "ID-1")))
                 assertEquals(listOf(1), matching(PresenceCondition("MDC[breadcrumbId]")))
+                // Empty: the key missing from a map, or no map keys at all.
+                val notEmpty = QueryCompiler(log.schema).compile(QueryParser.parse("""MDC[tenant] != """""))
+                assertEquals(listOf(1, 2), runBlocking { FilterEngine(log).prepare(notEmpty).run() }.rows.toList())
             }
         }
     }

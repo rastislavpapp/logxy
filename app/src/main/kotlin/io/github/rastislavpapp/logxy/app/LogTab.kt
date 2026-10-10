@@ -1,9 +1,16 @@
 package io.github.rastislavpapp.logxy.app
 
 import io.github.rastislavpapp.logxy.core.config.SavedFilter
+import io.github.rastislavpapp.logxy.core.log.ColumnType
+import io.github.rastislavpapp.logxy.core.log.Level
 import io.github.rastislavpapp.logxy.core.log.Records
+import io.github.rastislavpapp.logxy.core.log.Role
 import io.github.rastislavpapp.logxy.core.parse.LogFormat
+import io.github.rastislavpapp.logxy.core.query.Query
 import io.github.rastislavpapp.logxy.core.query.QueryException
+import io.github.rastislavpapp.logxy.core.query.QueryOp
+import io.github.rastislavpapp.logxy.core.query.QueryPrinter
+import io.github.rastislavpapp.logxy.core.query.TimeLiteral
 import io.github.rastislavpapp.logxy.core.session.FilteredRows
 import io.github.rastislavpapp.logxy.core.session.LogSession
 import io.github.rastislavpapp.logxy.core.session.SessionListener
@@ -15,7 +22,10 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.swing.Swing
 import net.miginfocom.swing.MigLayout
 import java.awt.BorderLayout
+import java.awt.event.MouseAdapter
+import java.awt.event.MouseEvent
 import java.nio.file.Path
+import java.time.ZoneId
 import javax.swing.JButton
 import javax.swing.JCheckBoxMenuItem
 import javax.swing.JComponent
@@ -34,6 +44,8 @@ import javax.swing.UIManager
 
 private const val MAX_DETAIL_BYTES = 1024 * 1024
 private const val MAX_TITLE_CHARS = 40
+private const val MAX_MENU_CHARS = 80
+private val RANGE_OPS = listOf(QueryOp.AT_LEAST, QueryOp.ABOVE, QueryOp.AT_MOST, QueryOp.BELOW)
 
 /**
  * One open file, or several merged: shows the records of its [LogSession], with the filter bar and the
@@ -177,8 +189,7 @@ class LogTab(
             boxes.forEach { it.isEnabled = !single || !it.isSelected }
         }
         fun update() {
-            hiddenColumns = boxes.filter { !it.isSelected }.map { it.text }.toSet()
-            model.hiddenColumns = hiddenColumns
+            hideColumns(boxes.filter { !it.isSelected }.map { it.text }.toSet())
             enableBoxes()
         }
         boxes.forEach { box ->
@@ -194,6 +205,63 @@ class LogTab(
         })
         enableBoxes()
         popup.show(columnsButton, 0, columnsButton.height)
+    }
+
+    /** The right-click menu of a column header: hide that column, or show all again. */
+    private fun showHeaderMenu(header: JComponent, column: Int, x: Int, y: Int) {
+        val model = model ?: return
+        val field = model.fieldAt(column) ?: return
+        val popup = JPopupMenu()
+        popup.add(JMenuItem("Hide “${field.name}”").apply {
+            isEnabled = model.columnChoices.count { it.name !in hiddenColumns } > 1
+            addActionListener { hideColumns(hiddenColumns + field.name) }
+        })
+        popup.add(JMenuItem("Show All Columns").apply {
+            isEnabled = hiddenColumns.isNotEmpty()
+            addActionListener { hideColumns(emptySet()) }
+        })
+        popup.show(header, x, y)
+    }
+
+    /** The right-click menu of a cell: show only records with that value, or all but them. */
+    private fun showCellMenu(table: LogTable, row: Int, column: Int, x: Int, y: Int) {
+        val model = model ?: return
+        val field = model.fieldAt(column) ?: return
+        if (!table.isRowSelected(row)) table.setRowSelectionInterval(row, row)
+        val value = model.getValueAt(row, column) as String
+        val level = model.level(row)?.takeIf { field.role == Role.LEVEL && it != Level.UNKNOWN }
+        // A message shows only its first line, and long values are cut: match what is shown as a prefix.
+        val partial = value.isNotEmpty() && (field.role == Role.MESSAGE || value.length >= MAX_DISPLAY_BYTES)
+        val pattern = value.replace("\\", "\\\\").replace("*", "\\*").replace("?", "\\?") + if (partial) "*" else ""
+        fun rule(op: QueryOp) =
+            if (level != null) Query.Rule(field.name, op, level.name, bare = true) else Query.Rule(field.name, op, pattern)
+        val popup = JPopupMenu()
+        fun add(rule: Query.Rule) {
+            val text = QueryPrinter.print(rule).let { if (it.length > MAX_MENU_CHARS) it.take(MAX_MENU_CHARS - 1) + "…" else it }
+            popup.add(JMenuItem(text, Icons.filter).apply {
+                addActionListener { filterBar.addRule(rule) }
+            })
+        }
+        // `== ""` is a placeholder that filters nothing; `!= ""` keeps records with a value.
+        if (value.isNotEmpty()) add(rule(QueryOp.EQUALS))
+        add(rule(QueryOp.NOT_EQUALS))
+        if (level != null) {
+            popup.addSeparator()
+            for (op in RANGE_OPS) add(Query.Rule(field.name, op, level.name, bare = true))
+        }
+        // The literal is written from the record's time, as the log's own layout may not parse back (e.g. offsets).
+        val time = model.records.timestamp(model.recordAt(row))?.takeIf { field.type == ColumnType.TIMESTAMP }
+        if (time != null) {
+            val literal = TimeLiteral.format(time, ZoneId.systemDefault())
+            popup.addSeparator()
+            for (op in RANGE_OPS) add(Query.Rule(field.name, op, literal))
+        }
+        popup.show(table, x, y)
+    }
+
+    private fun hideColumns(names: Set<String>) {
+        hiddenColumns = names
+        model?.hiddenColumns = names
     }
 
     private fun autoLabel() = if (session.formatDetected) "Auto: ${session.format.name}" else "Auto-detect"
@@ -259,6 +327,26 @@ class LogTab(
         model.hiddenColumns = hiddenColumns.takeIf { hidden -> model.columnChoices.any { it.name !in hidden } }.orEmpty()
         val table = LogTable(model)
         columnsButton.isEnabled = true
+        table.addMouseListener(object : MouseAdapter() {
+            override fun mousePressed(e: MouseEvent) = cellMenu(e)
+            override fun mouseReleased(e: MouseEvent) = cellMenu(e)
+
+            private fun cellMenu(e: MouseEvent) {
+                val row = table.rowAtPoint(e.point)
+                val column = table.columnAtPoint(e.point)
+                if (e.isPopupTrigger && row >= 0 && column >= 0) showCellMenu(table, row, column, e.x, e.y)
+            }
+        })
+        table.tableHeader.addMouseListener(object : MouseAdapter() {
+            // The popup trigger comes with the press on some systems, with the release on others.
+            override fun mousePressed(e: MouseEvent) = headerMenu(e)
+            override fun mouseReleased(e: MouseEvent) = headerMenu(e)
+
+            private fun headerMenu(e: MouseEvent) {
+                val column = table.tableHeader.columnAtPoint(e.point)
+                if (e.isPopupTrigger && column >= 0) showHeaderMenu(table.tableHeader, column, e.x, e.y)
+            }
+        })
         // The table has its own transfer handler (for copy), which would otherwise swallow file drops.
         table.transferHandler = FileDropHandler(openFiles, table.transferHandler)
         val scrollPane = VirtualScrollPane(table, model)
