@@ -17,6 +17,9 @@ private const val CELL_PADDING = 12
 /** Table of log records; the last column always fills the viewport and long values are cut. */
 class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
 
+    /** Column widths by name, kept when columns are hidden or shown; not of the last column, which fills the rest. */
+    private val widths = HashMap<Any, Int>()
+
     init {
         autoResizeMode = AUTO_RESIZE_LAST_COLUMN
         setShowGrid(false)
@@ -47,10 +50,15 @@ class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
 
     // Columns are created again when the model's columns change, e.g. some are hidden.
     override fun createDefaultColumnsFromModel() {
-        super.createDefaultColumnsFromModel()
         // Also called from JTable's constructor, before the model is set.
         @Suppress("SENSELESS_COMPARISON")
-        if (logModel != null) setUpColumns()
+        val ready = logModel != null
+        if (ready) rememberWidths()
+        super.createDefaultColumnsFromModel()
+        if (ready) {
+            setUpColumns()
+            restoreWidths()
+        }
     }
 
     private fun updateLook() {
@@ -58,7 +66,26 @@ class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
         // A plain Font, not a FontUIResource, so a theme switch does not replace it.
         font = Font(base.name, base.style, base.size)
         rowHeight = getFontMetrics(font).height + 4
+        // Widths are measured in the new font.
+        widths.clear()
         setUpColumns()
+    }
+
+    private fun rememberWidths() {
+        for (column in 0..<columnModel.columnCount - 1) {
+            val tableColumn = columnModel.getColumn(column)
+            widths[tableColumn.identifier] = tableColumn.preferredWidth
+        }
+    }
+
+    private fun restoreWidths() {
+        for (column in 0..<columnModel.columnCount - 1) {
+            val tableColumn = columnModel.getColumn(column)
+            val width = widths[tableColumn.identifier] ?: continue
+            if (tableColumn.minWidth == tableColumn.maxWidth) continue
+            tableColumn.preferredWidth = maxOf(width, tableColumn.minWidth)
+            tableColumn.width = tableColumn.preferredWidth
+        }
     }
 
     /** Renderers and widths by what each column shows. */
