@@ -59,18 +59,13 @@ jobs:
         with:
           distribution: temurin
           java-version: 25
-          cache: maven
-      - run: ./mvnw -B -q versions:set -DnewVersion="$VERSION" -DgenerateBackupPoms=false
-      - run: ./mvnw -B -pl app -am verify -DskipTests -Pdist
+      - uses: gradle/actions/setup-gradle@v6
+      - run: ./gradlew -Pversion="$VERSION" :app:nativeArchive
       - name: Collect packages
         run: |
           mkdir dist
-          if [[ $RUNNER_OS == Windows ]]; then
-            (cd app/target/jpackage && 7z a -tzip "../../../dist/logxy-$VERSION-windows-x64.zip" logxy)
-          else
-            tar -czf "dist/logxy-$VERSION-linux-x64.tar.gz" -C app/target/jpackage logxy
-            cp app/target/logxy.jar "dist/logxy-$VERSION.jar"
-          fi
+          cp app/build/dist/* dist/
+          if [[ $RUNNER_OS == Linux ]]; then cp app/build/libs/logxy.jar "dist/logxy-$VERSION.jar"; fi
       - uses: actions/upload-artifact@v7
         with:
           name: dist-${{ runner.os }}

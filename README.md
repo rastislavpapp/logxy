@@ -10,11 +10,12 @@ Requires JDK 25. Running the app needs a full JDK with GUI support (e.g. Temurin
 ./gradlew build                      # build and test (Windows: gradlew.bat)
 java -jar app/build/libs/logxy.jar   # run the fat jar
 ./gradlew :app:run                   # run during development
+./gradlew :app:nativeArchive         # app image with bundled runtime, zipped for this OS in app/build/dist
 ```
 
 ## Releasing
 
-Push an `X.Y.Z` tag on a commit in `main`. The release workflow builds and tests on Windows and Linux, stamps that version on the packages (the code stays at `-SNAPSHOT`) and creates a GitHub release with the jar, the Windows zip and the Linux tarball. Running the workflow by hand does a dry run that publishes nothing.
+Push an `X.Y.Z` tag on a commit in `main`. The release workflow builds and tests on Windows and Linux, stamps that version on the packages (the code stays at `-SNAPSHOT`; the release passes `-Pversion`) and creates a GitHub release with the jar, the Windows zip and the Linux tarball. Running the workflow by hand does a dry run that publishes nothing.
 
 ```sh
 git tag 0.1.0 && git push origin 0.1.0

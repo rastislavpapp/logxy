@@ -45,6 +45,58 @@ tasks.shadowJar {
     }
 }
 
+// Native app image with a bundled runtime, archived for the OS it is built on (Windows or Linux).
+val platform = if (System.getProperty("os.name").startsWith("Windows")) "windows-x64" else "linux-x64"
+
+val jpackageInput = tasks.register<Sync>("jpackageInput") {
+    // jpackage bundles its whole input directory, so give it only the jar.
+    from(tasks.shadowJar)
+    into(layout.buildDirectory.dir("jpackage-input"))
+}
+
+val jpackage = tasks.register<Exec>("jpackage") {
+    val image = layout.buildDirectory.dir("jpackage")
+    val icon = file(if (platform.startsWith("windows")) "src/packaging/logxy.ico" else "src/packaging/logxy.png")
+    val jdk = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(25) }.get().metadata.installationPath
+    inputs.files(jpackageInput, icon)
+    outputs.dir(image)
+    executable = jdk.file("bin/jpackage").asFile.path
+    args(
+        "--type", "app-image",
+        "--name", "logxy",
+        // jpackage only accepts numeric versions.
+        "--app-version", version.toString().removeSuffix("-SNAPSHOT"),
+        "--vendor", "Rastislav Papp",
+        "--description", "Fast desktop viewer for large log files",
+        "--icon", icon.path,
+        "--input", jpackageInput.get().destinationDir.path,
+        "--main-jar", "logxy.jar",
+        "--main-class", application.mainClass.get(),
+        "--add-modules", "java.base,java.desktop,java.logging,java.prefs,jdk.unsupported",
+        "--dest", image.get().asFile.path,
+    )
+    // jpackage refuses to overwrite an existing image.
+    val fs = objects.newInstance<Services>().fs
+    doFirst { fs.delete { delete(image) } }
+}
+
+fun AbstractArchiveTask.nativeArchive(extension: String) {
+    from(jpackage)
+    archiveFileName = "logxy-$version-$platform.$extension"
+    destinationDirectory = layout.buildDirectory.dir("dist")
+}
+
+if (platform.startsWith("windows")) {
+    tasks.register<Zip>("nativeArchive") { nativeArchive("zip") }
+} else {
+    // A tarball keeps the launcher executable.
+    tasks.register<Tar>("nativeArchive") {
+        compression = Compression.GZIP
+        nativeArchive("tar.gz")
+    }
+}
+
 interface Services {
     @get:Inject val archives: ArchiveOperations
+    @get:Inject val fs: FileSystemOperations
 }
