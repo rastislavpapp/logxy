@@ -261,18 +261,21 @@ class LogSession(
             formatDetected = true
             listener.formatChanged()
 
+            var nothingToMerge = false
             if (isMerged) {
                 val unmergeable = sources.filter { it.log!!.schema.indexOf(Role.TIMESTAMP) < 0 }
                 if (unmergeable.isNotEmpty()) {
                     unmergeable.forEach { it.log!!.close() }
                     opened.removeAll(unmergeable.map { it.log!! }.toSet())
-                    sources = sources - unmergeable.toSet()
+                    // Keep at least the files themselves, so the tab still names them and can be reloaded.
+                    nothingToMerge = unmergeable.size == sources.size
+                    if (nothingToMerge) sources.forEach { it.log = null } else sources = sources - unmergeable.toSet()
                     listener.notMergeable(unmergeable.map { it.path })
                     listener.formatChanged()
                 }
             }
             val view: Records = when {
-                sources.isEmpty() -> {
+                nothingToMerge -> {
                     listener.problem("None of these files has timestamps to merge by.", "They are opened in their own tabs.", null)
                     setStatus(SessionStatus(message = "Nothing to merge"))
                     return false
