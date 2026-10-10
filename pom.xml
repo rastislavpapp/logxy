@@ -30,6 +30,7 @@
         <miglayout.version>11.5.1</miglayout.version>
         <rsyntaxtextarea.version>4.0.1</rsyntaxtextarea.version>
         <autocomplete.version>4.0.0</autocomplete.version>
+        <jsvg.version>2.1.0</jsvg.version>
         <intellij-icons.version>262.10968.176</intellij-icons.version>
         <flatlaf-fonts-inter.version>4.1</flatlaf-fonts-inter.version>
         <flatlaf-fonts-jetbrains-mono.version>2.304</flatlaf-fonts-jetbrains-mono.version>
@@ -47,6 +48,8 @@
         <maven-site-plugin.version>3.22.0</maven-site-plugin.version>
         <maven-shade-plugin.version>3.6.2</maven-shade-plugin.version>
         <exec-maven-plugin.version>3.6.4</exec-maven-plugin.version>
+        <build-helper-maven-plugin.version>3.6.2</build-helper-maven-plugin.version>
+        <versions-maven-plugin.version>2.22.0</versions-maven-plugin.version>
     </properties>
 
     <dependencyManagement>
@@ -115,6 +118,12 @@
                 <groupId>com.fifesoft</groupId>
                 <artifactId>autocomplete</artifactId>
                 <version>${autocomplete.version}</version>
+            </dependency>
+            <dependency>
+                <!-- Same version FlatLaf uses for SVG icons. -->
+                <groupId>com.github.weisj</groupId>
+                <artifactId>jsvg</artifactId>
+                <version>${jsvg.version}</version>
             </dependency>
             <dependency>
                 <groupId>org.junit</groupId>
@@ -196,6 +205,10 @@
                     <groupId>org.apache.maven.plugins</groupId>
                     <artifactId>maven-clean-plugin</artifactId>
                     <version>${maven-clean-plugin.version}</version>
+                    <configuration>
+                        <!-- jpackage leaves the Windows launcher read-only. -->
+                        <force>true</force>
+                    </configuration>
                 </plugin>
                 <plugin>
                     <groupId>org.apache.maven.plugins</groupId>
@@ -241,6 +254,16 @@
                     <groupId>org.codehaus.mojo</groupId>
                     <artifactId>exec-maven-plugin</artifactId>
                     <version>${exec-maven-plugin.version}</version>
+                </plugin>
+                <plugin>
+                    <groupId>org.codehaus.mojo</groupId>
+                    <artifactId>build-helper-maven-plugin</artifactId>
+                    <version>${build-helper-maven-plugin.version}</version>
+                </plugin>
+                <plugin>
+                    <groupId>org.codehaus.mojo</groupId>
+                    <artifactId>versions-maven-plugin</artifactId>
+                    <version>${versions-maven-plugin.version}</version>
                 </plugin>
             </plugins>
         </pluginManagement>

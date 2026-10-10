@@ -12,7 +12,9 @@ private const val USAGE = """Usage:
                                         measure merging files and filtering the merged view
   simulate <file> [--rate N] [--rotate-at SIZE]
                                         append lines like a running application (N per second, default 20),
-                                        optionally rotating file -> file.1 -> ... at SIZE; Ctrl+C stops"""
+                                        optionally rotating file -> file.1 -> ... at SIZE; Ctrl+C stops
+  icons                                 render the logo SVG into the packaging PNG and ICO;
+                                        run from the project root after changing the logo"""
 
 fun main(args: Array<String>) {
     val positional = args.filterIndexed { i, arg -> !arg.startsWith("--") && (i == 0 || !args[i - 1].startsWith("--")) }
@@ -30,6 +32,8 @@ fun main(args: Array<String>) {
             benchmarkMerging(positional.drop(1).map { Path.of(it) }, option("iterations")?.toInt() ?: 3)
         "simulate" if positional.size == 2 ->
             simulateLogging(Path.of(positional[1]), option("rate")?.toInt() ?: 20, option("rotate-at")?.let(::parseSize))
+        "icons" if positional.size == 1 ->
+            generateIcons(Path.of("app/src/main/resources/logxy.svg"), Path.of("app/src/packaging"))
         else -> {
             System.err.println(USAGE)
             exitProcess(2)

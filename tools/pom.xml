@@ -19,6 +19,10 @@
             <groupId>io.github.rastislavpapp.logxy</groupId>
             <artifactId>logxy-core</artifactId>
         </dependency>
+        <dependency>
+            <groupId>com.github.weisj</groupId>
+            <artifactId>jsvg</artifactId>
+        </dependency>
     </dependencies>
 
     <build>
