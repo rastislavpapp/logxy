@@ -330,30 +330,39 @@ class LogSession(
                 var promoted = false
                 for ((part, source) in sources.withIndex()) {
                     val log = source.log ?: return
-                    val current = withContext(Dispatchers.IO) { FileSnapshot.take(source.path) }
-                    when (source.known!!.changeTo(current, log.indexedSize)) {
-                        FileChange.MISSING -> {
-                            problems += if (isMerged) "${source.path.fileName} not found" else "file not found"
-                            continue
-                        }
-                        FileChange.SHRUNK, FileChange.REPLACED -> {
-                            reload()
-                            return
-                        }
-                        FileChange.GROWN -> {
-                            if (log.recordCount > 0) changed += position(part, log.recordCount - 1)
-                            val appended = withContext(Dispatchers.IO) { log.readAppended(current!!.size) }
-                            log.append(appended)
-                            grown = true
-                            if (source.activity == FileActivity.STATIC) {
-                                source.activity = FileActivity.LIVE
-                                promoted = true
+                    // A failing file must not keep what the others appended from being merged and shown.
+                    try {
+                        val current = withContext(Dispatchers.IO) { FileSnapshot.take(source.path) }
+                        when (source.known!!.changeTo(current, log.indexedSize)) {
+                            FileChange.MISSING -> {
+                                problems += if (isMerged) "${source.path.fileName} not found" else "file not found"
+                                continue
                             }
+                            FileChange.SHRUNK, FileChange.REPLACED -> {
+                                reload()
+                                return
+                            }
+                            FileChange.GROWN -> {
+                                val shownCount = (records as? MergedLog)?.mergedCount(part) ?: log.recordCount
+                                if (shownCount > 0) changed += position(part, shownCount - 1)
+                                val appended = withContext(Dispatchers.IO) { log.readAppended(current!!.size) }
+                                log.append(appended)
+                                grown = true
+                                if (source.activity == FileActivity.STATIC) {
+                                    source.activity = FileActivity.LIVE
+                                    promoted = true
+                                }
+                            }
+                            FileChange.UNCHANGED ->
+                                source.activity = FileActivity.classify(current!!.lastModified, current.size, current.size)
                         }
-                        FileChange.UNCHANGED ->
-                            source.activity = FileActivity.classify(current!!.lastModified, current.size, current.size)
+                        source.known = current!!
+                    } catch (e: IOException) {
+                        // Closing the tab closes the files under a running read.
+                        currentCoroutineContext().ensureActive()
+                        val message = e.message ?: e.javaClass.simpleName
+                        problems += if (isMerged) "${source.path.fileName}: $message" else message
                     }
-                    source.known = current!!
                 }
                 problem = problems.joinToString(", ").ifEmpty { null }
                 if (grown) {
