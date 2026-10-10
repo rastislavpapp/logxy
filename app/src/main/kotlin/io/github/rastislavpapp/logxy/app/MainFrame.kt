@@ -395,7 +395,7 @@ class MainFrame : JFrame("logxy") {
         init {
             add(JPanel(MigLayout("insets 32 48 32 48, wrap 1, gapy 12", "[center]")).apply {
                 isOpaque = false
-                add(JLabel(Icons.logo(64)))
+                add(JLabel(Icons.get("fileTypes/text", 64)))
                 add(JLabel("Drop log files here").apply { putClientProperty("FlatLaf.styleClass", "h2") })
                 add(JLabel("or").apply { foreground = UIManager.getColor("Label.disabledForeground") })
                 add(JButton("Open File", Icons.open).apply {
