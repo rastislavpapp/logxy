@@ -4,7 +4,7 @@ Guidance for AI coding agents working on logxy.
 
 ## Project
 
-Fast desktop log viewer (Kotlin, Swing, FlatLaf, Maven).
+Fast desktop log viewer (Kotlin, Swing, FlatLaf, Gradle).
 
 ## Code style
 
@@ -16,7 +16,7 @@ Fast desktop log viewer (Kotlin, Swing, FlatLaf, Maven).
 
 - `core` must not depend on `java.awt` / `javax.swing`.
 - Prefer primitive arrays over boxed collections or per-row objects for anything that scales with file size.
-- Declare all dependency and plugin versions in the parent POM. Do not add dependencies without a clear reason.
+- Declare all dependency and plugin versions in `gradle/libs.versions.toml`. Do not add dependencies without a clear reason.
 
 ## Trying the app
 
@@ -29,8 +29,8 @@ Test logs are not committed. If the project already has log files that fit the c
 - Wait by taking another screenshot, not by long sleeps.
 
 ```sh
-./mvnw -q install -DskipTests              # the sandbox runs app/target/logxy.jar; tools needs core installed
-./mvnw -q -pl tools exec:java -Dexec.args="generate tools/gui-sandbox/out/small.log 5m"   # optional --seed N
+./gradlew -q :app:shadowJar               # the sandbox runs app/build/libs/logxy.jar
+./gradlew -q :tools:run --args="generate tools/gui-sandbox/out/small.log 5m"   # optional --seed N
 tools/gui-sandbox/gui.sh start tools/gui-sandbox/out/small.log   # any paths; builds the image on first use
 tools/gui-sandbox/gui.sh shot filter       # writes tools/gui-sandbox/out/filter.png; read it to see the screen
 tools/gui-sandbox/gui.sh click X Y         # screen coordinates read off the latest screenshot

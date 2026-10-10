@@ -31,7 +31,7 @@ case "${1:-}" in
     ;;
   start)
     shift
-    [[ -f $root/app/target/logxy.jar ]] || { echo "app/target/logxy.jar missing; run ./mvnw -q install -DskipTests" >&2; exit 1; }
+    [[ -f $root/app/build/libs/logxy.jar ]] || { echo "app/build/libs/logxy.jar missing; run ./gradlew -q :app:shadowJar" >&2; exit 1; }
     "$engine" image inspect "$image" >/dev/null 2>&1 || "$0" build
     # Each file's directory is mounted separately, so files can live anywhere on the host.
     mounts=() args=() i=0
@@ -44,7 +44,7 @@ case "${1:-}" in
     "$engine" rm -f "$name" >/dev/null 2>&1 || true
     mkdir -p "$out"
     "$engine" run -d --name "$name" "${run_opts[@]}" -e HOME=/tmp \
-      -v "$(host_path "$root/app/target"):/app:ro" -v "$(host_path "$out"):/out" "${mounts[@]}" \
+      -v "$(host_path "$root/app/build/libs"):/app:ro" -v "$(host_path "$out"):/out" "${mounts[@]}" \
       "$image" bash -c "
         Xvfb :99 -screen 0 ${size}x24 -nolisten tcp &
         until xdpyinfo >/dev/null 2>&1; do sleep 0.1; done

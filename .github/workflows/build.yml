@@ -25,5 +25,5 @@ jobs:
         with:
           distribution: temurin
           java-version: 25
-          cache: maven
-      - run: ./mvnw -B verify
+      - uses: gradle/actions/setup-gradle@v6
+      - run: ./gradlew build

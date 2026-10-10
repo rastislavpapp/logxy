@@ -1,6 +1,7 @@
-# Maven
-target/
-.mvn/wrapper/maven-wrapper.jar
+# Gradle
+.gradle/
+build/
+.kotlin/
 
 # IntelliJ IDEA
 .idea/

@@ -7,10 +7,9 @@ Fast desktop viewer for large log files.
 Requires JDK 25. Running the app needs a full JDK with GUI support (e.g. Temurin), not a headless-only runtime such as Fedora's `java-25-openjdk-headless`; point `JAVA_HOME` at it.
 
 ```sh
-./mvnw verify                       # build and test (Windows: mvnw.cmd)
-java -jar app/target/logxy.jar      # run the fat jar
-./mvnw -q install -DskipTests && ./mvnw -q -pl app exec:java   # run during development
-./mvnw -pl app -am clean verify -DskipTests -Pdist   # app image with bundled runtime in app/target/jpackage
+./gradlew build                      # build and test (Windows: gradlew.bat)
+java -jar app/build/libs/logxy.jar   # run the fat jar
+./gradlew :app:run                   # run during development
 ```
 
 ## Releasing
@@ -24,17 +23,17 @@ git tag 0.1.0 && git push origin 0.1.0
 Test data and benchmarks:
 
 ```sh
-./mvnw -q -pl tools exec:java -Dexec.args="generate /path/to/test.log 2g"
-./mvnw -q -pl tools exec:java -Dexec.args="benchmark /path/to/test.log"
-./mvnw -q -pl tools exec:java -Dexec.args="parse /path/to/test.log"
-./mvnw -q -pl tools exec:java -Dexec.args="filter /path/to/test.log"
-./mvnw -q -pl tools exec:java -Dexec.args="simulate /path/to/live.log --rate 50 --rotate-at 1m"
+./gradlew -q :tools:run --args="generate /path/to/test.log 2g"
+./gradlew -q :tools:run --args="benchmark /path/to/test.log"
+./gradlew -q :tools:run --args="parse /path/to/test.log"
+./gradlew -q :tools:run --args="filter /path/to/test.log"
+./gradlew -q :tools:run --args="simulate /path/to/live.log --rate 50 --rotate-at 1m"
 ```
 
 The logo's source is `app/src/main/resources/logxy.svg`. The packaging icons in `app/src/packaging` are generated from it and committed; after changing the logo, regenerate them from the project root:
 
 ```sh
-./mvnw -q install -DskipTests && ./mvnw -q -pl tools exec:java -Dexec.args="icons"
+./gradlew -q :tools:run --args="icons"
 ```
 
 ## AI disclosure
