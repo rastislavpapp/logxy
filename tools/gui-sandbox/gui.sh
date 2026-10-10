@@ -43,7 +43,8 @@ case "${1:-}" in
     done
     "$engine" rm -f "$name" >/dev/null 2>&1 || true
     mkdir -p "$out"
-    "$engine" run -d --name "$name" "${run_opts[@]}" -e HOME=/tmp \
+    # JAVA_TOOL_OPTIONS reaches the app, e.g. -Xmx64m to see how it copes with little memory.
+    "$engine" run -d --name "$name" "${run_opts[@]}" -e HOME=/tmp -e JAVA_TOOL_OPTIONS="${JAVA_TOOL_OPTIONS:-}" \
       -v "$(host_path "$root/app/build/libs"):/app:ro" -v "$(host_path "$out"):/out" "${mounts[@]}" \
       "$image" bash -c "
         Xvfb :99 -screen 0 ${size}x24 -nolisten tcp &

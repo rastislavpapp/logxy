@@ -11,12 +11,17 @@ import java.util.SplittableRandom
 
 private val LEVELS = listOf("TRACE" to 5, "DEBUG" to 25, "INFO" to 55, "WARN" to 10, "ERROR" to 5)
 
+private val TENANTS = listOf("acme", "globex", "initech", "umbrella")
+
 private val TIMESTAMP_SECONDS: DateTimeFormatter =
     DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").withZone(ZoneId.systemDefault())
 
-/** Writes log4j-style lines (`%d [%t] %-5p %c - %m%n`) with occasional stack traces until [size] bytes. */
-fun generateLog(file: Path, size: Long, seed: Long) {
-    val generator = LogGenerator(SplittableRandom(seed))
+/**
+ * Writes log4j-style lines (`%d [%t] %-5p %c - %m%n`, or `%d [%t] %-5p %c %X - %m%n` with [mdc])
+ * with occasional stack traces until [size] bytes.
+ */
+fun generateLog(file: Path, size: Long, seed: Long, mdc: Boolean = false) {
+    val generator = LogGenerator(SplittableRandom(seed), mdc)
     val started = System.nanoTime()
     var written = 0L
     var lines = 0L
@@ -33,7 +38,7 @@ fun generateLog(file: Path, size: Long, seed: Long) {
     println("Wrote ${formatByteSize(written)} ($lines records) to $file in %.1f s".format(seconds))
 }
 
-internal class LogGenerator(private val random: SplittableRandom) {
+internal class LogGenerator(private val random: SplittableRandom, private val mdc: Boolean = false) {
 
     private val threads = List(40) { i ->
         when (i % 4) {
@@ -55,6 +60,11 @@ internal class LogGenerator(private val random: SplittableRandom) {
         }.distinct()
     }
 
+    // A thread keeps its MDC for a run of records, like a request or a consumed message would.
+    private val contexts = arrayOfNulls<String>(threads.size)
+    private val contextRecordsLeft = IntArray(threads.size)
+    private var breadcrumbs = 0L
+
     var timeMillis = Instant.parse("2026-10-01T08:00:00Z").toEpochMilli()
     private var cachedSecond = -1L
     private var cachedSecondText = ""
@@ -63,8 +73,11 @@ internal class LogGenerator(private val random: SplittableRandom) {
         timeMillis += random.nextInt(0, 6)
         val level = pickLevel()
         val sb = StringBuilder(200)
-        sb.append(timestamp()).append(" [").append(threads[random.nextInt(threads.size)]).append("] ")
-        sb.append(level.padEnd(5)).append(' ').append(loggers[random.nextInt(loggers.size)]).append(" - ")
+        val thread = random.nextInt(threads.size)
+        sb.append(timestamp()).append(" [").append(threads[thread]).append("] ")
+        sb.append(level.padEnd(5)).append(' ').append(loggers[random.nextInt(loggers.size)])
+        if (mdc) sb.append(' ').append(context(thread))
+        sb.append(" - ")
         sb.append(message(level)).append('\n')
         val withTrace = (level == "ERROR" && random.nextInt(10) < 3) || (level == "WARN" && random.nextInt(20) == 0)
         if (withTrace) appendStackTrace(sb)
@@ -78,6 +91,28 @@ internal class LogGenerator(private val random: SplittableRandom) {
             roll -= weight
         }
         return "INFO"
+    }
+
+    private fun context(thread: Int): String {
+        if (contextRecordsLeft[thread] == 0) {
+            contextRecordsLeft[thread] = random.nextInt(1, 40)
+            contexts[thread] = newContext(threads[thread])
+        }
+        contextRecordsLeft[thread]--
+        return contexts[thread]!!
+    }
+
+    /** Log4j2's `%X`: all MDC entries sorted by key, `{}` when empty. The set of keys varies by thread. */
+    private fun newContext(thread: String): String {
+        val entries = ArrayList<String>(4)
+        val inRequest = thread.startsWith("http") || thread.startsWith("kafka")
+        if (inRequest || random.nextInt(3) == 0) {
+            entries += "breadcrumbId=ID-app-node-${1 + random.nextInt(3)}-1759305600000-0-${++breadcrumbs}"
+        }
+        if (thread.startsWith("kafka")) entries += "partition=${random.nextInt(12)}"
+        if (inRequest && random.nextInt(4) != 0) entries += "tenant=${TENANTS[random.nextInt(TENANTS.size)]}"
+        if (thread.startsWith("http") && random.nextBoolean()) entries += "userId=${id()}"
+        return entries.joinToString(", ", "{", "}")
     }
 
     private fun timestamp(): String {

@@ -7,9 +7,9 @@ import kotlinx.coroutines.runBlocking
 import java.nio.file.Files
 import java.nio.file.Path
 
-/** Detects the format of [file] and measures parsing it, plus the heap the result holds. */
-fun benchmarkParsing(file: Path, iterations: Int) {
-    val format = LogFormat.detect(file)
+/** Measures parsing [file] with [pattern] or the detected format, plus the heap the result holds. */
+fun benchmarkParsing(file: Path, iterations: Int, pattern: String? = null) {
+    val format = pattern?.let { LogFormat.Pattern(it, it) } ?: LogFormat.detect(file)
     val compiled = format.compile() ?: error("No built-in format matches $file")
     val size = Files.size(file)
     println("File: $file (${formatByteSize(size)}), format: ${format.name}\n")
@@ -28,6 +28,10 @@ fun benchmarkParsing(file: Path, iterations: Int) {
     System.gc()
     val heap = runtime.totalMemory() - runtime.freeMemory()
     val last = log!!
+    val spans = last.schema.fields.filterIndexed { i, field -> compiled.schema.fields.getOrNull(i)?.type.let { it != null && it != field.type } }
+    if (spans.isNotEmpty()) println("stored as spans, having mostly distinct values: ${spans.joinToString { it.name }}")
+    val keys = last.schema.fields.drop(compiled.schema.fields.size)
+    if (keys.isNotEmpty()) println("MDC keys as columns: ${keys.joinToString { it.name }}")
     println("\nheap after GC: ${formatByteSize(heap)} (%.1f bytes per record), timestamps sorted: %s"
         .format(heap.toDouble() / last.recordCount, last.timestampsSorted))
     last.close()

@@ -25,6 +25,7 @@ Test data and benchmarks:
 
 ```sh
 ./gradlew -q :tools:run --args="generate /path/to/test.log 2g"
+./gradlew -q :tools:run --args="generate /path/to/mdc.log 50m --mdc"
 ./gradlew -q :tools:run --args="benchmark /path/to/test.log"
 ./gradlew -q :tools:run --args="parse /path/to/test.log"
 ./gradlew -q :tools:run --args="filter /path/to/test.log"
