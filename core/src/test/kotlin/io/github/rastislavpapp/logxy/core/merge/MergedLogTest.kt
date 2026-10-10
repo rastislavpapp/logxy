@@ -119,7 +119,7 @@ class MergedLogTest {
             // A record earlier than ones already shown still goes after them.
             Files.writeString(a.path, "2026-10-01 10:00:00.000 [main] INFO  app.A - A4\n", StandardOpenOption.APPEND)
             for (part in listOf(a, b)) part.append(part.readAppended(Files.size(part.path)))
-            assertEquals(true, log.appendNew())
+            assertEquals(true, runBlocking { log.appendNew() })
             assertEquals(listOf("B1", "A1", "A2", "B2", "B3", "A3", "A4"), log.column("Message"))
             assertEquals(6, log.position(0, 3))
         }
@@ -137,7 +137,7 @@ class MergedLogTest {
             // A2 (merged position 2) gets a stack trace; B2 (position 3) stays as it was.
             Files.writeString(a.path, "java.lang.NullPointerException\n", StandardOpenOption.APPEND)
             a.append(a.readAppended(Files.size(a.path)))
-            assertEquals(true, log.appendNew())
+            assertEquals(true, runBlocking { log.appendNew() })
             assertEquals(2, filter.changedFrom(covered))
             assertEquals(listOf(2), runBlocking { filter.prepare(npe, filter.changedFrom(covered)).run() }.rows.toList())
         }

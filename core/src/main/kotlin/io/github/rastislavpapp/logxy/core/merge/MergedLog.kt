@@ -90,20 +90,28 @@ class MergedLog private constructor(
     /**
      * Merges the records the parts got since the last merge and adds them at the end. Returns false if
      * a part now has fewer records than were merged (its last record was parsed differently); then the
-     * merge cannot be continued and must be built again. Call on the owner thread after appending.
+     * merge cannot be continued and must be built again. Call on the owner thread after appending; the
+     * merge itself runs on [Dispatchers.Default].
      */
-    fun appendNew(): Boolean {
+    suspend fun appendNew(): Boolean {
         if (parts.indices.any { parts[it].recordCount < mergedCount(it) }) return false
-        merge(parts.map { it.filterSnapshot() })
+        val snapshots = parts.map { it.filterSnapshot() }
+        add(withContext(Dispatchers.Default) { order(snapshots) })
         return true
     }
 
-    private fun merge(snapshots: List<RecordSnapshot>) {
+    /** The part of each record merged next, in merged order, and the parts' last times after them. */
+    private class Order(val parts: ByteArray, val lastTimes: LongArray)
+
+    /** Merges the records of [snapshots] beyond those merged so far, without changing this log. */
+    private fun order(snapshots: List<RecordSnapshot>): Order {
         val count = parts.size
         val cursors = snapshots.map { it.cursor() }
         val next = IntArray(count) { mergedCount(it) }
+        val times = lastTimes.copyOf()
         val heads = LongArray(count)
         val done = BooleanArray(count)
+        val order = ByteArray((0..<count).sumOf { snapshots[it].count - next[it] })
 
         fun loadHead(part: Int) {
             if (next[part] >= snapshots[part].count) {
@@ -113,24 +121,33 @@ class MergedLog private constructor(
             val cursor = cursors[part]
             cursor.moveTo(next[part])
             val time = cursor.timestamp(timestampFields[part])
-            heads[part] = if (time == Columns.ABSENT_TIMESTAMP) lastTimes[part] else time
+            heads[part] = if (time == Columns.ABSENT_TIMESTAMP) times[part] else time
         }
 
         for (part in 0..<count) loadHead(part)
-        while (true) {
+        for (i in order.indices) {
             // Few parts: a linear scan beats a heap. Ties go to the earlier part.
             var best = -1
             for (part in 0..<count) {
                 if (!done[part] && (best < 0 || heads[part] < heads[best])) best = part
             }
-            if (best < 0) break
-            positions[best].add(partOf.size)
-            partOf.add(best.toByte())
-            recordOf.add(next[best])
-            lastTimes[best] = heads[best]
+            order[i] = best.toByte()
+            times[best] = heads[best]
             next[best]++
             loadHead(best)
         }
+        return Order(order, times)
+    }
+
+    private fun add(order: Order) {
+        val next = IntArray(parts.size) { mergedCount(it) }
+        for (b in order.parts) {
+            val part = b.toInt() and 0xFF
+            positions[part].add(partOf.size)
+            partOf.add(b)
+            recordOf.add(next[part]++)
+        }
+        order.lastTimes.copyInto(lastTimes)
     }
 
     companion object {
@@ -144,7 +161,7 @@ class MergedLog private constructor(
         suspend fun build(parts: List<LogData>): MergedLog {
             val log = MergedLog(parts, sourceNames(parts.map { it.path }))
             val snapshots = parts.map { it.filterSnapshot() }
-            withContext(Dispatchers.Default) { log.merge(snapshots) }
+            withContext(Dispatchers.Default) { log.add(log.order(snapshots)) }
             return log
         }
 
