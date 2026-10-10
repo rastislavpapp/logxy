@@ -1,6 +1,7 @@
 package io.github.rastislavpapp.logxy.app
 
 import com.formdev.flatlaf.FlatClientProperties
+import com.formdev.flatlaf.extras.FlatSVGUtils
 import io.github.rastislavpapp.logxy.core.merge.MergedLog
 import net.miginfocom.swing.MigLayout
 import java.awt.BasicStroke
@@ -61,7 +62,7 @@ class MainFrame : JFrame("logxy") {
 
     init {
         defaultCloseOperation = WindowConstants.EXIT_ON_CLOSE
-        iconImages = listOf(16, 32, 48, 64, 128).map { Icons.logFile.derive(it, it).image }
+        iconImages = FlatSVGUtils.createWindowIconImages(Icons.LOGO_PATH)
         jMenuBar = createMenuBar()
         // The title bar is full of controls, and the tab names the file; the title still names the window elsewhere.
         rootPane.putClientProperty(FlatClientProperties.TITLE_BAR_SHOW_TITLE, false)
@@ -140,6 +141,10 @@ class MainFrame : JFrame("logxy") {
                     JOptionPane.showMessageDialog(this@MainFrame, "The title bar changes when logxy is started again.", "Title Bar", JOptionPane.INFORMATION_MESSAGE)
                 }
             })
+        })
+        add(JMenu("Help").apply {
+            mnemonic = KeyEvent.VK_H
+            add(menuItem("About logxy", Icons.logo(16), null) { showAbout(this@MainFrame) })
         })
         // The selected tab's controls; the space between them drags the window.
         add(Box.createHorizontalStrut(12))
@@ -390,7 +395,7 @@ class MainFrame : JFrame("logxy") {
         init {
             add(JPanel(MigLayout("insets 32 48 32 48, wrap 1, gapy 12", "[center]")).apply {
                 isOpaque = false
-                add(JLabel(Icons.get("fileTypes/text", 64)))
+                add(JLabel(Icons.logo(64)))
                 add(JLabel("Drop log files here").apply { putClientProperty("FlatLaf.styleClass", "h2") })
                 add(JLabel("or").apply { foreground = UIManager.getColor("Label.disabledForeground") })
                 add(JButton("Open File", Icons.open).apply {

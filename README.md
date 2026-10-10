@@ -1,4 +1,4 @@
-# logxy
+# <img src="app/src/main/resources/logxy.svg" width="40" height="40" align="top" alt=""> logxy
 
 Fast desktop viewer for large log files.
 

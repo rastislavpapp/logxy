@@ -17,6 +17,9 @@ object Icons {
 
     fun get(path: String, size: Int = 16): FlatSVGIcon = FlatSVGIcon("expui/$path.svg", size, size)
 
+    const val LOGO_PATH = "/logxy.svg"
+    fun logo(size: Int) = FlatSVGIcon(LOGO_PATH.removePrefix("/"), size, size)
+
     val open get() = get("general/open")
     val close get() = get("general/close")
     val closeSmall get() = get("general/closeSmall")
