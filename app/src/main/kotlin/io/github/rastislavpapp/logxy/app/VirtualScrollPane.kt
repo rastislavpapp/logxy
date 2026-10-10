@@ -11,7 +11,6 @@ import javax.swing.AbstractAction
 import javax.swing.DefaultListSelectionModel
 import javax.swing.JComponent
 import javax.swing.JPanel
-import javax.swing.JScrollBar
 import javax.swing.JScrollPane
 import javax.swing.JTable
 import javax.swing.KeyStroke
@@ -48,7 +47,7 @@ class VirtualScrollPane(private val table: JTable, private val window: RowWindow
         isWheelScrollingEnabled = false
     }
     private val viewport get() = scrollPane.viewport
-    private val scrollBar = JScrollBar(JScrollBar.VERTICAL)
+    private val scrollBar = MarkedScrollBar()
     private var updatingScrollBar = false
     private var moveScheduled = false
     private var wheelRemainder = 0.0
@@ -63,6 +62,11 @@ class VirtualScrollPane(private val table: JTable, private val window: RowWindow
         }
 
     var onFollowChanged: (Boolean) -> Unit = {}
+
+    /** Rows to mark along the scroll bar. */
+    var marks: RowMarks? by scrollBar::marks
+
+    fun repaintMarks() = scrollBar.repaint()
 
     /** Whether the user scrolling to the end turns [follow] back on. */
     var resumeFollowAtEnd: () -> Boolean = { false }
@@ -90,6 +94,11 @@ class VirtualScrollPane(private val table: JTable, private val window: RowWindow
                 scrollToRow(it.value)
                 resumeFollowIfAtEnd()
             }
+        }
+        scrollBar.onMarkClicked = { row ->
+            follow = false
+            selectRow(row)
+            table.requestFocusInWindow()
         }
         scrollPane.addMouseWheelListener(::onWheel)
         table.addKeyListener(object : KeyAdapter() {

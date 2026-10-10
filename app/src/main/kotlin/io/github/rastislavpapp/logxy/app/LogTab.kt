@@ -118,6 +118,7 @@ class LogTab(
     private var model: LogTableModel? = null
     private var table: LogTable? = null
     private var scrollPane: VirtualScrollPane? = null
+    private var levelMarks: LevelMarks? = null
 
     /** What the status bar shows for this file. */
     val status: SessionStatus get() = session.status
@@ -350,12 +351,15 @@ class LogTab(
         val scrollPane = VirtualScrollPane(table, model)
         scrollPane.onFollowChanged = { session.follow = it }
         scrollPane.resumeFollowAtEnd = { session.isLive }
+        val levelMarks = LevelMarks(model, scope, scrollPane::repaintMarks)
+        scrollPane.marks = levelMarks
         table.selectionModel.addListSelectionListener { event ->
             if (!event.valueIsAdjusting) showDetail(model, table.selectionModel.leadSelectionIndex)
         }
         this.model = model
         this.table = table
         this.scrollPane = scrollPane
+        this.levelMarks = levelMarks
         filterBar.setSchema(records.schema)
         setFilterVisible(true)
 
@@ -422,6 +426,7 @@ class LogTab(
         val top = if (model.totalRowCount > 0) model.recordAtIndex(scrollPane.firstVisibleRow) else null
         model.showRows(rows)
         scrollPane.rowsReplaced()
+        levelMarks?.reset()
         val selectedIndex = selected?.let { record -> model.indexOfRecord(record).takeIf { it >= 0 && model.recordAtIndex(it) == record } }
         if (!session.follow) {
             if (keepView && top != null) {
@@ -462,6 +467,8 @@ class LogTab(
     private inner class Listener : SessionListener {
         override fun indexing(fraction: () -> Double) {
             columnsButton.isEnabled = false
+            levelMarks?.cancel()
+            levelMarks = null
             model = null
             table = null
             scrollPane = null
@@ -489,7 +496,10 @@ class LogTab(
         override fun recordsAppended(oldRecordCount: Int, changed: IntArray) {
             model?.recordsAppended(oldRecordCount, changed)
             changed.forEach(::refreshDetail)
-            if (session.shown == null) scrollPane?.rowsAppended()
+            if (session.shown == null) {
+                scrollPane?.rowsAppended()
+                levelMarks?.changedFrom(changed.fold(oldRecordCount, ::minOf))
+            }
         }
 
         override fun rowsReplaced(rows: FilteredRows?, keepView: Boolean) = showRows(rows, keepView)
@@ -497,10 +507,12 @@ class LogTab(
         override fun rowsExtended(firstChanged: Int, oldSize: Int) {
             model?.rowsChangedFrom(firstChanged, oldSize)
             scrollPane?.rowsAppended()
+            levelMarks?.changedFrom(firstChanged)
         }
 
         override fun levelMappingChanged() {
             model?.let { it.fireTableRowsUpdated(0, maxOf(0, it.rowCount - 1)) }
+            levelMarks?.reset()
         }
 
         override fun followChanged(follow: Boolean) {
