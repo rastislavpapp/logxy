@@ -228,7 +228,6 @@ class LogTab(
     private fun showCellMenu(table: LogTable, row: Int, column: Int, x: Int, y: Int) {
         val model = model ?: return
         val field = model.fieldAt(column) ?: return
-        if (!table.isRowSelected(row)) table.setRowSelectionInterval(row, row)
         val value = model.getValueAt(row, column) as String
         val level = model.level(row)?.takeIf { field.role == Role.LEVEL && it != Level.UNKNOWN }
         val pattern = value.replace("\\", "\\\\").replace("*", "\\*").replace("?", "\\?")
