@@ -46,11 +46,12 @@ internal class ReadChannels private constructor(private val channels: List<FileC
     companion object {
         private val serialReads = System.getProperty("os.name").startsWith("Windows")
 
-        fun open(path: Path): ReadChannels {
-            val count = if (serialReads) Runtime.getRuntime().availableProcessors() else 1
-            val channels = ArrayList<FileChannel>(count)
+        /** Opens [count] channels where reads are serial, else one. */
+        fun open(path: Path, count: Int): ReadChannels {
+            val opened = if (serialReads) count else 1
+            val channels = ArrayList<FileChannel>(opened)
             try {
-                repeat(count) { channels += FileChannel.open(path, StandardOpenOption.READ) }
+                repeat(opened) { channels += FileChannel.open(path, StandardOpenOption.READ) }
             } catch (e: Throwable) {
                 channels.forEach { runCatching { it.close() } }
                 throw e

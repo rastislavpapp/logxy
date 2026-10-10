@@ -273,7 +273,7 @@ class ParsedLog private constructor(
             progress: IndexProgress = IndexProgress(),
             options: IndexOptions = IndexOptions(),
         ): ParsedLog = withContext(Dispatchers.IO) {
-            val channels = ReadChannels.open(path)
+            val channels = ReadChannels.open(path, options.readChannels)
             try {
                 val channel = channels.main
                 val size = channel.size()

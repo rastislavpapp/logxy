@@ -1,5 +1,6 @@
 package io.github.rastislavpapp.logxy.core.parse
 
+import io.github.rastislavpapp.logxy.core.index.IndexOptions
 import io.github.rastislavpapp.logxy.core.index.IndexProgress
 import io.github.rastislavpapp.logxy.core.index.LineIndex
 import io.github.rastislavpapp.logxy.core.log.LevelMapping
@@ -73,7 +74,8 @@ suspend fun LogFormat.open(
     path: Path,
     progress: IndexProgress = IndexProgress(),
     levels: LevelMapping = LevelMapping.DEFAULT,
+    options: IndexOptions = IndexOptions(),
 ): LogData {
-    val compiled = compile() ?: return LineIndex.build(path, progress)
-    return ParsedLog.build(path, compiled, progress).also { it.levelMapping = levels }
+    val compiled = compile() ?: return LineIndex.build(path, progress, options)
+    return ParsedLog.build(path, compiled, progress, options).also { it.levelMapping = levels }
 }

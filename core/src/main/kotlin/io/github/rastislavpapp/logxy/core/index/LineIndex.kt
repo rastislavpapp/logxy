@@ -26,11 +26,14 @@ data class IndexOptions(
     /** Files are only split into ranges of at least this size, so small files use one thread. */
     val minRangeSize: Long = 64L * 1024 * 1024,
     val bufferSize: Int = 1024 * 1024,
+    /** Channels per file where positional reads are serial (Windows); fewer when many files are open together. */
+    val readChannels: Int = parallelism,
 ) {
     init {
         require(parallelism >= 1) { "parallelism must be at least 1" }
         require(minRangeSize >= 1) { "minRangeSize must be at least 1" }
         require(bufferSize >= 8) { "bufferSize must be at least 8" }
+        require(readChannels >= 1) { "readChannels must be at least 1" }
     }
 
     /** How many ranges a file of [size] bytes is split into for scanning in parallel. */
@@ -131,7 +134,7 @@ class LineIndex private constructor(
             progress: IndexProgress = IndexProgress(),
             options: IndexOptions = IndexOptions(),
         ): LineIndex = withContext(Dispatchers.IO) {
-            val channels = ReadChannels.open(path)
+            val channels = ReadChannels.open(path, options.readChannels)
             try {
                 val size = channels.main.size()
                 progress.totalBytes = size

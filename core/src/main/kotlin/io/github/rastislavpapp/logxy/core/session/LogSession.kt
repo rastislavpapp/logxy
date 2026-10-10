@@ -8,6 +8,7 @@ import io.github.rastislavpapp.logxy.core.filter.FilterEngine
 import io.github.rastislavpapp.logxy.core.filter.LevelCondition
 import io.github.rastislavpapp.logxy.core.filter.PreparedFilter
 import io.github.rastislavpapp.logxy.core.filter.RecordFilter
+import io.github.rastislavpapp.logxy.core.index.IndexOptions
 import io.github.rastislavpapp.logxy.core.index.IndexProgress
 import io.github.rastislavpapp.logxy.core.log.Level
 import io.github.rastislavpapp.logxy.core.log.LogData
@@ -244,6 +245,9 @@ class LogSession(
             val started = System.nanoTime()
             val preferred = settings.current.formats
             val levels = settings.current.levels
+            // A merge filters its files in parallel, so each needs only its share of channels; this bounds file handles.
+            // At least a few each, as files are indexed one at a time and that slows down a lot with fewer.
+            val options = IndexOptions().let { it.copy(readChannels = maxOf(minOf(4, it.parallelism), it.parallelism / sources.size)) }
             for ((i, source) in sources.withIndex()) {
                 current = source
                 // Taken before indexing, so a file replaced meanwhile shows up as a change on the first poll.
@@ -251,7 +255,7 @@ class LogSession(
                     ?: throw IOException("${source.path.fileName}: file not found")
                 val chosen = if (isMerged) null else chosenFormat
                 source.format = chosen ?: withContext(Dispatchers.IO) { LogFormat.detect(source.path, preferred) }
-                withContext(Dispatchers.IO) { opened += source.format.open(source.path, progresses[i], levels) }
+                withContext(Dispatchers.IO) { opened += source.format.open(source.path, progresses[i], levels, options) }
                 source.log = opened.last()
             }
             formatDetected = true
