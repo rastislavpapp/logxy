@@ -230,9 +230,7 @@ class LogTab(
         if (!table.isRowSelected(row)) table.setRowSelectionInterval(row, row)
         val value = model.getValueAt(row, column) as String
         val level = model.level(row)?.takeIf { field.role == Role.LEVEL && it != Level.UNKNOWN }
-        // A message shows only its first line, and long values are cut: match what is shown as a prefix.
-        val partial = value.isNotEmpty() && (field.role == Role.MESSAGE || value.length >= MAX_DISPLAY_BYTES)
-        val pattern = value.replace("\\", "\\\\").replace("*", "\\*").replace("?", "\\?") + if (partial) "*" else ""
+        val pattern = value.replace("\\", "\\\\").replace("*", "\\*").replace("?", "\\?")
         fun rule(op: QueryOp) =
             if (level != null) Query.Rule(field.name, op, level.name, bare = true) else Query.Rule(field.name, op, pattern)
         val popup = JPopupMenu()
