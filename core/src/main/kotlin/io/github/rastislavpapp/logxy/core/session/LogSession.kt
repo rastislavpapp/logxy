@@ -444,7 +444,19 @@ class LogSession(
                 filtering = true
                 updateStatus()
             }
-            val result = evaluation.run()
+            val result = try {
+                evaluation.run()
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                // Keep the previous result, but stop showing the filter as running.
+                indicator.cancel()
+                filtering = false
+                running = null
+                filterJob = null
+                problem = e.message ?: e.javaClass.simpleName
+                updateStatus()
+                return@launch
+            }
             indicator.cancel()
             filtering = false
             running = null
