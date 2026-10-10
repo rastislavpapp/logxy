@@ -13,3 +13,4 @@ replay_pid*
 # OS
 .DS_Store
 Thumbs.db
+tools/gui-sandbox/out/
