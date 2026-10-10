@@ -21,7 +21,8 @@ internal fun FileChannel.readFully(buffer: ByteBuffer, position: Long): Int {
 /**
  * Channels of one file for reading it in parallel. On Windows the JDK runs positional reads on one
  * channel one at a time (they move the shared file pointer), so there parallel readers get a channel
- * each; all are opened together so they see the same file, even if it is rotated later.
+ * each, and [main] is kept apart so the UI does not wait behind them; all are opened together so they
+ * see the same file, even if it is rotated later.
  */
 internal class ReadChannels private constructor(private val channels: List<FileChannel>) : Closeable {
 
@@ -29,7 +30,8 @@ internal class ReadChannels private constructor(private val channels: List<FileC
     val main: FileChannel get() = channels[0]
 
     /** The channel for parallel task number [task]. */
-    fun forTask(task: Int): FileChannel = channels[Math.floorMod(task, channels.size)]
+    fun forTask(task: Int): FileChannel =
+        if (channels.size == 1) channels[0] else channels[1 + Math.floorMod(task, channels.size - 1)]
 
     override fun close() {
         var error: Throwable? = null
@@ -46,9 +48,9 @@ internal class ReadChannels private constructor(private val channels: List<FileC
     companion object {
         private val serialReads = System.getProperty("os.name").startsWith("Windows")
 
-        /** Opens [count] channels where reads are serial, else one. */
+        /** Opens [count] channels for tasks plus [main] where reads are serial, else one for all. */
         fun open(path: Path, count: Int): ReadChannels {
-            val opened = if (serialReads) count else 1
+            val opened = if (serialReads) count + 1 else 1
             val channels = ArrayList<FileChannel>(opened)
             try {
                 repeat(opened) { channels += FileChannel.open(path, StandardOpenOption.READ) }
