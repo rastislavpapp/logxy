@@ -32,6 +32,9 @@ internal abstract class RecordSnapshot(
 
 internal interface RecordCursor {
     fun moveTo(record: Int)
+
+    /** The record moved to. */
+    val record: Int
     val start: Long
     val end: Long
     fun timestamp(field: Int): Long
@@ -63,7 +66,8 @@ internal class ParsedSnapshot(
         private var segment = 0
         private var columns = segments.firstOrNull()
         private var local = 0
-        private var record = 0
+        override var record = 0
+            private set
 
         override fun moveTo(record: Int) {
             this.record = record
@@ -105,7 +109,8 @@ internal class LineSnapshot(
     override fun dictionaryTexts(field: Int) = throw UnsupportedOperationException("Raw logs have no dictionaries")
 
     override fun cursor(): RecordCursor = object : RecordCursor {
-        private var record = 0
+        override var record = 0
+            private set
 
         override fun moveTo(record: Int) {
             this.record = record

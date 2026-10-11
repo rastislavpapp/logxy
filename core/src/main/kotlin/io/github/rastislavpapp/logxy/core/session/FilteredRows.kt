@@ -12,6 +12,12 @@ class FilteredRows(rows: IntArray) {
     /** The record at [index], which must be below [size]. */
     operator fun get(index: Int): Int = rows[index]
 
+    /**
+     * The rows below [size], for reading on another thread. Only the part [replaceFrom] replaces may change
+     * under the reader, so a result for the rows read then is complete up to there.
+     */
+    internal fun array(): IntArray = rows
+
     /** Position of [record], or of the first record after it; -1 if there is none. */
     fun indexOf(record: Int): Int {
         val found = rows.binarySearch(record, 0, size)

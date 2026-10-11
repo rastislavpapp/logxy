@@ -8,6 +8,7 @@ import io.github.rastislavpapp.logxy.core.log.LevelMapping
 import io.github.rastislavpapp.logxy.core.log.LogData
 import io.github.rastislavpapp.logxy.core.log.ParsedLog
 import io.github.rastislavpapp.logxy.core.parse.PatternFormat
+import io.github.rastislavpapp.logxy.core.pattern.Templates
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Files
@@ -263,6 +264,7 @@ class FilterEngineTest {
             Filter.And(listOf(LevelCondition.atLeast("Level", Level.WARN), TextCondition("Message", TextOp.EQUALS, "*needle*"))),
             Filter.Or(listOf(TextCondition("Thread", TextOp.EQUALS, "t-3"), Filter.Not(TextCondition("Logger", TextOp.EQUALS, "log.L1")))),
             Filter.And(listOf(TextCondition("Message", TextOp.EQUALS, "*NEEDLE*", ignoreCase = true), TimeCondition("Timestamp", from = nanos("2026-10-01T02:00:00")))),
+            Filter.And(listOf(LevelCondition.atLeast("Level", Level.INFO), Filter.Not(PatternCondition("Message", setOf("message {} hay"))))),
         )
         fun expected(log: LogData, filter: Filter): List<Int> = (0..<log.recordCount).filter { matches(log as ParsedLog, it, filter) }
 
@@ -306,6 +308,7 @@ class FilterEngineTest {
                 else -> error("unused")
             }
         }
+        is PatternCondition -> Templates.mask(log.rowValues(record, 1000)[log.schema.fields.indexOfFirst { it.name == filter.field }]) in filter.templates
         is PresenceCondition -> error("unused")
     }
 }

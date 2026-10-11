@@ -21,6 +21,8 @@ import io.github.rastislavpapp.logxy.core.merge.MergedLog
 import io.github.rastislavpapp.logxy.core.parse.FormatMismatchException
 import io.github.rastislavpapp.logxy.core.parse.LogFormat
 import io.github.rastislavpapp.logxy.core.parse.open
+import io.github.rastislavpapp.logxy.core.pattern.PatternCounts
+import io.github.rastislavpapp.logxy.core.pattern.PatternIndex
 import io.github.rastislavpapp.logxy.core.query.Query
 import io.github.rastislavpapp.logxy.core.query.QueryCompiler
 import io.github.rastislavpapp.logxy.core.query.QueryException
@@ -238,6 +240,33 @@ class LogSession(
         }
         activeFilter = filter
         runFilter(keepView = false, evaluation)
+    }
+
+    /** How far [patternCounts] got with finding the templates of new records, from 0 to 1. */
+    val patternProgress: Double get() = engine?.patternProgress ?: 1.0
+
+    /**
+     * Counts the shown rows by the template of their message (see [io.github.rastislavpapp.logxy.core.pattern.Templates]);
+     * null if there is nothing loaded or the records have no message. Cancelling the caller stops it.
+     */
+    suspend fun patternCounts(): PatternCounts? {
+        val records = records ?: return null
+        val engine = engine ?: return null
+        if (records.schema.indexOf(Role.MESSAGE) < 0) return null
+        val rows = shown
+        return engine.countPatterns(rows?.array(), rows?.size ?: records.recordCount)
+    }
+
+    /** The template of [record]'s message; null if it has none, or nothing is loaded. */
+    fun templateOf(record: Int): String? {
+        val records = records ?: return null
+        if (records.schema.indexOf(Role.MESSAGE) < 0) return null
+        val template = if (records is MergedLog) {
+            PatternIndex.templateOf(records.parts[records.part(record)].filterSnapshot(), records.record(record))
+        } else {
+            PatternIndex.templateOf((records as LogData).filterSnapshot(), record)
+        }
+        return template.ifEmpty { null }
     }
 
     /** Cancels running work and releases the files. */

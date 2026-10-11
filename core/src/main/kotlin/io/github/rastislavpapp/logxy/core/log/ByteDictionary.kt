@@ -29,6 +29,16 @@ class ByteDictionary {
         return id
     }
 
+    /** The id of `bytes[from, to)`, or -1 if it has none; adds nothing. */
+    fun find(bytes: ByteArray, from: Int, to: Int): Int {
+        var slot = hash(bytes, from, to) and (table.size - 1)
+        while (true) {
+            val id = table[slot]
+            if (id < 0 || keys[id].contentEquals(bytes, from, to)) return id
+            slot = (slot + 1) and (table.size - 1)
+        }
+    }
+
     fun key(id: Int): ByteArray = keys[id]
 
     /** The id in [target] of each of this dictionary's keys, by id here; adds the keys [target] lacks. */

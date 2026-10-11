@@ -3,6 +3,7 @@ package io.github.rastislavpapp.logxy.tools
 import io.github.rastislavpapp.logxy.core.filter.Filter
 import io.github.rastislavpapp.logxy.core.filter.FilterEngine
 import io.github.rastislavpapp.logxy.core.filter.LevelCondition
+import io.github.rastislavpapp.logxy.core.filter.PatternCondition
 import io.github.rastislavpapp.logxy.core.filter.TextCondition
 import io.github.rastislavpapp.logxy.core.filter.TextOp
 import io.github.rastislavpapp.logxy.core.log.Level
@@ -69,6 +70,13 @@ private fun measureAll(): Map<String, Double> {
             // A new engine each time, as it caches what it computed.
             record(name, best { runBlocking { FilterEngine(parsed).prepare(filter).run() } })
         }
+        // New engines find the templates anew; a used one only counts.
+        record("patterns: count all", best { runBlocking { FilterEngine(parsed).countPatterns(null, parsed.recordCount) } })
+        val engine = FilterEngine(parsed)
+        val top = runBlocking { engine.countPatterns(null, parsed.recordCount) }.templates.first()!!
+        record("patterns: count all again", best { runBlocking { engine.countPatterns(null, parsed.recordCount) } })
+        val hide = Filter.Not(PatternCondition("Message", setOf(top)))
+        record("filter hide most common pattern", best { runBlocking { FilterEngine(parsed).prepare(hide).run() } })
     }
 
     val parts = ArrayList<LogData>()
@@ -87,6 +95,7 @@ private fun measureAll(): Map<String, Double> {
         val merged = runBlocking { MergedLog.build(parts) }
         val timeout = TextCondition("Message", TextOp.EQUALS, "*timeout*")
         record("merge: filter message contains 'timeout'", best { runBlocking { MergedFilter(merged).prepare(timeout, 0).run() } })
+        record("merge: count patterns", best { runBlocking { MergedFilter(merged).countPatterns(null, merged.recordCount) } })
     } finally {
         parts.forEach { it.close() }
     }

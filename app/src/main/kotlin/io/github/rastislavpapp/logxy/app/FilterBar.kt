@@ -123,8 +123,9 @@ class FilterBar(private val onApply: () -> Unit) : JPanel(MigLayout("insets 6 8 
         val text = if (textMode.isSelected) runCatching { QueryParser.parse(textArea.text) }.getOrNull() else null
         text?.let(editor::setQuery)
         val fields = schema.fields.filter { !it.hidden }
+        editor.patterns = schema.hasPatterns()
         editor.setFields(fields)
-        textArea.setFields(fields.map { it.name })
+        textArea.setFields(fields.map { it.name } + listOfNotNull(Query.PATTERN_FIELD.takeIf { schema.hasPatterns() }))
         // The editor starts placeholder rows over on new fields; text without real conditions follows it.
         if (text != null && editor.query().items.isEmpty()) textArea.text = QueryPrinter.print(editor.query(includeEmpty = true))
         if (suspended) updateInputsEnabled()
@@ -171,7 +172,10 @@ class FilterBar(private val onApply: () -> Unit) : JPanel(MigLayout("insets 6 8 
     fun query(): Query.Group = if (textMode.isSelected) QueryParser.parse(textArea.text) else editor.query()
 
     /** Adds [rule] to the filter, joined with AND, and applies it. */
-    fun addRule(rule: Query.Rule) {
+    fun addRule(rule: Query) = addRules(listOf(rule))
+
+    /** Adds [rules] to the filter, each joined with AND, and applies it once. */
+    fun addRules(rules: List<Query>) {
         val current = try {
             query()
         } catch (e: QueryException) {
@@ -179,9 +183,9 @@ class FilterBar(private val onApply: () -> Unit) : JPanel(MigLayout("insets 6 8 
             return
         }
         val combined = when {
-            current.items.isEmpty() -> Query.Group(all = true, items = listOf(rule))
-            current.all && !current.negated -> current.copy(items = current.items + rule)
-            else -> Query.Group(all = true, items = listOf(current, rule))
+            current.items.isEmpty() -> Query.Group(all = true, items = rules)
+            current.all && !current.negated -> current.copy(items = current.items + rules)
+            else -> Query.Group(all = true, items = listOf(current) + rules)
         }
         if (textMode.isSelected) textArea.text = QueryPrinter.print(combined) else editor.setQuery(combined)
         applyFilter()

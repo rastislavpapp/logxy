@@ -10,6 +10,8 @@ import io.github.rastislavpapp.logxy.core.log.MapKey
 import io.github.rastislavpapp.logxy.core.parse.Json
 import io.github.rastislavpapp.logxy.core.parse.MapSyntax
 import io.github.rastislavpapp.logxy.core.parse.MdcMap
+import io.github.rastislavpapp.logxy.core.pattern.PatternCounts
+import io.github.rastislavpapp.logxy.core.pattern.PatternIndex
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -40,6 +42,16 @@ interface RecordFilter {
      * records: records that were still growing then (the last one of a log) and everything after.
      */
     fun changedFrom(coveredRecords: Int): Int
+
+    /**
+     * Counts [rowCount] rows (`rows[i]`, or all records from the first if [rows] is null) by the template of
+     * their message; see [io.github.rastislavpapp.logxy.core.pattern.Templates]. Call on the thread that owns
+     * the records; cancelling the calling coroutine stops it.
+     */
+    suspend fun countPatterns(rows: IntArray?, rowCount: Int): PatternCounts
+
+    /** How far [countPatterns] got with finding the templates of records it had not seen, from 0 to 1. */
+    val patternProgress: Double
 }
 
 /** A filter ready to run; [run] may be called on any thread. */
@@ -68,6 +80,10 @@ class FilterEngine(private val log: LogData, private val maxCacheBytes: Long = D
     private val cache: MutableMap<Condition, Entry> = Collections.synchronizedMap(LinkedHashMap(16, 0.75f, true))
 
     internal val cachedConditions get() = cache.size
+
+    /** Message templates of the log's records, for [PatternCondition]s and for counting them. */
+    internal val patterns = PatternIndex()
+
     @Volatile
     private var cachedLevels: LevelMapping? = null
 
@@ -88,6 +104,11 @@ class FilterEngine(private val log: LogData, private val maxCacheBytes: Long = D
     // Only the last record of a log grows.
     override fun changedFrom(coveredRecords: Int) = maxOf(0, coveredRecords - 1)
 
+    override suspend fun countPatterns(rows: IntArray?, rowCount: Int): PatternCounts =
+        PatternCounts.count(listOf(patterns), listOf(log.filterSnapshot()), rows, rowCount, null)
+
+    override val patternProgress get() = patterns.progress
+
     /** Caches [entry], dropping the least recently used others while the cache is over [maxCacheBytes]. */
     private fun store(condition: Condition, entry: Entry) = synchronized(cache) {
         cache[condition] = entry
@@ -103,7 +124,7 @@ class FilterEngine(private val log: LogData, private val maxCacheBytes: Long = D
         is Filter.And -> AndNode(filter.parts.map { compile(it, snapshot) }.sortedBy { it.cost })
         is Filter.Or -> OrNode(filter.parts.map { compile(it, snapshot) }.sortedBy { it.cost })
         is Filter.Not -> NotNode(compile(filter.part, snapshot))
-        is Condition -> Leaf.of(filter, snapshot)
+        is Condition -> Leaf.of(filter, snapshot, patterns)
     }
 
     inner class Evaluation internal constructor(
@@ -137,6 +158,7 @@ class FilterEngine(private val log: LogData, private val maxCacheBytes: Long = D
         }
 
         override suspend fun run(): FilterResult = withContext(Dispatchers.Default) {
+            for (leaf in leaves(root)) leaf.prepare?.invoke()
             FilterResult(rows(evaluate(root, null)), from, snapshot.count, snapshot.end)
         }
 
@@ -267,16 +289,20 @@ private class NotNode(val part: Node) : Node {
     override val cost = part.cost
 }
 
-/** A condition resolved against a snapshot's schema, with everything dictionary-based precomputed. */
+/**
+ * A condition resolved against a snapshot's schema, with everything dictionary-based precomputed;
+ * what needs more work than that is done by [prepare], on the evaluating thread, before any [test].
+ */
 private class Leaf(
     val condition: Condition,
     override val cost: Int,
     val readsFile: Boolean,
+    val prepare: (suspend () -> Unit)? = null,
     val test: (RecordCursor, SpanReader?) -> Boolean,
 ) : Node {
 
     companion object {
-        fun of(condition: Condition, snapshot: RecordSnapshot): Leaf {
+        fun of(condition: Condition, snapshot: RecordSnapshot, patterns: PatternIndex): Leaf {
             val field = snapshot.schema.fields.indexOfFirst { it.name == condition.field }
             val type = snapshot.schema.fields.getOrNull(field)?.type
             fun constant(value: Boolean) = Leaf(condition, 0, false) { _, _ -> value }
@@ -302,6 +328,11 @@ private class Leaf(
                     Leaf(condition, 0, false) { c, _ -> c.timestamp(field) in from..to }
                 }
                 is TextCondition -> textLeaf(condition, snapshot, field, type)
+                is PatternCondition -> {
+                    var matching = BooleanArray(0)
+                    val prepare: suspend () -> Unit = { matching = patterns.matching(snapshot, condition.templates) }
+                    Leaf(condition, 0, false, prepare) { c, _ -> matching.getOrElse(patterns.id(c.record)) { false } }
+                }
             }
         }
 
@@ -369,7 +400,7 @@ private class Leaf(
                     }
                 }
             }
-            is LevelCondition, is TimeCondition -> Leaf(condition, 0, false) { _, _ -> false }
+            is LevelCondition, is TimeCondition, is PatternCondition -> Leaf(condition, 0, false) { _, _ -> false }
         }
 
         /** The range of [key]'s value in the reader's buffer, packed as by [MdcMap]; -1 if the record has none. */

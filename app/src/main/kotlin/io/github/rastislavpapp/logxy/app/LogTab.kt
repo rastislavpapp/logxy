@@ -37,6 +37,7 @@ import javax.swing.JPopupMenu
 import javax.swing.JProgressBar
 import javax.swing.JScrollPane
 import javax.swing.JSplitPane
+import javax.swing.JTabbedPane
 import javax.swing.JTextArea
 import javax.swing.ScrollPaneConstants
 import javax.swing.SwingUtilities
@@ -47,6 +48,7 @@ private const val MAX_DETAIL_BYTES = 1024 * 1024
 private const val MAX_TITLE_CHARS = 40
 private const val MAX_MENU_CHARS = 80
 private val RANGE_OPS = listOf(QueryOp.AT_LEAST, QueryOp.ABOVE, QueryOp.AT_MOST, QueryOp.BELOW)
+private const val BOTTOM_TAB_PATTERNS = "patterns"
 
 /**
  * One open file, or several merged: shows the records of its [LogSession], with the filter bar and the
@@ -94,6 +96,16 @@ class LogTab(
     val description: String get() = paths.joinToString("\n") { (origin(it) ?: it).toString() }
     private val content = JPanel(BorderLayout())
     private val detail = LogDetailArea()
+    private val filterBar = FilterBar(::applyFilter)
+    private val patterns = PatternsPanel(scope, { session.patternCounts() }, { session.patternProgress }, filterBar::addRules)
+
+    /** Below the table: the selected record, or the message patterns of the shown rows. */
+    private val bottomTabs = JTabbedPane().apply {
+        addTab("Detail", JScrollPane(detail, ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED, ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER))
+        addTab("Patterns", patterns)
+        if (AppState[AppState.BOTTOM_TAB] == BOTTOM_TAB_PATTERNS) selectedComponent = patterns
+        addChangeListener { AppState[AppState.BOTTOM_TAB] = if (selectedComponent === patterns) BOTTOM_TAB_PATTERNS else null }
+    }
     private val followButton = accentToggle(Icons.follow, "Follow (tail)").apply {
         addActionListener { session.follow = isSelected }
     }
@@ -105,7 +117,6 @@ class LogTab(
 
     /** Names of the columns the user hid; kept when the file is read again. */
     private var hiddenColumns = emptySet<String>()
-    private val filterBar = FilterBar(::applyFilter)
     private var progressTimer: Timer? = null
     private var filterTimer: Timer? = null
 
@@ -272,6 +283,12 @@ class LogTab(
         // `== ""` is a placeholder that filters nothing; `!= ""` keeps records with a value.
         if (value.isNotEmpty()) add(rule(QueryOp.EQUALS))
         add(rule(QueryOp.NOT_EQUALS))
+        val template = if (field.role == Role.MESSAGE && model.records.schema.hasPatterns()) session.templateOf(model.recordAt(row)) else null
+        if (template != null) {
+            popup.addSeparator()
+            add(Query.Rule(Query.PATTERN_FIELD, QueryOp.EQUALS, template))
+            add(Query.Rule(Query.PATTERN_FIELD, QueryOp.NOT_EQUALS, template))
+        }
         if (level != null) {
             popup.addSeparator()
             for (op in RANGE_OPS) add(Query.Rule(field.name, op, level.name, bare = true))
@@ -401,12 +418,11 @@ class LogTab(
         this.scrollPane = scrollPane
         this.levelMarks = levelMarks
         filterBar.setSchema(records.schema)
+        patterns.canFilter = records.schema.hasPatterns()
         setFilterVisible(true)
 
         detail.text = ""
-        val split = JSplitPane(JSplitPane.VERTICAL_SPLIT, scrollPane, JScrollPane(
-            detail, ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED, ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER,
-        )).apply {
+        val split = JSplitPane(JSplitPane.VERTICAL_SPLIT, scrollPane, bottomTabs).apply {
             resizeWeight = 0.75
             isOneTouchExpandable = true
             border = null
@@ -473,6 +489,7 @@ class LogTab(
         model.showRows(rows)
         scrollPane.rowsReplaced()
         levelMarks?.reset()
+        patterns.refresh()
         val selectedIndex = selected?.let { record -> model.indexOfRecord(record).takeIf { it >= 0 && model.recordAtIndex(it) == record } }
         if (!session.follow) {
             if (keepView && top != null) {
@@ -505,6 +522,7 @@ class LogTab(
     /** Cancels any running work and releases the file. */
     fun dispose() {
         stopProgress()
+        patterns.reset()
         showFilterProgress(false)
         session.dispose()
         scope.cancel()
@@ -515,6 +533,7 @@ class LogTab(
             columnsButton.isEnabled = false
             levelMarks?.cancel()
             levelMarks = null
+            patterns.reset()
             model = null
             table = null
             scrollPane = null
@@ -545,6 +564,7 @@ class LogTab(
             if (session.shown == null) {
                 scrollPane?.rowsAppended()
                 levelMarks?.changedFrom(changed.fold(oldRecordCount, ::minOf))
+                patterns.refreshSoon()
             }
         }
 
@@ -554,11 +574,13 @@ class LogTab(
             model?.rowsChangedFrom(firstChanged, oldSize)
             scrollPane?.rowsAppended()
             levelMarks?.changedFrom(firstChanged)
+            patterns.refreshSoon()
         }
 
         override fun levelMappingChanged() {
             model?.let { it.fireTableRowsUpdated(0, maxOf(0, it.rowCount - 1)) }
             levelMarks?.reset()
+            patterns.refresh()
         }
 
         override fun followChanged(follow: Boolean) {

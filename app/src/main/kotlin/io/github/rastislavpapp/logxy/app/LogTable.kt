@@ -4,6 +4,7 @@ import io.github.rastislavpapp.logxy.core.log.ColumnType
 import io.github.rastislavpapp.logxy.core.log.Level
 import io.github.rastislavpapp.logxy.core.log.Role
 import io.github.rastislavpapp.logxy.core.query.Highlighter
+import java.awt.Color
 import java.awt.Component
 import java.awt.Font
 import java.awt.Graphics
@@ -23,6 +24,14 @@ private const val CLIP = "..."
 
 /** The last column (usually the message) keeps this many characters; when columns do not fit, the others shrink first. */
 private const val MIN_LAST_COLUMN_CHARS = 40
+
+/** The text color of [level]: red for errors, yellow for warnings, dim for debug output, else [default]. */
+fun levelColor(level: Level?, default: Color): Color = when (level) {
+    Level.ERROR, Level.FATAL -> UIManager.getColor("Actions.Red")
+    Level.WARN -> UIManager.getColor("Actions.Yellow")
+    Level.TRACE, Level.DEBUG -> UIManager.getColor("Label.disabledForeground")
+    else -> default
+}
 
 /** Table of log records; the last column always fills the viewport and long values are cut. */
 class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
@@ -199,14 +208,7 @@ class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
             table: JTable, value: Any?, isSelected: Boolean, hasFocus: Boolean, row: Int, column: Int,
         ): Component {
             super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column)
-            if (!isSelected) {
-                foreground = when (logModel.level(row)) {
-                    Level.ERROR, Level.FATAL -> UIManager.getColor("Actions.Red")
-                    Level.WARN -> UIManager.getColor("Actions.Yellow")
-                    Level.TRACE, Level.DEBUG -> UIManager.getColor("Label.disabledForeground")
-                    else -> table.foreground
-                }
-            }
+            if (!isSelected) foreground = levelColor(logModel.level(row), table.foreground)
             return this
         }
     }

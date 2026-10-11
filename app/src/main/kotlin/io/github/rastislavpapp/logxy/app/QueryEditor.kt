@@ -92,6 +92,9 @@ fun applyOnEnter(combo: JComboBox<*>, action: () -> Unit) {
 class QueryEditor(private val onApply: () -> Unit) : JPanel(MigLayout("insets 0, fillx", "[grow, fill]")) {
 
     private var fields: List<Field> = emptyList()
+
+    /** Whether rules on the message template, [Query.PATTERN_FIELD], are offered; set before [setFields]. */
+    var patterns = false
     private var root = GroupView(Query.EMPTY, isRoot = true)
 
     init {
@@ -133,6 +136,8 @@ class QueryEditor(private val onApply: () -> Unit) : JPanel(MigLayout("insets 0,
     private fun defaultRule() = Query.Rule(defaultField(), QueryOp.EQUALS, "")
 
     private fun fieldType(name: String) = fields.firstOrNull { it.name.equals(name, ignoreCase = true) }?.type
+
+    private fun isPattern(name: String) = name.equals(Query.PATTERN_FIELD, ignoreCase = true) && fieldType(name) == null
 
     /** Puts the keyboard focus into the first condition's value. */
     fun focusFirstValue() {
@@ -319,7 +324,7 @@ class QueryEditor(private val onApply: () -> Unit) : JPanel(MigLayout("insets 0,
 
         init {
             isOpaque = false
-            val names = fields.map { it.name }
+            val names = fields.map { it.name } + listOfNotNull(Query.PATTERN_FIELD.takeIf { patterns })
             val known = names.firstOrNull { it.equals(rule.field, ignoreCase = true) }
             names.forEach(field::addItem)
             if (known == null) field.addItem(rule.field)
@@ -346,7 +351,10 @@ class QueryEditor(private val onApply: () -> Unit) : JPanel(MigLayout("insets 0,
 
         private fun fieldType() = fieldType(field.selectedItem as String)
 
-        private fun ops(): List<RuleOp> = when (fieldType()) {
+        private fun isPattern() = isPattern(field.selectedItem as String)
+
+        // Templates match exactly.
+        private fun ops(): List<RuleOp> = if (isPattern()) listOf(RuleOp.IS, RuleOp.IS_NOT) else when (fieldType()) {
             ColumnType.LEVEL -> RuleOp.LEVEL + RuleOp.TEXT
             ColumnType.TIMESTAMP -> RuleOp.TIME + RuleOp.TEXT
             else -> RuleOp.TEXT
@@ -374,11 +382,15 @@ class QueryEditor(private val onApply: () -> Unit) : JPanel(MigLayout("insets 0,
                 valueSlot = wanted
                 changed()
             }
-            case.isEnabled = selected.usesCase
-            text.toolTipText = when (selected) {
-                RuleOp.MATCHES, RuleOp.NOT_MATCHES -> "Regular expression, found anywhere; ignores case unless it starts with (?-i)"
-                in RuleOp.TIME -> "e.g. 2026-10-09 08:30:00.000, 2026-10-09 or 08:30"
-                else -> "* matches any text, ? one character"
+            case.isEnabled = selected.usesCase && !isPattern()
+            text.toolTipText = if (isPattern()) {
+                "The message with its variable parts (numbers, ids, …) written as {}"
+            } else {
+                when (selected) {
+                    RuleOp.MATCHES, RuleOp.NOT_MATCHES -> "Regular expression, found anywhere; ignores case unless it starts with (?-i)"
+                    in RuleOp.TIME -> "e.g. 2026-10-09 08:30:00.000, 2026-10-09 or 08:30"
+                    else -> "* matches any text, ? one character"
+                }
             }
         }
 
@@ -402,6 +414,7 @@ class QueryEditor(private val onApply: () -> Unit) : JPanel(MigLayout("insets 0,
                 } to rule.value
                 type == ColumnType.LEVEL && rule.bare && levelName != null && rule.op == QueryOp.EQUALS -> RuleOp.LEVEL_IS to rule.value
                 type == ColumnType.LEVEL && rule.bare && levelName != null && rule.op == QueryOp.NOT_EQUALS -> RuleOp.LEVEL_IS_NOT to rule.value
+                isPattern() -> (if (rule.op == QueryOp.NOT_EQUALS || rule.op == QueryOp.NOT_EQUALS_CASE) RuleOp.IS_NOT else RuleOp.IS) to rule.value
                 rule.op == QueryOp.MATCHES -> RuleOp.MATCHES to rule.value
                 rule.op == QueryOp.NOT_MATCHES -> RuleOp.NOT_MATCHES to rule.value
                 // An empty value is a placeholder; show it as the default "contains".
@@ -448,7 +461,7 @@ class QueryEditor(private val onApply: () -> Unit) : JPanel(MigLayout("insets 0,
             // "is not" nothing keeps the records that have a value.
             val notEmpty = selected == RuleOp.IS_NOT && value.isEmpty()
             if (!selected.usesLevel && value.isEmpty() && !includeEmpty && !notEmpty) return null
-            val exact = case.isSelected
+            val exact = case.isSelected && !isPattern()
             val equals = if (exact) QueryOp.EQUALS_CASE else QueryOp.EQUALS
             val notEquals = if (exact) QueryOp.NOT_EQUALS_CASE else QueryOp.NOT_EQUALS
             val levelName = (level.selectedItem as Level).name

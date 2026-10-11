@@ -2,12 +2,14 @@ package io.github.rastislavpapp.logxy.core.query
 
 import io.github.rastislavpapp.logxy.core.filter.Filter
 import io.github.rastislavpapp.logxy.core.filter.LevelCondition
+import io.github.rastislavpapp.logxy.core.filter.PatternCondition
 import io.github.rastislavpapp.logxy.core.filter.PresenceCondition
 import io.github.rastislavpapp.logxy.core.filter.TextCondition
 import io.github.rastislavpapp.logxy.core.filter.TextOp
 import io.github.rastislavpapp.logxy.core.filter.TimeCondition
 import io.github.rastislavpapp.logxy.core.log.ColumnType
 import io.github.rastislavpapp.logxy.core.log.Level
+import io.github.rastislavpapp.logxy.core.log.Role
 import io.github.rastislavpapp.logxy.core.log.Schema
 import java.time.DateTimeException
 import java.time.Instant
@@ -41,7 +43,9 @@ class QueryCompiler(private val schema: Schema, private val zone: ZoneId = ZoneI
 
     private fun rule(rule: Query.Rule): Filter {
         val field = schema.fields.firstOrNull { it.name.equals(rule.field, ignoreCase = true) }
-            ?: throw QueryException("Unknown field “${rule.field}”; this log has ${schema.fields.joinToString { it.name }}")
+        // A field of the log named so wins over the template.
+        if (field == null && rule.field.equals(Query.PATTERN_FIELD, ignoreCase = true)) return pattern(rule)
+        field ?: throw QueryException("Unknown field “${rule.field}”; this log has ${schema.fields.joinToString { it.name }}")
         val name = field.name
         if (rule.op.comparison) {
             return when (field.type) {
@@ -73,6 +77,18 @@ class QueryCompiler(private val schema: Schema, private val zone: ZoneId = ZoneI
             }
         }
         return TextCondition(name, op, rule.value, ignoreCase)
+    }
+
+    /** Templates match exactly; `==` and `===` alike, as templates have no wildcards. */
+    private fun pattern(rule: Query.Rule): Filter {
+        val message = schema.fields.firstOrNull { it.role == Role.MESSAGE }
+            ?: throw QueryException("${Query.PATTERN_FIELD} needs a message, which this log does not have")
+        val condition = PatternCondition(message.name, setOf(rule.value))
+        return when (rule.op) {
+            QueryOp.EQUALS, QueryOp.EQUALS_CASE -> condition
+            QueryOp.NOT_EQUALS, QueryOp.NOT_EQUALS_CASE -> Filter.Not(condition)
+            else -> throw QueryException("${Query.PATTERN_FIELD} works with == and !=, not ${rule.op.symbol}")
+        }
     }
 
     private fun level(text: String): Level = Level.entries.firstOrNull { it.name.equals(text, ignoreCase = true) }

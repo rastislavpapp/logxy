@@ -44,6 +44,11 @@ class HighlighterTest {
     }
 
     @Test
+    fun skipsPatterns() {
+        assertTrue(of(rule(QueryOp.EQUALS, "Request from {} took {} ms", field = "Pattern")).isEmpty)
+    }
+
+    @Test
     fun mergesOverlaps() {
         val h = of(rule(QueryOp.EQUALS, "*abc*"), rule(QueryOp.EQUALS, "*bcd*"))
         assertContentEquals(intArrayOf(0, 4), h.ranges("message", "abcd"))
