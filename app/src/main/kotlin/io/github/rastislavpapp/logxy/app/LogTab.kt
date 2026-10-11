@@ -59,11 +59,13 @@ class LogTab(
     private val openEach: (List<Path>) -> Unit,
     filter: SavedFilter? = null,
     private val origin: (Path) -> ZipSpool.Origin? = { null },
+    /** The parser chosen for each of [paths], null (or missing) to detect it. */
+    formats: List<LogFormat?> = emptyList(),
     private val onStatusChanged: () -> Unit,
 ) : JPanel(BorderLayout()) {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Swing)
-    private val session = LogSession(paths, scope, AppSettings, Listener(), origin)
+    private val session = LogSession(paths, scope, AppSettings, Listener(), origin, formats)
 
     /** The files shown; for a merge, without those that turned out to have no timestamps. */
     val paths: List<Path> get() = session.paths
@@ -72,6 +74,9 @@ class LogTab(
     val path: Path get() = session.paths.first()
 
     val isMerged get() = session.isMerged
+
+    /** The parser chosen for each of [paths], null where it is detected. */
+    val chosenFormats: List<LogFormat?> get() = session.chosenFormats
 
     /** Short names of [paths], as the merge's source column shows them. */
     val sourceNames: List<String> get() = session.sourceNames
@@ -179,12 +184,14 @@ class LogTab(
         showPopupList(parserButton, items)
     }
 
-    /** Merged files always use detected parsers: list them, read-only. */
+    /** A merge's parsers are chosen when opening it: list them, read-only. */
     private fun showMergedParsers() {
-        val names = sourceNames
         val items = buildList {
-            names.zip(session.formats).forEach { (name, format) -> add(PopupItem("$name: ${format.name}", enabled = false)) }
-            add(PopupItem("To choose a parser, open the file on its own", enabled = false, separatorBefore = true))
+            for ((i, name) in sourceNames.withIndex()) {
+                val format = session.formats[i]
+                add(PopupItem("$name: ${if (session.chosenFormats[i] == null) "Auto: ${format.name}" else format.name}", enabled = false))
+            }
+            add(PopupItem("To choose other parsers, open the files again", enabled = false, separatorBefore = true))
             add(PopupItem("Edit Parsers", Icons.settings) { editParsers(session.format) })
         }
         showPopupList(parserButton, items)
@@ -288,7 +295,11 @@ class LogTab(
     /** Shows the format in use on the parser button. */
     private fun showFormat() {
         parserButton.text = when {
-            isMerged -> if (session.formatDetected) "Auto: per file" else "Auto-detect"
+            isMerged -> when {
+                session.chosenFormats.any { it != null } -> "Per file"
+                session.formatDetected -> "Auto: per file"
+                else -> "Auto-detect"
+            }
             else -> session.chosenFormat?.name ?: autoLabel()
         }
     }

@@ -116,6 +116,22 @@ class LogSessionTest {
     }
 
     @Test
+    fun `a merge uses the formats chosen for its files and detects the others`() = runBlocking {
+        val a = Files.writeString(dir.resolve("a.log"), lines(10))
+        val b = Files.writeString(dir.resolve("b.log"), lines(10))
+        val pattern = LogFormat.Pattern("Mine", "%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %-5p %c - %m%n")
+        val recorder = Recorder()
+        val session = withContext(ui) { LogSession(listOf(a, b), scope, NoSettings, recorder, chosen = listOf(null, pattern)).also { it.start() } }
+        val records = withTimeout(10_000) { recorder.loads.receive() }
+        withContext(ui) {
+            assertEquals(listOf(null, pattern), session.chosenFormats)
+            assertEquals(listOf(LogFormat.BUILT_IN[0], pattern), session.formats)
+            assertEquals(20, records.recordCount)
+            session.dispose()
+        }
+    }
+
+    @Test
     fun `a filter follows appended records, also when a record is completed later`() = runBlocking {
         val file = Files.writeString(dir.resolve("tail.log"), lines(1000))
         val (session, _) = open(file, Recorder())

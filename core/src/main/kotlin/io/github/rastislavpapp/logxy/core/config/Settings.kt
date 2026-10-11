@@ -14,12 +14,26 @@ import java.util.Properties
 /** A named filter: the minimum level (null for all) and the query text. */
 data class SavedFilter(val name: String, val minimumLevel: Level?, val query: String)
 
-/** The user's saved formats (parsers), level names, filters, and the memory limit (e.g. `8g`, null for the JVM default). */
+/** How to open files: into the current tab's merge, merged with it in a new tab, merged on their own, or a tab each. */
+enum class OpenMode(val key: String) {
+    MERGE_INTO_CURRENT("merge-into-current"),
+    MERGE_WITH_CURRENT_IN_NEW("merge-with-current"),
+    MERGE("merge"),
+    TABS("tabs"),
+}
+
+/**
+ * The user's saved formats (parsers), level names, filters, the memory limit (e.g. `8g`, null for the JVM
+ * default), how to open files without asking ([openMode], null to ask) and whether opened folders include
+ * their subfolders.
+ */
 data class Settings(
     val formats: List<LogFormat> = emptyList(),
     val levels: LevelMapping = LevelMapping.DEFAULT,
     val filters: List<SavedFilter> = emptyList(),
     val maxMemory: String? = null,
+    val openMode: OpenMode? = null,
+    val includeSubfolders: Boolean = true,
 ) {
     companion object {
         /** `%APPDATA%\logxy` on Windows, `$XDG_CONFIG_HOME/logxy` or `~/.config/logxy` elsewhere. */
@@ -59,6 +73,8 @@ data class Settings(
          * filter.1.level=WARN
          * filter.1.query=logger == "com.example.db*"
          * max-memory=8g
+         * open.mode=merge
+         * open.subfolders=false
          * ```
          * Level names are stored only once the user changed them, and then completely. A missing file
          * means default settings; entries that cannot be read are skipped.
@@ -96,7 +112,11 @@ data class Settings(
             }
             val maxMemory = properties.getProperty("max-memory")?.let(::parseMemory)
             // Without the marker, level entries only add to the built-in names (as first released).
-            return Settings(formats, LevelMapping(if (custom) levels else Level.BUILT_IN_NAMES + levels), filters, maxMemory)
+            val openMode = properties.getProperty("open.mode")?.let { mode -> OpenMode.entries.firstOrNull { it.key == mode } }
+            val includeSubfolders = properties.getProperty("open.subfolders") != "false"
+            return Settings(
+                formats, LevelMapping(if (custom) levels else Level.BUILT_IN_NAMES + levels), filters, maxMemory, openMode, includeSubfolders,
+            )
         }
 
         /** Writes [settings] to [path], replacing the file only once the new one is complete. */
@@ -128,6 +148,8 @@ data class Settings(
                 properties["filter.${i + 1}.query"] = filter.query
             }
             settings.maxMemory?.let { properties["max-memory"] = it }
+            settings.openMode?.let { properties["open.mode"] = it.key }
+            if (!settings.includeSubfolders) properties["open.subfolders"] = "false"
             if (settings.levels != LevelMapping.DEFAULT) {
                 properties["level-names"] = "custom"
                 settings.levels.names.forEach { (text, level) -> properties["level.$text"] = level.name }

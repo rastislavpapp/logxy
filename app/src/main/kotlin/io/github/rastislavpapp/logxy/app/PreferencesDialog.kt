@@ -41,14 +41,14 @@ class PreferencesDialog(
     offerUse: Boolean = false,
 ) : JDialog(owner, "Preferences", ModalityType.APPLICATION_MODAL) {
 
-    enum class Section { PARSERS, LEVELS, MEMORY }
+    enum class Section { PARSERS, LEVELS, MEMORY, OPENING }
 
     /** Set when the dialog closed with "Save and Use for This File". */
     var formatToUse: LogFormat? = null
         private set
 
     private val parsers = ParsersPage(previewFile, select)
-    private val pages = listOf(parsers, LevelsPage(), MemoryPage())
+    private val pages = listOf(parsers, LevelsPage(), MemoryPage(), OpeningPage())
     private val cards = CardLayout()
     private val content = JPanel(cards)
     private val heading = JLabel().apply { putClientProperty("FlatLaf.styleClass", "h3") }

@@ -30,6 +30,8 @@ class SettingsTest {
                 SavedFilter("Everything", null, ""),
             ),
             maxMemory = "8g",
+            openMode = OpenMode.MERGE_WITH_CURRENT_IN_NEW,
+            includeSubfolders = false,
         )
         val file = dir.resolve("nested/dir/logxy.properties")
         Settings.save(file, settings)

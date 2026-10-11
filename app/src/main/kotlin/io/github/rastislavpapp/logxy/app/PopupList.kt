@@ -55,17 +55,17 @@ fun dropDownButton(tooltip: String, maxWidth: Int? = null, sizedFor: List<String
     }
 
 /**
- * Shows [items] in a popup under [invoker], like IntelliJ's run configuration list: rows rather than
- * menu items, so that each can carry its own [PopupTool] buttons.
+ * Shows [items] in a popup under [invoker] (from [x] on), like IntelliJ's run configuration list: rows
+ * rather than menu items, so that each can carry its own [PopupTool] buttons.
  */
-fun showPopupList(invoker: JComponent, items: List<PopupItem>) {
+fun showPopupList(invoker: JComponent, items: List<PopupItem>, x: Int = 0) {
     val popup = JPopupMenu()
     val hasChecks = items.any { it.selected }
     items.forEach { item ->
         if (item.separatorBefore && popup.componentCount > 0) popup.addSeparator()
         popup.add(PopupRow(item, popup, hasChecks))
     }
-    popup.show(invoker, 0, invoker.height)
+    popup.show(invoker, x, invoker.height)
 }
 
 private class PopupRow(private val item: PopupItem, private val popup: JPopupMenu, hasChecks: Boolean) :

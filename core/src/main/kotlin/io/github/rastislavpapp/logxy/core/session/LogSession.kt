@@ -93,7 +93,8 @@ interface SessionListener {
  * One or more open files without their UI: indexes them in the background, merges several by time
  * (see [MergedLog]), follows changes to them, and filters them. Not thread-safe: use it, and run
  * [scope], on one thread (the UI thread); [listener] is called there. [origin] tells which files were
- * extracted from zips, for naming them.
+ * extracted from zips, for naming them. [chosen] holds the format the user picked for each of the paths,
+ * null (or missing) to detect it.
  */
 class LogSession(
     paths: List<Path>,
@@ -101,11 +102,12 @@ class LogSession(
     private val settings: SettingsStore,
     private val listener: SessionListener,
     private val origin: (Path) -> ZipSpool.Origin? = { null },
+    chosen: List<LogFormat?> = emptyList(),
 ) {
     constructor(path: Path, scope: CoroutineScope, settings: SettingsStore, listener: SessionListener) :
         this(listOf(path), scope, settings, listener)
 
-    private class Source(val path: Path) {
+    private class Source(val path: Path, var chosen: LogFormat?) {
         var format: LogFormat = LogFormat.Raw
         var log: LogData? = null
         var known: FileSnapshot? = null
@@ -116,7 +118,7 @@ class LogSession(
         require(paths.isNotEmpty()) { "A session needs a file" }
     }
 
-    private var sources = paths.map { Source(it) }
+    private var sources = paths.mapIndexed { i, path -> Source(path, chosen.getOrNull(i)) }
         set(value) {
             field = value
             sourceNames = MergedLog.sourceNames(paths, origin)
@@ -134,9 +136,11 @@ class LogSession(
     /** Several files merged into one view. */
     val isMerged get() = sources.size > 1
 
-    /** The format the user picked for a single file, or null to detect it. Merged files are always detected. */
-    var chosenFormat: LogFormat? = null
-        private set
+    /** The format the user picked for a single file (the first one of a merge), or null to detect it. */
+    val chosenFormat: LogFormat? get() = sources.first().chosen
+
+    /** The format the user picked for each of [paths], null where it is detected. */
+    val chosenFormats: List<LogFormat?> get() = sources.map { it.chosen }
 
     /** The format in use (or last used) for each of [paths]. */
     val formats: List<LogFormat> get() = sources.map { it.format }
@@ -194,9 +198,9 @@ class LogSession(
 
     /** Uses [format] for a single file from now on, or detects the format if null; reads the file again. */
     fun useFormat(format: LogFormat?) {
-        require(!isMerged) { "Merged files always use detected formats" }
+        require(!isMerged) { "A merge's formats are chosen when opening it" }
         if (format == chosenFormat) return
-        chosenFormat = format
+        sources.first().chosen = format
         listener.formatChanged()
         reload()
     }
@@ -265,8 +269,7 @@ class LogSession(
                 // Taken before indexing, so a file replaced meanwhile shows up as a change on the first poll.
                 source.known = withContext(Dispatchers.IO) { FileSnapshot.take(source.path) }
                     ?: throw IOException("${source.path.fileName}: file not found")
-                val chosen = if (isMerged) null else chosenFormat
-                source.format = chosen ?: withContext(Dispatchers.IO) { LogFormat.detect(source.path, preferred) }
+                source.format = source.chosen ?: withContext(Dispatchers.IO) { LogFormat.detect(source.path, preferred) }
                 withContext(Dispatchers.IO) { opened += source.format.open(source.path, progresses[i], levels, options) }
                 source.log = opened.last()
             }
@@ -422,14 +425,19 @@ class LogSession(
             log.levelMapping = settings.levels
         }
         if (levelsChanged) listener.levelMappingChanged()
-        // A saved format this session uses was edited: read the file with the new definition.
-        val edited = chosenFormat?.let { chosen -> settings.formats.firstOrNull { it.name == chosen.name && it != chosen } }
-        if (edited != null) chosenFormat = edited
+        // A saved format this session uses was edited: read the files with the new definition.
+        var edited = false
+        for (source in sources) {
+            val chosen = source.chosen ?: continue
+            val changed = settings.formats.firstOrNull { it.name == chosen.name && it != chosen } ?: continue
+            source.chosen = changed
+            edited = true
+        }
         // Only renamed: nothing to read again, just show the new name.
-        chosenFormat?.let { renamed(it, settings.formats) }?.let { chosenFormat = it }
+        for (source in sources) source.chosen?.let { renamed(it, settings.formats) }?.let { source.chosen = it }
         for (source in sources) renamed(source.format, settings.formats)?.let { source.format = it }
         listener.formatChanged()
-        if (edited != null) {
+        if (edited) {
             reload()
         } else if (levelsChanged && activeFilter != null) {
             runFilter(keepView = true, activeFilter?.let { engine?.prepare(it) })

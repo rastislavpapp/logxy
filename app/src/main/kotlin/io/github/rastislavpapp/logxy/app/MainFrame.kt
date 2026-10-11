@@ -4,10 +4,12 @@ import com.formdev.flatlaf.FlatClientProperties
 import com.formdev.flatlaf.extras.FlatSVGUtils
 import io.github.rastislavpapp.logxy.core.LogFolders
 import io.github.rastislavpapp.logxy.core.archive.ZipSpool
+import io.github.rastislavpapp.logxy.core.config.OpenMode
 import io.github.rastislavpapp.logxy.core.config.SavedFilter
 import io.github.rastislavpapp.logxy.core.config.Settings
 import io.github.rastislavpapp.logxy.core.log.Level
 import io.github.rastislavpapp.logxy.core.merge.MergedLog
+import io.github.rastislavpapp.logxy.core.parse.LogFormat
 import net.miginfocom.swing.MigLayout
 import java.awt.BasicStroke
 import java.awt.BorderLayout
@@ -31,7 +33,6 @@ import javax.swing.Box
 import javax.swing.ButtonGroup
 import javax.swing.Icon
 import javax.swing.JButton
-import javax.swing.JCheckBox
 import javax.swing.JCheckBoxMenuItem
 import javax.swing.JComponent
 import javax.swing.JDialog
@@ -43,13 +44,11 @@ import javax.swing.JMenuBar
 import javax.swing.JMenuItem
 import javax.swing.JOptionPane
 import javax.swing.JPanel
-import javax.swing.JRadioButton
 import javax.swing.JRadioButtonMenuItem
 import javax.swing.JSeparator
 import javax.swing.JTabbedPane
 import javax.swing.KeyStroke
 import javax.swing.SwingConstants
-import javax.swing.SwingUtilities
 import javax.swing.Timer
 import javax.swing.UIManager
 import javax.swing.WindowConstants
@@ -246,23 +245,59 @@ class MainFrame : JFrame("logxy") {
         )
     }
 
+    /**
+     * Opens [found] as the settings say, or as the user answers in the Open Files dialog: how to open
+     * them, with which parsers, and whether with the files in subfolders.
+     */
     private fun openFound(found: List<Found>) {
         val current = selectedTab()
         // Files the current tab already shows have nothing to add.
         val candidates = found.distinctBy { it.path }.filter { current == null || it.path !in current.paths }
         if (candidates.isEmpty()) return
         val all = candidates.map { it.path }
-        if (current == null && all.size == 1) return openFile(all.single())
-        val outsideSubfolders = candidates.filter { !it.inSubfolder }.map { it.path }.takeIf { it.size < all.size }
-        val (choice, subfolders) = openChoice(all, outsideSubfolders, current?.paths) ?: return
-        val openable = if (subfolders) all else outsideSubfolders!!
-        if (openable.isEmpty()) return
-        when (choice) {
-            OpenChoice.MERGE_INTO_CURRENT -> mergeWithCurrent(current!!, openable, keepCurrent = false)
-            OpenChoice.MERGE_WITH_CURRENT_IN_NEW -> mergeWithCurrent(current!!, openable, keepCurrent = true)
-            OpenChoice.MERGE -> openMerged(openable)
-            OpenChoice.TABS -> openable.forEach(::openFile)
+        val inSubfolders = candidates.filter { it.inSubfolder }.map { it.path }.toSet()
+        val settings = AppSettings.current
+        val answer = settings.openMode?.let { remembered ->
+            val files = if (settings.includeSubfolders) all else all - inSubfolders
+            if (files.isEmpty()) return
+            val mode = rememberedMode(remembered, files.size, current?.paths?.size) ?: return@let null
+            OpenAnswer(mode, files, files.map { null }, settings.includeSubfolders, remember = false)
+        } ?: askHowToOpen(all, inSubfolders, current) ?: return
+        if (answer.remember) {
+            try {
+                AppSettings.update(AppSettings.current.copy(openMode = answer.mode, includeSubfolders = answer.includeSubfolders))
+            } catch (e: Exception) {
+                JOptionPane.showMessageDialog(this, "Cannot write ${AppSettings.location}:\n${e.message}", "Cannot Save", JOptionPane.ERROR_MESSAGE)
+            }
         }
+        when (answer.mode) {
+            OpenMode.MERGE_INTO_CURRENT -> mergeWithCurrent(current!!, answer.files, answer.formats, keepCurrent = false)
+            OpenMode.MERGE_WITH_CURRENT_IN_NEW -> mergeWithCurrent(current!!, answer.files, answer.formats, keepCurrent = true)
+            OpenMode.MERGE -> openMerged(answer.files, answer.formats)
+            OpenMode.TABS -> answer.files.zip(answer.formats).forEach { (file, format) -> openFile(file, format) }
+        }
+    }
+
+    /**
+     * The closest of the modes [count] files can be opened in to the [remembered] one, with a current tab of
+     * [currentCount] files; null if merging is not possible as remembered (too many files), so the user decides.
+     */
+    private fun rememberedMode(remembered: OpenMode, count: Int, currentCount: Int?): OpenMode? {
+        val possible = OpenFilesDialog.modesFor(count, currentCount)
+        return when {
+            remembered in possible -> remembered
+            remembered != OpenMode.TABS && OpenMode.MERGE in possible -> OpenMode.MERGE
+            count == 1 -> OpenMode.TABS
+            else -> null
+        }
+    }
+
+    private fun askHowToOpen(files: List<Path>, inSubfolders: Set<Path>, current: LogTab?): OpenAnswer? {
+        val names = MergedLog.sourceNames(files, ::originOf)
+        val descriptions = files.map { (originOf(it) ?: it).toString() }
+        val dialog = OpenFilesDialog(this, files, names, descriptions, inSubfolders, current?.paths)
+        dialog.isVisible = true
+        return dialog.answer
     }
 
     /** Arguments for [openArgs] that reopen the open tabs with their filters, e.g. after a restart. */
@@ -356,28 +391,29 @@ class MainFrame : JFrame("logxy") {
     }
 
     /** Opens each of [paths] in a tab of its own. */
-    fun openEach(paths: List<Path>) = paths.forEach(::openFile)
+    fun openEach(paths: List<Path>) = paths.forEach { openFile(it) }
 
-    fun openFile(path: Path) {
+    /** Opens [path] in a tab with [format], or the detected one if null; selects its tab if it is open already. */
+    fun openFile(path: Path, format: LogFormat? = null) {
         val absolute = path.toAbsolutePath().normalize()
         if (selectTab(listOf(absolute)) || !checkOpenable(absolute)) return
-        addTab(LogTab(listOf(absolute), ::openFiles, ::openEach, origin = ::originOf) { updateStatus() })
+        addTab(LogTab(listOf(absolute), ::openFiles, ::openEach, origin = ::originOf, formats = listOf(format)) { updateStatus() })
     }
 
-    private fun openMerged(paths: List<Path>) {
+    private fun openMerged(paths: List<Path>, formats: List<LogFormat?>) {
         if (selectTab(paths)) return
-        addTab(LogTab(paths, ::openFiles, ::openEach, origin = ::originOf) { updateStatus() })
+        addTab(LogTab(paths, ::openFiles, ::openEach, origin = ::originOf, formats = formats) { updateStatus() })
     }
 
     /**
-     * Merges [tab]'s files with [paths] under its filter: in a new tab next to it if [keepCurrent],
-     * else in its place.
+     * Merges [tab]'s files with [paths] (read with [formats]) under its filter: in a new tab next to it if
+     * [keepCurrent], else in its place.
      */
-    private fun mergeWithCurrent(tab: LogTab, paths: List<Path>, keepCurrent: Boolean) {
+    private fun mergeWithCurrent(tab: LogTab, paths: List<Path>, formats: List<LogFormat?>, keepCurrent: Boolean) {
         val merged = tab.paths + paths
         if (selectTab(merged)) return
         val index = tabs.indexOfComponent(tab)
-        val mergedTab = LogTab(merged, ::openFiles, ::openEach, tab.filter, ::originOf) { updateStatus() }
+        val mergedTab = LogTab(merged, ::openFiles, ::openEach, tab.filter, ::originOf, tab.chosenFormats + formats) { updateStatus() }
         val at = if (keepCurrent) index + 1 else index
         tabs.insertTab(mergedTab.title, Icons.merged, mergedTab, mergedTab.description, at)
         tabs.selectedIndex = at
@@ -407,61 +443,6 @@ class MainFrame : JFrame("logxy") {
         }
         if (problem != null) JOptionPane.showMessageDialog(this, "$problem:\n$path", "Cannot Open File", JOptionPane.ERROR_MESSAGE)
         return problem == null
-    }
-
-    private enum class OpenChoice { MERGE_INTO_CURRENT, MERGE_WITH_CURRENT_IN_NEW, MERGE, TABS }
-
-    /**
-     * Asks how to open [paths], offering to merge them with the [current] tab's files if there is one, and
-     * whether to include files in subfolders if [outsideSubfolders] (the files without those) is given;
-     * null if cancelled. Merges of more files than [MergedLog.MAX_PARTS] are not offered.
-     */
-    private fun openChoice(paths: List<Path>, outsideSubfolders: List<Path>?, current: List<Path>?): Pair<OpenChoice, Boolean>? {
-        val subfolders = outsideSubfolders?.let { JCheckBox("Include subfolders", true) }
-        val message = JLabel()
-        val options = JPanel(MigLayout("insets 8 0 0 0, wrap 1, gapy 2"))
-        var choices = emptyList<Pair<OpenChoice, String>>()
-        var radios = emptyList<JRadioButton>()
-        // Only what the user clicked; a choice that was the only one left was not picked.
-        var picked: OpenChoice? = null
-        // The choices depend on how many files there are, which the checkbox changes.
-        fun update() {
-            val files = if (subfolders?.isSelected == false) outsideSubfolders else paths
-            choices = openChoices(files, current)
-            val group = ButtonGroup()
-            radios = choices.map { (choice, label) ->
-                JRadioButton(label, choice == picked).also { radio ->
-                    group.add(radio)
-                    radio.addActionListener { picked = choice }
-                }
-            }
-            if (radios.none { it.isSelected }) radios.firstOrNull()?.isSelected = true
-            options.removeAll()
-            radios.forEach(options::add)
-            message.text = when (files.size) {
-                0 -> "No files outside subfolders."
-                1 -> "Open ${files.single().fileName}:"
-                else -> "Open ${files.size} files:"
-            }
-            SwingUtilities.getWindowAncestor(options)?.pack()
-        }
-        update()
-        subfolders?.addActionListener { update() }
-        val answer = JOptionPane.showConfirmDialog(
-            this, listOfNotNull<JComponent>(message, options, subfolders).toTypedArray(), "Open Files", JOptionPane.OK_CANCEL_OPTION, JOptionPane.QUESTION_MESSAGE,
-        )
-        if (answer != JOptionPane.OK_OPTION) return null
-        return choices[radios.indexOfFirst { it.isSelected }].first to (subfolders?.isSelected != false)
-    }
-
-    private fun openChoices(paths: List<Path>, current: List<Path>?): List<Pair<OpenChoice, String>> = buildList {
-        val several = paths.size > 1
-        if (current != null && current.size + paths.size <= MergedLog.MAX_PARTS) {
-            add(OpenChoice.MERGE_INTO_CURRENT to "Merge into current tab")
-            add(OpenChoice.MERGE_WITH_CURRENT_IN_NEW to "Merge with current tab in a new tab")
-        }
-        if (several && paths.size <= MergedLog.MAX_PARTS) add(OpenChoice.MERGE to if (current != null) "Merge only these files" else "Merge into one view")
-        add(OpenChoice.TABS to if (several) "Open in separate tabs" else "Open in a new tab")
     }
 
     private fun closeTab(index: Int) {
