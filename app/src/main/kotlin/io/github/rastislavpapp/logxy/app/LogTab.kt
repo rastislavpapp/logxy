@@ -123,6 +123,19 @@ class LogTab(
     /** What the status bar shows for this file. */
     val status: SessionStatus get() = session.status
 
+    /** Nanoseconds from the first selected row's timestamp to the last's; null unless two rows with timestamps are selected. */
+    val selectionSpan: Long?
+        get() {
+            val model = model ?: return null
+            val selection = table?.selectionModel ?: return null
+            val first = selection.minSelectionIndex
+            val last = selection.maxSelectionIndex
+            if (first < 0 || first == last || last >= model.rowCount) return null
+            val start = model.records.timestamp(model.recordAt(first)) ?: return null
+            val end = model.records.timestamp(model.recordAt(last)) ?: return null
+            return end - start
+        }
+
     // The file controls live outside the tab, and are not updated with it while another tab shows its own.
     override fun updateUI() {
         super.updateUI()
@@ -353,7 +366,10 @@ class LogTab(
         val levelMarks = LevelMarks(model, scope, scrollPane::repaintMarks)
         scrollPane.marks = levelMarks
         table.selectionModel.addListSelectionListener { event ->
-            if (!event.valueIsAdjusting) showDetail(model, table.selectionModel.leadSelectionIndex)
+            if (!event.valueIsAdjusting) {
+                showDetail(model, table.selectionModel.leadSelectionIndex)
+                onStatusChanged()
+            }
         }
         this.model = model
         this.table = table

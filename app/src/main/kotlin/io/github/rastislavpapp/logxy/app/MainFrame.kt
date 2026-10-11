@@ -337,6 +337,11 @@ class MainFrame : JFrame("logxy") {
                     toolTipText = if (filtered) "A filter is active" else null
                 })
             }
+            tab.selectionSpan?.let {
+                segment(JLabel("Selection: ${io.github.rastislavpapp.logxy.core.formatTimeSpan(it)}").apply {
+                    toolTipText = "Time from the first selected row to the last"
+                })
+            }
             status.size?.let { segment(JLabel(io.github.rastislavpapp.logxy.core.formatByteSize(it))) }
             if (status.records != null) {
                 val text = when {
