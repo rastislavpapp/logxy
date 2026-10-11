@@ -13,7 +13,6 @@ import java.nio.channels.FileChannel
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.attribute.BasicFileAttributes
-import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
 import java.util.zip.GZIPInputStream
 
@@ -54,7 +53,7 @@ class CompressedSpool(val root: Path) {
             val attributes = Files.readAttributes(absolute, BasicFileAttributes::class.java)
             val key = "$absolute|${attributes.size()}|${attributes.lastModifiedTime().toMillis()}"
             decompressed[key]?.let { return@withContext it }
-            val base = root.resolve(hash(key))
+            val base = root.resolve(SpoolCache.hash(key))
             val target = base.resolve(absolute.fileName.toString().removeSuffix(format.extension))
             try {
                 write(absolute, target, format, attributes.size(), progress)
@@ -64,7 +63,7 @@ class CompressedSpool(val root: Path) {
                 decompressed[key] = target
                 target
             } catch (e: Throwable) {
-                runCatching { deleteRecursively(base) }
+                runCatching { SpoolCache.deleteRecursively(base) }
                 throw e
             }
         }
@@ -119,28 +118,6 @@ class CompressedSpool(val root: Path) {
          * A spool of this process in [cache]; deleted when the JVM exits. Spools of processes no longer
          * running, e.g. after a crash, are deleted now.
          */
-        fun forThisProcess(cache: Path): CompressedSpool {
-            runCatching {
-                if (Files.isDirectory(cache)) {
-                    Files.list(cache).use { dirs ->
-                        dirs.filter { it.fileName.toString().startsWith(DIRECTORY_PREFIX) }.toList().forEach { dir ->
-                            val pid = dir.fileName.toString().removePrefix(DIRECTORY_PREFIX).toLongOrNull()
-                            if (pid == null || ProcessHandle.of(pid).isEmpty) runCatching { deleteRecursively(dir) }
-                        }
-                    }
-                }
-            }
-            val root = cache.resolve(DIRECTORY_PREFIX + ProcessHandle.current().pid())
-            Runtime.getRuntime().addShutdownHook(Thread { runCatching { deleteRecursively(root) } })
-            return CompressedSpool(root)
-        }
-
-        private fun hash(text: String): String =
-            MessageDigest.getInstance("SHA-256").digest(text.toByteArray()).take(8).joinToString("") { "%02x".format(it) }
-
-        private fun deleteRecursively(path: Path) {
-            if (!Files.exists(path)) return
-            Files.walk(path).use { paths -> paths.sorted(Comparator.reverseOrder()).forEach(Files::delete) }
-        }
+        fun forThisProcess(cache: Path) = CompressedSpool(SpoolCache.createProcessSpool(cache, DIRECTORY_PREFIX))
     }
 }

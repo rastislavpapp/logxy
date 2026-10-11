@@ -12,7 +12,6 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
 import java.nio.file.attribute.BasicFileAttributes
-import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
 import java.util.zip.ZipException
 import java.util.zip.ZipFile
@@ -57,16 +56,16 @@ class ZipSpool(val root: Path) {
             val key = "$absolute|${attributes.size()}|${attributes.lastModifiedTime().toMillis()}"
             extracted[key]?.let { return@withContext it }
             // A folder per zip version, holding a folder named like the zip, so merged views name files "app.zip/app.log".
-            val base = root.resolve(hash(key))
+            val base = root.resolve(SpoolCache.hash(key))
             val dir = base.resolve(absolute.fileName.toString())
-            deleteRecursively(base)
+            SpoolCache.deleteRecursively(base)
             try {
                 val files = unzip(absolute, dir, progress, depth = 0)
                 for (file in files) origins[file] = Origin(absolute, dir.relativize(file).joinToString("/"))
                 extracted[key] = files
                 files
             } catch (e: Throwable) {
-                runCatching { deleteRecursively(base) }
+                runCatching { SpoolCache.deleteRecursively(base) }
                 throw e
             }
         }
@@ -151,21 +150,7 @@ class ZipSpool(val root: Path) {
          * A spool of this process in [cache] (not the temp folder, which may be in memory); deleted when the
          * JVM exits. Spools of processes no longer running, e.g. after a crash, are deleted now.
          */
-        fun forThisProcess(cache: Path): ZipSpool {
-            runCatching {
-                if (Files.isDirectory(cache)) {
-                    Files.list(cache).use { dirs ->
-                        dirs.filter { it.fileName.toString().startsWith(DIRECTORY_PREFIX) }.toList().forEach { dir ->
-                            val pid = dir.fileName.toString().removePrefix(DIRECTORY_PREFIX).toLongOrNull()
-                            if (pid == null || ProcessHandle.of(pid).isEmpty) runCatching { deleteRecursively(dir) }
-                        }
-                    }
-                }
-            }
-            val root = cache.resolve(DIRECTORY_PREFIX + ProcessHandle.current().pid())
-            Runtime.getRuntime().addShutdownHook(Thread { runCatching { deleteRecursively(root) } })
-            return ZipSpool(root)
-        }
+        fun forThisProcess(cache: Path) = ZipSpool(SpoolCache.createProcessSpool(cache, DIRECTORY_PREFIX))
 
         /** Like [ZipFile], also for zips whose entry names are not UTF-8 (e.g. made by older Windows tools). */
         private fun open(zip: Path): ZipFile = try {
@@ -178,14 +163,6 @@ class ZipSpool(val root: Path) {
         private fun isWanted(name: String): Boolean {
             val parts = name.split('/').filter { it.isNotEmpty() }
             return parts.isNotEmpty() && parts.first() != "__MACOSX" && !parts.last().startsWith(".")
-        }
-
-        private fun hash(text: String): String =
-            MessageDigest.getInstance("SHA-256").digest(text.toByteArray()).take(8).joinToString("") { "%02x".format(it) }
-
-        private fun deleteRecursively(path: Path) {
-            if (!Files.exists(path)) return
-            Files.walk(path).use { paths -> paths.sorted(Comparator.reverseOrder()).forEach(Files::delete) }
         }
     }
 }
