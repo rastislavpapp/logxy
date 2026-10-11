@@ -139,6 +139,27 @@ class FilterEngineTest {
     }
 
     @Test
+    fun `numbers in dictionary, span and map fields`() {
+        val mdc = PatternFormat("%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %-5p %c %X - %m%n", ZoneOffset.UTC)
+        val content = """
+            2026-10-01 08:00:00.000 [7] INFO  app.Http {status=200, ms=15} - 12
+            2026-10-01 08:00:01.000 [12] INFO  app.Http {status=503, ms=2400} - 1.5e3
+            2026-10-01 08:00:02.000 [main] INFO  app.Http {status=, ms=x} - slow
+        """.trimIndent() + "\n"
+        val file = Files.writeString(dir.resolve("numbers.log"), content)
+        runBlocking { ParsedLog.build(file, mdc, IndexProgress()) }.use { log ->
+            val engine = FilterEngine(log)
+            assertEquals(listOf(1), engine.rows(NumberCondition("Thread", from = 10.0)))
+            assertEquals(listOf(0, 1), engine.rows(NumberCondition("Thread", to = 12.0)))
+            assertEquals(listOf(1), engine.rows(NumberCondition("Message", from = 100.0)))
+            assertEquals(listOf(0, 1), engine.rows(NumberCondition("Message")))
+            assertEquals(listOf(1), engine.rows(NumberCondition("MDC[status]", from = 500.0)))
+            assertEquals(listOf(0), engine.rows(NumberCondition("MDC[ms]", to = 2000.0)))
+            assertEquals(listOf(), engine.rows(NumberCondition("Timestamp", from = 0.0)))
+        }
+    }
+
+    @Test
     fun `invalid regex is reported when preparing`() {
         parse(sample).use { log ->
             assertFailsWith<IllegalArgumentException> { FilterEngine(log).prepare(TextCondition("Message", TextOp.MATCHES, "(")) }
@@ -288,6 +309,7 @@ class FilterEngineTest {
         is Filter.Or -> filter.parts.any { matches(log, record, it) }
         is Filter.Not -> !matches(log, record, filter.part)
         is LevelCondition -> log.level(record) in filter.levels
+        is NumberCondition -> error("unused")
         is TimeCondition -> {
             val text = log.rowValues(record, 1000)[0]
             text.isNotEmpty() && nanos(text.replace(' ', 'T')) >= (filter.from ?: Long.MIN_VALUE)

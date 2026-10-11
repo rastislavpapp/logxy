@@ -2,6 +2,7 @@ package io.github.rastislavpapp.logxy.core.query
 
 import io.github.rastislavpapp.logxy.core.filter.Filter
 import io.github.rastislavpapp.logxy.core.filter.LevelCondition
+import io.github.rastislavpapp.logxy.core.filter.NumberCondition
 import io.github.rastislavpapp.logxy.core.filter.PatternCondition
 import io.github.rastislavpapp.logxy.core.filter.PresenceCondition
 import io.github.rastislavpapp.logxy.core.filter.TextCondition
@@ -79,6 +80,9 @@ class QueryTest {
             Filter.And(listOf(TimeCondition("Timestamp", from = 1_791_533_400_000_000_000L + 1))),
             compile("timestamp > \"2026-10-09 08:10\""),
         )
+        assertEquals(Filter.And(listOf(NumberCondition("request id", from = 500.0))), compile("`request id` >= 500"))
+        assertEquals(Filter.And(listOf(NumberCondition("Thread", from = Math.nextUp(2.5)))), compile("thread > 2.5"))
+        assertEquals(Filter.And(listOf(NumberCondition("Message", to = Math.nextDown(-1.0)))), compile("message < \"-1\""))
         assertEquals(Filter.And(emptyList()), compile(""))
         assertEquals(Filter.And(emptyList()), compile("message == \"\""))
         assertEquals(
@@ -92,7 +96,7 @@ class QueryTest {
         fun error(text: String) = assertFailsWith<QueryException> { compiler.compile(QueryParser.parse(text)) }.message!!
         assertEquals("Unknown field “thred”; this log has Timestamp, Thread, Level, Logger, request id, Message", error("thred == x"))
         assertEquals("Unknown level “WARNING”; use one of TRACE, DEBUG, INFO, WARN, ERROR, FATAL, UNKNOWN", error("level >= WARNING"))
-        assertEquals(">= works on levels and timestamps, not on Thread", error("thread >= x"))
+        assertEquals(">= on Thread compares numbers; “x” is no number", error("thread >= x"))
         assertEquals("Invalid time “yesterday”; write e.g. 2026-10-09 08:30:00.000, 2026-10-09 or 08:30", error("timestamp >= yesterday"))
         assertEquals("Invalid regex “(”: Unclosed group", error("message =~ \"(\""))
     }

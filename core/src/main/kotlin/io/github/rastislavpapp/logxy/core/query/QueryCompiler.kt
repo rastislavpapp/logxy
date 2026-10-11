@@ -1,7 +1,9 @@
 package io.github.rastislavpapp.logxy.core.query
 
+import io.github.rastislavpapp.logxy.core.Bytes
 import io.github.rastislavpapp.logxy.core.filter.Filter
 import io.github.rastislavpapp.logxy.core.filter.LevelCondition
+import io.github.rastislavpapp.logxy.core.filter.NumberCondition
 import io.github.rastislavpapp.logxy.core.filter.PatternCondition
 import io.github.rastislavpapp.logxy.core.filter.PresenceCondition
 import io.github.rastislavpapp.logxy.core.filter.TextCondition
@@ -51,7 +53,7 @@ class QueryCompiler(private val schema: Schema, private val zone: ZoneId = ZoneI
             return when (field.type) {
                 ColumnType.LEVEL -> levelComparison(name, rule)
                 ColumnType.TIMESTAMP -> timeComparison(name, rule)
-                else -> throw QueryException("${rule.op.symbol} works on levels and timestamps, not on $name")
+                else -> numberComparison(name, rule)
             }
         }
         if (field.type == ColumnType.LEVEL && rule.bare && (rule.op == QueryOp.EQUALS || rule.op == QueryOp.NOT_EQUALS)) {
@@ -105,6 +107,17 @@ class QueryCompiler(private val schema: Schema, private val zone: ZoneId = ZoneI
             }
         }
         return LevelCondition(field, levels.toSet())
+    }
+
+    private fun numberComparison(field: String, rule: Query.Rule): Filter {
+        val number = Bytes.parseNumber(rule.value)
+        if (number.isNaN()) throw QueryException("${rule.op.symbol} on $field compares numbers; “${rule.value}” is no number")
+        return when (rule.op) {
+            QueryOp.AT_LEAST -> NumberCondition(field, from = number)
+            QueryOp.ABOVE -> NumberCondition(field, from = Math.nextUp(number))
+            QueryOp.AT_MOST -> NumberCondition(field, to = number)
+            else -> NumberCondition(field, to = Math.nextDown(number))
+        }
     }
 
     private fun timeComparison(field: String, rule: Query.Rule): Filter {

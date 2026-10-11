@@ -45,3 +45,11 @@ data class PatternCondition(override val field: String, val templates: Set<Strin
 
 /** The timestamp, in epoch nanoseconds, lies in `[from, to]`; a null bound is open. */
 data class TimeCondition(override val field: String, val from: Long? = null, val to: Long? = null) : Condition
+
+/**
+ * The value, read as a decimal number, lies in `[from, to]`; a null bound is open. Values that are no
+ * number match nothing, like absent ones.
+ */
+data class NumberCondition(override val field: String, val from: Double? = null, val to: Double? = null) : Condition {
+    internal fun matches(number: Double) = number >= (from ?: Double.NEGATIVE_INFINITY) && number <= (to ?: Double.POSITIVE_INFINITY)
+}

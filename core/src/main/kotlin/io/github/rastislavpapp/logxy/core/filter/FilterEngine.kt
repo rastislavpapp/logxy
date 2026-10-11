@@ -333,6 +333,7 @@ private class Leaf(
                     val prepare: suspend () -> Unit = { matching = patterns.matching(snapshot, condition.templates) }
                     Leaf(condition, 0, false, prepare) { c, _ -> matching.getOrElse(patterns.id(c.record)) { false } }
                 }
+                is NumberCondition -> numberLeaf(condition, snapshot, field, type)
             }
         }
 
@@ -355,35 +356,51 @@ private class Leaf(
                     val nanos = c.timestamp(field)
                     if (nanos == Columns.ABSENT_TIMESTAMP) absent else matcher.matches(snapshot.formatTimestamp(field, nanos))
                 }
-                ColumnType.SPAN -> {
-                    val json = snapshot.schema.fields[field].json
-                    Leaf(condition, 2, true) { c, reader ->
-                        val length = c.spanLength(field)
-                        if (length == Columns.ABSENT_LENGTH) {
-                            absent
-                        } else {
-                            val from = c.start + c.spanStart(field)
-                            val to = if (length == Columns.TO_RECORD_END) c.end else from + length
-                            val offset = reader!!.load(from, to)
-                            var end = offset + (to - from).toInt()
-                            if (length == Columns.TO_RECORD_END) end = Bytes.trimLineEnd(reader.buffer, offset, end)
-                            // Lines that are no JSON run to the record end and read as written.
-                            if (json && length != Columns.TO_RECORD_END) {
-                                matchesJson(matcher, reader.buffer, offset, minOf(end, reader.loaded))
-                            } else {
-                                matcher.matches(reader.buffer, offset, minOf(end, reader.loaded))
-                            }
-                        }
+                ColumnType.SPAN -> spanLeaf(condition, snapshot, field, absent, matcher::matches)
+            }
+        }
+
+        private fun numberLeaf(condition: NumberCondition, snapshot: RecordSnapshot, field: Int, type: ColumnType): Leaf = when (type) {
+            ColumnType.DICT, ColumnType.LEVEL -> {
+                val matching = snapshot.dictionaryTexts(field).map { condition.matches(Bytes.parseNumber(it)) }.toBooleanArray()
+                if (type == ColumnType.DICT) {
+                    Leaf(condition, 0, false) { c, _ -> matching.getOrElse(c.dictId(field)) { false } }
+                } else {
+                    Leaf(condition, 0, false) { c, _ -> matching.getOrElse(c.levelId(field)) { false } }
+                }
+            }
+            ColumnType.TIMESTAMP -> Leaf(condition, 0, false) { _, _ -> false }
+            ColumnType.SPAN -> spanLeaf(condition, snapshot, field, false) { bytes, from, to -> condition.matches(Bytes.parseNumber(bytes, from, to)) }
+        }
+
+        /** Tests the text of a SPAN field as shown, see [ValueTest]; [absent] is the result for records without a value. */
+        private fun spanLeaf(condition: Condition, snapshot: RecordSnapshot, field: Int, absent: Boolean, test: ValueTest): Leaf {
+            val json = snapshot.schema.fields[field].json
+            return Leaf(condition, 2, true) { c, reader ->
+                val length = c.spanLength(field)
+                if (length == Columns.ABSENT_LENGTH) {
+                    absent
+                } else {
+                    val from = c.start + c.spanStart(field)
+                    val to = if (length == Columns.TO_RECORD_END) c.end else from + length
+                    val offset = reader!!.load(from, to)
+                    var end = offset + (to - from).toInt()
+                    if (length == Columns.TO_RECORD_END) end = Bytes.trimLineEnd(reader.buffer, offset, end)
+                    // Lines that are no JSON run to the record end and read as written.
+                    if (json && length != Columns.TO_RECORD_END) {
+                        testJson(test, reader.buffer, offset, minOf(end, reader.loaded))
+                    } else {
+                        test.test(reader.buffer, offset, minOf(end, reader.loaded))
                     }
                 }
             }
         }
 
-        /** Matches the JSON value `bytes[from, to)` as shown; strings without escapes straight on their bytes. */
-        private fun matchesJson(matcher: TextMatcher, bytes: ByteArray, from: Int, to: Int): Boolean {
-            if (Json.isString(bytes, from, to) && Json.isPlain(bytes, from + 1, to - 1)) return matcher.matches(bytes, from + 1, to - 1)
+        /** Tests the JSON value `bytes[from, to)` as shown; strings without escapes straight on their bytes. */
+        private fun testJson(test: ValueTest, bytes: ByteArray, from: Int, to: Int): Boolean {
+            if (Json.isString(bytes, from, to) && Json.isPlain(bytes, from + 1, to - 1)) return test.test(bytes, from + 1, to - 1)
             val decoded = Json.decode(bytes, from, to)
-            return matcher.matches(decoded, 0, decoded.size)
+            return test.test(decoded, 0, decoded.size)
         }
 
         /** A field read from a map: like a span, but the value is found in the map's text. */
@@ -391,17 +408,23 @@ private class Leaf(
             is PresenceCondition -> Leaf(condition, 2, true) { c, reader -> (mapValue(c, reader!!, key, map) >= 0) == condition.present }
             is TextCondition -> {
                 val matcher = TextMatcher(condition)
-                Leaf(condition, 2, true) { c, reader ->
-                    val value = mapValue(c, reader!!, key, map)
-                    when {
-                        value < 0 -> matcher.matchesAbsent
-                        map.json -> matchesJson(matcher, reader.buffer, MdcMap.from(value), MdcMap.to(value))
-                        else -> matcher.matches(reader.buffer, MdcMap.from(value), MdcMap.to(value))
-                    }
-                }
+                mapValueLeaf(condition, key, map, matcher.matchesAbsent, matcher::matches)
+            }
+            is NumberCondition -> mapValueLeaf(condition, key, map, false) { bytes, from, to ->
+                condition.matches(Bytes.parseNumber(bytes, from, to))
             }
             is LevelCondition, is TimeCondition, is PatternCondition -> Leaf(condition, 0, false) { _, _ -> false }
         }
+
+        private fun mapValueLeaf(condition: Condition, key: MapKey, map: MapSyntax, absent: Boolean, test: ValueTest) =
+            Leaf(condition, 2, true) { c, reader ->
+                val value = mapValue(c, reader!!, key, map)
+                when {
+                    value < 0 -> absent
+                    map.json -> testJson(test, reader.buffer, MdcMap.from(value), MdcMap.to(value))
+                    else -> test.test(reader.buffer, MdcMap.from(value), MdcMap.to(value))
+                }
+            }
 
         /** The range of [key]'s value in the reader's buffer, packed as by [MdcMap]; -1 if the record has none. */
         private fun mapValue(c: RecordCursor, reader: SpanReader, key: MapKey, map: MapSyntax): Long {
@@ -423,6 +446,11 @@ private class Leaf(
             ColumnType.SPAN -> c.spanLength(field) != Columns.ABSENT_LENGTH
         }
     }
+}
+
+/** Tests a value's text, as shown, in `bytes[from, to)`. */
+private fun interface ValueTest {
+    fun test(bytes: ByteArray, from: Int, to: Int): Boolean
 }
 
 /**

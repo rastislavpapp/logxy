@@ -1,10 +1,12 @@
 package io.github.rastislavpapp.logxy.core.merge
 
+import io.github.rastislavpapp.logxy.core.Bytes
 import io.github.rastislavpapp.logxy.core.filter.Condition
 import io.github.rastislavpapp.logxy.core.filter.Filter
 import io.github.rastislavpapp.logxy.core.filter.FilterEngine
 import io.github.rastislavpapp.logxy.core.filter.FilterResult
 import io.github.rastislavpapp.logxy.core.filter.LevelCondition
+import io.github.rastislavpapp.logxy.core.filter.NumberCondition
 import io.github.rastislavpapp.logxy.core.filter.PatternCondition
 import io.github.rastislavpapp.logxy.core.filter.PreparedFilter
 import io.github.rastislavpapp.logxy.core.filter.PresenceCondition
@@ -118,6 +120,7 @@ class MergedFilter(private val log: MergedLog) : RecordFilter {
     private fun sourceCondition(condition: Condition, name: String): Filter = when (condition) {
         is TextCondition -> constant(TextMatcher(condition).matches(name))
         is PresenceCondition -> constant(condition.present)
+        is NumberCondition -> constant(condition.matches(Bytes.parseNumber(name)))
         is LevelCondition, is TimeCondition, is PatternCondition -> constant(false)
     }
 
@@ -127,6 +130,7 @@ class MergedFilter(private val log: MergedLog) : RecordFilter {
         is LevelCondition -> condition.copy(field = field)
         is TimeCondition -> condition.copy(field = field)
         is PatternCondition -> condition.copy(field = field)
+        is NumberCondition -> condition.copy(field = field)
     }
 
     private fun constant(matches: Boolean): Filter = if (matches) Filter.And(emptyList()) else Filter.Or(emptyList())

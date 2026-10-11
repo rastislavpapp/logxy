@@ -45,7 +45,11 @@ private enum class RuleOp(val label: String) {
     TIME_FROM("at or after"),
     TIME_AFTER("after"),
     TIME_TO("at or before"),
-    TIME_BEFORE("before");
+    TIME_BEFORE("before"),
+    NUMBER_AT_LEAST("≥"),
+    NUMBER_ABOVE(">"),
+    NUMBER_AT_MOST("≤"),
+    NUMBER_BELOW("<");
 
     val usesLevel get() = name.startsWith("LEVEL_")
     val usesCase get() = this in setOf(CONTAINS, NOT_CONTAINS, STARTS_WITH, ENDS_WITH, IS, IS_NOT)
@@ -56,6 +60,7 @@ private enum class RuleOp(val label: String) {
         val TEXT = listOf(CONTAINS, NOT_CONTAINS, STARTS_WITH, ENDS_WITH, IS, IS_NOT, MATCHES, NOT_MATCHES)
         val LEVEL = listOf(LEVEL_AT_LEAST, LEVEL_ABOVE, LEVEL_AT_MOST, LEVEL_BELOW, LEVEL_IS, LEVEL_IS_NOT)
         val TIME = listOf(TIME_FROM, TIME_AFTER, TIME_TO, TIME_BEFORE)
+        val NUMBER = listOf(NUMBER_AT_LEAST, NUMBER_ABOVE, NUMBER_AT_MOST, NUMBER_BELOW)
     }
 }
 
@@ -357,7 +362,7 @@ class QueryEditor(private val onApply: () -> Unit) : JPanel(MigLayout("insets 0,
         private fun ops(): List<RuleOp> = if (isPattern()) listOf(RuleOp.IS, RuleOp.IS_NOT) else when (fieldType()) {
             ColumnType.LEVEL -> RuleOp.LEVEL + RuleOp.TEXT
             ColumnType.TIMESTAMP -> RuleOp.TIME + RuleOp.TEXT
-            else -> RuleOp.TEXT
+            else -> RuleOp.TEXT + RuleOp.NUMBER
         }
 
         private fun fillOps(selected: RuleOp) {
@@ -389,6 +394,7 @@ class QueryEditor(private val onApply: () -> Unit) : JPanel(MigLayout("insets 0,
                 when (selected) {
                     RuleOp.MATCHES, RuleOp.NOT_MATCHES -> "Regular expression, found anywhere; ignores case unless it starts with (?-i)"
                     in RuleOp.TIME -> "e.g. 2026-10-09 08:30:00.000, 2026-10-09 or 08:30"
+                    in RuleOp.NUMBER -> "A number, e.g. 500, -1.5 or 2e3; records whose value is no number are left out"
                     else -> "* matches any text, ? one character"
                 }
             }
@@ -405,6 +411,12 @@ class QueryEditor(private val onApply: () -> Unit) : JPanel(MigLayout("insets 0,
                     QueryOp.ABOVE -> RuleOp.LEVEL_ABOVE
                     QueryOp.AT_MOST -> RuleOp.LEVEL_AT_MOST
                     else -> RuleOp.LEVEL_BELOW
+                } to rule.value
+                rule.op.comparison && type != ColumnType.TIMESTAMP -> when (rule.op) {
+                    QueryOp.AT_LEAST -> RuleOp.NUMBER_AT_LEAST
+                    QueryOp.ABOVE -> RuleOp.NUMBER_ABOVE
+                    QueryOp.AT_MOST -> RuleOp.NUMBER_AT_MOST
+                    else -> RuleOp.NUMBER_BELOW
                 } to rule.value
                 rule.op.comparison -> when (rule.op) {
                     QueryOp.AT_LEAST -> RuleOp.TIME_FROM
@@ -490,6 +502,10 @@ class QueryEditor(private val onApply: () -> Unit) : JPanel(MigLayout("insets 0,
                 RuleOp.TIME_AFTER -> Triple(QueryOp.ABOVE, value, false)
                 RuleOp.TIME_TO -> Triple(QueryOp.AT_MOST, value, false)
                 RuleOp.TIME_BEFORE -> Triple(QueryOp.BELOW, value, false)
+                RuleOp.NUMBER_AT_LEAST -> Triple(QueryOp.AT_LEAST, value, true)
+                RuleOp.NUMBER_ABOVE -> Triple(QueryOp.ABOVE, value, true)
+                RuleOp.NUMBER_AT_MOST -> Triple(QueryOp.AT_MOST, value, true)
+                RuleOp.NUMBER_BELOW -> Triple(QueryOp.BELOW, value, true)
             }
             return Query.Rule(name, queryOp, queryValue, bare)
         }

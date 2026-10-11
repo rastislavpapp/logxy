@@ -54,4 +54,50 @@ internal object Bytes {
         while (end > from && (bytes[end].toInt() and 0xC0) == 0x80) end--
         return String(bytes, from, end - from, Charsets.UTF_8) + "…"
     }
+
+    /** The decimal number `bytes[from, to)` holds, e.g. `-12`, `3.5` or `1e-3`, ignoring surrounding blanks; NaN if it holds none. */
+    fun parseNumber(bytes: ByteArray, from: Int, to: Int): Double {
+        var start = from
+        var end = to
+        while (start < end && bytes[start] <= SPACE) start++
+        while (end > start && bytes[end - 1] <= SPACE) end--
+        var i = start
+        val negative = i < end && bytes[i] == MINUS
+        if (i < end && (negative || bytes[i] == PLUS)) i++
+        val digits = i
+        var value = 0L
+        // Integers of up to 18 digits fit a long; they are the common case and need no string.
+        while (i < end && i - digits < 18 && bytes[i] in ZERO..NINE) value = value * 10 + (bytes[i++] - ZERO)
+        if (i == end) return if (i == digits) Double.NaN else (if (negative) -value else value).toDouble()
+        return if (isDecimal(bytes, digits, end)) String(bytes, start, end - start, Charsets.ISO_8859_1).toDouble() else Double.NaN
+    }
+
+    fun parseNumber(text: String): Double = text.toByteArray().let { parseNumber(it, 0, it.size) }
+
+    /** Whether `bytes[from, to)` is digits with an optional fraction and exponent; toDouble would also take e.g. `NaN` or `1f`. */
+    private fun isDecimal(bytes: ByteArray, from: Int, to: Int): Boolean {
+        var i = from
+        var mantissa = 0
+        while (i < to && bytes[i] in ZERO..NINE) { i++; mantissa++ }
+        if (i < to && bytes[i] == DOT) {
+            i++
+            while (i < to && bytes[i] in ZERO..NINE) { i++; mantissa++ }
+        }
+        if (mantissa == 0) return false
+        if (i < to && (bytes[i] == 'e'.code.toByte() || bytes[i] == 'E'.code.toByte())) {
+            i++
+            if (i < to && (bytes[i] == PLUS || bytes[i] == MINUS)) i++
+            val exponent = i
+            while (i < to && bytes[i] in ZERO..NINE) i++
+            if (i == exponent) return false
+        }
+        return i == to
+    }
+
+    private const val SPACE = ' '.code.toByte()
+    private const val PLUS = '+'.code.toByte()
+    private const val MINUS = '-'.code.toByte()
+    private const val DOT = '.'.code.toByte()
+    private const val ZERO = '0'.code.toByte()
+    private const val NINE = '9'.code.toByte()
 }
