@@ -408,15 +408,15 @@ class LogTab(
         scrollPane.onFollowChanged = { session.follow = it }
         scrollPane.resumeFollowAtEnd = { session.isLive }
         val timestampField = records.schema.fields.firstOrNull { it.role == Role.TIMESTAMP }?.name
-        val summary = RowSummary(model, scope) {
-            scrollPane.repaintMarks()
-            showVisibleTimes()
-            histogramBar?.repaint()
+        val summary = timestampField?.let {
+            RowSummary(model, scope) {
+                showVisibleTimes()
+                histogramBar?.repaint()
+            }
         }
-        scrollPane.marks = summary
         scrollPane.onRowsInViewChanged = ::showVisibleTimes
         val histogramBar = timestampField?.let { field ->
-            TimeHistogramBar { summary.histogram }.apply {
+            TimeHistogramBar { summary?.histogram }.apply {
                 onJump = ::jumpToTime
                 onRange = { from, to -> filterBar.setTimeRange(field, timeLiteral(from), timeLiteral(to)) }
                 onShowAllTimes = { filterBar.setTimeRange(field, null, null) }
