@@ -1,6 +1,7 @@
 package io.github.rastislavpapp.logxy.app
 
 import io.github.rastislavpapp.logxy.core.config.Settings
+import org.slf4j.LoggerFactory
 import java.awt.Frame
 import java.awt.GraphicsConfiguration
 import java.awt.GraphicsEnvironment
@@ -20,6 +21,7 @@ object WindowState {
 
     const val MAIN = "main"
 
+    private val log = LoggerFactory.getLogger(WindowState::class.java)
     private val path = Settings.directory().resolve("window.properties")
 
     /**
@@ -77,7 +79,7 @@ object WindowState {
             window.bounds = if (area.intersects(saved)) fitInto(saved, area) else centeredIn(saved, area)
             if (window is Frame && value("maximized").toBoolean()) window.extendedState = Frame.MAXIMIZED_BOTH
         } catch (e: Exception) {
-            System.err.println("Cannot restore the window from $path: $e")
+            log.warn("Cannot restore the window from {}", path, e)
         }
     }
 
@@ -130,7 +132,7 @@ object WindowState {
             Files.createDirectories(path.parent)
             Files.newBufferedWriter(path).use { properties.store(it, "logxy window state") }
         } catch (e: Exception) {
-            System.err.println("Cannot save the window state to $path: $e")
+            log.warn("Cannot save the window state to {}", path, e)
         }
     }
 }

@@ -1,5 +1,6 @@
 package io.github.rastislavpapp.logxy.app
 
+import org.slf4j.LoggerFactory
 import java.awt.Window
 import java.awt.event.WindowEvent
 import java.io.IOException
@@ -8,6 +9,8 @@ import javax.swing.JOptionPane
 
 /** Starts logxy again in a new JVM, to apply a memory limit: a running JVM cannot change its heap limit. */
 object Restart {
+
+    private val log = LoggerFactory.getLogger(Restart::class.java)
 
     /** Set in a restarted app, so it does not restart itself again. */
     private const val RESTARTED = "LOGXY_RESTARTED"
@@ -53,7 +56,7 @@ object Restart {
             builder.start()
             true
         } catch (e: IOException) {
-            System.err.println("Cannot restart logxy: $e")
+            log.error("Cannot restart logxy", e)
             false
         }
     }

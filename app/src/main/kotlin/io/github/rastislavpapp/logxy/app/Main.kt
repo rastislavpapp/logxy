@@ -9,6 +9,7 @@ import javax.swing.SwingUtilities
 internal val MAIN_CLASS: String = MethodHandles.lookup().lookupClass().name
 
 fun main(args: Array<String>) {
+    Logging.init()
     if (Restart.atStartup(args.toList())) return
     SwingUtilities.invokeLater {
         Themes.installFonts()

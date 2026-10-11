@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  logxy's own logging. Edit freely: changes are picked up within 30 seconds.
+  Delete this file to get the default back on the next start.
+-->
+<Configuration status="warn" monitorInterval="30">
+    <Properties>
+        <Property name="dir">${sys:logxy.logDir}</Property>
+        <Property name="pattern">%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %-5level %logger - %msg%n</Property>
+    </Properties>
+    <Appenders>
+        <Console name="console" target="SYSTEM_ERR">
+            <PatternLayout pattern="${pattern}"/>
+        </Console>
+        <RollingFile name="file" fileName="${dir}/logxy.log" filePattern="${dir}/logxy.%i.log">
+            <PatternLayout pattern="${pattern}"/>
+            <SizeBasedTriggeringPolicy size="10 MB"/>
+            <DefaultRolloverStrategy max="5"/>
+        </RollingFile>
+    </Appenders>
+    <Loggers>
+        <Root level="info">
+            <AppenderRef ref="console"/>
+            <AppenderRef ref="file"/>
+        </Root>
+    </Loggers>
+</Configuration>

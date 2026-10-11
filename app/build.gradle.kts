@@ -15,6 +15,9 @@ dependencies {
     implementation(libs.miglayout.swing)
     implementation(libs.rsyntaxtextarea)
     implementation(libs.autocomplete)
+    implementation(libs.slf4j.api)
+    runtimeOnly(libs.log4j.core)
+    runtimeOnly(libs.log4j.slf4j2.impl)
     runtimeOnly(libs.intellij.icons)
 }
 
@@ -33,6 +36,8 @@ val intellijIcons = configurations.detachedConfiguration(dependencies.create(lib
 
 tasks.shadowJar {
     archiveFileName = "logxy.jar"
+    // log4j-core is a multi-release jar; without this its Java 9+ classes are ignored.
+    manifest { attributes("Multi-Release" to "true") }
     dependencies { exclude(dependency(libs.intellij.icons.get())) }
     // A local, so the lambda does not capture the build script, which the configuration cache rejects.
     val archives = objects.newInstance<Services>().archives

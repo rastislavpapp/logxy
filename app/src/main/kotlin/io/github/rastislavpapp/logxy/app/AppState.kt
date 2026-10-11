@@ -1,18 +1,20 @@
 package io.github.rastislavpapp.logxy.app
 
 import io.github.rastislavpapp.logxy.core.config.Settings
+import org.slf4j.LoggerFactory
 import java.nio.file.Files
 import java.util.Properties
 
 /** Small UI state remembered between runs (theme, last folder, …); unlike [AppSettings], not configuration. */
 object AppState {
 
+    private val log = LoggerFactory.getLogger(AppState::class.java)
     private val path = Settings.directory().resolve("ui.properties")
     private val properties = Properties().apply {
         try {
             if (Files.exists(path)) Files.newBufferedReader(path).use { load(it) }
         } catch (e: Exception) {
-            System.err.println("Cannot read $path: $e")
+            log.warn("Cannot read {}", path, e)
         }
     }
 
@@ -24,7 +26,7 @@ object AppState {
             Files.createDirectories(path.parent)
             Files.newBufferedWriter(path).use { properties.store(it, "logxy UI state") }
         } catch (e: Exception) {
-            System.err.println("Cannot write $path: $e")
+            log.warn("Cannot write {}", path, e)
         }
     }
 
