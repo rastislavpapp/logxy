@@ -75,8 +75,8 @@ class FileParsersTable(
     private val warning = JLabel(" ").apply { horizontalAlignment = SwingConstants.LEADING }
     private val scrollPane = JScrollPane(table)
 
-    val component = JPanel(MigLayout("insets 0, wrap 1", "[grow, fill]", "[grow][]")).apply {
-        add(scrollPane, "grow, hmin pref")
+    val component = JPanel(MigLayout("fill, insets 0, wrap 1", "[grow, fill]", "[grow][]")).apply {
+        add(scrollPane, "grow")
         add(warning)
     }
 
@@ -158,9 +158,10 @@ class FileParsersTable(
                 if (table.tableHeader.columnAtPoint(e.point) == parserColumn && files.size > 1) chooseForAll()
             }
         })
-        val height = table.tableHeader.preferredSize.height + table.rowHeight * files.size.coerceIn(3, 12) + 4
+        fun height(rows: Int) = table.tableHeader.preferredSize.height + table.rowHeight * rows + 4
         val width = (0..<table.columnCount).sumOf { table.columnModel.getColumn(it).preferredWidth }
-        scrollPane.preferredSize = Dimension(width + scrollPane.verticalScrollBar.preferredSize.width + 4, height)
+        scrollPane.preferredSize = Dimension(width + scrollPane.verticalScrollBar.preferredSize.width + 4, height(files.size.coerceIn(3, 12)))
+        scrollPane.minimumSize = Dimension(0, height(3))
         files.forEach(::check)
     }
 
