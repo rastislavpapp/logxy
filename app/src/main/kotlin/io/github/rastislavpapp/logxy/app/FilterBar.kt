@@ -14,7 +14,6 @@ import java.awt.Graphics
 import java.awt.event.ActionEvent
 import java.awt.event.KeyEvent
 import javax.swing.AbstractAction
-import javax.swing.Icon
 import javax.swing.JButton
 import javax.swing.JLabel
 import javax.swing.JOptionPane
@@ -42,11 +41,10 @@ class FilterBar(private val onApply: () -> Unit) : JPanel(MigLayout("insets 6 8 
         }
     private val editor = QueryEditor(onApply)
     private val textArea = QueryTextArea(onApply)
-    private val textMode = accentToggle("").apply {
-        icon = Icons.advanced
-        toolTipText = "Advanced: write the filter as an expression, e.g. level >= WARN AND message == \"*timeout*\" (Ctrl+Enter applies)"
-        putClientProperty("JButton.buttonType", "toolBarButton")
-        isFocusable = false
+    private val textMode = accentToggle(
+        Icons.advanced,
+        "Advanced: write the filter as an expression, e.g. level >= WARN AND message == \"*timeout*\" (Ctrl+Enter applies)",
+    ).apply {
         addActionListener { switchMode(isSelected) }
     }
     private val actions = JPanel(MigLayout("insets 0, gap 2, hidemode 3")).apply {
@@ -102,13 +100,6 @@ class FilterBar(private val onApply: () -> Unit) : JPanel(MigLayout("insets 6 8 
         }
         // Hidden when empty, so its gap does not widen the space right of the editor.
         actionsColumn.isVisible = text
-    }
-
-    private fun toolBarButton(icon: Icon, tooltip: String, action: (JButton) -> Unit) = JButton(icon).apply {
-        toolTipText = tooltip
-        putClientProperty("JButton.buttonType", "toolBarButton")
-        isFocusable = false
-        addActionListener { action(this) }
     }
 
     /** Fields of the log being filtered: offered in the editors; the level choice needs a level field. */

@@ -17,14 +17,12 @@ import java.awt.event.KeyEvent
 import javax.swing.AbstractAction
 import javax.swing.BorderFactory
 import javax.swing.DefaultListCellRenderer
-import javax.swing.JButton
 import javax.swing.JComboBox
 import javax.swing.JComponent
 import javax.swing.JLabel
 import javax.swing.JList
 import javax.swing.JPanel
 import javax.swing.JTextField
-import javax.swing.JToggleButton
 import javax.swing.KeyStroke
 import javax.swing.UIManager
 
@@ -73,11 +71,6 @@ private enum class Match(val label: String, val all: Boolean, val negated: Boole
     companion object {
         fun of(group: Query.Group) = entries.first { it.all == group.all && it.negated == group.negated }
     }
-}
-
-/** A toggle whose on state is plainly visible: filled with the accent color. */
-fun accentToggle(text: String) = JToggleButton(text).apply {
-    putClientProperty("FlatLaf.style", "selectedBackground: \$Component.accentColor; selectedForeground: #ffffff")
 }
 
 /** Lets Enter in a combo box with a closed popup run [action]; combo boxes otherwise ignore it. */
@@ -153,12 +146,6 @@ class QueryEditor(private val onApply: () -> Unit) : JPanel(MigLayout("insets 0,
         first(root)?.requestFocusInWindow()
     }
 
-    private fun smallButton(text: String, tooltip: String, icon: javax.swing.Icon? = null, action: (JButton) -> Unit) = JButton(text, icon).apply {
-        toolTipText = tooltip
-        putClientProperty("JButton.buttonType", "toolBarButton")
-        addActionListener { action(this) }
-    }
-
     private fun changed() {
         root.updateRemovable()
         trailing?.let { trailing ->
@@ -188,7 +175,7 @@ class QueryEditor(private val onApply: () -> Unit) : JPanel(MigLayout("insets 0,
         val header = JPanel(MigLayout("insets 0", "[]push[]")).apply {
             isOpaque = false
             add(match)
-            if (!isRoot) add(smallButton("", "Remove this group", Icons.closeSmall) {
+            if (!isRoot) add(toolBarButton(Icons.closeSmall, "Remove this group", focusable = true) {
                 val counted = query(includeEmpty = false) != null
                 removeFromParent(this@GroupView)
                 if (counted) onApply()
@@ -199,8 +186,8 @@ class QueryEditor(private val onApply: () -> Unit) : JPanel(MigLayout("insets 0,
         private val footer = JPanel(MigLayout("insets 0", "[][]push")).apply {
             isOpaque = false
             // wmin pref: the buttons must never shrink into "Conditi…".
-            add(smallButton("", "Add a condition${if (isRoot) "" else " to this group"}", Icons.add) { addItem(group = false) }, "wmin pref")
-            add(smallButton("( )", "Add a group of conditions, matching all, any or none of them") { addItem(group = true) }, "wmin pref")
+            add(toolBarButton(Icons.add, "Add a condition${if (isRoot) "" else " to this group"}", focusable = true) { addItem(group = false) }, "wmin pref")
+            add(toolBarButton(null, "Add a group of conditions, matching all, any or none of them", "( )", focusable = true) { addItem(group = true) }, "wmin pref")
         }
         private val items = JPanel(MigLayout("insets 0, wrap 1, gapy 2, fillx", "[grow, fill]"))
 
@@ -321,9 +308,9 @@ class QueryEditor(private val onApply: () -> Unit) : JPanel(MigLayout("insets 0,
             toolTipText = "* matches any text, ? one character"
         }
         private val level = JComboBox(Level.entries.filter { it != Level.UNKNOWN }.toTypedArray())
-        private val case = accentToggle("Aa").apply { toolTipText = "Match exact case" }
+        private val case = accentToggle(null, "Match exact case", "Aa", flat = false)
         private var valueSlot: JComponent = text
-        val remove = smallButton("", "Remove this condition", Icons.closeSmall) {
+        val remove = toolBarButton(Icons.closeSmall, "Remove this condition", focusable = true) {
             // Only a condition with a value filtered anything.
             val counted = rule(includeEmpty = false) != null
             group.removeItem(this)
@@ -348,7 +335,7 @@ class QueryEditor(private val onApply: () -> Unit) : JPanel(MigLayout("insets 0,
             add(op)
             add(text, "wmin 60")
             add(case)
-            add(smallButton("( )", "Create a group from this condition") { group.wrapInGroup(this) })
+            add(toolBarButton(null, "Create a group from this condition", "( )", focusable = true) { group.wrapInGroup(this) })
             add(remove)
             load(rule)
         }

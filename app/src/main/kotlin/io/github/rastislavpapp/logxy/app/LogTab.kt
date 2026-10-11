@@ -27,7 +27,6 @@ import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import java.nio.file.Path
 import java.time.ZoneId
-import javax.swing.JButton
 import javax.swing.JCheckBoxMenuItem
 import javax.swing.JComponent
 import javax.swing.JLabel
@@ -94,26 +93,13 @@ class LogTab(
     val description: String get() = paths.joinToString("\n") { (origin(it) ?: it).toString() }
     private val content = JPanel(BorderLayout())
     private val detail = LogDetailArea()
-    private val followButton = accentToggle("").apply {
-        icon = Icons.follow
-        putClientProperty("JButton.buttonType", "toolBarButton")
-        isFocusable = false
-        toolTipText = "Follow (tail)"
+    private val followButton = accentToggle(Icons.follow, "Follow (tail)").apply {
         addActionListener { session.follow = isSelected }
     }
-    private val reloadButton = JButton(Icons.refresh).apply {
-        toolTipText = "Reload the file (F5)"
-        putClientProperty("JButton.buttonType", "toolBarButton")
-        isFocusable = false
-        addActionListener { session.reload() }
-    }
+    private val reloadButton = toolBarButton(Icons.refresh, "Reload the file (F5)") { session.reload() }
     private val parserButton = dropDownButton("Parser: how lines are split into columns", maxWidth = 280) { showParsers() }
-    private val columnsButton = JButton(DropDownIcon(Icons.columns)).apply {
-        toolTipText = "Columns to show"
-        putClientProperty("JButton.buttonType", "toolBarButton")
-        isFocusable = false
+    private val columnsButton = toolBarButton(DropDownIcon(Icons.columns), "Columns to show") { showColumns() }.apply {
         isEnabled = false
-        addActionListener { showColumns() }
     }
 
     /** Names of the columns the user hid; kept when the file is read again. */
