@@ -48,9 +48,9 @@ private val TICK_STEPS = longArrayOf(
 )
 
 /**
- * Shown records over time: their volume as an area (square-root scale, so one spike does not flatten the
- * rest), with lines for warnings and errors over it, each against its own peak, so a burst stands out even
- * when it is a small share of all records. The rows in view are outlined.
+ * Shown records over time: their volume as an area, with lines for warnings and errors over it on the same
+ * scale, so heights compare truthfully. The scale is the square root, so one spike does not flatten the rest
+ * and a burst that is a small share of all records still rises well off the bottom. The rows in view are outlined.
  * Clicking calls [onJump] with the time there; dragging calls [onRange] with the times covered; the
  * context menu calls [onShowAllTimes] when [hasTimeRange].
  */
@@ -181,9 +181,12 @@ class TimeHistogramBar(private val histogram: () -> TimeHistogram?) : JComponent
             g2.fillRect(0, height - 1, width, 1)
             val slices = slices() ?: return
             g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
-            paintVolume(g2, slices)
-            paintLine(g2, slices, slices.warnings, UIManager.getColor("Actions.Yellow"))
-            paintLine(g2, slices, slices.errors, UIManager.getColor("Actions.Red"))
+            // One scale for all, so a line's height means as many records as the area's.
+            val peak = sqrt(maxOf(1, slices.totals.max()).toDouble())
+            paintVolume(g2, slices, peak)
+            paintLine(g2, slices, slices.warnings, peak, UIManager.getColor("Actions.Yellow"))
+            paintLine(g2, slices, slices.errors, peak, UIManager.getColor("Actions.Red"))
+            paintPeak(g2, slices)
             val accent = UIManager.getColor("Component.accentColor")
             visibleTimes?.let { (from, to) ->
                 val x1 = timeX(slices, from)
@@ -198,8 +201,7 @@ class TimeHistogramBar(private val histogram: () -> TimeHistogram?) : JComponent
         }
     }
 
-    private fun paintVolume(g2: Graphics2D, slices: Slices) {
-        val peak = sqrt(maxOf(1, slices.totals.max()).toDouble())
+    private fun paintVolume(g2: Graphics2D, slices: Slices, peak: Double) {
         val area = path(slices) { sqrt(slices.totals[it].toDouble()) / peak }.apply {
             lineTo(width.toDouble(), chartBottom.toDouble())
             lineTo(0.0, chartBottom.toDouble())
@@ -209,16 +211,30 @@ class TimeHistogramBar(private val histogram: () -> TimeHistogram?) : JComponent
         g2.fill(area)
     }
 
-    /**
-     * [counts] as a line against their own peak, so a burst reaches the top even when it is a small share of all
-     * records; square root like the volume, so a steady trickle still rises off the bottom.
-     */
-    private fun paintLine(g2: Graphics2D, slices: Slices, counts: IntArray, color: Color) {
-        val peak = sqrt(counts.max().toDouble())
-        if (peak == 0.0) return
+    /** [counts] as a line on the volume's square-root scale, which lifts small counts off the bottom. */
+    private fun paintLine(g2: Graphics2D, slices: Slices, counts: IntArray, peak: Double, color: Color) {
+        if (counts.max() == 0) return
         g2.color = color
         g2.stroke = BasicStroke(UIScale.scale(1.5f), BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND)
         g2.draw(path(slices) { sqrt(counts[it].toDouble()) / peak })
+    }
+
+    /** The count the top of the chart stands for, e.g. `1,234 / 2 min`, so the height can be read. */
+    private fun paintPeak(g2: Graphics2D, slices: Slices) {
+        g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON)
+        g2.font = labelFont
+        g2.color = UIManager.getColor("Label.disabledForeground")
+        val text = "%,d / %s".format(slices.totals.max(), shortSpan(slices.start(1) - slices.start(0)))
+        g2.drawString(text, UIScale.scale(4), chartTop + g2.fontMetrics.ascent)
+    }
+
+    private fun shortSpan(nanos: Long): String = when {
+        nanos % DAY == 0L -> "${nanos / DAY} d"
+        nanos % HOUR == 0L -> "${nanos / HOUR} h"
+        nanos % MINUTE == 0L -> "${nanos / MINUTE} min"
+        nanos % SECOND == 0L -> "${nanos / SECOND} s"
+        nanos % MILLI == 0L -> "${nanos / MILLI} ms"
+        else -> "$nanos ns"
     }
 
     /** A line through the middle of each slice at [fraction] of the chart's height, held level to both edges. */
