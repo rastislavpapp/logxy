@@ -25,7 +25,8 @@ import java.util.zip.ZipFile
 class ZipSpool(val root: Path) {
 
     /** Where an extracted file came from: [entry] is its path inside [zip], `/`-separated; nested zips are folders. */
-    data class Origin(val zip: Path, val entry: String) {
+    data class Origin(val zip: Path, override val entry: String) : ArchiveOrigin {
+        override val container: Path get() = zip
         override fun toString() = "$zip$SEPARATOR$entry"
     }
 
@@ -119,20 +120,24 @@ class ZipSpool(val root: Path) {
         /** Between a zip and an entry in [Origin.toString], as in `logs.zip!/app/app.log`. */
         const val SEPARATOR = "!/"
 
+        /** Bytes of a file's start [isZip] needs. */
+        const val HEADER_BYTES = 4
+
         private const val BUFFER_SIZE = 1024 * 1024
         private const val MAX_DEPTH = 4
         private const val DIRECTORY_PREFIX = "unzipped-"
 
         /** Whether [path] is a zip file, judged by its first bytes rather than its name. */
         fun isZip(path: Path): Boolean = try {
-            Files.newInputStream(path).use { input ->
-                val header = input.readNBytes(4)
-                header.size == 4 && header[0] == 'P'.code.toByte() && header[1] == 'K'.code.toByte() &&
-                    ((header[2].toInt() == 3 && header[3].toInt() == 4) || (header[2].toInt() == 5 && header[3].toInt() == 6))
-            }
+            Files.newInputStream(path).use { isZip(it.readNBytes(HEADER_BYTES)) }
         } catch (_: IOException) {
             false
         }
+
+        /** Whether a file starting with [header] is a zip. */
+        fun isZip(header: ByteArray): Boolean =
+            header.size >= 4 && header[0] == 'P'.code.toByte() && header[1] == 'K'.code.toByte() &&
+                ((header[2].toInt() == 3 && header[3].toInt() == 4) || (header[2].toInt() == 5 && header[3].toInt() == 6))
 
         /** The origin [text] names, as [Origin.toString] writes it, if its zip exists. */
         fun parseOrigin(text: String): Origin? {

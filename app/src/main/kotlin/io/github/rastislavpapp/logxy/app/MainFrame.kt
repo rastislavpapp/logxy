@@ -3,6 +3,8 @@ package io.github.rastislavpapp.logxy.app
 import com.formdev.flatlaf.FlatClientProperties
 import com.formdev.flatlaf.extras.FlatSVGUtils
 import io.github.rastislavpapp.logxy.core.LogFolders
+import io.github.rastislavpapp.logxy.core.archive.ArchiveOrigin
+import io.github.rastislavpapp.logxy.core.archive.CompressedSpool
 import io.github.rastislavpapp.logxy.core.archive.ZipSpool
 import io.github.rastislavpapp.logxy.core.config.OpenMode
 import io.github.rastislavpapp.logxy.core.config.SavedFilter
@@ -67,7 +69,7 @@ private const val LEVEL_ARG = "--level"
 private const val QUERY_ARG = "--query"
 private const val LIVE_COLOR = "Actions.Green"
 private const val FOLLOW_COLOR = "Component.accentColor"
-private const val UNZIP_DIALOG_DELAY_MILLIS = 300
+private const val EXTRACT_DIALOG_DELAY_MILLIS = 300
 
 class MainFrame : JFrame("logxy") {
 
@@ -84,7 +86,13 @@ class MainFrame : JFrame("logxy") {
     private val spoolCreation = lazy { ZipSpool.forThisProcess(Settings.cacheDirectory()) }
     private val spool by spoolCreation
 
-    private fun originOf(path: Path): ZipSpool.Origin? = if (spoolCreation.isInitialized()) spool.originOf(path) else null
+    /** Where opened .gz and .zst files are decompressed to; made when the first one is opened. */
+    private val compressedSpoolCreation = lazy { CompressedSpool.forThisProcess(Settings.cacheDirectory()) }
+    private val compressedSpool by compressedSpoolCreation
+
+    private fun originOf(path: Path): ArchiveOrigin? =
+        (if (spoolCreation.isInitialized()) spool.originOf(path) else null)
+            ?: if (compressedSpoolCreation.isInitialized()) compressedSpool.originOf(path) else null
 
     init {
         defaultCloseOperation = WindowConstants.EXIT_ON_CLOSE
@@ -216,9 +224,10 @@ class MainFrame : JFrame("logxy") {
     private class Found(val path: Path, val inSubfolder: Boolean = false)
 
     /**
-     * Opens [paths], folders as the log files in them and zip files as the files in them: a single file
-     * into a tab if none is open; otherwise the user chooses between merging them, with the current tab
-     * or into a new one, and tabs of their own.
+     * Opens [paths], folders as the log files in them, zip files as the files in them, and compressed
+     * files (.gz, .zst) as their decompressed content: a single file into a tab if none is open;
+     * otherwise the user chooses between merging them, with the current tab or into a new one,
+     * and tabs of their own.
      */
     fun openFiles(paths: List<Path>) {
         val existing = paths.map { it.toAbsolutePath().normalize() }.distinct().filter(::checkOpenable)
@@ -227,16 +236,18 @@ class MainFrame : JFrame("logxy") {
             if (!Files.isDirectory(path)) return@flatMap listOf(Found(path))
             LogFolders.files(path).map { Found(it, it.parent != path) }.also { if (it.isEmpty()) empty.add(path) }
         }
-        val zips = found.map { it.path }.filter(ZipSpool::isZip)
-        if (zips.isEmpty()) {
+        val archives = found.map { it.path }.filter(::isArchive)
+        if (archives.isEmpty()) {
             tellNothingIn(empty)
             return openFound(found)
         }
-        unzipThen(zips) { files ->
-            tellNothingIn(empty + zips.filter { files[it].isNullOrEmpty() })
+        extractThen(archives) { files ->
+            tellNothingIn(empty + archives.filter { files[it].isNullOrEmpty() })
             openFound(found.flatMap { item -> files[item.path]?.map { Found(it, item.inSubfolder) } ?: listOf(item) })
         }
     }
+
+    private fun isArchive(path: Path) = ZipSpool.isZip(path) || CompressedSpool.formatOf(path) != null
 
     private fun tellNothingIn(folders: List<Path>) {
         if (folders.isEmpty()) return
@@ -301,7 +312,7 @@ class MainFrame : JFrame("logxy") {
         for (i in 0..<tabs.tabCount) {
             val tab = tabs.getComponentAt(i) as LogTab
             add(TAB_ARG)
-            // Extracted files by their zip, as the next app extracts them anew.
+            // Extracted files by their zip or compressed file, as the next app extracts them anew.
             tab.paths.forEach { add((originOf(it) ?: it).toString()) }
             tab.filter.minimumLevel?.let { add(LEVEL_ARG); add(it.name) }
             // Encoded, as Windows command lines do not reliably keep the quotes queries are full of.
@@ -334,11 +345,17 @@ class MainFrame : JFrame("logxy") {
             SELECT_ARG -> selected = value().toIntOrNull() ?: 0
             else -> groups.last().paths.add(arg)
         }
-        val zips = groups.flatMap { it.paths }.mapNotNull(ZipSpool::parseOrigin).map { it.zip }.distinct()
-        if (zips.isEmpty()) return openGroups(groups.map { it.paths.map(Path::of) to it.filter() }, selected)
-        unzipThen(zips) {
-            val paths = { group: Group -> group.paths.map { arg -> ZipSpool.parseOrigin(arg)?.let(spool::extractedFile) ?: Path.of(arg) } }
-            openGroups(groups.map { paths(it) to it.filter() }, selected)
+        val args = groups.flatMap { it.paths }
+        val zips = args.mapNotNull(ZipSpool::parseOrigin).map { it.zip }
+        // Decompressed files are saved as their .gz or .zst, and decompressed again.
+        val compressed = args.filter { ZipSpool.parseOrigin(it) == null }.map { Path.of(it).toAbsolutePath().normalize() }
+            .filter { CompressedSpool.formatOf(it) != null }
+        val archives = (zips + compressed).distinct()
+        if (archives.isEmpty()) return openGroups(groups.map { it.paths.map(Path::of) to it.filter() }, selected)
+        extractThen(archives) { files ->
+            fun path(arg: String) = ZipSpool.parseOrigin(arg)?.let(spool::extractedFile)
+                ?: Path.of(arg).let { files[it.toAbsolutePath().normalize()]?.singleOrNull() ?: it }
+            openGroups(groups.map { group -> group.paths.map(::path) to group.filter() }, selected)
         }
     }
 
@@ -353,37 +370,46 @@ class MainFrame : JFrame("logxy") {
     }
 
     /**
-     * Unzips [zips] while showing how far it got, then calls [then] with the files of each zip; nothing
-     * more if the user cancels or a zip cannot be read.
+     * Unzips the zips among [archives] and decompresses the .gz and .zst files while showing how far it got,
+     * then calls [then] with the files of each; nothing more if the user cancels or one cannot be read.
      */
-    private fun unzipThen(zips: List<Path>, then: (Map<Path, List<Path>>) -> Unit) {
+    private fun extractThen(archives: List<Path>, then: (Map<Path, List<Path>>) -> Unit) {
         lateinit var job: Job
-        var unzipped = false
-        val dialog = UnzipDialog(this) { job.cancel() }
+        var finished = false
+        val dialog = ExtractDialog(this) { job.cancel() }
         job = scope.launch {
             val files = LinkedHashMap<Path, List<Path>>()
+            var failure = ""
             try {
-                for ((i, zip) in zips.withIndex()) {
-                    dialog.text = "Unzipping ${zip.fileName}…"
-                    files[zip] = spool.extract(zip) { dialog.fraction = (i + it) / zips.size }
+                for ((i, archive) in archives.withIndex()) {
+                    val progress = { fraction: Double -> dialog.fraction = (i + fraction) / archives.size }
+                    val format = CompressedSpool.formatOf(archive)
+                    if (format == null) {
+                        failure = "Cannot unzip $archive"
+                        dialog.text = "Unzipping ${archive.fileName}…"
+                        files[archive] = spool.extract(archive, progress)
+                    } else {
+                        failure = "Cannot decompress $archive"
+                        dialog.text = "Decompressing ${archive.fileName}…"
+                        files[archive] = listOf(compressedSpool.decompress(archive, format, progress))
+                    }
                 }
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
                 dialog.dispose()
-                val zip = zips.getOrNull(files.size) ?: zips.last()
                 JOptionPane.showMessageDialog(
-                    this@MainFrame, "Cannot unzip $zip:\n${e.message ?: e.javaClass.simpleName}", "Cannot Open File", JOptionPane.ERROR_MESSAGE,
+                    this@MainFrame, "$failure:\n${e.message ?: e.javaClass.simpleName}", "Cannot Open File", JOptionPane.ERROR_MESSAGE,
                 )
                 return@launch
             } finally {
-                unzipped = true
+                finished = true
                 dialog.dispose()
             }
             then(files)
         }
         // Quick ones finish before the dialog would only flash.
         // Not job.isActive: the job is still running while [then] asks how to open the files.
-        Timer(UNZIP_DIALOG_DELAY_MILLIS) { if (!unzipped) dialog.isVisible = true }.apply { isRepeats = false }.start()
+        Timer(EXTRACT_DIALOG_DELAY_MILLIS) { if (!finished) dialog.isVisible = true }.apply { isRepeats = false }.start()
     }
 
     /** Opens each of [paths] in a tab of its own. */

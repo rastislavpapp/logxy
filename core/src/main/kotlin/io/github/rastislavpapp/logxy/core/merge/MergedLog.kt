@@ -1,5 +1,6 @@
 package io.github.rastislavpapp.logxy.core.merge
 
+import io.github.rastislavpapp.logxy.core.archive.ArchiveOrigin
 import io.github.rastislavpapp.logxy.core.filter.RecordSnapshot
 import io.github.rastislavpapp.logxy.core.index.ByteChunkList
 import io.github.rastislavpapp.logxy.core.index.IntChunkList
@@ -11,7 +12,6 @@ import io.github.rastislavpapp.logxy.core.log.Role
 import io.github.rastislavpapp.logxy.core.log.Schema
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import io.github.rastislavpapp.logxy.core.archive.ZipSpool
 import java.nio.file.Path
 
 /**
@@ -171,12 +171,16 @@ class MergedLog private constructor(
         /**
          * File names, prefixed with as many parent folders as needed to make them unique. A file extracted
          * from a zip (see [origin]) is named by the zip and the file, e.g. `logs.zip/app.log`, with folders
-         * inside the zip and then outside it added as needed.
+         * inside the zip and then outside it added as needed. A decompressed file is named like its .gz or .zst.
          */
-        fun sourceNames(paths: List<Path>, origin: (Path) -> ZipSpool.Origin? = { null }): List<String> {
+        fun sourceNames(paths: List<Path>, origin: (Path) -> ArchiveOrigin? = { null }): List<String> {
             val names = paths.map { path ->
-                val from = origin(path) ?: return@map Name(emptyList(), path.map { it.toString() })
-                Name(from.zip.map { it.toString() }, from.entry.split('/'))
+                val from = origin(path)
+                when {
+                    from == null -> Name(emptyList(), path.map { it.toString() })
+                    from.entry.isEmpty() -> Name(emptyList(), from.container.map { it.toString() })
+                    else -> Name(from.container.map { it.toString() }, from.entry.split('/'))
+                }
             }
             var depth = 1
             while (true) {

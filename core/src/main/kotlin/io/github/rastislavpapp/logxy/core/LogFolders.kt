@@ -1,5 +1,6 @@
 package io.github.rastislavpapp.logxy.core
 
+import io.github.rastislavpapp.logxy.core.archive.CompressedSpool
 import io.github.rastislavpapp.logxy.core.archive.ZipSpool
 import java.io.IOException
 import java.nio.file.FileVisitResult
@@ -15,8 +16,8 @@ object LogFolders {
 
     /**
      * The files in [folder] and, if [recursive], its subfolders, sorted by path. Leaves out hidden files
-     * and folders (such as `.git`), empty files and binary files, except zips. Unreadable folders are
-     * skipped.
+     * and folders (such as `.git`), empty files and binary files, except zips and .gz or .zst files.
+     * Unreadable folders are skipped.
      */
     fun files(folder: Path, recursive: Boolean = true): List<Path> {
         val found = ArrayList<Path>()
@@ -25,7 +26,7 @@ object LogFolders {
                 if (dir != folder && isHidden(dir)) FileVisitResult.SKIP_SUBTREE else FileVisitResult.CONTINUE
 
             override fun visitFile(file: Path, attrs: BasicFileAttributes): FileVisitResult {
-                if (attrs.isRegularFile && attrs.size() > 0 && !isHidden(file) && (ZipSpool.isZip(file) || !isBinary(file))) found.add(file)
+                if (attrs.isRegularFile && attrs.size() > 0 && !isHidden(file) && isOpenable(file)) found.add(file)
                 return FileVisitResult.CONTINUE
             }
 
@@ -36,10 +37,11 @@ object LogFolders {
 
     private fun isHidden(path: Path) = path.fileName.toString().startsWith(".") || runCatching { Files.isHidden(path) }.getOrDefault(false)
 
-    /** Text logs have no NUL bytes; images, archives and the like do, near their start. */
-    private fun isBinary(file: Path): Boolean = try {
-        Files.newInputStream(file).use { input -> input.readNBytes(SNIFFED_BYTES).any { it.toInt() == 0 } }
+    /** A zip or compressed file, or text: text logs have no NUL bytes, while images and the like do near their start. */
+    private fun isOpenable(file: Path): Boolean = try {
+        val start = Files.newInputStream(file).use { it.readNBytes(SNIFFED_BYTES) }
+        ZipSpool.isZip(start) || CompressedSpool.formatOf(start) != null || start.none { it.toInt() == 0 }
     } catch (_: IOException) {
-        true
+        false
     }
 }

@@ -11,9 +11,9 @@ import javax.swing.JPanel
 import javax.swing.JProgressBar
 import javax.swing.Timer
 
-/** How far unzipping got, with a Cancel button that calls [onCancel]. [text] and [fraction] may be set from any thread. */
-internal class UnzipDialog(owner: Window, private val onCancel: () -> Unit) :
-    JDialog(owner, "Opening Zip Files", ModalityType.APPLICATION_MODAL) {
+/** How far unzipping or decompressing got, with a Cancel button that calls [onCancel]. [text] and [fraction] may be set from any thread. */
+internal class ExtractDialog(owner: Window, private val onCancel: () -> Unit) :
+    JDialog(owner, "Opening Files", ModalityType.APPLICATION_MODAL) {
 
     @Volatile
     var text = " "

@@ -1,6 +1,6 @@
 package io.github.rastislavpapp.logxy.app
 
-import io.github.rastislavpapp.logxy.core.archive.ZipSpool
+import io.github.rastislavpapp.logxy.core.archive.ArchiveOrigin
 import io.github.rastislavpapp.logxy.core.config.SavedFilter
 import io.github.rastislavpapp.logxy.core.log.ColumnType
 import io.github.rastislavpapp.logxy.core.log.Level
@@ -51,14 +51,14 @@ private val RANGE_OPS = listOf(QueryOp.AT_LEAST, QueryOp.ABOVE, QueryOp.AT_MOST,
 /**
  * One open file, or several merged: shows the records of its [LogSession], with the filter bar and the
  * detail pane. [openFiles] opens dropped files; [openEach] opens files in tabs of their own. [filter]
- * is applied once the records are there. [origin] tells which files were extracted from zips.
+ * is applied once the records are there. [origin] tells which files were extracted from zips or decompressed.
  */
 class LogTab(
     paths: List<Path>,
     private val openFiles: (List<Path>) -> Unit,
     private val openEach: (List<Path>) -> Unit,
     filter: SavedFilter? = null,
-    private val origin: (Path) -> ZipSpool.Origin? = { null },
+    private val origin: (Path) -> ArchiveOrigin? = { null },
     /** The parser chosen for each of [paths], null (or missing) to detect it. */
     formats: List<LogFormat?> = emptyList(),
     private val onStatusChanged: () -> Unit,
@@ -81,16 +81,16 @@ class LogTab(
     /** Short names of [paths], as the merge's source column shows them. */
     val sourceNames: List<String> get() = session.sourceNames
 
-    /** Short name for the tab: the file name, or the merged files' names; files from zips go by the zip's name. */
+    /** Short name for the tab: the file name, or the merged files' names; files from archives go by the container's name. */
     val title: String
         get() {
-            if (!isMerged) return origin(path)?.let { "${it.zip.fileName}/${path.fileName}" } ?: path.fileName.toString()
-            val names = paths.zip(sourceNames) { path, name -> origin(path)?.zip?.fileName?.toString() ?: name }.distinct()
+            if (!isMerged) return origin(path)?.let { if (it.entry.isEmpty()) "${it.container.fileName}" else "${it.container.fileName}/${path.fileName}" } ?: path.fileName.toString()
+            val names = paths.zip(sourceNames) { p, name -> origin(p)?.container?.fileName?.toString() ?: name }.distinct()
             val all = names.joinToString(" + ")
             return if (all.length <= MAX_TITLE_CHARS) all else "${names.first()} + ${names.size - 1} more"
         }
 
-    /** The full path, or one per line for a merge; files from zips as `zip!/entry`. */
+    /** The full path, or one per line for a merge; files from archives as `container!/entry`. */
     val description: String get() = paths.joinToString("\n") { (origin(it) ?: it).toString() }
     private val content = JPanel(BorderLayout())
     private val detail = LogDetailArea()

@@ -43,7 +43,7 @@ object Restart {
         // The jpackage launcher passes its arguments to the app, not the JVM, so the limit goes in JAVA_TOOL_OPTIONS.
         val command = System.getProperty("jpackage.app-path")?.let { listOf(it) } ?: listOf(
             Path.of(System.getProperty("java.home"), "bin", "java").toString(),
-            "-cp", System.getProperty("java.class.path"), MAIN_CLASS,
+            "--enable-native-access=ALL-UNNAMED", "-cp", System.getProperty("java.class.path"), MAIN_CLASS,
         )
         val builder = ProcessBuilder(command + args).inheritIO()
         val env = builder.environment()

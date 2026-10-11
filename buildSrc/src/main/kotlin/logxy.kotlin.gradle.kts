@@ -21,3 +21,8 @@ dependencies {
 tasks.test {
     useJUnitPlatform()
 }
+
+// zstd-jni loads a native library, which Java 24+ warns about without this.
+tasks.withType<Test>().configureEach {
+    jvmArgs("--enable-native-access=ALL-UNNAMED")
+}
