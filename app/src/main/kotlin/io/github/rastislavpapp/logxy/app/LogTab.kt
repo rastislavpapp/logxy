@@ -282,6 +282,11 @@ class LogTab(
             popup.addSeparator()
             for (op in RANGE_OPS) add(Query.Rule(field.name, op, literal))
         }
+        popup.addSeparator()
+        popup.add(JMenuItem(if (filterBar.suspended) "Resume Filter" else "Suspend Filter", Icons.pause).apply {
+            isEnabled = filterBar.canSuspend
+            addActionListener { filterBar.toggleSuspended() }
+        })
         popup.show(table, x, y)
     }
 
@@ -445,7 +450,8 @@ class LogTab(
     private fun applyFilter() {
         if (session.records == null) return
         try {
-            session.applyFilter(filterBar.minimumLevel, filterBar.query())
+            if (filterBar.suspended) session.applyFilter(null, Query.Group(all = true, items = emptyList()))
+            else session.applyFilter(filterBar.minimumLevel, filterBar.query())
             filterBar.showError(null)
         } catch (e: QueryException) {
             filterBar.showError(e.message)

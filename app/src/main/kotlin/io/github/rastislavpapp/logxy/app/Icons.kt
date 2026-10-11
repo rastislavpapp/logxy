@@ -37,6 +37,7 @@ object Icons {
     val merged get() = get("vcs/merge")
     val theme get() = get("general/layout")
     val run get() = get("run/run")
+    val pause get() = get("run/pause")
     val clear get() = get("general/delete")
     val advanced get() = get("general/edit")
     val columns get() = get("nodes/dataColumn")
