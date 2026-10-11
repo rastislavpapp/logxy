@@ -198,9 +198,15 @@ class LogSession(
 
     /** Uses [format] for a single file from now on, or detects the format if null; reads the file again. */
     fun useFormat(format: LogFormat?) {
-        require(!isMerged) { "A merge's formats are chosen when opening it" }
-        if (format == chosenFormat) return
-        sources.first().chosen = format
+        require(!isMerged) { "A merge takes a format per file" }
+        useFormats(listOf(format))
+    }
+
+    /** Uses [formats] for the files at [paths] from now on, detecting those that are null; reads the files again. */
+    fun useFormats(formats: List<LogFormat?>) {
+        require(formats.size == sources.size) { "${formats.size} formats for ${sources.size} files" }
+        if (formats == chosenFormats) return
+        sources.forEachIndexed { i, source -> source.chosen = formats[i] }
         listener.formatChanged()
         reload()
     }
@@ -320,7 +326,7 @@ class LogSession(
             listener.problem(
                 "${current.path.fileName} does not match the parser “${current.format.name}”.",
                 e.message.orEmpty(),
-                if (isMerged) "Open the file on its own to choose another parser, or edit the parser."
+                if (isMerged) "Choose another parser for it in the toolbar, or edit the parser."
                 else "Choose another parser in the toolbar, or Raw text.",
             )
             setStatus(SessionStatus(message = "Parser does not match"))

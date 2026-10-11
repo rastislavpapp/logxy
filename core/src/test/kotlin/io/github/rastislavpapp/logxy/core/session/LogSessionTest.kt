@@ -127,6 +127,12 @@ class LogSessionTest {
             assertEquals(listOf(null, pattern), session.chosenFormats)
             assertEquals(listOf(LogFormat.BUILT_IN[0], pattern), session.formats)
             assertEquals(20, records.recordCount)
+            session.useFormats(listOf(pattern, null))
+        }
+        withTimeout(10_000) { recorder.loads.receive() }
+        withContext(ui) {
+            assertEquals(listOf(pattern, null), session.chosenFormats)
+            assertEquals(listOf(pattern, LogFormat.BUILT_IN[0]), session.formats)
             session.dispose()
         }
     }

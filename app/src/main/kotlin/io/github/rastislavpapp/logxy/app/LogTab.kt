@@ -184,15 +184,35 @@ class LogTab(
         showPopupList(parserButton, items)
     }
 
-    /** A merge's parsers are chosen when opening it: list them, read-only. */
+    /** A merge's parsers: a row for all files and one per file, each opening the parsers to choose from. */
     private fun showMergedParsers() {
+        val chosen = session.chosenFormats
+        val all = chosen.distinct().let { if (it.size == 1) it.single()?.name ?: "Auto-detect" else "Mixed" }
         val items = buildList {
+            add(PopupItem("All files: $all", Icons.chevronRight) { showMergedParserChoice(null) })
             for ((i, name) in sourceNames.withIndex()) {
-                val format = session.formats[i]
-                add(PopupItem("$name: ${if (session.chosenFormats[i] == null) "Auto: ${format.name}" else format.name}", enabled = false))
+                val parser = when {
+                    chosen[i] != null -> chosen[i]!!.name
+                    session.formatDetected -> "Auto: ${session.formats[i].name}"
+                    else -> "Auto-detect"
+                }
+                add(PopupItem("$name: $parser", Icons.chevronRight, separatorBefore = i == 0) { showMergedParserChoice(i) })
             }
-            add(PopupItem("To choose other parsers, open the files again", enabled = false, separatorBefore = true))
-            add(PopupItem("Edit Parsers", Icons.settings) { editParsers(session.format) })
+            add(PopupItem("Edit Parsers", Icons.settings, separatorBefore = true) { editParsers(session.format) })
+        }
+        showPopupList(parserButton, items)
+    }
+
+    /** The parsers to choose from for the file at [index] of a merge, or for all its files if null; choosing reads them again. */
+    private fun showMergedParserChoice(index: Int?) {
+        val chosen = session.chosenFormats
+        val formats: List<LogFormat?> = listOf(null, LogFormat.Raw) + AppSettings.current.formats + LogFormat.BUILT_IN
+        val heading = PopupItem("Parser for ${if (index == null) "all files" else sourceNames[index]}", enabled = false)
+        val items = listOf(heading) + formats.mapIndexed { i, format ->
+            val selected = if (index == null) chosen.all { it == format } else chosen[index] == format
+            PopupItem(format?.name ?: "Auto-detect", selected = selected, separatorBefore = i <= 1) {
+                session.useFormats(if (index == null) chosen.map { format } else chosen.toMutableList().also { it[index] = format })
+            }
         }
         showPopupList(parserButton, items)
     }
