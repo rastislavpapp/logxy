@@ -79,6 +79,8 @@ val jpackage = tasks.register<Exec>("jpackage") {
         "--main-jar", "logxy.jar",
         "--main-class", application.mainClass.get(),
         "--add-modules", "java.base,java.desktop,java.logging,java.prefs,jdk.unsupported",
+        // Twice the JVM default, so few users need a limit in Preferences, which costs a second JVM at every start.
+        "--java-options", "-XX:MaxRAMPercentage=50",
         "--dest", image.get().asFile.path,
     )
     // jpackage refuses to overwrite an existing image.
