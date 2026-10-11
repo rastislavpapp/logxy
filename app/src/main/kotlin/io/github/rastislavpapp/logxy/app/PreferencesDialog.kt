@@ -115,12 +115,7 @@ class PreferencesDialog(
         }
         val before = AppSettings.current
         val settings = pages.fold(before) { settings, page -> page.applyTo(settings) }
-        try {
-            AppSettings.update(settings)
-        } catch (e: Exception) {
-            JOptionPane.showMessageDialog(this, "Cannot write ${AppSettings.location}:\n${e.message}", "Cannot Save", JOptionPane.ERROR_MESSAGE)
-            return false
-        }
+        if (!AppSettings.updateOrShowError(this, settings)) return false
         if (settings.maxMemory != before.maxMemory) {
             val options = arrayOf("Restart Now", "Later")
             restartAfterClose = JOptionPane.showOptionDialog(

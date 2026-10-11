@@ -3,6 +3,8 @@ package io.github.rastislavpapp.logxy.app
 import io.github.rastislavpapp.logxy.core.config.Settings
 import io.github.rastislavpapp.logxy.core.session.SettingsStore
 import org.slf4j.LoggerFactory
+import java.awt.Component
+import javax.swing.JOptionPane
 
 /** The settings in use, loaded at startup; listeners hear about saved changes. Used on the EDT only. */
 object AppSettings : SettingsStore {
@@ -24,6 +26,15 @@ object AppSettings : SettingsStore {
         Settings.save(path, settings)
         current = settings
         listeners.toList().forEach { it() }
+    }
+
+    /** Saves [settings]; on failure tells the user (over [parent]) and returns false. */
+    fun updateOrShowError(parent: Component, settings: Settings): Boolean = try {
+        update(settings)
+        true
+    } catch (e: Exception) {
+        JOptionPane.showMessageDialog(parent, "Cannot write $path:\n${e.message}", "Cannot Save", JOptionPane.ERROR_MESSAGE)
+        false
     }
 
     override fun addListener(listener: () -> Unit) {

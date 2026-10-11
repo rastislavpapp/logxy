@@ -265,11 +265,7 @@ class FilterBar(private val onApply: () -> Unit) : JPanel(MigLayout("insets 6 8 
     }
 
     private fun persist(filters: List<SavedFilter>) {
-        try {
-            AppSettings.update(AppSettings.current.copy(filters = filters))
-        } catch (e: Exception) {
-            JOptionPane.showMessageDialog(this, "Cannot write ${AppSettings.location}:\n${e.message}", "Cannot Save", JOptionPane.ERROR_MESSAGE)
-        }
+        AppSettings.updateOrShowError(this, AppSettings.current.copy(filters = filters))
     }
 
     private companion object {

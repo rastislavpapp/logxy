@@ -265,13 +265,7 @@ class MainFrame : JFrame("logxy") {
             val mode = rememberedMode(remembered, files.size, current?.paths?.size) ?: return@let null
             OpenAnswer(mode, files, files.map { null }, settings.includeSubfolders, remember = false)
         } ?: askHowToOpen(all, inSubfolders, current) ?: return
-        if (answer.remember) {
-            try {
-                AppSettings.update(AppSettings.current.copy(openMode = answer.mode, includeSubfolders = answer.includeSubfolders))
-            } catch (e: Exception) {
-                JOptionPane.showMessageDialog(this, "Cannot write ${AppSettings.location}:\n${e.message}", "Cannot Save", JOptionPane.ERROR_MESSAGE)
-            }
-        }
+        if (answer.remember) AppSettings.updateOrShowError(this, AppSettings.current.copy(openMode = answer.mode, includeSubfolders = answer.includeSubfolders))
         when (answer.mode) {
             OpenMode.MERGE_INTO_CURRENT -> mergeWithCurrent(current!!, answer.files, answer.formats, keepCurrent = false)
             OpenMode.MERGE_WITH_CURRENT_IN_NEW -> mergeWithCurrent(current!!, answer.files, answer.formats, keepCurrent = true)
