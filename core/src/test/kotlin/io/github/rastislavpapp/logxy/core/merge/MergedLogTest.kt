@@ -14,6 +14,7 @@ import io.github.rastislavpapp.logxy.core.log.Role
 import io.github.rastislavpapp.logxy.core.log.Schema
 import io.github.rastislavpapp.logxy.core.parse.PatternFormat
 import java.nio.file.Files
+import io.github.rastislavpapp.logxy.core.archive.ZipSpool
 import java.nio.file.Path
 import java.nio.file.StandardOpenOption
 import java.time.ZoneOffset
@@ -96,6 +97,25 @@ class MergedLogTest {
         val names = MergedLog.sourceNames(listOf(Path.of("/x/app/server.log"), Path.of("/x/db/server.log"), Path.of("/x/db/other.log")))
         assertEquals(listOf("app/server.log", "db/server.log", "db/other.log"), names)
         assertEquals(listOf("a.log", "b.log"), MergedLog.sourceNames(listOf(Path.of("/x/a.log"), Path.of("/y/b.log"))))
+    }
+
+    @Test
+    fun `names files from zips by the zip`() {
+        val origins = mapOf(
+            "/spool/1/app.zip/logs/node1.log" to ZipSpool.Origin(Path.of("/data/app.zip"), "logs/node1.log"),
+            "/spool/2/more.zip/archive/older.zip/node3.log" to ZipSpool.Origin(Path.of("/data/more.zip"), "archive/older.zip/node3.log"),
+            "/spool/3/a.zip/x/app.log" to ZipSpool.Origin(Path.of("/d1/a.zip"), "x/app.log"),
+            "/spool/3/a.zip/y/app.log" to ZipSpool.Origin(Path.of("/d1/a.zip"), "y/app.log"),
+            "/spool/4/b.zip/app.log" to ZipSpool.Origin(Path.of("/d1/b.zip"), "app.log"),
+            "/spool/5/b.zip/app.log" to ZipSpool.Origin(Path.of("/d2/b.zip"), "app.log"),
+        ).mapKeys { Path.of(it.key) }
+        fun names(vararg paths: String) = MergedLog.sourceNames(paths.map { Path.of(it) }) { origins[it] }
+        assertEquals(
+            listOf("app.zip/node1.log", "more.zip/node3.log", "other.log"),
+            names("/spool/1/app.zip/logs/node1.log", "/spool/2/more.zip/archive/older.zip/node3.log", "/x/other.log"),
+        )
+        assertEquals(listOf("a.zip/x/app.log", "a.zip/y/app.log"), names("/spool/3/a.zip/x/app.log", "/spool/3/a.zip/y/app.log"))
+        assertEquals(listOf("d1/b.zip/app.log", "d2/b.zip/app.log"), names("/spool/4/b.zip/app.log", "/spool/5/b.zip/app.log"))
     }
 
     @Test

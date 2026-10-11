@@ -34,6 +34,16 @@ data class Settings(
 
         fun defaultPath(): Path = directory().resolve("logxy.properties")
 
+        /** For files that can be made again: `%LOCALAPPDATA%\logxy\cache` on Windows, `$XDG_CACHE_HOME/logxy` or `~/.cache/logxy` elsewhere. */
+        fun cacheDirectory(): Path {
+            val localAppData = System.getenv("LOCALAPPDATA")
+            return when {
+                System.getProperty("os.name").startsWith("Windows") && localAppData != null -> Path.of(localAppData, "logxy", "cache")
+                else -> (System.getenv("XDG_CACHE_HOME")?.let { Path.of(it) }
+                    ?: Path.of(System.getProperty("user.home"), ".cache")).resolve("logxy")
+            }
+        }
+
         /**
          * Reads settings from a properties file, e.g.:
          * ```

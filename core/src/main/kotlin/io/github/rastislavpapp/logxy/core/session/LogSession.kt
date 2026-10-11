@@ -1,6 +1,7 @@
 package io.github.rastislavpapp.logxy.core.session
 
 import io.github.rastislavpapp.logxy.core.FileActivity
+import io.github.rastislavpapp.logxy.core.archive.ZipSpool
 import io.github.rastislavpapp.logxy.core.FileChange
 import io.github.rastislavpapp.logxy.core.FileSnapshot
 import io.github.rastislavpapp.logxy.core.formatByteSize
@@ -91,13 +92,15 @@ interface SessionListener {
 /**
  * One or more open files without their UI: indexes them in the background, merges several by time
  * (see [MergedLog]), follows changes to them, and filters them. Not thread-safe: use it, and run
- * [scope], on one thread (the UI thread); [listener] is called there.
+ * [scope], on one thread (the UI thread); [listener] is called there. [origin] tells which files were
+ * extracted from zips, for naming them.
  */
 class LogSession(
     paths: List<Path>,
     private val scope: CoroutineScope,
     private val settings: SettingsStore,
     private val listener: SessionListener,
+    private val origin: (Path) -> ZipSpool.Origin? = { null },
 ) {
     constructor(path: Path, scope: CoroutineScope, settings: SettingsStore, listener: SessionListener) :
         this(listOf(path), scope, settings, listener)
@@ -116,7 +119,7 @@ class LogSession(
     private var sources = paths.map { Source(it) }
         set(value) {
             field = value
-            sourceNames = MergedLog.sourceNames(paths)
+            sourceNames = MergedLog.sourceNames(paths, origin)
         }
     private var job: Job? = null
     private val settingsListener = { settingsChanged() }
@@ -125,7 +128,7 @@ class LogSession(
     val paths: List<Path> get() = sources.map { it.path }
 
     /** Short names of [paths], as the source field of a merge shows them. */
-    var sourceNames: List<String> = MergedLog.sourceNames(paths)
+    var sourceNames: List<String> = MergedLog.sourceNames(paths, origin)
         private set
 
     /** Several files merged into one view. */
@@ -290,7 +293,7 @@ class LogSession(
                     return false
                 }
                 sources.size == 1 -> sources.single().log!!
-                else -> MergedLog.build(sources.map { it.log!! })
+                else -> MergedLog.build(sources.map { it.log!! }, sourceNames)
             }
             engine = if (view is MergedLog) MergedFilter(view) else FilterEngine(view as LogData)
             records = view

@@ -11,6 +11,7 @@ import io.github.rastislavpapp.logxy.core.log.Role
 import io.github.rastislavpapp.logxy.core.log.Schema
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import io.github.rastislavpapp.logxy.core.archive.ZipSpool
 import java.nio.file.Path
 
 /**
@@ -160,23 +161,40 @@ class MergedLog private constructor(
          * Merges [parts], which must all have a timestamp field. Call on the thread that owns them; the
          * merge itself runs on [Dispatchers.Default].
          */
-        suspend fun build(parts: List<LogData>): MergedLog {
-            val log = MergedLog(parts, sourceNames(parts.map { it.path }))
+        suspend fun build(parts: List<LogData>, names: List<String> = sourceNames(parts.map { it.path })): MergedLog {
+            val log = MergedLog(parts, names)
             val snapshots = parts.map { it.filterSnapshot() }
             withContext(Dispatchers.Default) { log.add(log.order(snapshots)) }
             return log
         }
 
-        /** File names, prefixed with as many parent folders as needed to make them unique. */
-        fun sourceNames(paths: List<Path>): List<String> {
+        /**
+         * File names, prefixed with as many parent folders as needed to make them unique. A file extracted
+         * from a zip (see [origin]) is named by the zip and the file, e.g. `logs.zip/app.log`, with folders
+         * inside the zip and then outside it added as needed.
+         */
+        fun sourceNames(paths: List<Path>, origin: (Path) -> ZipSpool.Origin? = { null }): List<String> {
+            val names = paths.map { path ->
+                val from = origin(path) ?: return@map Name(emptyList(), path.map { it.toString() })
+                Name(from.zip.map { it.toString() }, from.entry.split('/'))
+            }
             var depth = 1
             while (true) {
-                val names = paths.map { path ->
-                    val count = minOf(depth, path.nameCount)
-                    path.subpath(path.nameCount - count, path.nameCount).joinToString("/")
-                }
-                if (names.toSet().size == names.size || depth >= paths.maxOf { it.nameCount }) return names
+                val shown = names.map { it.shown(depth) }
+                if (shown.toSet().size == shown.size || depth >= names.maxOf { it.depth }) return shown
                 depth++
+            }
+        }
+
+        /** A file's path: [zip] (empty if none) and the path in it, or the file's path. */
+        private class Name(val zip: List<String>, val path: List<String>) {
+            val depth get() = zip.size + path.size
+
+            /** The last [depth] parts, the zip's name always among them. */
+            fun shown(depth: Int): String {
+                if (zip.isEmpty()) return path.takeLast(depth).joinToString("/")
+                val inZip = path.takeLast(depth)
+                return (zip.takeLast(1 + maxOf(0, depth - path.size)) + inZip).joinToString("/")
             }
         }
     }

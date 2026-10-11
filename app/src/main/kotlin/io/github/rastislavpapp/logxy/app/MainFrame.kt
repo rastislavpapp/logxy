@@ -2,7 +2,9 @@ package io.github.rastislavpapp.logxy.app
 
 import com.formdev.flatlaf.FlatClientProperties
 import com.formdev.flatlaf.extras.FlatSVGUtils
+import io.github.rastislavpapp.logxy.core.archive.ZipSpool
 import io.github.rastislavpapp.logxy.core.config.SavedFilter
+import io.github.rastislavpapp.logxy.core.config.Settings
 import io.github.rastislavpapp.logxy.core.log.Level
 import io.github.rastislavpapp.logxy.core.merge.MergedLog
 import net.miginfocom.swing.MigLayout
@@ -45,8 +47,15 @@ import javax.swing.JSeparator
 import javax.swing.JTabbedPane
 import javax.swing.KeyStroke
 import javax.swing.SwingConstants
+import javax.swing.Timer
 import javax.swing.UIManager
 import javax.swing.WindowConstants
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.swing.Swing
 
 private const val CARD_PLACEHOLDER = "placeholder"
 private const val CARD_TABS = "tabs"
@@ -56,6 +65,7 @@ private const val LEVEL_ARG = "--level"
 private const val QUERY_ARG = "--query"
 private const val LIVE_COLOR = "Actions.Green"
 private const val FOLLOW_COLOR = "Component.accentColor"
+private const val UNZIP_DIALOG_DELAY_MILLIS = 300
 
 class MainFrame : JFrame("logxy") {
 
@@ -66,6 +76,13 @@ class MainFrame : JFrame("logxy") {
     private val statusBar = JPanel(MigLayout("insets 3 8 3 8, fill, gap 0, hidemode 3", "[grow][]"))
     private val fileSlot = Slot()
     private var lastDirectory: File? = AppState[AppState.LAST_DIRECTORY]?.let(::File)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Swing)
+
+    /** Where opened zip files are extracted to; made when the first one is opened. */
+    private val spoolCreation = lazy { ZipSpool.forThisProcess(Settings.cacheDirectory()) }
+    private val spool by spoolCreation
+
+    private fun originOf(path: Path): ZipSpool.Origin? = if (spoolCreation.isInitialized()) spool.originOf(path) else null
 
     init {
         defaultCloseOperation = WindowConstants.EXIT_ON_CLOSE
@@ -194,15 +211,28 @@ class MainFrame : JFrame("logxy") {
     }
 
     /**
-     * Opens [paths]: a single file into a tab if none is open; otherwise the user chooses between merging
-     * them, with the current tab or into a new one, and tabs of their own.
+     * Opens [paths], zip files as the files in them: a single file into a tab if none is open; otherwise
+     * the user chooses between merging them, with the current tab or into a new one, and tabs of their own.
      */
     fun openFiles(paths: List<Path>) {
+        val existing = paths.map { it.toAbsolutePath().normalize() }.distinct().filter(::checkOpenable)
+        val zips = existing.filter(ZipSpool::isZip)
+        if (zips.isEmpty()) return openUnzipped(existing)
+        unzipThen(zips) { files ->
+            val empty = zips.filter { files[it].isNullOrEmpty() }
+            if (empty.isNotEmpty()) {
+                JOptionPane.showMessageDialog(
+                    this, "No files in:\n${empty.joinToString("\n")}", "Nothing to Open", JOptionPane.INFORMATION_MESSAGE,
+                )
+            }
+            openUnzipped(existing.flatMap { files[it] ?: listOf(it) })
+        }
+    }
+
+    private fun openUnzipped(paths: List<Path>) {
         val current = selectedTab()
-        val openable = paths.map { it.toAbsolutePath().normalize() }.distinct()
-            // Files the current tab already shows have nothing to add.
-            .filter { current == null || it !in current.paths }
-            .filter(::checkOpenable)
+        // Files the current tab already shows have nothing to add.
+        val openable = paths.distinct().filter { current == null || it !in current.paths }
         if (openable.isEmpty()) return
         if (current == null && openable.size == 1) return openFile(openable.single())
         when (openChoice(openable, current?.paths)) {
@@ -219,7 +249,8 @@ class MainFrame : JFrame("logxy") {
         for (i in 0..<tabs.tabCount) {
             val tab = tabs.getComponentAt(i) as LogTab
             add(TAB_ARG)
-            tab.paths.forEach { add(it.toString()) }
+            // Extracted files by their zip, as the next app extracts them anew.
+            tab.paths.forEach { add((originOf(it) ?: it).toString()) }
             tab.filter.minimumLevel?.let { add(LEVEL_ARG); add(it.name) }
             // Encoded, as Windows command lines do not reliably keep the quotes queries are full of.
             if (tab.filter.query.isNotBlank()) {
@@ -233,7 +264,9 @@ class MainFrame : JFrame("logxy") {
     /** Opens files given on the command line, or the tabs from [tabArgs]: each file group in a tab, merged if several. */
     fun openArgs(args: List<String>) {
         if (args.firstOrNull() != TAB_ARG) return openFiles(args.map { Path.of(it) })
-        class Group(val paths: MutableList<Path> = ArrayList(), var level: Level? = null, var query: String = "")
+        class Group(val paths: MutableList<String> = ArrayList(), var level: Level? = null, var query: String = "") {
+            fun filter() = SavedFilter("", level, query).takeIf { it.minimumLevel != null || it.query.isNotBlank() }
+        }
         val groups = ArrayList<Group>()
         var selected = 0
         val iterator = args.iterator()
@@ -247,15 +280,58 @@ class MainFrame : JFrame("logxy") {
                 ""
             }
             SELECT_ARG -> selected = value().toIntOrNull() ?: 0
-            else -> groups.last().paths.add(Path.of(arg))
+            else -> groups.last().paths.add(arg)
         }
-        for (group in groups) {
-            val openable = group.paths.filter(::checkOpenable)
+        val zips = groups.flatMap { it.paths }.mapNotNull(ZipSpool::parseOrigin).map { it.zip }.distinct()
+        if (zips.isEmpty()) return openGroups(groups.map { it.paths.map(Path::of) to it.filter() }, selected)
+        unzipThen(zips) {
+            val paths = { group: Group -> group.paths.map { arg -> ZipSpool.parseOrigin(arg)?.let(spool::extractedFile) ?: Path.of(arg) } }
+            openGroups(groups.map { paths(it) to it.filter() }, selected)
+        }
+    }
+
+    /** Opens a tab for each group of files with its filter, then selects the tab at [selected]. */
+    private fun openGroups(groups: List<Pair<List<Path>, SavedFilter?>>, selected: Int) {
+        for ((paths, filter) in groups) {
+            val openable = paths.filter(::checkOpenable)
             if (openable.isEmpty() || selectTab(openable)) continue
-            val filter = SavedFilter("", group.level, group.query).takeIf { it.minimumLevel != null || it.query.isNotBlank() }
-            addTab(LogTab(openable, ::openFiles, ::openEach, filter) { updateStatus() })
+            addTab(LogTab(openable, ::openFiles, ::openEach, filter, ::originOf) { updateStatus() })
         }
         if (tabs.tabCount > 0) tabs.selectedIndex = selected.coerceIn(0, tabs.tabCount - 1)
+    }
+
+    /**
+     * Unzips [zips] while showing how far it got, then calls [then] with the files of each zip; nothing
+     * more if the user cancels or a zip cannot be read.
+     */
+    private fun unzipThen(zips: List<Path>, then: (Map<Path, List<Path>>) -> Unit) {
+        lateinit var job: Job
+        var unzipped = false
+        val dialog = UnzipDialog(this) { job.cancel() }
+        job = scope.launch {
+            val files = LinkedHashMap<Path, List<Path>>()
+            try {
+                for ((i, zip) in zips.withIndex()) {
+                    dialog.text = "Unzipping ${zip.fileName}…"
+                    files[zip] = spool.extract(zip) { dialog.fraction = (i + it) / zips.size }
+                }
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                dialog.dispose()
+                val zip = zips.getOrNull(files.size) ?: zips.last()
+                JOptionPane.showMessageDialog(
+                    this@MainFrame, "Cannot unzip $zip:\n${e.message ?: e.javaClass.simpleName}", "Cannot Open File", JOptionPane.ERROR_MESSAGE,
+                )
+                return@launch
+            } finally {
+                unzipped = true
+                dialog.dispose()
+            }
+            then(files)
+        }
+        // Quick ones finish before the dialog would only flash.
+        // Not job.isActive: the job is still running while [then] asks how to open the files.
+        Timer(UNZIP_DIALOG_DELAY_MILLIS) { if (!unzipped) dialog.isVisible = true }.apply { isRepeats = false }.start()
     }
 
     /** Opens each of [paths] in a tab of its own. */
@@ -264,12 +340,12 @@ class MainFrame : JFrame("logxy") {
     fun openFile(path: Path) {
         val absolute = path.toAbsolutePath().normalize()
         if (selectTab(listOf(absolute)) || !checkOpenable(absolute)) return
-        addTab(LogTab(listOf(absolute), ::openFiles, ::openEach) { updateStatus() })
+        addTab(LogTab(listOf(absolute), ::openFiles, ::openEach, origin = ::originOf) { updateStatus() })
     }
 
     private fun openMerged(paths: List<Path>) {
         if (selectTab(paths)) return
-        addTab(LogTab(paths, ::openFiles, ::openEach) { updateStatus() })
+        addTab(LogTab(paths, ::openFiles, ::openEach, origin = ::originOf) { updateStatus() })
     }
 
     /**
@@ -280,7 +356,7 @@ class MainFrame : JFrame("logxy") {
         val merged = tab.paths + paths
         if (selectTab(merged)) return
         val index = tabs.indexOfComponent(tab)
-        val mergedTab = LogTab(merged, ::openFiles, ::openEach, tab.filter) { updateStatus() }
+        val mergedTab = LogTab(merged, ::openFiles, ::openEach, tab.filter, ::originOf) { updateStatus() }
         val at = if (keepCurrent) index + 1 else index
         tabs.insertTab(mergedTab.title, Icons.merged, mergedTab, mergedTab.description, at)
         tabs.selectedIndex = at
@@ -365,7 +441,7 @@ class MainFrame : JFrame("logxy") {
         } else {
             val status = tab.status
             val numbers = NumberFormat.getIntegerInstance()
-            val location = if (tab.isMerged) tab.sourceNames.joinToString(", ") else tab.path.toString()
+            val location = if (tab.isMerged) tab.sourceNames.joinToString(", ") else (originOf(tab.path) ?: tab.path).toString()
             statusBar.add(JLabel(location).apply { toolTipText = "<html>" + tab.description.replace("\n", "<br>") + "</html>" }, "growx, wmin 0")
             fun segment(component: JComponent) {
                 statusBar.add(JSeparator(SwingConstants.VERTICAL), "growy, gap 10 10")
