@@ -68,6 +68,9 @@ class VirtualScrollPane(private val table: JTable, private val window: RowWindow
 
     fun repaintMarks() = scrollBar.repaint()
 
+    /** Called whenever the rows in view may have changed. */
+    var onRowsInViewChanged: () -> Unit = {}
+
     /** Whether the user scrolling to the end turns [follow] back on. */
     var resumeFollowAtEnd: () -> Boolean = { false }
 
@@ -128,6 +131,9 @@ class VirtualScrollPane(private val table: JTable, private val window: RowWindow
     /** Index of the topmost visible row in the whole list. */
     val firstVisibleRow get() = topRow
 
+    /** Index of the lowest visible row in the whole list; below [firstVisibleRow] if there are no rows. */
+    val lastVisibleRow get() = minOf(topRow + visibleRows, window.totalRowCount) - 1
+
     /** Selects [row] of the whole list; with [scroll], first scrolls it into the middle of the view. */
     fun selectRow(row: Int, scroll: Boolean = true) {
         if (row < 0 || row >= window.totalRowCount) return
@@ -154,6 +160,7 @@ class VirtualScrollPane(private val table: JTable, private val window: RowWindow
 
     private fun onViewChanged() {
         updateScrollBar()
+        onRowsInViewChanged()
         val localTop = topRow - window.windowStart
         val nearStart = localTop < EDGE_ROWS && window.windowStart > 0
         val nearEnd = localTop + visibleRows > table.rowCount - EDGE_ROWS &&

@@ -15,11 +15,18 @@ interface Records {
     fun level(record: Int): Level?
 
     /** Epoch nanoseconds of [record]'s timestamp, or null if there is none. */
-    fun timestamp(record: Int): Long?
+    fun timestamp(record: Int): Long? = timestampNanos(record).takeIf { it != NO_TIMESTAMP }
+
+    /** Like [timestamp], but [NO_TIMESTAMP] if there is none; no boxing, for passes over many records. */
+    fun timestampNanos(record: Int): Long
 
     /** Display text of every field of [record], each cut to its first line and at most [maxBytes]. */
     fun rowValues(record: Int, maxBytes: Int): Array<String>
 
     /** The whole record as it appears in the file, cut at [maxBytes]. */
     fun recordText(record: Int, maxBytes: Int): String
+
+    companion object {
+        const val NO_TIMESTAMP = Columns.ABSENT_TIMESTAMP
+    }
 }

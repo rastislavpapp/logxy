@@ -2,6 +2,7 @@ package io.github.rastislavpapp.logxy.app
 
 import com.formdev.flatlaf.ui.FlatScrollBarUI
 import java.awt.AlphaComposite
+import java.awt.Color
 import java.awt.Cursor
 import java.awt.Graphics
 import java.awt.Graphics2D
@@ -16,20 +17,24 @@ import kotlin.math.abs
 private const val MARK_HEIGHT = 2
 private const val THUMB_ALPHA = 0.7f
 
+/** How strongly rows are marked that are no denser in warnings or errors than the rows overall. */
+private const val MIN_MARK_ALPHA = 0.3f
+
 /** How far from a mark, in pixels, a click still goes to it. */
 private const val CLICK_TOLERANCE = 3
 
 /** What to mark along a scroll bar over the rows it scrolls. */
 interface RowMarks {
-    /** [SEVERITY_ERROR], [SEVERITY_WARN] or 0 for the rows from [from] to [to], exclusive. */
-    fun severity(from: Int, to: Int): Int
+    /** Rows of [severity] ([SEVERITY_ERROR] or [SEVERITY_WARN]) from [from] to [to], exclusive. */
+    fun count(from: Int, to: Int, severity: Int): Int
 
     /** The first row from [from] to [to], exclusive, of [severity]; -1 if none. */
     fun first(from: Int, to: Int, severity: Int): Int
 }
 
 /**
- * A vertical scroll bar that marks rows with warnings and errors, in the table's level colors.
+ * A vertical scroll bar that marks rows with warnings and errors, in the table's level colors; the more
+ * of them there are at a spot compared to the whole, the stronger the mark, so clusters stand out.
  * Clicking a mark calls [onMarkClicked] with its first row.
  */
 class MarkedScrollBar : JScrollBar(VERTICAL) {
@@ -76,13 +81,52 @@ class MarkedScrollBar : JScrollBar(VERTICAL) {
         private fun paintMarks(g: Graphics, track: Rectangle) {
             val marks = marks ?: return
             if (maximum - minimum <= 0 || track.height <= 0) return
-            val severities = IntArray(track.height) { y -> rowsAt(y, track).let { (from, to) -> marks.severity(from, to) } }
             // Errors last, so they are not covered by a warning next to them.
             for ((severity, color) in listOf(SEVERITY_WARN to "Actions.Yellow", SEVERITY_ERROR to "Actions.Red")) {
-                g.color = UIManager.getColor(color)
-                for (y in severities.indices) {
-                    if (severities[y] == severity) g.fillRect(track.x, track.y + y, track.width, MARK_HEIGHT)
+                val shades = shades(marks, severity, track)
+                val base = UIManager.getColor(color)
+                for (y in shades.indices) {
+                    // A mark reaches MARK_HEIGHT pixels down, so single rows stay visible; overlaps take the stronger shade.
+                    var alpha = 0f
+                    for (above in maxOf(0, y - MARK_HEIGHT + 1)..y) alpha = maxOf(alpha, shades[above])
+                    if (alpha <= 0f) continue
+                    g.color = Color(base.red, base.green, base.blue, (alpha * 255).toInt())
+                    g.fillRect(track.x, track.y + y, track.width, 1)
                 }
+            }
+        }
+
+        /** Per pixel of [track], how strongly to mark [severity]: 0 where there is none, more where it is denser than overall. */
+        private fun shades(marks: RowMarks, severity: Int, track: Rectangle): FloatArray {
+            val counts = IntArray(track.height)
+            val sizes = IntArray(track.height)
+            var allCounts = 0L
+            var allRows = 0L
+            var densest = 0.0
+            for (y in counts.indices) {
+                val (from, to) = rowsAt(y, track)
+                counts[y] = marks.count(from, to, severity)
+                sizes[y] = to - from
+                allCounts += counts[y]
+                allRows += sizes[y]
+                densest = maxOf(densest, counts[y].toDouble() / sizes[y])
+            }
+            val overall = allCounts.toDouble() / maxOf(1L, allRows)
+            return FloatArray(track.height) { y ->
+                if (counts[y] == 0) return@FloatArray 0f
+                val density = counts[y].toDouble() / sizes[y]
+                val above = if (densest > overall) ((density - overall) / (densest - overall)).coerceIn(0.0, 1.0) else 0.0
+                MIN_MARK_ALPHA + (1 - MIN_MARK_ALPHA) * above.toFloat()
+            }
+        }
+
+        private fun severityAt(pixel: Int, track: Rectangle): Int {
+            val marks = marks ?: return 0
+            val (from, to) = rowsAt(pixel, track)
+            return when {
+                marks.count(from, to, SEVERITY_ERROR) > 0 -> SEVERITY_ERROR
+                marks.count(from, to, SEVERITY_WARN) > 0 -> SEVERITY_WARN
+                else -> 0
             }
         }
 
@@ -96,7 +140,7 @@ class MarkedScrollBar : JScrollBar(VERTICAL) {
             // A mark is drawn below its pixel, so look further up than down.
             for (pixel in (y - track.y - CLICK_TOLERANCE - MARK_HEIGHT + 1..y - track.y + CLICK_TOLERANCE).sortedBy { abs(it - (y - track.y)) }) {
                 if (pixel !in 0..<track.height) continue
-                val severity = rowsAt(pixel, track).let { (from, to) -> marks.severity(from, to) }
+                val severity = severityAt(pixel, track)
                 if (severity > bestSeverity) {
                     bestSeverity = severity
                     best = pixel

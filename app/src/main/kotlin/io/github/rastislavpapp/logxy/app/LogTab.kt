@@ -47,6 +47,7 @@ import javax.swing.UIManager
 private const val MAX_DETAIL_BYTES = 1024 * 1024
 private const val MAX_TITLE_CHARS = 40
 private const val MAX_MENU_CHARS = 80
+private const val MAX_UNTIMED_ROWS = 1000
 private val RANGE_OPS = listOf(QueryOp.AT_LEAST, QueryOp.ABOVE, QueryOp.AT_MOST, QueryOp.BELOW)
 private const val BOTTOM_TAB_PATTERNS = "patterns"
 
@@ -123,7 +124,8 @@ class LogTab(
     private var model: LogTableModel? = null
     private var table: LogTable? = null
     private var scrollPane: VirtualScrollPane? = null
-    private var levelMarks: LevelMarks? = null
+    private var summary: RowSummary? = null
+    private var histogramBar: TimeHistogramBar? = null
 
     /** What the status bar shows for this file. */
     val status: SessionStatus get() = session.status
@@ -405,8 +407,22 @@ class LogTab(
         val scrollPane = VirtualScrollPane(table, model)
         scrollPane.onFollowChanged = { session.follow = it }
         scrollPane.resumeFollowAtEnd = { session.isLive }
-        val levelMarks = LevelMarks(model, scope, scrollPane::repaintMarks)
-        scrollPane.marks = levelMarks
+        val timestampField = records.schema.fields.firstOrNull { it.role == Role.TIMESTAMP }?.name
+        val summary = RowSummary(model, scope) {
+            scrollPane.repaintMarks()
+            showVisibleTimes()
+            histogramBar?.repaint()
+        }
+        scrollPane.marks = summary
+        scrollPane.onRowsInViewChanged = ::showVisibleTimes
+        val histogramBar = timestampField?.let { field ->
+            TimeHistogramBar { summary.histogram }.apply {
+                onJump = ::jumpToTime
+                onRange = { from, to -> filterBar.setTimeRange(field, timeLiteral(from), timeLiteral(to)) }
+                onShowAllTimes = { filterBar.setTimeRange(field, null, null) }
+                hasTimeRange = { filterBar.hasTimeRange(field) }
+            }
+        }
         table.selectionModel.addListSelectionListener { event ->
             if (!event.valueIsAdjusting) {
                 showDetail(model, table.selectionModel.leadSelectionIndex)
@@ -416,13 +432,18 @@ class LogTab(
         this.model = model
         this.table = table
         this.scrollPane = scrollPane
-        this.levelMarks = levelMarks
+        this.summary = summary
+        this.histogramBar = histogramBar
         filterBar.setSchema(records.schema)
         patterns.canFilter = records.schema.hasPatterns()
         setFilterVisible(true)
 
         detail.text = ""
-        val split = JSplitPane(JSplitPane.VERTICAL_SPLIT, scrollPane, bottomTabs).apply {
+        val rowsPanel = JPanel(BorderLayout()).apply {
+            histogramBar?.let { add(it, BorderLayout.NORTH) }
+            add(scrollPane, BorderLayout.CENTER)
+        }
+        val split = JSplitPane(JSplitPane.VERTICAL_SPLIT, rowsPanel, bottomTabs).apply {
             resizeWeight = 0.75
             isOneTouchExpandable = true
             border = null
@@ -488,7 +509,7 @@ class LogTab(
         val top = if (model.totalRowCount > 0) model.recordAtIndex(scrollPane.firstVisibleRow) else null
         model.showRows(rows)
         scrollPane.rowsReplaced()
-        levelMarks?.reset()
+        summary?.reset()
         patterns.refresh()
         val selectedIndex = selected?.let { record -> model.indexOfRecord(record).takeIf { it >= 0 && model.recordAtIndex(it) == record } }
         if (!session.follow) {
@@ -500,6 +521,50 @@ class LogTab(
         }
         if (selectedIndex != null) scrollPane.selectRow(selectedIndex, scroll = false)
     }
+
+    /** Shades the times of the rows in view on the histogram. */
+    private fun showVisibleTimes() {
+        val bar = histogramBar ?: return
+        val model = model ?: return
+        val scrollPane = scrollPane ?: return
+        val first = scrollPane.firstVisibleRow
+        val last = scrollPane.lastVisibleRow
+        if (last < first) {
+            bar.visibleTimes = null
+            return
+        }
+        val from = model.records.timestamp(model.recordAtIndex(first))
+        val to = model.records.timestamp(model.recordAtIndex(last))
+        bar.visibleTimes = if (from != null && to != null) from to to else null
+    }
+
+    /** Selects the first shown row at [time] or later, or the last row if none is. */
+    private fun jumpToTime(time: Long) {
+        val model = model ?: return
+        val scrollPane = scrollPane ?: return
+        if (model.totalRowCount == 0) return
+        // Rows are about in time order; a few out of order only make the jump land near them.
+        var low = 0
+        var high = model.totalRowCount
+        while (low < high) {
+            val middle = (low + high) ushr 1
+            if (timeFrom(model, middle) < time) low = middle + 1 else high = middle
+        }
+        session.follow = false
+        scrollPane.selectRow(minOf(low, model.totalRowCount - 1))
+        table?.requestFocusInWindow()
+    }
+
+    /** The time of the shown row at [index], or of the next one that has a time; [Long.MAX_VALUE] if none near. */
+    private fun timeFrom(model: LogTableModel, index: Int): Long {
+        for (row in index..<minOf(model.totalRowCount, index + MAX_UNTIMED_ROWS)) {
+            val time = model.records.timestampNanos(model.recordAtIndex(row))
+            if (time != Records.NO_TIMESTAMP) return time
+        }
+        return Long.MAX_VALUE
+    }
+
+    private fun timeLiteral(nanos: Long) = TimeLiteral.format(nanos, ZoneId.systemDefault())
 
     /** Follows a slow filter's progress on the filter bar while [filtering]. */
     private fun showFilterProgress(filtering: Boolean) {
@@ -531,8 +596,9 @@ class LogTab(
     private inner class Listener : SessionListener {
         override fun indexing(fraction: () -> Double) {
             columnsButton.isEnabled = false
-            levelMarks?.cancel()
-            levelMarks = null
+            summary?.cancel()
+            summary = null
+            histogramBar = null
             patterns.reset()
             model = null
             table = null
@@ -563,7 +629,7 @@ class LogTab(
             changed.forEach(::refreshDetail)
             if (session.shown == null) {
                 scrollPane?.rowsAppended()
-                levelMarks?.changedFrom(changed.fold(oldRecordCount, ::minOf))
+                summary?.changedFrom(changed.fold(oldRecordCount, ::minOf))
                 patterns.refreshSoon()
             }
         }
@@ -573,13 +639,13 @@ class LogTab(
         override fun rowsExtended(firstChanged: Int, oldSize: Int) {
             model?.rowsChangedFrom(firstChanged, oldSize)
             scrollPane?.rowsAppended()
-            levelMarks?.changedFrom(firstChanged)
+            summary?.changedFrom(firstChanged)
             patterns.refreshSoon()
         }
 
         override fun levelMappingChanged() {
             model?.let { it.fireTableRowsUpdated(0, maxOf(0, it.rowCount - 1)) }
-            levelMarks?.reset()
+            summary?.reset()
             patterns.refresh()
         }
 

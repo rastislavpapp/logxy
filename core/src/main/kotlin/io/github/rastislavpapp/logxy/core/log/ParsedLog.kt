@@ -122,11 +122,10 @@ class ParsedLog private constructor(
         return levels[id]
     }
 
-    override fun timestamp(record: Int): Long? {
-        if (timestampField < 0) return null
+    override fun timestampNanos(record: Int): Long {
+        if (timestampField < 0) return Columns.ABSENT_TIMESTAMP
         val segment = segmentOf(record)
-        val nanos = segments[segment].longs[timestampField]!![record - segmentFirst[segment]]
-        return if (nanos == Columns.ABSENT_TIMESTAMP) null else nanos
+        return segments[segment].longs[timestampField]!![record - segmentFirst[segment]]
     }
 
     override fun filterSnapshot(): RecordSnapshot = ParsedSnapshot(

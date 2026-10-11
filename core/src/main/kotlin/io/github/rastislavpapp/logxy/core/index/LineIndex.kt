@@ -12,6 +12,7 @@ import kotlinx.coroutines.withContext
 import io.github.rastislavpapp.logxy.core.filter.LineSnapshot
 import io.github.rastislavpapp.logxy.core.filter.RecordSnapshot
 import io.github.rastislavpapp.logxy.core.log.AppendedData
+import io.github.rastislavpapp.logxy.core.log.Columns
 import io.github.rastislavpapp.logxy.core.log.Level
 import io.github.rastislavpapp.logxy.core.log.LevelMapping
 import io.github.rastislavpapp.logxy.core.log.LogData
@@ -74,7 +75,7 @@ class LineIndex private constructor(
 
     override fun level(record: Int): Level? = null
 
-    override fun timestamp(record: Int): Long? = null
+    override fun timestampNanos(record: Int): Long = Columns.ABSENT_TIMESTAMP
 
     val lineCount: Int get() = starts.size
 

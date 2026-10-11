@@ -6,6 +6,7 @@ import io.github.rastislavpapp.logxy.core.log.Role
 import io.github.rastislavpapp.logxy.core.log.Schema
 import io.github.rastislavpapp.logxy.core.query.Query
 import io.github.rastislavpapp.logxy.core.query.QueryException
+import io.github.rastislavpapp.logxy.core.query.QueryOp
 import io.github.rastislavpapp.logxy.core.query.QueryParser
 import io.github.rastislavpapp.logxy.core.query.QueryPrinter
 import net.miginfocom.swing.MigLayout
@@ -175,7 +176,31 @@ class FilterBar(private val onApply: () -> Unit) : JPanel(MigLayout("insets 6 8 
     fun addRule(rule: Query) = addRules(listOf(rule))
 
     /** Adds [rules] to the filter, each joined with AND, and applies it once. */
-    fun addRules(rules: List<Query>) {
+    fun addRules(rules: List<Query>) = combine(rules) { it }
+
+    /**
+     * Replaces the comparisons on [field] joined at the top of the filter with `>= from` and `< to`, or
+     * only removes them if [from] and [to] are null, and applies it.
+     */
+    fun setTimeRange(field: String, from: String?, to: String?) {
+        val rules = if (from == null || to == null) emptyList() else listOf(
+            Query.Rule(field, QueryOp.AT_LEAST, from),
+            Query.Rule(field, QueryOp.BELOW, to),
+        )
+        combine(rules) { items -> items.filterNot { isTimeRule(it, field) } }
+    }
+
+    /** Whether the filter has comparisons on [field] that [setTimeRange] replaces. */
+    fun hasTimeRange(field: String): Boolean {
+        val current = runCatching { query() }.getOrNull() ?: return false
+        return current.all && !current.negated && current.items.any { isTimeRule(it, field) }
+    }
+
+    private fun isTimeRule(item: Query, field: String) =
+        item is Query.Rule && !item.negated && item.op.comparison && item.field.equals(field, ignoreCase = true)
+
+    /** Joins [rules] to the filter with AND, after [keep] picked which of its top-level items stay, and applies it. */
+    private fun combine(rules: List<Query>, keep: (List<Query>) -> List<Query>) {
         val current = try {
             query()
         } catch (e: QueryException) {
@@ -184,7 +209,7 @@ class FilterBar(private val onApply: () -> Unit) : JPanel(MigLayout("insets 6 8 
         }
         val combined = when {
             current.items.isEmpty() -> Query.Group(all = true, items = rules)
-            current.all && !current.negated -> current.copy(items = current.items + rules)
+            current.all && !current.negated -> current.copy(items = keep(current.items) + rules)
             else -> Query.Group(all = true, items = listOf(current) + rules)
         }
         if (textMode.isSelected) textArea.text = QueryPrinter.print(combined) else editor.setQuery(combined)
