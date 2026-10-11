@@ -22,9 +22,7 @@ import javax.swing.UIManager
 import kotlin.math.abs
 import kotlin.math.sqrt
 
-private const val VOLUME_HEIGHT = 30
-private const val ERROR_STRIP_HEIGHT = 5
-private const val WARNING_STRIP_HEIGHT = 4
+private const val CHART_HEIGHT = 40
 private const val TICK_HEIGHT = 3
 
 /** Pixels per slice of time: wide enough that counts are not mostly noise, narrow enough to look continuous. */
@@ -51,8 +49,8 @@ private val TICK_STEPS = longArrayOf(
 
 /**
  * Shown records over time: their volume as an area (square-root scale, so one spike does not flatten the
- * rest), and below it strips for errors and warnings, each shaded against its own peak, so a burst stands
- * out even when it is a small share of all records. The rows in view are outlined.
+ * rest), with lines for warnings and errors over it, each against its own peak, so a burst stands out even
+ * when it is a small share of all records. The rows in view are outlined.
  * Clicking calls [onJump] with the time there; dragging calls [onRange] with the times covered; the
  * context menu calls [onShowAllTimes] when [hasTimeRange].
  */
@@ -147,10 +145,7 @@ class TimeHistogramBar(private val histogram: () -> TimeHistogram?) : JComponent
     private val labelFont get() = UIManager.getFont("small.font") ?: font
 
     private val chartTop get() = UIScale.scale(4)
-    private val volumeBottom get() = chartTop + UIScale.scale(VOLUME_HEIGHT)
-    private val errorTop get() = volumeBottom + UIScale.scale(1)
-    private val warningTop get() = errorTop + UIScale.scale(ERROR_STRIP_HEIGHT)
-    private val chartBottom get() = warningTop + UIScale.scale(WARNING_STRIP_HEIGHT)
+    private val chartBottom get() = chartTop + UIScale.scale(CHART_HEIGHT)
 
     override fun getPreferredSize(): Dimension {
         val labels = getFontMetrics(labelFont).height
@@ -187,8 +182,8 @@ class TimeHistogramBar(private val histogram: () -> TimeHistogram?) : JComponent
             val slices = slices() ?: return
             g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
             paintVolume(g2, slices)
-            paintStrip(g2, slices, slices.errors, errorTop, ERROR_STRIP_HEIGHT, UIManager.getColor("Actions.Red"))
-            paintStrip(g2, slices, slices.warnings, warningTop, WARNING_STRIP_HEIGHT, UIManager.getColor("Actions.Yellow"))
+            paintLine(g2, slices, slices.warnings, UIManager.getColor("Actions.Yellow"))
+            paintLine(g2, slices, slices.errors, UIManager.getColor("Actions.Red"))
             val accent = UIManager.getColor("Component.accentColor")
             visibleTimes?.let { (from, to) ->
                 val x1 = timeX(slices, from)
@@ -205,38 +200,36 @@ class TimeHistogramBar(private val histogram: () -> TimeHistogram?) : JComponent
 
     private fun paintVolume(g2: Graphics2D, slices: Slices) {
         val peak = sqrt(maxOf(1, slices.totals.max()).toDouble())
-        val height = (volumeBottom - chartTop).toDouble()
-        fun y(slice: Int) = volumeBottom - sqrt(slices.totals[slice].toDouble()) / peak * height
-        val sliceWidth = width.toDouble() / slices.count
-        val top = Path2D.Double()
-        top.moveTo(0.0, y(0))
-        for (i in 0..<slices.count) top.lineTo((i + 0.5) * sliceWidth, y(i))
-        top.lineTo(width.toDouble(), y(slices.count - 1))
-        val area = Path2D.Double(top).apply {
-            lineTo(width.toDouble(), volumeBottom.toDouble())
-            lineTo(0.0, volumeBottom.toDouble())
+        val area = path(slices) { sqrt(slices.totals[it].toDouble()) / peak }.apply {
+            lineTo(width.toDouble(), chartBottom.toDouble())
+            lineTo(0.0, chartBottom.toDouble())
             closePath()
         }
-        val color = UIManager.getColor("Label.disabledForeground")
-        g2.color = withAlpha(color, 0.35f)
+        g2.color = withAlpha(UIManager.getColor("Label.disabledForeground"), 0.3f)
         g2.fill(area)
-        g2.color = withAlpha(color, 0.9f)
-        g2.stroke = BasicStroke(UIScale.scale(1f))
-        g2.draw(top)
     }
 
-    /** One cell per slice; the more of [counts] against their peak, the stronger the cell. */
-    private fun paintStrip(g2: Graphics2D, slices: Slices, counts: IntArray, top: Int, height: Int, color: Color) {
-        g2.color = withAlpha(color, 0.08f)
-        g2.fillRect(0, top, width, UIScale.scale(height))
-        val peak = counts.max()
-        if (peak == 0) return
-        for (slice in 0..<slices.count) {
-            if (counts[slice] == 0) continue
-            // Linear: a steady trickle stays faint next to a burst.
-            g2.color = withAlpha(color, 0.15f + 0.85f * counts[slice] / peak)
-            val x = sliceX(slices, slice)
-            g2.fillRect(x, top, maxOf(1, sliceX(slices, slice + 1) - x), UIScale.scale(height))
+    /**
+     * [counts] as a line against their own peak, so a burst reaches the top even when it is a small share of all
+     * records; square root like the volume, so a steady trickle still rises off the bottom.
+     */
+    private fun paintLine(g2: Graphics2D, slices: Slices, counts: IntArray, color: Color) {
+        val peak = sqrt(counts.max().toDouble())
+        if (peak == 0.0) return
+        g2.color = color
+        g2.stroke = BasicStroke(UIScale.scale(1.5f), BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND)
+        g2.draw(path(slices) { sqrt(counts[it].toDouble()) / peak })
+    }
+
+    /** A line through the middle of each slice at [fraction] of the chart's height, held level to both edges. */
+    private fun path(slices: Slices, fraction: (Int) -> Double): Path2D.Double {
+        val height = (chartBottom - chartTop).toDouble()
+        fun y(slice: Int) = chartBottom - fraction(slice) * height
+        val sliceWidth = width.toDouble() / slices.count
+        return Path2D.Double().apply {
+            moveTo(0.0, y(0))
+            for (i in 0..<slices.count) lineTo((i + 0.5) * sliceWidth, y(i))
+            lineTo(width.toDouble(), y(slices.count - 1))
         }
     }
 
