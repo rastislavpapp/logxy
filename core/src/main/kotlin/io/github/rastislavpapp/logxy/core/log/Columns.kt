@@ -26,6 +26,9 @@ internal class Columns(val schema: Schema) {
     /** Keys seen in each map field; null once one of its values was no map or there were too many keys. */
     val mapKeys = Array(schema.fields.size) { if (schema.fields[it].isMap) ByteDictionary() else null }
 
+    /** Whether any record has a value of the field. */
+    val present = BooleanArray(schema.fields.size)
+
     /** A DICT field whose values turned out mostly distinct, so a dictionary costs more than it saves; -1 if none. */
     var overflowed = -1
         private set
@@ -69,6 +72,7 @@ internal class Columns(val schema: Schema) {
 
     fun setTimestamp(field: Int, nanos: Long) {
         longs[field]!![size - 1] = nanos
+        present[field] = true
         if (nanos < lastTimestamp) timestampsSorted = false
         lastTimestamp = nanos
     }
@@ -76,6 +80,7 @@ internal class Columns(val schema: Schema) {
     fun setLevel(field: Int, source: ByteArray, from: Int, to: Int) {
         val id = minOf(dictionaries[field]!!.idOf(source, from, to), MAX_LEVEL_ID)
         bytes[field]!![size - 1] = id.toByte()
+        present[field] = true
     }
 
     /** A value of a field the format declares DICT, stored as a span if the log made it one, see [ParsedLog]. */
@@ -83,18 +88,21 @@ internal class Columns(val schema: Schema) {
         if (schema.fields[field].type == ColumnType.SPAN) setSpan(field, from - lineFrom, to - from) else setDict(field, source, from, to)
     }
 
-    private fun setDict(field: Int, source: ByteArray, from: Int, to: Int) {
+    fun setDict(field: Int, source: ByteArray, from: Int, to: Int) {
         val id = dictionaries[field]!!.idOf(source, from, to)
         ints[field]!![size - 1] = id
+        present[field] = true
         if (id >= MIN_OVERFLOW_VALUES && id.toLong() * MAX_DISTINCT_SHARE >= size) overflowed = field
     }
 
     fun setLevelId(field: Int, id: Int) {
         bytes[field]!![size - 1] = minOf(id, MAX_LEVEL_ID).toByte()
+        present[field] = true
     }
 
     fun setDictId(field: Int, id: Int) {
         ints[field]!![size - 1] = id
+        present[field] = true
     }
 
     /** Notes the keys of the map in `source[from, to)`, if it is one, see [MdcMap]. */
@@ -106,12 +114,20 @@ internal class Columns(val schema: Schema) {
             return
         }
         MdcMap.forEachKey(source, MdcMap.from(entries), MdcMap.to(entries)) { keyFrom, keyTo -> keys.idOf(source, keyFrom, keyTo) }
-        if (keys.size > MAX_MAP_KEYS) mapKeys[field] = null
+        if (keys.size > schema.fields[field].map!!.maxKeys) mapKeys[field] = null
+    }
+
+    /** Notes the key `source[from, to)` of the map in [field]. */
+    fun addMapKey(field: Int, source: ByteArray, from: Int, to: Int) {
+        val keys = mapKeys[field] ?: return
+        keys.idOf(source, from, to)
+        if (keys.size > schema.fields[field].map!!.maxKeys) mapKeys[field] = null
     }
 
     /** [length] may be [TO_RECORD_END]. */
     fun setSpan(field: Int, relativeStart: Int, length: Int) {
         ints[field]!![size - 1] = relativeStart
+        present[field] = true
         val lengths = lengths[field]
         if (lengths != null) {
             lengths[size - 1] = length
@@ -163,9 +179,6 @@ internal class Columns(val schema: Schema) {
         // About where a dictionary entry (key bytes, list and table slots) outweighs the 4 bytes a span costs extra.
         private const val MIN_OVERFLOW_VALUES = 10_000
         private const val MAX_DISTINCT_SHARE = 16
-
-        /** More distinct keys than this, e.g. ids used as keys, and a map stays one column. */
-        const val MAX_MAP_KEYS = 32
 
         /** Level ids are stored as unsigned bytes; 255 means absent. */
         const val MAX_LEVEL_ID = 254

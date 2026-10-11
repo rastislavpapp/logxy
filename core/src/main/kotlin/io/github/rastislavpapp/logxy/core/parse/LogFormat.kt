@@ -8,7 +8,7 @@ import io.github.rastislavpapp.logxy.core.log.LogData
 import io.github.rastislavpapp.logxy.core.log.ParsedLog
 import java.nio.file.Path
 
-/** A saved description of how to read a log: raw lines, a pattern layout, or a regex. */
+/** A saved description of how to read a log: raw lines, a pattern layout, a regex, or JSON lines. */
 sealed interface LogFormat {
     val name: String
 
@@ -28,6 +28,10 @@ sealed interface LogFormat {
         override fun compile() = RegexFormat(regex, timestampPattern)
     }
 
+    data class Json(override val name: String, val keys: JsonKeys = JsonKeys()) : LogFormat {
+        override fun compile() = JsonFormat(keys)
+    }
+
     companion object {
         val BUILT_IN: List<LogFormat> = listOf(
             Pattern("date [thread] LEVEL logger - message", "%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %-5p %c - %m%n"),
@@ -42,6 +46,7 @@ sealed interface LogFormat {
                 "%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} %5p %pid --- [%X{application}] [%t] %-40.40logger{39} : %m%n",
             ),
             Pattern("date [thread] LEVEL logger {MDC} - message", "%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %-5p %c %X - %m%n"),
+            Json("JSON lines"),
         )
 
         private class Scored(val format: LogFormat, val matches: Int, val preferred: Boolean, val fields: Int)

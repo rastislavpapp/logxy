@@ -2,6 +2,7 @@ package io.github.rastislavpapp.logxy.core.config
 
 import io.github.rastislavpapp.logxy.core.log.Level
 import io.github.rastislavpapp.logxy.core.log.LevelMapping
+import io.github.rastislavpapp.logxy.core.parse.JsonKeys
 import io.github.rastislavpapp.logxy.core.parse.LogFormat
 import java.io.IOException
 import java.nio.file.Files
@@ -38,6 +39,9 @@ data class Settings(
          * format.1.name=My app
          * format.1.type=pattern
          * format.1.layout=%d [%t] %-5p %c - %m%n
+         * format.2.name=My JSON
+         * format.2.type=json
+         * format.2.keys.level=level,severity
          * level-names=custom
          * level.NOTE=INFO
          * filter.1.name=Slow DB
@@ -54,9 +58,11 @@ data class Settings(
 
             val formats = numbered(properties, "format").mapNotNull { n ->
                 val name = properties.getProperty("format.$n.name")?.trim().orEmpty()
-                val layout = properties.getProperty("format.$n.layout") ?: return@mapNotNull null
                 if (name.isEmpty()) return@mapNotNull null
-                when (properties.getProperty("format.$n.type", "pattern")) {
+                val type = properties.getProperty("format.$n.type", "pattern")
+                if (type == "json") return@mapNotNull LogFormat.Json(name, jsonKeys(properties, "format.$n.keys."))
+                val layout = properties.getProperty("format.$n.layout") ?: return@mapNotNull null
+                when (type) {
                     "pattern" -> LogFormat.Pattern(name, layout)
                     "regex" -> LogFormat.Regex(name, layout, properties.getProperty("format.$n.timestamp", DEFAULT_TIMESTAMP))
                     else -> null
@@ -95,6 +101,10 @@ data class Settings(
                         properties["format.$n.layout"] = format.regex
                         properties["format.$n.timestamp"] = format.timestampPattern
                     }
+                    is LogFormat.Json -> {
+                        properties["format.$n.type"] = "json"
+                        JSON_ROLES.forEach { (key, keys) -> properties["format.$n.keys.$key"] = keys(format.keys).joinToString(",") }
+                    }
                     LogFormat.Raw -> return@forEachIndexed
                 }
                 properties["format.$n.name"] = format.name
@@ -124,6 +134,27 @@ data class Settings(
         }
 
         const val DEFAULT_TIMESTAMP = "yyyy-MM-dd HH:mm:ss.SSS"
+
+        /** The role keys of a JSON format as stored, e.g. `format.1.keys.level=level,severity`. */
+        private val JSON_ROLES: List<Pair<String, (JsonKeys) -> List<String>>> = listOf(
+            "timestamp" to JsonKeys::timestamp, "level" to JsonKeys::level, "message" to JsonKeys::message,
+            "logger" to JsonKeys::logger, "thread" to JsonKeys::thread, "exception" to JsonKeys::exception,
+        )
+
+        /** Keys missing from the file keep their defaults. */
+        private fun jsonKeys(properties: Properties, prefix: String): JsonKeys {
+            fun keys(role: String, default: List<String>) =
+                properties.getProperty(prefix + role)?.split(',')?.map { it.trim() }?.filter { it.isNotEmpty() } ?: default
+            val defaults = JsonKeys()
+            return JsonKeys(
+                timestamp = keys("timestamp", defaults.timestamp),
+                level = keys("level", defaults.level),
+                message = keys("message", defaults.message),
+                logger = keys("logger", defaults.logger),
+                thread = keys("thread", defaults.thread),
+                exception = keys("exception", defaults.exception),
+            )
+        }
 
         /** The N of all `prefix.N.name` keys, in order. */
         private fun numbered(properties: Properties, prefix: String): List<Int> = properties.stringPropertyNames()

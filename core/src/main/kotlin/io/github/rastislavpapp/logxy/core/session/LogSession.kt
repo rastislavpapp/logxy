@@ -440,6 +440,7 @@ class LogSession(
                 is LogFormat.Pattern -> candidate is LogFormat.Pattern && candidate.pattern == format.pattern
                 is LogFormat.Regex -> candidate is LogFormat.Regex && candidate.regex == format.regex &&
                     candidate.timestampPattern == format.timestampPattern
+                is LogFormat.Json -> candidate is LogFormat.Json && candidate.keys == format.keys
                 LogFormat.Raw -> false
             }
         }

@@ -13,6 +13,8 @@ enum class Level {
             "WARN" to WARN, "WARNING" to WARN,
             "ERROR" to ERROR, "ERR" to ERROR, "SEVERE" to ERROR,
             "FATAL" to FATAL, "CRITICAL" to FATAL, "CRIT" to FATAL, "ALERT" to FATAL, "EMERG" to FATAL,
+            // Numeric levels of JSON loggers such as pino and bunyan.
+            "10" to TRACE, "20" to DEBUG, "30" to INFO, "40" to WARN, "50" to ERROR, "60" to FATAL,
         )
     }
 }

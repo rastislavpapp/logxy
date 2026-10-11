@@ -2,6 +2,7 @@ package io.github.rastislavpapp.logxy.core.config
 
 import io.github.rastislavpapp.logxy.core.log.Level
 import io.github.rastislavpapp.logxy.core.log.LevelMapping
+import io.github.rastislavpapp.logxy.core.parse.JsonKeys
 import io.github.rastislavpapp.logxy.core.parse.LogFormat
 import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Files
@@ -20,6 +21,7 @@ class SettingsTest {
         val settings = Settings(
             formats = (1..12).map { LogFormat.Pattern("Format $it", "%d [%t] %-5p %c - %m%n") } + listOf(
                 LogFormat.Regex("Tricky: = and \\ ž", """^(?<timestamp>\S+) \\d+ = (?<message>.*)$""", "HH:mm:ss"),
+                LogFormat.Json("JSON", JsonKeys(level = listOf("lvl", "log.level"), exception = emptyList())),
             ),
             levels = LevelMapping(Level.BUILT_IN_NAMES - "CONFIG" + mapOf("note" to Level.INFO, "40" to Level.ERROR)),
             filters = listOf(

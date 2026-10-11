@@ -8,10 +8,10 @@ import io.github.rastislavpapp.logxy.core.filter.ParsedSnapshot
 import io.github.rastislavpapp.logxy.core.filter.RecordSnapshot
 import io.github.rastislavpapp.logxy.core.index.IndexProgress
 import io.github.rastislavpapp.logxy.core.parse.FormatCheck
+import io.github.rastislavpapp.logxy.core.parse.Json
 import io.github.rastislavpapp.logxy.core.parse.LineReader
 import io.github.rastislavpapp.logxy.core.parse.MdcMap
 import io.github.rastislavpapp.logxy.core.parse.RecordFormat
-import io.github.rastislavpapp.logxy.core.parse.RecordParser
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -167,7 +167,13 @@ class ParsedLog private constructor(
                 if (length == Columns.ABSENT_LENGTH) "" else {
                     val relative = columns.ints[field]!![local]
                     val end = if (length == Columns.TO_RECORD_END) bytes.size else minOf(relative + length, bytes.size)
-                    firstLine(bytes, minOf(relative, end), end, maxBytes)
+                    // Lines that are no JSON run to the record end and are shown as written.
+                    if (schema.fields[field].json && length != Columns.TO_RECORD_END) {
+                        val decoded = Json.decode(bytes, minOf(relative, end), end)
+                        firstLine(decoded, 0, decoded.size, maxBytes)
+                    } else {
+                        firstLine(bytes, minOf(relative, end), end, maxBytes)
+                    }
                 }
             }
         }
@@ -179,17 +185,23 @@ class ParsedLog private constructor(
         val from = columns.ints[key.field]!![local]
         val to = if (length == Columns.TO_RECORD_END) bytes.size else minOf(from + length, bytes.size)
         if (from >= to) return ""
-        val entries = MdcMap.entries(bytes, from, to)
+        val map = storage.fields[key.field].map!!
+        val entries = map.entries(bytes, from, to)
         if (entries < 0) return ""
-        val value = MdcMap.valueOf(bytes, MdcMap.from(entries), MdcMap.to(entries), key.prefix)
-        return if (value < 0) "" else Bytes.utf8Text(bytes, MdcMap.from(value), MdcMap.to(value), maxBytes)
+        val value = map.value(bytes, MdcMap.from(entries), MdcMap.to(entries), key)
+        if (value < 0) return ""
+        if (!map.json) return Bytes.utf8Text(bytes, MdcMap.from(value), MdcMap.to(value), maxBytes)
+        val decoded = Json.decode(bytes, MdcMap.from(value), MdcMap.to(value))
+        return firstLine(decoded, 0, decoded.size, maxBytes)
     }
 
     override fun recordText(record: Int, maxBytes: Int): String {
         val start = recordStart(record)
         val length = recordEnd(record) - start
         val bytes = read(start, minOf(length, maxBytes + 2L).toInt())
-        val end = if (bytes.size.toLong() == length) Bytes.trimLineEnd(bytes, 0, bytes.size) else bytes.size
+        val complete = bytes.size.toLong() == length
+        val end = if (complete) Bytes.trimLineEnd(bytes, 0, bytes.size) else bytes.size
+        if (complete) format.detailText(bytes, 0, end)?.let { return it }
         return Bytes.utf8Text(bytes, 0, end, maxBytes)
     }
 
@@ -199,7 +211,7 @@ class ParsedLog private constructor(
         val columns = Columns(storage)
         if (size <= indexedSize) return AppendedRecords(from, from, columns, false, tail)
         val hasPrevious = recordCount - (if (removeLast) 1 else 0) > 0
-        val result = parseRange(channels.main, from, size, format.newParser(), columns, hasPrevious, {}, null)
+        val result = parseRange(channels.main, from, size, format, columns, hasPrevious, {}, null)
         return AppendedRecords(from, result.end, columns, removeLast, result.tail)
     }
 
@@ -315,7 +327,7 @@ class ParsedLog private constructor(
                 val bounds = LongArray(count + 1)
                 bounds[count] = size
                 (1..<count).map { i ->
-                    async { bounds[i] = resync(channels.forTask(i), size / count * i, size, format.newParser()) }
+                    async { bounds[i] = resync(channels.forTask(i), size / count * i, size, format) }
                 }.awaitAll()
                 for (i in 1..count) bounds[i] = bounds[i].coerceIn(bounds[i - 1], size)
 
@@ -333,7 +345,7 @@ class ParsedLog private constructor(
                     if (result.truncated) break
                 }
                 val dictionaries = mergeDictionaries(storage, segments)
-                val schema = withMapKeys(storage, mapKeys(storage, segments))
+                val schema = withoutAbsent(withMapKeys(storage, mapKeys(storage, segments)), segments)
                 ParsedLog(path, channels, format, storage, schema, segments, dictionaries, indexedSize, tail)
             } catch (e: Throwable) {
                 channels.close()
@@ -379,7 +391,7 @@ class ParsedLog private constructor(
                         if (columns.overflowed >= 0) throw DictionaryOverflow(columns.overflowed)
                     }
                     val result = parseRange(
-                        channels.forTask(i), bounds[i], bounds[i + 1], format.newParser(), columns,
+                        channels.forTask(i), bounds[i], bounds[i + 1], format, columns,
                         hasPrevious = false, check = check, progress = progress,
                     )
                     columns to result
@@ -397,7 +409,7 @@ class ParsedLog private constructor(
                     repeat(found.size) { keys += found.text(it) }
                     segment.mapKeys[field] = null
                 }
-                if (keys.size > Columns.MAX_MAP_KEYS) null else keys.toList()
+                if (keys.size > storage.fields[field].map!!.maxKeys) null else keys.toList()
             }
 
         /** [storage] with a field for each of [keys]; a map split into its keys is hidden. */
@@ -407,28 +419,44 @@ class ParsedLog private constructor(
             for ((field, mapKeys) in keys.withIndex()) {
                 if (mapKeys == null) continue
                 val map = storage.fields[field]
-                fields[field] = Field(map.name, map.type, map.role, map.toRecordEnd, hidden = true, isMap = true)
-                for (key in mapKeys) {
-                    val base = "${map.name}[$key]"
+                val syntax = map.map!!
+                fields[field] = map.copy(hidden = true)
+                for (key in mapKeys.filter(syntax::splits)) {
+                    val base = syntax.fieldName(map.name, key)
                     val name = (sequenceOf(base) + generateSequence(2) { it + 1 }.map { "$base $it" })
                         .first { candidate -> fields.none { it.name.equals(candidate, ignoreCase = true) } }
-                    fields += Field(name, ColumnType.SPAN, mapKey = MapKey(field, key))
+                    fields += Field(name, ColumnType.SPAN, mapKey = MapKey(field, key), json = syntax.json)
                 }
             }
             return Schema(fields)
         }
 
+        /** [schema] with optional fields that no record has hidden. */
+        private fun withoutAbsent(schema: Schema, segments: List<Columns>): Schema {
+            val absent = schema.fields.indices.filter { field ->
+                schema.fields[field].optional && segments.none { field < it.present.size && it.present[field] }
+            }
+            if (absent.isEmpty()) return schema
+            return Schema(schema.fields.mapIndexed { i, field -> if (i in absent) field.copy(hidden = true) else field })
+        }
+
         private fun Schema.asSpan(field: Int) = Schema(
-            fields.mapIndexed { i, f -> if (i == field) Field(f.name, ColumnType.SPAN, f.role, isMap = f.isMap) else f },
+            fields.mapIndexed { i, f -> if (i == field) f.copy(type = ColumnType.SPAN) else f },
         )
 
         /** The start of the first record at or after [from]; [end] if there is none. */
-        private fun resync(channel: FileChannel, from: Long, end: Long, parser: RecordParser): Long {
+        private fun resync(channel: FileChannel, from: Long, end: Long, format: RecordFormat): Long {
+            val parser = format.newParser()
             // Start one byte early: the first line read is then only the rest of a line, and skipped.
             val reader = LineReader(channel, from - 1, end, RESYNC_BUFFER_SIZE)
             if (!reader.next()) return end
             while (reader.next()) {
-                if (parser.match(reader.buffer, reader.lineFrom, reader.lineTo)) return reader.lineStart
+                val starts = if (format.multiLine) {
+                    parser.match(reader.buffer, reader.lineFrom, reader.lineTo)
+                } else {
+                    !isBlank(reader.buffer, reader.lineFrom, reader.lineTo)
+                }
+                if (starts) return reader.lineStart
             }
             return end
         }
@@ -437,13 +465,15 @@ class ParsedLog private constructor(
             channel: FileChannel,
             from: Long,
             to: Long,
-            parser: RecordParser,
+            format: RecordFormat,
             out: Columns,
             hasPrevious: Boolean,
             check: () -> Unit,
             progress: IndexProgress?,
         ): RangeResult {
             val reader = LineReader(channel, from, to, BUFFER_SIZE) { progress?.add(it.toLong()) }
+            val parser = format.newParser()
+            val multiLine = format.multiLine
             val messageField = out.schema.indexOf(Role.MESSAGE)
             var inRecord = hasPrevious
             var tail = Tail(from, lastLineComplete = true, lastLineStartedRecord = false)
@@ -451,7 +481,8 @@ class ParsedLog private constructor(
             while (reader.next()) {
                 if (++lines and 1023 == 0) check()
                 val matched = parser.match(reader.buffer, reader.lineFrom, reader.lineTo)
-                val startsRecord = matched || !inRecord
+                // Without multi-line records, only blank lines continue one.
+                val startsRecord = matched || !inRecord || (!multiLine && !isBlank(reader.buffer, reader.lineFrom, reader.lineTo))
                 if (matched) {
                     out.beginRecord(reader.lineStart)
                     parser.write(out)
@@ -503,6 +534,11 @@ class ParsedLog private constructor(
                 }.awaitAll()
                 global
             }
+
+        private fun isBlank(bytes: ByteArray, from: Int, to: Int): Boolean {
+            for (i in from..<to) if (!Json.isSpace(bytes[i])) return false
+            return true
+        }
 
         /** The first line of `bytes[from, to)`, cut at [maxBytes]. */
         private fun firstLine(bytes: ByteArray, from: Int, to: Int, maxBytes: Int): String {

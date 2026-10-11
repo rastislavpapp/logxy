@@ -2,6 +2,7 @@ package io.github.rastislavpapp.logxy.app
 
 import io.github.rastislavpapp.logxy.core.config.Settings
 import io.github.rastislavpapp.logxy.core.parse.FormatPreview
+import io.github.rastislavpapp.logxy.core.parse.JsonKeys
 import io.github.rastislavpapp.logxy.core.parse.LogFormat
 import io.github.rastislavpapp.logxy.core.parse.PreviewLine
 import net.miginfocom.swing.MigLayout
@@ -50,8 +51,15 @@ class ParsersDialog(owner: Window?, private val previewFile: Path?, private val 
     private val nameField = JTextField(30)
     private val patternChoice = JRadioButton("log4j / logback pattern")
     private val regexChoice = JRadioButton("Regex with named groups")
+    private val jsonChoice = JRadioButton("JSON lines")
     private val layoutField = JTextField(40)
     private val timestampField = JTextField(30)
+    private val layoutLabel = JLabel("Layout:")
+    private val timestampLabel = JLabel("Timestamp:")
+
+    /** Comma-separated keys per role of a JSON parser, in the order of [JsonKeys.byRole]. */
+    private val keyFields = JSON_ROLES.map { JTextField(30) }
+    private val keyLabels = JSON_ROLES.map { (label, _) -> JLabel("$label keys:") }
     private val status = JLabel(" ")
     private val deleteButton = JButton("Delete").apply {
         toolTipText = "Built-in parsers cannot be deleted"
@@ -105,15 +113,15 @@ class ParsersDialog(owner: Window?, private val previewFile: Path?, private val 
         ButtonGroup().apply {
             add(patternChoice)
             add(regexChoice)
+            add(jsonChoice)
         }
         val onChange = object : DocumentListener {
             override fun insertUpdate(e: DocumentEvent) = edited()
             override fun removeUpdate(e: DocumentEvent) = edited()
             override fun changedUpdate(e: DocumentEvent) = edited()
         }
-        listOf(nameField, layoutField, timestampField).forEach { it.document.addDocumentListener(onChange) }
-        patternChoice.addActionListener { edited() }
-        regexChoice.addActionListener { edited() }
+        (listOf(nameField, layoutField, timestampField) + keyFields).forEach { it.document.addDocumentListener(onChange) }
+        listOf(patternChoice, regexChoice, jsonChoice).forEach { choice -> choice.addActionListener { edited() } }
 
         val left = JPanel(MigLayout("fill, insets 0", "[grow]", "[grow][]")).apply {
             add(JScrollPane(list), "grow, wrap")
@@ -126,17 +134,22 @@ class ParsersDialog(owner: Window?, private val previewFile: Path?, private val 
             setShowGrid(false)
             setDefaultRenderer(Any::class.java, PreviewRenderer())
         }
-        val right = JPanel(MigLayout("fill, insets 0 8 0 0, wrap 2", "[][grow, fill]", "[][][][][][grow]")).apply {
+        val right = JPanel(MigLayout("fill, insets 0 8 0 0, wrap 2, hidemode 3", "[][grow, fill]")).apply {
             add(JLabel("Name:"))
             add(nameField)
-            add(patternChoice, "skip, split 2")
+            add(patternChoice, "skip, split 3")
             add(regexChoice)
-            add(JLabel("Layout:"))
+            add(jsonChoice)
+            add(layoutLabel)
             add(layoutField)
-            add(JLabel("Timestamp:"))
+            add(timestampLabel)
             add(timestampField)
+            for ((label, field) in keyLabels.zip(keyFields)) {
+                add(label)
+                add(field)
+            }
             add(status, "span 2")
-            add(JScrollPane(previewTable), "span 2, grow")
+            add(JScrollPane(previewTable), "span 2, grow, push")
         }
         return JPanel(MigLayout("fill, insets 8", "[grow]", "[grow]")).apply {
             add(JSplitPane(JSplitPane.HORIZONTAL_SPLIT, left, right).apply {
@@ -171,19 +184,23 @@ class ParsersDialog(owner: Window?, private val previewFile: Path?, private val 
         try {
             val format = entry?.format
             nameField.text = format?.name.orEmpty()
-            patternChoice.isSelected = format !is LogFormat.Regex
+            patternChoice.isSelected = format !is LogFormat.Regex && format !is LogFormat.Json
             regexChoice.isSelected = format is LogFormat.Regex
+            jsonChoice.isSelected = format is LogFormat.Json
             layoutField.text = when (format) {
                 is LogFormat.Pattern -> format.pattern
                 is LogFormat.Regex -> format.regex
                 else -> ""
             }
             timestampField.text = (format as? LogFormat.Regex)?.timestampPattern ?: Settings.DEFAULT_TIMESTAMP
+            val keys = (format as? LogFormat.Json)?.keys ?: JsonKeys()
+            for ((field, role) in keyFields.zip(JSON_ROLES)) field.text = role.second(keys).joinToString(", ")
             val editable = entry != null && !entry.builtIn
             deleteButton.isEnabled = editable
             deleteButton.toolTipText = if (entry?.builtIn == true) "Built-in parsers cannot be deleted" else null
-            listOf(nameField, patternChoice, regexChoice, layoutField).forEach { it.isEnabled = editable }
+            (listOf(nameField, patternChoice, regexChoice, jsonChoice, layoutField) + keyFields).forEach { it.isEnabled = editable }
             timestampField.isEnabled = editable && regexChoice.isSelected
+            showKindFields()
         } finally {
             loadingEditor = false
         }
@@ -193,6 +210,7 @@ class ParsersDialog(owner: Window?, private val previewFile: Path?, private val 
     private fun edited() {
         if (loadingEditor) return
         timestampField.isEnabled = regexChoice.isSelected
+        showKindFields()
         val index = list.selectedIndex
         val entry = selected() ?: return
         if (entry.builtIn) return
@@ -200,10 +218,20 @@ class ParsersDialog(owner: Window?, private val previewFile: Path?, private val 
         previewTimer.restart()
     }
 
-    private fun editedFormat(): LogFormat = if (regexChoice.isSelected) {
-        LogFormat.Regex(nameField.text.trim(), layoutField.text, timestampField.text)
-    } else {
-        LogFormat.Pattern(nameField.text.trim(), layoutField.text)
+    /** Shows the layout fields, or the key fields of a JSON parser. */
+    private fun showKindFields() {
+        val json = jsonChoice.isSelected
+        listOf(layoutLabel, layoutField, timestampLabel, timestampField).forEach { it.isVisible = !json }
+        (keyLabels + keyFields).forEach { it.isVisible = json }
+    }
+
+    private fun editedFormat(): LogFormat = when {
+        regexChoice.isSelected -> LogFormat.Regex(nameField.text.trim(), layoutField.text, timestampField.text)
+        jsonChoice.isSelected -> {
+            val keys = keyFields.map { field -> field.text.split(',').map { it.trim() }.filter { it.isNotEmpty() } }
+            LogFormat.Json(nameField.text.trim(), JsonKeys(keys[0], keys[1], keys[2], keys[3], keys[4], keys[5]))
+        }
+        else -> LogFormat.Pattern(nameField.text.trim(), layoutField.text)
     }
 
     private fun updatePreview() {
@@ -262,6 +290,7 @@ class ParsersDialog(owner: Window?, private val previewFile: Path?, private val 
     private fun copyOf(format: LogFormat): LogFormat = when (format) {
         is LogFormat.Pattern -> format.copy(name = uniqueName("${format.name} copy"))
         is LogFormat.Regex -> format.copy(name = uniqueName("${format.name} copy"))
+        is LogFormat.Json -> format.copy(name = uniqueName("${format.name} copy"))
         LogFormat.Raw -> newFormat()
     }
 
@@ -292,6 +321,14 @@ class ParsersDialog(owner: Window?, private val previewFile: Path?, private val 
             JOptionPane.showMessageDialog(this, "Cannot write ${AppSettings.location}:\n${e.message}", "Cannot Save", JOptionPane.ERROR_MESSAGE)
             false
         }
+    }
+
+    private companion object {
+        /** Label and keys of each role, in the order of [JsonKeys]' constructor. */
+        val JSON_ROLES: List<Pair<String, (JsonKeys) -> List<String>>> = listOf(
+            "Timestamp" to JsonKeys::timestamp, "Level" to JsonKeys::level, "Message" to JsonKeys::message,
+            "Logger" to JsonKeys::logger, "Thread" to JsonKeys::thread, "Exception" to JsonKeys::exception,
+        )
     }
 
     /** Sample lines as the edited format reads them: one row per line, one column per field. */

@@ -1,5 +1,7 @@
 package io.github.rastislavpapp.logxy.core.log
 
+import io.github.rastislavpapp.logxy.core.parse.MapSyntax
+
 /** How a field's values are stored, see [ParsedLog]. */
 enum class ColumnType {
     /** Epoch nanoseconds. */
@@ -18,7 +20,7 @@ enum class ColumnType {
 /** What a field means, independent of the format it came from. */
 enum class Role { TIMESTAMP, LEVEL, MESSAGE, THREAD, LOGGER, EXCEPTION, SOURCE }
 
-class Field(
+class Field internal constructor(
     val name: String,
     val type: ColumnType,
     val role: Role? = null,
@@ -26,15 +28,26 @@ class Field(
     internal val toRecordEnd: Boolean = false,
     /** Shown through other fields instead of as a column, e.g. an MDC map split into its keys. */
     val hidden: Boolean = false,
-    /** A SPAN holding a whole MDC map, see [io.github.rastislavpapp.logxy.core.parse.MdcMap]. */
-    internal val isMap: Boolean = false,
+    /** For a SPAN holding a whole map, e.g. an MDC map or a JSON object, how to read its entries. */
+    internal val map: MapSyntax? = null,
     /** For a field taken from a map: the map's field and the entry's key. Its values are read from the map. */
     internal val mapKey: MapKey? = null,
-)
+    /** Values are JSON values: strings are quoted and escaped, see [io.github.rastislavpapp.logxy.core.parse.Json]. */
+    internal val json: Boolean = false,
+    /** Hidden if no record has a value, e.g. a role that the keys of a JSON log do not fill. */
+    internal val optional: Boolean = false,
+) {
+    internal val isMap get() = map != null
 
-/** A key of an MDC map field; see [Field.mapKey]. */
+    internal fun copy(type: ColumnType = this.type, hidden: Boolean = this.hidden) =
+        Field(name, type, role, toRecordEnd, hidden, map, mapKey, json, optional)
+}
+
+/** A key of a map field; see [Field.mapKey]. */
 class MapKey internal constructor(internal val field: Int, val key: String) {
-    /** `key=`, as an entry starts. */
+    internal val bytes = key.toByteArray()
+
+    /** `key=`, as an MDC entry starts. */
     internal val prefix = "$key=".toByteArray()
 }
 

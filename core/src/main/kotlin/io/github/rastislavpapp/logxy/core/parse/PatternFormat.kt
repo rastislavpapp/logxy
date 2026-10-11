@@ -43,7 +43,7 @@ class PatternFormat(val pattern: String, private val zone: ZoneId = ZoneId.syste
         if (literal.isNotEmpty()) tokens += Literal(literal.toString().toByteArray())
         require(fields.isNotEmpty()) { "The pattern has no fields" }
         if (mdcMaps.size > 1) {
-            for ((n, field) in mdcMaps.withIndex()) fields[field] = Field("$MDC[$n]", ColumnType.SPAN, isMap = true)
+            for ((n, field) in mdcMaps.withIndex()) fields[field] = Field("$MDC[$n]", ColumnType.SPAN, map = MdcMap)
         }
         // A message at the end runs to the end of the record, stack traces included.
         val last = tokens.last()
@@ -154,7 +154,7 @@ class PatternFormat(val pattern: String, private val zone: ZoneId = ZoneId.syste
         val mdcKeys = if (word in MDC_WORDS) options.firstOrNull().orEmpty() else null
         // `%X{a,b}` writes a map of those keys, like `%X` of all.
         val isMap = mdcKeys != null && (mdcKeys.isEmpty() || ',' in mdcKeys)
-        fields += Field(unique, type, role, isMap = isMap)
+        fields += Field(unique, type, role, map = if (isMap) MdcMap else null)
         tokens += FieldToken(index, kind, minWidth, mdcKeys?.takeIf { !isMap }?.let { "$it=".toByteArray() })
     }
 

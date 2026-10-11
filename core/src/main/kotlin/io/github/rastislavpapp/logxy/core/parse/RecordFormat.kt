@@ -12,6 +12,12 @@ abstract class RecordFormat {
 
     /** Display text of a TIMESTAMP field's value, in the log's own layout. */
     abstract fun formatTimestamp(field: Int, nanos: Long): String
+
+    /** Whether lines that do not start a record continue the one before (stack traces), or are records of their own. */
+    open val multiLine: Boolean get() = true
+
+    /** The record `bytes[from, to)` laid out for reading in full, or null to show it as written. */
+    open fun detailText(bytes: ByteArray, from: Int, to: Int): String? = null
 }
 
 /** Recognizes the first line of a record. Stateful; one per thread. */

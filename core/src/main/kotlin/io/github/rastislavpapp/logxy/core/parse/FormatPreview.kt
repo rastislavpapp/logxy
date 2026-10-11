@@ -47,7 +47,7 @@ object FormatPreview {
                     when (val length = columns.spanLength(field, 0)) {
                         Columns.ABSENT_LENGTH -> ""
                         Columns.TO_RECORD_END -> String(line, start, line.size - start, Charsets.UTF_8)
-                        else -> String(line, start, length, Charsets.UTF_8)
+                        else -> if (fields[field].json) Json.text(line, start, start + length) else String(line, start, length, Charsets.UTF_8)
                     }
                 }
             }

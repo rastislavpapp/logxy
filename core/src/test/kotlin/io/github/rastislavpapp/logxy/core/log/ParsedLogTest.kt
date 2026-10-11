@@ -7,6 +7,7 @@ import io.github.rastislavpapp.logxy.core.filter.TextOp
 import io.github.rastislavpapp.logxy.core.index.IndexOptions
 import io.github.rastislavpapp.logxy.core.index.IndexProgress
 import io.github.rastislavpapp.logxy.core.parse.FormatMismatchException
+import io.github.rastislavpapp.logxy.core.parse.MdcMap
 import io.github.rastislavpapp.logxy.core.parse.PatternFormat
 import io.github.rastislavpapp.logxy.core.parse.RecordFormat
 import io.github.rastislavpapp.logxy.core.parse.RegexFormat
@@ -245,7 +246,7 @@ class ParsedLogTest {
         val notMap = "2026-10-01 08:00:00.001 [main] INFO  a.B {a=1} - map\n" +
             "2026-10-01 08:00:00.002 [main] INFO  a.B plain - not a map\n"
         parse(notMap, mdc).use { log -> assertEquals(listOf("MDC"), log.schema.fields.filter { it.name == "MDC" && !it.hidden }.map { it.name }) }
-        val manyKeys = (0..Columns.MAX_MAP_KEYS).joinToString("") { "2026-10-01 08:00:00.001 [main] INFO  a.B {key$it=1} - x\n" }
+        val manyKeys = (0..MdcMap.maxKeys).joinToString("") { "2026-10-01 08:00:00.001 [main] INFO  a.B {key$it=1} - x\n" }
         parse(manyKeys, mdc).use { log ->
             assertEquals(6, log.schema.fields.size)
             assertFalse(log.schema.fields.any { it.hidden })

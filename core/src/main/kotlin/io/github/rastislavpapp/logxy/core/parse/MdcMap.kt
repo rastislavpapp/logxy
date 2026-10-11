@@ -1,12 +1,16 @@
 package io.github.rastislavpapp.logxy.core.parse
 
 import io.github.rastislavpapp.logxy.core.Bytes
+import io.github.rastislavpapp.logxy.core.log.MapKey
 
 /**
  * The whole MDC as `%X` writes it: `{k1=v1, k2=v2}` in log4j2, the same without braces in logback.
  * A value containing ", " is cut there, as the text does not tell it from the next entry.
  */
-internal object MdcMap {
+internal object MdcMap : MapSyntax {
+
+    override val maxKeys = 32
+    override val json = false
 
     private const val OPEN = '{'.code.toByte()
     private const val CLOSE = '}'.code.toByte()
@@ -14,7 +18,7 @@ internal object MdcMap {
     val SEPARATOR = ", ".toByteArray()
 
     /** The entries of `bytes[from, to)` without braces, packed as [pack]; -1 if it is not a map. */
-    fun entries(bytes: ByteArray, from: Int, to: Int): Long {
+    override fun entries(bytes: ByteArray, from: Int, to: Int): Long {
         var start = from
         var end = to
         if (end - start >= 2 && bytes[start] == OPEN && bytes[end - 1] == CLOSE) {
@@ -52,6 +56,10 @@ internal object MdcMap {
         }
         return -1
     }
+
+    override fun value(bytes: ByteArray, from: Int, to: Int, key: MapKey) = valueOf(bytes, from, to, key.prefix)
+
+    override fun fieldName(map: String, key: String) = "$map[$key]"
 
     fun pack(from: Int, to: Int): Long = (from.toLong() shl 32) or to.toLong()
     fun from(packed: Long): Int = (packed ushr 32).toInt()
