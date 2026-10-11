@@ -169,33 +169,35 @@ class FilterEngine(private val log: LogData, private val maxCacheBytes: Long = D
 
         private suspend fun leaf(leaf: Leaf, candidates: LongArray): LongArray {
             val entry = cache[leaf.condition]
+            val oldBits = entry?.bits
+            val oldCoverage = entry?.coverage
+            fun cached(w: Int) = (oldBits?.getOrElse(w) { 0L } ?: 0L) and (oldCoverage?.getOrElse(w) { 0L } ?: 0L)
+
+            // The last record may still grow while tailing, so it is never cached and computed again every time.
+            val lastWord = (snapshot.count - 1) ushr 6
+            val lastBit = 1L shl ((snapshot.count - 1) and 63)
             val need = LongArray(words)
             var anyNeeded = false
+            var cacheable = false
             for (w in 0..<words) {
-                val covered = entry?.coverage?.getOrElse(w) { 0L } ?: 0L
-                need[w] = candidates[w] and covered.inv()
+                need[w] = candidates[w] and (oldCoverage?.getOrElse(w) { 0L } ?: 0L).inv()
                 if (need[w] != 0L) anyNeeded = true
+                if (need[w] and (if (w == lastWord) lastBit.inv() else -1L) != 0L) cacheable = true
             }
-            var bits = entry?.bits
-            var computedChunks = 0
-            if (anyNeeded) {
-                val (computed, chunks) = compute(leaf, need)
-                computedChunks = chunks
-                val oldCoverage = entry?.coverage
-                bits = LongArray(words) {
-                    ((bits?.getOrElse(it) { 0L } ?: 0L) and (oldCoverage?.getOrElse(it) { 0L } ?: 0L)) or computed[it]
-                }
-                val coverage = LongArray(words) { (oldCoverage?.getOrElse(it) { 0L } ?: 0L) or need[it] }
-                // The last record may still grow while tailing, so it is computed again every time.
-                if (snapshot.count > 0) {
-                    val last = snapshot.count - 1
-                    coverage[last ushr 6] = coverage[last ushr 6] and (1L shl (last and 63)).inv()
-                }
-                store(leaf.condition, Entry(bits, coverage))
-            }
+            val (computed, computedChunks) = if (anyNeeded) compute(leaf, need) else null to 0
             // Chunks without candidates (cached, or ruled out by other conditions) are done right away.
             if (counted(leaf)) doneChunks.addAndGet((chunkCount - computedChunks).toLong())
-            return LongArray(words) { (bits?.getOrElse(it) { 0L } ?: 0L) and candidates[it] }
+            if (computed == null) return LongArray(words) { cached(it) and candidates[it] }
+
+            // When only the last record was computed there is nothing new to cache, so skip copying the entry.
+            if (cacheable) {
+                val bits = LongArray(words) { cached(it) or computed[it] }
+                val coverage = LongArray(words) { (oldCoverage?.getOrElse(it) { 0L } ?: 0L) or need[it] }
+                coverage[lastWord] = coverage[lastWord] and lastBit.inv()
+                store(leaf.condition, Entry(bits, coverage))
+            }
+            for (w in 0..<words) computed[w] = computed[w] or (cached(w) and candidates[w])
+            return computed
         }
 
         /** The bits of [leaf] for the [need]ed records, and how many chunks that took. */
