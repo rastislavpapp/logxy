@@ -32,7 +32,10 @@ Test data and benchmarks:
 ./gradlew -q :tools:run --args="parse /path/to/test.log"
 ./gradlew -q :tools:run --args="filter /path/to/test.log"
 ./gradlew -q :tools:run --args="simulate /path/to/live.log --rate 50 --rotate-at 1m"
+./gradlew :tools:benchmark                     # JUnit test: fails if parsing, filtering or merging got slower than saved
 ```
+
+The benchmark is not part of `./gradlew test`. `-PbaselineTolerance=N` sets the allowed slowdown in percent (default 25). The baseline (`tools/benchmark-baseline.properties`) is machine-specific; its times come from fixed-seed files generated into `build/benchmark` on first use (about 1.5 GB).
 
 The logo's source is `app/src/main/resources/logxy.svg`. The packaging icons in `app/src/packaging` are generated from it and committed; after changing the logo, regenerate them from the project root:
 

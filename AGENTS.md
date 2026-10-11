@@ -17,6 +17,7 @@ Fast desktop log viewer (Kotlin, Swing, FlatLaf, Gradle).
 - `core` must not depend on `java.awt` / `javax.swing`.
 - Prefer primitive arrays over boxed collections or per-row objects for anything that scales with file size.
 - Declare all dependency and plugin versions in `gradle/libs.versions.toml`. Do not add dependencies without a clear reason.
+- Speed is the top goal: after a change to parsing, indexing, filtering or merging, run `./gradlew -q :tools:benchmark`. If it fails, find the cause.
 
 ## Trying the app
 
