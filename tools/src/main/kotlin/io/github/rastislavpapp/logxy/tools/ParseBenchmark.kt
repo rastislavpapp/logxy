@@ -31,7 +31,7 @@ fun benchmarkParsing(file: Path, iterations: Int, pattern: String? = null) {
     val spans = last.schema.fields.filterIndexed { i, field -> compiled.schema.fields.getOrNull(i)?.type.let { it != null && it != field.type } }
     if (spans.isNotEmpty()) println("stored as spans, having mostly distinct values: ${spans.joinToString { it.name }}")
     val keys = last.schema.fields.drop(compiled.schema.fields.size)
-    if (keys.isNotEmpty()) println("MDC keys as columns: ${keys.joinToString { it.name }}")
+    if (keys.isNotEmpty()) println("Map keys as columns: ${keys.joinToString { it.name }}")
     println("\nheap after GC: ${formatByteSize(heap)} (%.1f bytes per record), timestamps sorted: %s"
         .format(heap.toDouble() / last.recordCount, last.timestampsSorted))
     last.close()

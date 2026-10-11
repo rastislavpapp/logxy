@@ -12,9 +12,17 @@ private const val BATCHES_PER_SECOND = 10
 private const val KEPT_ROTATIONS = 5
 
 /** Appends log lines in small batches, ending each batch mid-line to exercise partial-line handling. */
-fun simulateLogging(file: Path, linesPerSecond: Int, rotateAt: Long?, mdc: Boolean = false) {
+fun simulateLogging(
+    file: Path,
+    linesPerSecond: Int,
+    rotateAt: Long?,
+    mdc: Boolean = false,
+    json: Boolean = false,
+    rabbitmq: Boolean = false,
+) {
     require(linesPerSecond > 0) { "rate must be positive" }
-    val generator = LogGenerator(SplittableRandom(), mdc)
+    val random = SplittableRandom()
+    val generator = if (rabbitmq) RabbitMqGenerator(random) else LogGenerator(random, mdc, json = json)
     val rotation = rotateAt?.let { ", rotating at ${formatByteSize(it)}" } ?: ""
     println("Appending about $linesPerSecond lines/s to $file$rotation. Ctrl+C stops.")
 

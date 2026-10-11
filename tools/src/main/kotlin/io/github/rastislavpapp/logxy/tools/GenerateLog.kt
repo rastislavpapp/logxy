@@ -16,18 +16,45 @@ private val TENANTS = listOf("acme", "globex", "initech", "umbrella")
 private val TIMESTAMP_SECONDS: DateTimeFormatter =
     DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").withZone(ZoneId.systemDefault())
 
+private val ISO_SECONDS: DateTimeFormatter =
+    DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss").withZone(ZoneId.systemDefault())
+
+private val ISO_OFFSET: DateTimeFormatter = DateTimeFormatter.ofPattern("XXX").withZone(ZoneId.systemDefault())
+
+private val LEVEL_VALUES = mapOf("TRACE" to 5000, "DEBUG" to 10000, "INFO" to 20000, "WARN" to 30000, "ERROR" to 40000)
+
+/** Writes one record at a time, e.g. a line or a record with its stack trace. */
+internal interface RecordGenerator {
+    /** Time of the last record; advanced a little by each [next]. */
+    var timeMillis: Long
+
+    /** The next record, ending with a newline; of [forcedLevel] (`ERROR` or `WARN`) if given. */
+    fun next(forcedLevel: String? = null): String
+}
+
 /**
  * Writes log4j-style lines (`%d [%t] %-5p %c - %m%n`, or `%d [%t] %-5p %c %X - %m%n` with [mdc])
- * with occasional stack traces until [size] bytes. With [errors] or [warnings], exactly that many
- * records of the level are written, at random places.
+ * with occasional stack traces until [size] bytes; with [json], JSON lines as logstash-logback-encoder
+ * writes them; with [rabbitmq], a RabbitMQ broker's JSON log. With [errors] or [warnings], exactly that
+ * many records of the level are written, at random places.
  */
-fun generateLog(file: Path, size: Long, seed: Long, mdc: Boolean = false, errors: Int? = null, warnings: Int? = null) {
+fun generateLog(
+    file: Path,
+    size: Long,
+    seed: Long,
+    mdc: Boolean = false,
+    errors: Int? = null,
+    warnings: Int? = null,
+    json: Boolean = false,
+    rabbitmq: Boolean = false,
+) {
     val random = SplittableRandom(seed)
     val placed = listOfNotNull(errors?.let { "ERROR" to it }, warnings?.let { "WARN" to it })
     // Byte offsets at which a placed record is written next, sorted.
     val places = placed.flatMap { (level, count) -> List(count) { random.nextLong(size) to level } }.sortedBy { it.first }
     var nextPlace = 0
-    val generator = LogGenerator(random, mdc, excluded = placed.map { it.first }.toSet())
+    val excluded = placed.map { it.first }.toSet()
+    val generator = if (rabbitmq) RabbitMqGenerator(random, excluded) else LogGenerator(random, mdc, excluded, json)
     val started = System.nanoTime()
     var written = 0L
     var lines = 0L
@@ -51,7 +78,9 @@ internal class LogGenerator(
     private val mdc: Boolean = false,
     /** Levels never picked at random. */
     private val excluded: Set<String> = emptySet(),
-) {
+    /** JSON lines with the MDC as top-level keys (always, as an encoder writes it) instead of text. */
+    private val json: Boolean = false,
+) : RecordGenerator {
 
     private val threads = List(40) { i ->
         when (i % 4) {
@@ -74,27 +103,60 @@ internal class LogGenerator(
     }
 
     // A thread keeps its MDC for a run of records, like a request or a consumed message would.
-    private val contexts = arrayOfNulls<String>(threads.size)
+    private val contexts = arrayOfNulls<List<Pair<String, String>>>(threads.size)
     private val contextRecordsLeft = IntArray(threads.size)
     private var breadcrumbs = 0L
 
-    var timeMillis = Instant.parse("2026-10-01T08:00:00Z").toEpochMilli()
+    override var timeMillis = Instant.parse("2026-10-01T08:00:00Z").toEpochMilli()
     private var cachedSecond = -1L
     private var cachedSecondText = ""
+    private var cachedIsoSecond = -1L
+    private var cachedIsoSecondText = ""
+    private var cachedIsoOffset = ""
 
-    fun next(forcedLevel: String? = null): String {
+    override fun next(forcedLevel: String?): String {
         timeMillis += random.nextInt(0, 6)
         val level = forcedLevel ?: pickLevel()
-        val sb = StringBuilder(200)
         val thread = random.nextInt(threads.size)
-        sb.append(timestamp()).append(" [").append(threads[thread]).append("] ")
-        sb.append(level.padEnd(5)).append(' ').append(loggers[random.nextInt(loggers.size)])
-        if (mdc) sb.append(' ').append(context(thread))
-        sb.append(" - ")
-        sb.append(message(level)).append('\n')
+        val logger = loggers[random.nextInt(loggers.size)]
+        val context = if (mdc || json) context(thread) else null
+        val message = message(level)
         val withTrace = (level == "ERROR" && random.nextInt(10) < 3) || (level == "WARN" && random.nextInt(20) == 0)
-        if (withTrace) appendStackTrace(sb)
+        val trace = if (withTrace) StringBuilder().also(::appendStackTrace) else null
+        if (json) return jsonRecord(level, threads[thread], logger, context!!, message, trace)
+
+        val sb = StringBuilder(200)
+        sb.append(timestamp()).append(" [").append(threads[thread]).append("] ")
+        sb.append(level.padEnd(5)).append(' ').append(logger)
+        if (context != null) sb.append(' ').append(context.joinToString(", ", "{", "}") { (key, value) -> "$key=$value" })
+        sb.append(" - ")
+        sb.append(message).append('\n')
+        if (trace != null) sb.append(trace)
         return sb.toString()
+    }
+
+    private fun jsonRecord(
+        level: String,
+        thread: String,
+        logger: String,
+        context: List<Pair<String, String>>,
+        message: String,
+        trace: CharSequence?,
+    ): String {
+        val sb = StringBuilder(300)
+        sb.append("{\"@timestamp\":\"").append(isoTimestamp()).append("\",\"@version\":\"1\",\"message\":")
+        appendJsonString(sb, message)
+        sb.append(",\"logger_name\":\"").append(logger).append("\",\"thread_name\":\"").append(thread)
+        sb.append("\",\"level\":\"").append(level).append("\",\"level_value\":").append(LEVEL_VALUES.getValue(level))
+        if (trace != null) {
+            sb.append(",\"stack_trace\":")
+            appendJsonString(sb, trace)
+        }
+        for ((key, value) in context) {
+            sb.append(",\"").append(key).append("\":")
+            appendJsonString(sb, value)
+        }
+        return sb.append("}\n").toString()
     }
 
     private fun pickLevel(): String {
@@ -106,7 +168,7 @@ internal class LogGenerator(
         return "INFO"
     }
 
-    private fun context(thread: Int): String {
+    private fun context(thread: Int): List<Pair<String, String>> {
         if (contextRecordsLeft[thread] == 0) {
             contextRecordsLeft[thread] = random.nextInt(1, 40)
             contexts[thread] = newContext(threads[thread])
@@ -115,17 +177,17 @@ internal class LogGenerator(
         return contexts[thread]!!
     }
 
-    /** Log4j2's `%X`: all MDC entries sorted by key, `{}` when empty. The set of keys varies by thread. */
-    private fun newContext(thread: String): String {
-        val entries = ArrayList<String>(4)
+    /** MDC entries sorted by key, as log4j2's `%X` writes them. The set of keys varies by thread. */
+    private fun newContext(thread: String): List<Pair<String, String>> {
+        val entries = ArrayList<Pair<String, String>>(4)
         val inRequest = thread.startsWith("http") || thread.startsWith("kafka")
         if (inRequest || random.nextInt(3) == 0) {
-            entries += "breadcrumbId=ID-app-node-${1 + random.nextInt(3)}-1759305600000-0-${++breadcrumbs}"
+            entries += "breadcrumbId" to "ID-app-node-${1 + random.nextInt(3)}-1759305600000-0-${++breadcrumbs}"
         }
-        if (thread.startsWith("kafka")) entries += "partition=${random.nextInt(12)}"
-        if (inRequest && random.nextInt(4) != 0) entries += "tenant=${TENANTS[random.nextInt(TENANTS.size)]}"
-        if (thread.startsWith("http") && random.nextBoolean()) entries += "userId=${id()}"
-        return entries.joinToString(", ", "{", "}")
+        if (thread.startsWith("kafka")) entries += "partition" to "${random.nextInt(12)}"
+        if (inRequest && random.nextInt(4) != 0) entries += "tenant" to TENANTS[random.nextInt(TENANTS.size)]
+        if (thread.startsWith("http") && random.nextBoolean()) entries += "userId" to "${id()}"
+        return entries
     }
 
     private fun timestamp(): String {
@@ -135,6 +197,17 @@ internal class LogGenerator(
             cachedSecondText = TIMESTAMP_SECONDS.format(Instant.ofEpochSecond(second))
         }
         return cachedSecondText + "." + (timeMillis % 1000).toString().padStart(3, '0')
+    }
+
+    private fun isoTimestamp(): String {
+        val second = timeMillis / 1000
+        if (second != cachedIsoSecond) {
+            cachedIsoSecond = second
+            val instant = Instant.ofEpochSecond(second)
+            cachedIsoSecondText = ISO_SECONDS.format(instant)
+            cachedIsoOffset = ISO_OFFSET.format(instant)
+        }
+        return cachedIsoSecondText + "." + (timeMillis % 1000).toString().padStart(3, '0') + cachedIsoOffset
     }
 
     private fun id() = random.nextInt(1, 1_000_000)
@@ -199,4 +272,19 @@ internal class LogGenerator(
                 .append(random.nextInt(20, 900)).append(")\n")
         }
     }
+}
+
+/** Appends [text] as a JSON string, quoted and escaped. */
+internal fun appendJsonString(sb: StringBuilder, text: CharSequence) {
+    sb.append('"')
+    for (c in text) {
+        when (c) {
+            '"' -> sb.append("\\\"")
+            '\\' -> sb.append("\\\\")
+            '\n' -> sb.append("\\n")
+            '\t' -> sb.append("\\t")
+            else -> sb.append(c)
+        }
+    }
+    sb.append('"')
 }
