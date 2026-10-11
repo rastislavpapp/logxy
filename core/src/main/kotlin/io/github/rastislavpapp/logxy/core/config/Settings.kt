@@ -4,11 +4,8 @@ import io.github.rastislavpapp.logxy.core.log.Level
 import io.github.rastislavpapp.logxy.core.log.LevelMapping
 import io.github.rastislavpapp.logxy.core.parse.JsonKeys
 import io.github.rastislavpapp.logxy.core.parse.LogFormat
-import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.Path
-import java.nio.file.StandardCopyOption
-import java.util.Collections
 import java.util.Properties
 
 /** A named filter: the minimum level (null for all) and the query text. */
@@ -81,8 +78,7 @@ data class Settings(
          */
         fun load(path: Path): Settings {
             if (!Files.exists(path)) return Settings()
-            val properties = Properties()
-            Files.newBufferedReader(path).use { properties.load(it) }
+            val properties = PropertiesFiles.load(path)
 
             val formats = numbered(properties, "format").mapNotNull { n ->
                 val name = properties.getProperty("format.$n.name")?.trim().orEmpty()
@@ -121,7 +117,7 @@ data class Settings(
 
         /** Writes [settings] to [path], replacing the file only once the new one is complete. */
         fun save(path: Path, settings: Settings) {
-            val properties = SortedProperties()
+            val properties = Properties()
             settings.formats.forEachIndexed { i, format ->
                 val n = i + 1
                 when (format) {
@@ -154,19 +150,7 @@ data class Settings(
                 properties["level-names"] = "custom"
                 settings.levels.names.forEach { (text, level) -> properties["level.$text"] = level.name }
             }
-
-            Files.createDirectories(path.toAbsolutePath().parent)
-            val temporary = Files.createTempFile(path.toAbsolutePath().parent, "logxy", ".tmp")
-            try {
-                Files.newBufferedWriter(temporary).use { properties.store(it, "logxy settings") }
-                try {
-                    Files.move(temporary, path, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
-                } catch (_: IOException) {
-                    Files.move(temporary, path, StandardCopyOption.REPLACE_EXISTING)
-                }
-            } finally {
-                Files.deleteIfExists(temporary)
-            }
+            PropertiesFiles.store(path, properties, "logxy settings")
         }
 
         const val DEFAULT_TIMESTAMP = "yyyy-MM-dd HH:mm:ss.SSS"
@@ -208,10 +192,4 @@ data class Settings(
             .mapNotNull { Regex("""${Regex.escape(prefix)}\.(\d+)\.name""").matchEntire(it)?.groupValues?.get(1)?.toInt() }
             .sorted()
     }
-}
-
-/** Writes keys in sorted order, so the file stays readable and diffs stay small. */
-private class SortedProperties : Properties() {
-    override val entries: MutableSet<MutableMap.MutableEntry<Any, Any>>
-        get() = Collections.synchronizedSet(sortedSetOf(compareBy { it.key.toString() }, *super.entries.toTypedArray()))
 }
