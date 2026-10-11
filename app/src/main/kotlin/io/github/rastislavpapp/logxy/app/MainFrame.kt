@@ -256,6 +256,8 @@ class MainFrame : JFrame("logxy") {
         if (candidates.isEmpty()) return
         val all = candidates.map { it.path }
         val inSubfolders = candidates.filter { it.inSubfolder }.map { it.path }.toSet()
+        // With nothing open yet, a single file has only one way to open.
+        if (current == null && all.size == 1 && inSubfolders.isEmpty()) return openFile(all.single())
         val settings = AppSettings.current
         val answer = settings.openMode?.let { remembered ->
             val files = if (settings.includeSubfolders) all else all - inSubfolders
