@@ -33,10 +33,10 @@ case "${1:-}" in
     shift
     [[ -f $root/app/build/libs/logxy.jar ]] || { echo "app/build/libs/logxy.jar missing; run ./gradlew -q :app:shadowJar" >&2; exit 1; }
     "$engine" image inspect "$image" >/dev/null 2>&1 || "$0" build
-    # Each file's directory is mounted separately, so files can live anywhere on the host.
+    # Each file's or folder's parent is mounted separately, so they can live anywhere on the host.
     mounts=() args=() i=0
     for f in "$@"; do
-      [[ -f $f ]] || { echo "no such file: $f" >&2; exit 1; }
+      [[ -e $f ]] || { echo "no such file or folder: $f" >&2; exit 1; }
       mounts+=(-v "$(host_path "$(cd "$(dirname "$f")" && pwd)"):/data/$i:ro")
       args+=("/data/$i/$(basename "$f")")
       i=$((i + 1))
