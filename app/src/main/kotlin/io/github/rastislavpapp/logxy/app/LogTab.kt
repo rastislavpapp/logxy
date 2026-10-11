@@ -184,37 +184,37 @@ class LogTab(
         showPopupList(parserButton, items)
     }
 
-    /** A merge's parsers: a row for all files and one per file, each opening the parsers to choose from. */
+    /**
+     * Like [showParsers], but a parser applies to all files of the merge; "Choose Parser per File" opens
+     * the table of files and their parsers, also checked when the files' parsers differ.
+     */
     private fun showMergedParsers() {
         val chosen = session.chosenFormats
-        val all = chosen.distinct().let { if (it.size == 1) it.single()?.name ?: "Auto-detect" else "Mixed" }
+        val mixed = chosen.distinct().size > 1
+        // The parser of all files when not mixed; null is Auto-detect.
+        val same = chosen.first()
+        val custom = AppSettings.current.formats
+        val known = listOf(LogFormat.Raw) + custom + LogFormat.BUILT_IN
         val items = buildList {
-            add(PopupItem("All files: $all", Icons.chevronRight) { showMergedParserChoice(null) })
-            for ((i, name) in sourceNames.withIndex()) {
-                val parser = when {
-                    chosen[i] != null -> chosen[i]!!.name
-                    session.formatDetected -> "Auto: ${session.formats[i].name}"
-                    else -> "Auto-detect"
-                }
-                add(PopupItem("$name: $parser", Icons.chevronRight, separatorBefore = i == 0) { showMergedParserChoice(i) })
+            val auto = if (session.formatDetected) "Auto: per file" else "Auto-detect"
+            add(PopupItem(auto, selected = !mixed && same == null) { session.useFormats(chosen.map { null }) })
+            known.forEachIndexed { i, format ->
+                val tools = if (format in custom) listOf(PopupTool(Icons.advanced, "Edit this parser") { editParsers(format) }) else emptyList()
+                add(PopupItem(format.name, selected = !mixed && same == format, separatorBefore = i == 0, tools = tools) {
+                    session.useFormats(chosen.map { format })
+                })
             }
-            add(PopupItem("Edit Parsers", Icons.settings, separatorBefore = true) { editParsers(session.format) })
+            add(PopupItem("Choose Parser per File", selected = mixed, separatorBefore = true) { chooseParserPerFile() })
+            add(PopupItem("Edit Parsers", Icons.settings) { editParsers(session.format) })
         }
         showPopupList(parserButton, items)
     }
 
-    /** The parsers to choose from for the file at [index] of a merge, or for all its files if null; choosing reads them again. */
-    private fun showMergedParserChoice(index: Int?) {
-        val chosen = session.chosenFormats
-        val formats: List<LogFormat?> = listOf(null, LogFormat.Raw) + AppSettings.current.formats + LogFormat.BUILT_IN
-        val heading = PopupItem("Parser for ${if (index == null) "all files" else sourceNames[index]}", enabled = false)
-        val items = listOf(heading) + formats.mapIndexed { i, format ->
-            val selected = if (index == null) chosen.all { it == format } else chosen[index] == format
-            PopupItem(format?.name ?: "Auto-detect", selected = selected, separatorBefore = i <= 1) {
-                session.useFormats(if (index == null) chosen.map { format } else chosen.toMutableList().also { it[index] = format })
-            }
-        }
-        showPopupList(parserButton, items)
+    private fun chooseParserPerFile() {
+        val descriptions = paths.map { (origin(it) ?: it).toString() }
+        val dialog = FileParsersDialog(SwingUtilities.getWindowAncestor(this), paths, sourceNames, descriptions, session.chosenFormats)
+        dialog.isVisible = true
+        session.useFormats(dialog.formats ?: return)
     }
 
     /** Checks for the columns to show; the menu stays open while they are toggled. */

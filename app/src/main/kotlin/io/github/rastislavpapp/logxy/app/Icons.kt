@@ -40,7 +40,8 @@ object Icons {
     val clear get() = get("general/delete")
     val advanced get() = get("general/edit")
     val columns get() = get("nodes/dataColumn")
-    val chevronRight get() = get("general/chevronRight")
+    val warning get() = get("status/warning")
+    val fits get() = get("general/greenCheckmark")
 }
 
 /** [icon] with a small dot in its lower right corner, e.g. to mark a file that is being written to. */

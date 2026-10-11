@@ -4,6 +4,7 @@ import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 import org.junit.jupiter.api.io.TempDir
 
 class LogFormatTest {
@@ -78,5 +79,17 @@ class LogFormatTest {
             2026-10-01 08:00:00.002 [http-1] INFO  com.example.Api {breadcrumbId=ID-1, tenant=acme} - GET /a - done
         """.trimIndent())
         assertEquals("date [thread] LEVEL logger {MDC} - message", LogFormat.detect(file).name)
+    }
+
+    @Test
+    fun `tells whether a format fits a file before opening it`() {
+        val file = Files.writeString(dir.resolve("m.log"), "2026-10-01 08:00:00.001 [main] INFO  a.B - hello\n")
+        assertEquals(null, LogFormat.BUILT_IN[0].mismatch(file))
+        assertEquals(null, LogFormat.Raw.mismatch(file))
+        assertTrue(LogFormat.Json("JSON").mismatch(file)!!.startsWith("No entry in the file matches the parser."))
+        assertEquals("The pattern has no fields", LogFormat.Pattern("Broken", "just text").mismatch(file))
+        // A start the first bytes cannot decide passes.
+        val dump = Files.writeString(dir.resolve("dump.log"), (1..400_000).joinToString("") { "    <item id=\"$it\"/>\n" })
+        assertEquals(null, LogFormat.Json("JSON").mismatch(dump))
     }
 }

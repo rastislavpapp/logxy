@@ -6,7 +6,9 @@ import io.github.rastislavpapp.logxy.core.index.LineIndex
 import io.github.rastislavpapp.logxy.core.log.LevelMapping
 import io.github.rastislavpapp.logxy.core.log.LogData
 import io.github.rastislavpapp.logxy.core.log.ParsedLog
+import java.nio.channels.FileChannel
 import java.nio.file.Path
+import java.nio.file.StandardOpenOption
 
 /** A saved description of how to read a log: raw lines, a pattern layout, a regex, or JSON lines. */
 sealed interface LogFormat {
@@ -71,6 +73,29 @@ sealed interface LogFormat {
             }
             val best = scored.maxWithOrNull(compareBy({ it.matches }, { it.preferred }, { it.fields })) ?: return Raw
             return if (best.matches > 0 && best.matches * 20 >= realLines) best.format else Raw
+        }
+    }
+}
+
+/** Bytes read by [mismatch]: enough for the first entries, but bounded for a file that starts with a huge dump. */
+private const val MISMATCH_CHECK_BYTES = 4L * 1024 * 1024
+
+/**
+ * Why this format cannot read [path], judged by the start of the file as opening it does; null if it can, if
+ * it is raw text, or if the first few MB do not tell.
+ */
+fun LogFormat.mismatch(path: Path): String? {
+    val compiled = try {
+        compile() ?: return null
+    } catch (e: IllegalArgumentException) {
+        return e.message ?: "Invalid parser"
+    }
+    return FileChannel.open(path, StandardOpenOption.READ).use { channel ->
+        try {
+            FormatCheck.check(channel, channel.size(), compiled.newParser(), MISMATCH_CHECK_BYTES)
+            null
+        } catch (e: FormatMismatchException) {
+            e.message
         }
     }
 }

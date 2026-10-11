@@ -22,10 +22,11 @@ internal object FormatCheck {
      * Throws [FormatMismatchException] unless one of the first [REAL_LINES] lines that do not look
      * like continuations matches, or the file has no content at all. Continuations before the first
      * match are skipped, as the file may start in the middle of a stack trace; after it nothing more
-     * is read, as a single record may be huge.
+     * is read, as a single record may be huge. Reads at most [limit] bytes; if they do not decide it,
+     * the format passes.
      */
-    fun check(channel: FileChannel, size: Long, parser: RecordParser) {
-        val reader = LineReader(channel, 0, size, BUFFER_SIZE)
+    fun check(channel: FileChannel, size: Long, parser: RecordParser, limit: Long = size) {
+        val reader = LineReader(channel, 0, minOf(size, limit), BUFFER_SIZE)
         var firstContent: String? = null
         var firstMismatch: String? = null
         var mismatches = 0
@@ -40,6 +41,7 @@ internal object FormatCheck {
             if (firstMismatch == null) firstMismatch = shown(bytes, from, to)
             if (++mismatches == REAL_LINES) break
         }
+        if (mismatches < REAL_LINES && limit < size) return
         val example = firstMismatch ?: firstContent ?: return
         val which = if (mismatches == REAL_LINES) "None of the first $REAL_LINES entries" else "No entry"
         throw FormatMismatchException("$which in the file matches the parser. First one:\n$example")
