@@ -1,17 +1,23 @@
 package io.github.rastislavpapp.logxy.app
 
 import com.formdev.flatlaf.FlatLaf
+import io.github.rastislavpapp.logxy.core.query.Highlighter
 import org.fife.ui.rsyntaxtextarea.AbstractTokenMakerFactory
 import org.fife.ui.rsyntaxtextarea.RSyntaxTextArea
 import org.fife.ui.rsyntaxtextarea.Theme
 import org.fife.ui.rsyntaxtextarea.Token
 import org.fife.ui.rsyntaxtextarea.TokenMakerBase
 import org.fife.ui.rsyntaxtextarea.TokenMakerFactory
+import java.awt.Color
 import java.awt.Font
 import javax.swing.UIManager
+import javax.swing.text.DefaultHighlighter
 import javax.swing.text.Segment
 
 private const val SYNTAX_STYLE = "text/x-logxy-record"
+
+/** Background of text matched by the filter, translucent to suit light and dark looks. */
+val HIGHLIGHT_COLOR = Color(255, 200, 0, 110)
 
 /** Applies the editor colors matching the light or dark look and the monospaced UI font. */
 fun RSyntaxTextArea.applyEditorTheme() {
@@ -26,6 +32,14 @@ fun RSyntaxTextArea.applyEditorTheme() {
 class LogDetailArea : RSyntaxTextArea() {
 
     private var initialized = false
+    private val painter = DefaultHighlighter.DefaultHighlightPainter(HIGHLIGHT_COLOR)
+
+    /** Marks what this filter matched in the shown text. */
+    var matches: Highlighter = Highlighter.NONE
+        set(value) {
+            field = value
+            mark()
+        }
 
     init {
         (TokenMakerFactory.getDefaultInstance() as AbstractTokenMakerFactory)
@@ -43,6 +57,19 @@ class LogDetailArea : RSyntaxTextArea() {
         super.updateUI()
         // Also called from the superclass constructor, before this class is initialized.
         if (initialized) applyTheme()
+    }
+
+    /** Shows [value] with the matches marked. */
+    fun show(value: String) {
+        text = value
+        mark()
+    }
+
+    private fun mark() {
+        if (!initialized) return
+        highlighter.removeAllHighlights()
+        val ranges = matches.ranges(null, text)
+        for (i in ranges.indices step 2) highlighter.addHighlight(ranges[i], ranges[i + 1], painter)
     }
 
     /** The editor theme, with levels in the same colors as the table's level badges. */

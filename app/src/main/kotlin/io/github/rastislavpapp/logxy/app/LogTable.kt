@@ -3,16 +3,23 @@ package io.github.rastislavpapp.logxy.app
 import io.github.rastislavpapp.logxy.core.log.ColumnType
 import io.github.rastislavpapp.logxy.core.log.Level
 import io.github.rastislavpapp.logxy.core.log.Role
+import io.github.rastislavpapp.logxy.core.query.Highlighter
 import java.awt.Component
 import java.awt.Font
+import java.awt.Graphics
+import java.awt.Rectangle
 import javax.swing.JLabel
 import javax.swing.JTable
 import javax.swing.ListSelectionModel
 import javax.swing.SwingConstants
+import javax.swing.SwingUtilities
 import javax.swing.UIManager
 import javax.swing.table.DefaultTableCellRenderer
 
 private const val CELL_PADDING = 12
+
+/** What Swing ends a label's text with when it does not fit. */
+private const val CLIP = "..."
 
 /** The last column (usually the message) keeps this many characters; when columns do not fit, the others shrink first. */
 private const val MIN_LAST_COLUMN_CHARS = 40
@@ -22,6 +29,13 @@ class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
 
     /** Column widths by name, kept when columns are hidden or shown; not of the last column, which fills the rest. */
     private val widths = HashMap<Any, Int>()
+
+    /** Marks what the filter matched in the cells. */
+    var matches: Highlighter = Highlighter.NONE
+        set(value) {
+            field = value
+            repaint()
+        }
 
     init {
         autoResizeMode = AUTO_RESIZE_LAST_COLUMN
@@ -104,7 +118,7 @@ class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
                     foreground = UIManager.getColor("Label.disabledForeground")
                 }
                 field.role == Role.LEVEL -> LevelRenderer()
-                else -> null
+                else -> HighlightRenderer()
             }
             if (column == columnModel.columnCount - 1) {
                 tableColumn.minWidth = MIN_LAST_COLUMN_CHARS * charWidth
@@ -142,7 +156,45 @@ class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
     private fun sampleLength(column: Int, fallback: Int): Int =
         (0..<minOf(rowCount, 100)).map { (getValueAt(it, column) as String).length }.firstOrNull { it > 0 } ?: fallback
 
-    private inner class LevelRenderer : DefaultTableCellRenderer() {
+    /** Paints the matches behind the text of left-aligned cells. */
+    private open inner class HighlightRenderer : DefaultTableCellRenderer() {
+        private var ranges = IntArray(0)
+
+        override fun getTableCellRendererComponent(
+            table: JTable, value: Any?, isSelected: Boolean, hasFocus: Boolean, row: Int, column: Int,
+        ): Component {
+            super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column)
+            val field = logModel.fieldAt(column)
+            ranges = if (field == null || value !is String || isSelected) IntArray(0) else matches.ranges(field.name, value)
+            return this
+        }
+
+        override fun paintComponent(g: Graphics) {
+            if (ranges.isNotEmpty()) {
+                val metrics = getFontMetrics(font)
+                val insets = insets
+                val view = Rectangle(insets.left, insets.top, width - insets.left - insets.right, height - insets.top - insets.bottom)
+                val textBounds = Rectangle()
+                // Laid out as the label paints it, so marks stop where a cut value's "..." begins.
+                val shown = SwingUtilities.layoutCompoundLabel(
+                    this, metrics, text, null, verticalAlignment, horizontalAlignment,
+                    verticalTextPosition, horizontalTextPosition, view, Rectangle(), textBounds, 0,
+                )
+                val visible = if (shown == text) text.length else (shown.length - CLIP.length).coerceAtLeast(0)
+                g.color = HIGHLIGHT_COLOR
+                for (i in ranges.indices step 2) {
+                    val start = ranges[i]
+                    val end = minOf(ranges[i + 1], visible)
+                    if (start >= end) break
+                    val x = textBounds.x + metrics.stringWidth(text.substring(0, start))
+                    g.fillRect(x, 1, metrics.stringWidth(text.substring(start, end)), height - 2)
+                }
+            }
+            super.paintComponent(g)
+        }
+    }
+
+    private inner class LevelRenderer : HighlightRenderer() {
         override fun getTableCellRendererComponent(
             table: JTable, value: Any?, isSelected: Boolean, hasFocus: Boolean, row: Int, column: Int,
         ): Component {

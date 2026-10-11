@@ -7,6 +7,7 @@ import io.github.rastislavpapp.logxy.core.log.Level
 import io.github.rastislavpapp.logxy.core.log.Records
 import io.github.rastislavpapp.logxy.core.log.Role
 import io.github.rastislavpapp.logxy.core.parse.LogFormat
+import io.github.rastislavpapp.logxy.core.query.Highlighter
 import io.github.rastislavpapp.logxy.core.query.Query
 import io.github.rastislavpapp.logxy.core.query.QueryException
 import io.github.rastislavpapp.logxy.core.query.QueryOp
@@ -430,7 +431,7 @@ class LogTab(
     }
 
     private fun showDetail(model: LogTableModel, row: Int) {
-        detail.text = if (row < 0 || row >= model.rowCount) "" else model.records.recordText(model.recordAt(row), MAX_DETAIL_BYTES)
+        detail.show(if (row < 0 || row >= model.rowCount) "" else model.records.recordText(model.recordAt(row), MAX_DETAIL_BYTES))
         detail.caretPosition = 0
     }
 
@@ -442,7 +443,7 @@ class LogTab(
         val text = model.records.recordText(record, MAX_DETAIL_BYTES)
         if (text == detail.text) return
         val caret = detail.caretPosition
-        detail.text = text
+        detail.show(text)
         detail.caretPosition = caret.coerceAtMost(detail.document.length)
     }
 
@@ -450,8 +451,13 @@ class LogTab(
     private fun applyFilter() {
         if (session.records == null) return
         try {
-            if (filterBar.suspended) session.applyFilter(null, Query.Group(all = true, items = emptyList()))
-            else session.applyFilter(filterBar.minimumLevel, filterBar.query())
+            // While suspended the query is not read: text that does not parse must not keep it from showing all.
+            val query = if (filterBar.suspended) null else filterBar.query()
+            if (query == null) session.applyFilter(null, Query.Group(all = true, items = emptyList()))
+            else session.applyFilter(filterBar.minimumLevel, query)
+            val matches = query?.let(Highlighter::of) ?: Highlighter.NONE
+            table?.matches = matches
+            detail.matches = matches
             filterBar.showError(null)
         } catch (e: QueryException) {
             filterBar.showError(e.message)
