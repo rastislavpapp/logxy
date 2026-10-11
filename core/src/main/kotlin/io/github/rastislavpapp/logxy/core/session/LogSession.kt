@@ -332,7 +332,8 @@ class LogSession(
             val what = if (isMerged) "these ${sources.size} files" else "${current.path.fileName}"
             listener.problem(
                 "Not enough memory to open $what.",
-                "Logxy can use up to ${formatByteSize(Runtime.getRuntime().maxMemory())} of memory.",
+                "Logxy can use up to ${formatByteSize(Runtime.getRuntime().maxMemory())} of memory. " +
+                    "To allow more, raise the limit in File > Preferences > Memory.",
                 if (isMerged) "Merge fewer files, or close other tabs." else "Close other tabs, or choose a parser that fits the file.",
             )
             setStatus(SessionStatus(message = "Out of memory"))

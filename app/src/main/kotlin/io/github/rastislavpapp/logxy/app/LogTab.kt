@@ -278,7 +278,7 @@ class LogTab(
     private fun autoLabel() = if (session.formatDetected) "Auto: ${session.format.name}" else "Auto-detect"
 
     private fun editParsers(select: LogFormat) {
-        val dialog = ParsersDialog(SwingUtilities.getWindowAncestor(this), path, offerUse = !isMerged, select)
+        val dialog = PreferencesDialog(SwingUtilities.getWindowAncestor(this), PreferencesDialog.Section.PARSERS, path, select, offerUse = !isMerged)
         dialog.isVisible = true
         session.useFormat(dialog.formatToUse ?: return)
     }

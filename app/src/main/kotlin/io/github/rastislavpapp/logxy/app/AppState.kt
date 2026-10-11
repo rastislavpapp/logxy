@@ -33,4 +33,5 @@ object AppState {
     const val LAST_DIRECTORY = "lastDirectory"
     const val DETAIL_DIVIDER = "detail.divider"
     const val FILTER_MODE = "filter.mode"
+    const val PREFERENCES_SECTION = "preferences.section"
 }

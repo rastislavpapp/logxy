@@ -14,11 +14,12 @@ import java.util.Properties
 /** A named filter: the minimum level (null for all) and the query text. */
 data class SavedFilter(val name: String, val minimumLevel: Level?, val query: String)
 
-/** The user's saved formats (parsers), level names and filters. */
+/** The user's saved formats (parsers), level names, filters, and the memory limit (e.g. `8g`, null for the JVM default). */
 data class Settings(
     val formats: List<LogFormat> = emptyList(),
     val levels: LevelMapping = LevelMapping.DEFAULT,
     val filters: List<SavedFilter> = emptyList(),
+    val maxMemory: String? = null,
 ) {
     companion object {
         /** `%APPDATA%\logxy` on Windows, `$XDG_CONFIG_HOME/logxy` or `~/.config/logxy` elsewhere. */
@@ -47,6 +48,7 @@ data class Settings(
          * filter.1.name=Slow DB
          * filter.1.level=WARN
          * filter.1.query=logger == "com.example.db*"
+         * max-memory=8g
          * ```
          * Level names are stored only once the user changed them, and then completely. A missing file
          * means default settings; entries that cannot be read are skipped.
@@ -82,8 +84,9 @@ data class Settings(
                 val level = properties.getProperty("filter.$n.level")?.trim()?.uppercase()
                 SavedFilter(name, Level.entries.firstOrNull { it.name == level }, properties.getProperty("filter.$n.query").orEmpty())
             }
+            val maxMemory = properties.getProperty("max-memory")?.let(::parseMemory)
             // Without the marker, level entries only add to the built-in names (as first released).
-            return Settings(formats, LevelMapping(if (custom) levels else Level.BUILT_IN_NAMES + levels), filters)
+            return Settings(formats, LevelMapping(if (custom) levels else Level.BUILT_IN_NAMES + levels), filters, maxMemory)
         }
 
         /** Writes [settings] to [path], replacing the file only once the new one is complete. */
@@ -114,6 +117,7 @@ data class Settings(
                 properties["filter.${i + 1}.level"] = filter.minimumLevel?.name.orEmpty()
                 properties["filter.${i + 1}.query"] = filter.query
             }
+            settings.maxMemory?.let { properties["max-memory"] = it }
             if (settings.levels != LevelMapping.DEFAULT) {
                 properties["level-names"] = "custom"
                 settings.levels.names.forEach { (text, level) -> properties["level.$text"] = level.name }
@@ -154,6 +158,17 @@ data class Settings(
                 thread = keys("thread", defaults.thread),
                 exception = keys("exception", defaults.exception),
             )
+        }
+
+        /**
+         * A memory size in megabytes (`m`) or gigabytes (`g`), lowercased, or null if it is malformed or under
+         * 256 MB. Strict, as the app passes it to a new JVM as `-Xmx`, which would not start with a bad value.
+         */
+        fun parseMemory(text: String): String? {
+            val match = Regex("""(\d{1,7})\s*([mg])b?""").matchEntire(text.trim().lowercase()) ?: return null
+            val (amount, unit) = match.destructured
+            val megabytes = amount.toLong() * if (unit == "g") 1024 else 1
+            return if (megabytes >= 256) "$amount$unit" else null
         }
 
         /** The N of all `prefix.N.name` keys, in order. */

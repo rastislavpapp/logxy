@@ -29,6 +29,7 @@ object Icons {
     val filter get() = get("general/filter")
     val settings get() = get("general/settings")
     val levels get() = get("nodes/sortBySeverity")
+    val memory get() = get("actions/profileMemory")
     val add get() = get("general/add")
     val group get() = get("general/groups")
     val star get() = get("nodes/star")

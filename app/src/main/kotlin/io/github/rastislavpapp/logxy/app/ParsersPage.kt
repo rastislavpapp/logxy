@@ -7,16 +7,13 @@ import io.github.rastislavpapp.logxy.core.parse.LogFormat
 import io.github.rastislavpapp.logxy.core.parse.PreviewLine
 import net.miginfocom.swing.MigLayout
 import java.awt.Component
-import java.awt.Window
 import java.nio.file.Path
 import javax.swing.ButtonGroup
 import javax.swing.DefaultListCellRenderer
 import javax.swing.DefaultListModel
 import javax.swing.JButton
-import javax.swing.JDialog
 import javax.swing.JLabel
 import javax.swing.JList
-import javax.swing.JOptionPane
 import javax.swing.JPanel
 import javax.swing.JRadioButton
 import javax.swing.JScrollPane
@@ -33,16 +30,8 @@ import javax.swing.table.DefaultTableCellRenderer
 
 private const val PREVIEW_LINES = 200
 
-/**
- * Edits the saved parsers (formats), with a preview of [previewFile] read by the one being edited.
- * Returns the parser to use for the file if the user asked for that.
- */
-class ParsersDialog(owner: Window?, private val previewFile: Path?, private val offerUse: Boolean, select: LogFormat?) :
-    JDialog(owner, "Parsers", ModalityType.APPLICATION_MODAL) {
-
-    /** Set when the dialog closed with "Save and Use for This File". */
-    var formatToUse: LogFormat? = null
-        private set
+/** Edits the saved parsers (formats), with a preview of [previewFile] read by the one being edited. */
+class ParsersPage(private val previewFile: Path?, select: LogFormat?) : PreferencesPage("Parsers", Icons.settings) {
 
     private class Entry(val format: LogFormat, val builtIn: Boolean)
 
@@ -77,23 +66,21 @@ class ParsersDialog(owner: Window?, private val previewFile: Path?, private val 
     private val previewTimer = Timer(250) { updatePreview() }.apply { isRepeats = false }
     private var loadingEditor = false
 
-
     init {
         AppSettings.current.formats.forEach { entries.addElement(Entry(it, builtIn = false)) }
         LogFormat.BUILT_IN.forEach { entries.addElement(Entry(it, builtIn = true)) }
 
-        contentPane = JPanel(MigLayout("fill, insets dialog", "[grow]", "[grow][]")).apply {
-            add(parsersPanel(), "grow, wrap")
-            add(buttons(), "growx")
-        }
-        fitToScreen(0.75)
-        WindowState.install(this, "parsers")
+        layout = MigLayout("fill, insets 0", "[grow]", "[grow]")
+        add(editor(), "grow")
 
         val index = (0..<entries.size).firstOrNull { entries[it].format == select } ?: 0
         if (entries.size > 0) list.selectedIndex = index
     }
 
-    private fun parsersPanel(): JPanel {
+    /** The selected parser, if it is one the user may use. */
+    val selectedFormat: LogFormat? get() = selected()?.format
+
+    private fun editor(): JSplitPane {
         list.selectionMode = ListSelectionModel.SINGLE_SELECTION
         list.cellRenderer = object : DefaultListCellRenderer() {
             override fun getListCellRendererComponent(
@@ -151,29 +138,10 @@ class ParsersDialog(owner: Window?, private val previewFile: Path?, private val 
             add(status, "span 2")
             add(JScrollPane(previewTable), "span 2, grow, push")
         }
-        return JPanel(MigLayout("fill, insets 8", "[grow]", "[grow]")).apply {
-            add(JSplitPane(JSplitPane.HORIZONTAL_SPLIT, left, right).apply {
-                resizeWeight = 0.25
-                border = null
-            }, "grow")
+        return JSplitPane(JSplitPane.HORIZONTAL_SPLIT, left, right).apply {
+            resizeWeight = 0.25
+            border = null
         }
-    }
-
-    private fun buttons() = JPanel(MigLayout("insets 0", "[grow][][][]")).apply {
-        add(JLabel("Saved in ${AppSettings.location}").apply {
-            foreground = UIManager.getColor("Label.disabledForeground")
-            toolTipText = AppSettings.location.toString()
-        }, "wmin 0")
-        if (offerUse) {
-            add(JButton("Save and Use for This File").apply {
-                addActionListener { if (save()) { formatToUse = selected()?.format; dispose() } }
-            })
-        }
-        add(JButton("Save").apply {
-            addActionListener { if (save()) dispose() }
-            this@ParsersDialog.rootPane.defaultButton = this
-        })
-        add(JButton("Cancel").apply { addActionListener { dispose() } })
     }
 
     private fun selected(): Entry? = list.selectedValue
@@ -294,10 +262,11 @@ class ParsersDialog(owner: Window?, private val previewFile: Path?, private val 
         LogFormat.Raw -> newFormat()
     }
 
-    /** Validates and saves; returns false (after telling the user) if something is wrong. */
-    private fun save(): Boolean {
-        val formats = (0..<entries.size).map { entries[it] }.filterNot { it.builtIn }.map { it.format }
-        val problem = formats.firstNotNullOfOrNull { format ->
+    private fun formats() = (0..<entries.size).map { entries[it] }.filterNot { it.builtIn }.map { it.format }
+
+    override fun problem(): String? {
+        val formats = formats()
+        return formats.firstNotNullOfOrNull { format ->
             when {
                 format.name.isBlank() -> "A parser has no name."
                 formats.count { it.name == format.name } > 1 || LogFormat.BUILT_IN.any { it.name == format.name } ->
@@ -310,18 +279,9 @@ class ParsersDialog(owner: Window?, private val previewFile: Path?, private val 
                 }
             }
         }
-        if (problem != null) {
-            JOptionPane.showMessageDialog(this, problem, "Cannot Save", JOptionPane.ERROR_MESSAGE)
-            return false
-        }
-        return try {
-            AppSettings.update(AppSettings.current.copy(formats = formats))
-            true
-        } catch (e: Exception) {
-            JOptionPane.showMessageDialog(this, "Cannot write ${AppSettings.location}:\n${e.message}", "Cannot Save", JOptionPane.ERROR_MESSAGE)
-            false
-        }
     }
+
+    override fun applyTo(settings: Settings) = settings.copy(formats = formats())
 
     private companion object {
         /** Label and keys of each role, in the order of [JsonKeys]' constructor. */

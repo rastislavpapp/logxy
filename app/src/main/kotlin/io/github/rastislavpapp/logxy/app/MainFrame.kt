@@ -2,6 +2,8 @@ package io.github.rastislavpapp.logxy.app
 
 import com.formdev.flatlaf.FlatClientProperties
 import com.formdev.flatlaf.extras.FlatSVGUtils
+import io.github.rastislavpapp.logxy.core.config.SavedFilter
+import io.github.rastislavpapp.logxy.core.log.Level
 import io.github.rastislavpapp.logxy.core.merge.MergedLog
 import net.miginfocom.swing.MigLayout
 import java.awt.BasicStroke
@@ -13,11 +15,13 @@ import java.awt.Graphics
 import java.awt.Graphics2D
 import java.awt.RenderingHints
 import java.awt.event.ActionEvent
+import java.awt.event.InputEvent
 import java.awt.event.KeyEvent
 import java.io.File
 import java.nio.file.Files
 import java.nio.file.Path
 import java.text.NumberFormat
+import java.util.Base64
 import java.util.function.IntConsumer
 import javax.swing.AbstractAction
 import javax.swing.Box
@@ -46,6 +50,10 @@ import javax.swing.WindowConstants
 
 private const val CARD_PLACEHOLDER = "placeholder"
 private const val CARD_TABS = "tabs"
+private const val TAB_ARG = "--tab"
+private const val SELECT_ARG = "--select"
+private const val LEVEL_ARG = "--level"
+private const val QUERY_ARG = "--query"
 private const val LIVE_COLOR = "Actions.Green"
 private const val FOLLOW_COLOR = "Component.accentColor"
 
@@ -122,12 +130,11 @@ class MainFrame : JFrame("logxy") {
             add(menuItem("Reload", Icons.refresh, KeyEvent.VK_F5) { selectedTab()?.reloadFile() })
             add(menuItem("Close Tab", Icons.close, KeyEvent.VK_W, shortcut) { if (tabs.selectedIndex >= 0) closeTab(tabs.selectedIndex) })
             addSeparator()
+            add(menuItem("Preferences", Icons.settings, KeyEvent.VK_S, shortcut or InputEvent.ALT_DOWN_MASK) {
+                PreferencesDialog(this@MainFrame, previewFile = selectedTab()?.path).isVisible = true
+            })
+            addSeparator()
             add(menuItem("Exit", Icons.exit, null) { dispose() })
-        })
-        add(JMenu("Settings").apply {
-            mnemonic = KeyEvent.VK_S
-            add(menuItem("Parsers", Icons.settings, null) { showParsers() })
-            add(menuItem("Log Level Mapping", Icons.levels, null) { LogLevelMappingDialog(this@MainFrame).isVisible = true })
         })
         add(JMenu("View").apply {
             mnemonic = KeyEvent.VK_V
@@ -171,10 +178,6 @@ class MainFrame : JFrame("logxy") {
         add(JMenu("More Light Themes").apply { Themes.INTELLIJ.filter { !it.dark }.forEach { add(item(it)) } })
     }
 
-    private fun showParsers() {
-        ParsersDialog(this, selectedTab()?.path, offerUse = false, select = null).isVisible = true
-    }
-
     private fun chooseAndOpenFiles() {
         val chooser = object : JFileChooser(lastDirectory) {
             override fun createDialog(parent: Component?): JDialog =
@@ -209,6 +212,50 @@ class MainFrame : JFrame("logxy") {
             OpenChoice.TABS -> openable.forEach(::openFile)
             null -> Unit
         }
+    }
+
+    /** Arguments for [openArgs] that reopen the open tabs with their filters, e.g. after a restart. */
+    fun tabArgs(): List<String> = buildList {
+        for (i in 0..<tabs.tabCount) {
+            val tab = tabs.getComponentAt(i) as LogTab
+            add(TAB_ARG)
+            tab.paths.forEach { add(it.toString()) }
+            tab.filter.minimumLevel?.let { add(LEVEL_ARG); add(it.name) }
+            // Encoded, as Windows command lines do not reliably keep the quotes queries are full of.
+            if (tab.filter.query.isNotBlank()) {
+                add(QUERY_ARG)
+                add(Base64.getUrlEncoder().encodeToString(tab.filter.query.toByteArray()))
+            }
+        }
+        if (tabs.selectedIndex >= 0) add(SELECT_ARG).also { add(tabs.selectedIndex.toString()) }
+    }
+
+    /** Opens files given on the command line, or the tabs from [tabArgs]: each file group in a tab, merged if several. */
+    fun openArgs(args: List<String>) {
+        if (args.firstOrNull() != TAB_ARG) return openFiles(args.map { Path.of(it) })
+        class Group(val paths: MutableList<Path> = ArrayList(), var level: Level? = null, var query: String = "")
+        val groups = ArrayList<Group>()
+        var selected = 0
+        val iterator = args.iterator()
+        fun value() = if (iterator.hasNext()) iterator.next() else ""
+        while (iterator.hasNext()) when (val arg = iterator.next()) {
+            TAB_ARG -> groups += Group()
+            LEVEL_ARG -> value().let { level -> groups.last().level = Level.entries.firstOrNull { it.name == level } }
+            QUERY_ARG -> groups.last().query = try {
+                String(Base64.getUrlDecoder().decode(value()))
+            } catch (_: IllegalArgumentException) {
+                ""
+            }
+            SELECT_ARG -> selected = value().toIntOrNull() ?: 0
+            else -> groups.last().paths.add(Path.of(arg))
+        }
+        for (group in groups) {
+            val openable = group.paths.filter(::checkOpenable)
+            if (openable.isEmpty() || selectTab(openable)) continue
+            val filter = SavedFilter("", group.level, group.query).takeIf { it.minimumLevel != null || it.query.isNotBlank() }
+            addTab(LogTab(openable, ::openFiles, ::openEach, filter) { updateStatus() })
+        }
+        if (tabs.tabCount > 0) tabs.selectedIndex = selected.coerceIn(0, tabs.tabCount - 1)
     }
 
     /** Opens each of [paths] in a tab of its own. */

@@ -1,23 +1,20 @@
 package io.github.rastislavpapp.logxy.app
 
+import io.github.rastislavpapp.logxy.core.config.Settings
 import io.github.rastislavpapp.logxy.core.log.Level
 import io.github.rastislavpapp.logxy.core.log.LevelMapping
 import net.miginfocom.swing.MigLayout
-import java.awt.Window
 import javax.swing.DefaultCellEditor
 import javax.swing.JButton
 import javax.swing.JComboBox
-import javax.swing.JDialog
 import javax.swing.JLabel
-import javax.swing.JOptionPane
-import javax.swing.JPanel
 import javax.swing.JScrollPane
 import javax.swing.JTable
 import javax.swing.UIManager
 import javax.swing.table.AbstractTableModel
 
 /** Edits which level texts in logs mean which [Level]; starts from the current table, built-in names included. */
-class LogLevelMappingDialog(owner: Window?) : JDialog(owner, "Log Level Mapping", ModalityType.APPLICATION_MODAL) {
+class LevelsPage : PreferencesPage("Log Levels", Icons.levels) {
 
     private class Row(var name: String, var level: Level)
 
@@ -32,21 +29,12 @@ class LogLevelMappingDialog(owner: Window?) : JDialog(owner, "Log Level Mapping"
         table.autoCreateRowSorter = true
 
         val hint = "Texts are matched ignoring case. Texts not listed here are shown as UNKNOWN."
-        contentPane = JPanel(MigLayout("fill, insets dialog", "[grow]", "[][grow][]")).apply {
-            add(JLabel(hint).apply { foreground = UIManager.getColor("Label.disabledForeground") }, "wrap")
-            add(JScrollPane(table), "grow, wrap")
-            add(JButton("Add").apply { addActionListener { addRow() } }, "split 6")
-            add(JButton("Remove").apply { addActionListener { removeSelected() } })
-            add(JButton("Reset to Defaults").apply { addActionListener { show(LevelMapping.DEFAULT) } })
-            add(JLabel(), "pushx, growx")
-            add(JButton("Save").apply {
-                addActionListener { if (save()) dispose() }
-                this@LogLevelMappingDialog.rootPane.defaultButton = this
-            })
-            add(JButton("Cancel").apply { addActionListener { dispose() } })
-        }
-        fitToScreen(0.4)
-        WindowState.install(this, "log-level-mapping")
+        layout = MigLayout("fill, insets 0", "[grow]", "[][grow][]")
+        add(JLabel(hint).apply { foreground = UIManager.getColor("Label.disabledForeground") }, "wrap")
+        add(JScrollPane(table), "grow, wrap")
+        add(JButton("Add").apply { addActionListener { addRow() } }, "split 3")
+        add(JButton("Remove").apply { addActionListener { removeSelected() } })
+        add(JButton("Reset to Defaults").apply { addActionListener { show(LevelMapping.DEFAULT) } })
     }
 
     private fun show(mapping: LevelMapping) {
@@ -75,22 +63,18 @@ class LogLevelMappingDialog(owner: Window?) : JDialog(owner, "Log Level Mapping"
         model.fireTableDataChanged()
     }
 
-    private fun save(): Boolean {
+    private fun named(): List<Row> {
         if (table.isEditing) table.cellEditor.stopCellEditing()
-        val named = rows.filter { it.name.isNotBlank() }
-        val duplicate = named.groupBy { LevelMapping.normalize(it.name) }.entries.firstOrNull { it.value.size > 1 }
-        if (duplicate != null) {
-            JOptionPane.showMessageDialog(this, "“${duplicate.key}” is listed more than once.", "Cannot Save", JOptionPane.ERROR_MESSAGE)
-            return false
-        }
-        return try {
-            AppSettings.update(AppSettings.current.copy(levels = LevelMapping(named.associate { it.name.trim() to it.level })))
-            true
-        } catch (e: Exception) {
-            JOptionPane.showMessageDialog(this, "Cannot write ${AppSettings.location}:\n${e.message}", "Cannot Save", JOptionPane.ERROR_MESSAGE)
-            false
-        }
+        return rows.filter { it.name.isNotBlank() }
     }
+
+    override fun problem(): String? {
+        val duplicate = named().groupBy { LevelMapping.normalize(it.name) }.entries.firstOrNull { it.value.size > 1 }
+        return duplicate?.let { "Log Levels: “${it.key}” is listed more than once." }
+    }
+
+    override fun applyTo(settings: Settings) =
+        settings.copy(levels = LevelMapping(named().associate { it.name.trim() to it.level }))
 
     private inner class RowsModel : AbstractTableModel() {
         override fun getRowCount() = rows.size

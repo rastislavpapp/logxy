@@ -214,7 +214,7 @@ class FilterBar(private val onApply: () -> Unit) : JPanel(MigLayout("insets 6 8 
                 add(PopupItem("≥ $level", selected = minimum == level, separatorBefore = i == 0) { choose(level) })
             }
             add(PopupItem("Log Level Mapping", Icons.levels, separatorBefore = true) {
-                LogLevelMappingDialog(SwingUtilities.getWindowAncestor(this@FilterBar)).isVisible = true
+                PreferencesDialog(SwingUtilities.getWindowAncestor(this@FilterBar), PreferencesDialog.Section.LEVELS).isVisible = true
             })
         }
         showPopupList(levelButton, items)

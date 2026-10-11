@@ -1,12 +1,15 @@
 package io.github.rastislavpapp.logxy.app
 
 import java.awt.Taskbar
-import java.nio.file.Path
+import java.lang.invoke.MethodHandles
 import javax.swing.JDialog
 import javax.swing.JFrame
 import javax.swing.SwingUtilities
 
+internal val MAIN_CLASS: String = MethodHandles.lookup().lookupClass().name
+
 fun main(args: Array<String>) {
+    if (Restart.atStartup(args.toList())) return
     SwingUtilities.invokeLater {
         Themes.installFonts()
         if (AppState[AppState.TITLE_BAR] != "false") {
@@ -21,7 +24,7 @@ fun main(args: Array<String>) {
         }
         MainFrame().apply {
             isVisible = true
-            openFiles(args.map { Path.of(it) })
+            openArgs(args.toList())
         }
     }
 }
