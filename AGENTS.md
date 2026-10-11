@@ -23,7 +23,7 @@ Fast desktop log viewer (Kotlin, Swing, FlatLaf, Gradle).
 
 To check UI behaviour, run the app in the GUI sandbox, never on the user's desktop. `tools/gui-sandbox/gui.sh` (bash, also Git Bash on Windows) runs it on a virtual X display in a podman or docker container (`GUI_ENGINE` overrides the choice), so it cannot steal focus. Each command is one primitive action; drive a scenario interactively by taking a screenshot, reading it, and choosing the next action, rather than writing scripted scenarios.
 
-Test logs are not committed. If the project already has log files that fit the check (often under `test-data/`, but names, sizes and content vary, so look first), use them; otherwise generate one with the tools module (`generate`, or `simulate` for a live, growing log). Keep checks fast:
+Test logs are not committed. If the project already has log files that fit the check (often under `test-data/`, but names, sizes and content vary, so look first), use them; otherwise generate one with the tools module (`generate`; `scenario` for a day with traffic, an incident and an outage to find; or `simulate` for a live, growing log). Keep checks fast:
 
 - Use the smallest file the check needs: a few MB for UI behaviour, large files only when the change is about scale. Files are read through a container mount, which is slower than native disk.
 - Reuse generated files and keep one sandbox running across checks; restart only after rebuilding the jar.

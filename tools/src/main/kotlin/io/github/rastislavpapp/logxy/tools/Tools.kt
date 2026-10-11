@@ -10,6 +10,10 @@ private const val USAGE = """Usage:
                                         --json writes JSON lines like logstash-logback-encoder, MDC keys included;
                                         --rabbitmq writes a RabbitMQ broker's JSON log (log.file.formatter = json);
                                         --errors and --warnings write exactly N such records, at random places
+  scenario <file> <size> [--seed N] [--mdc] [--json] [--rabbitmq]
+                                        write a day of a service's log with things worth finding: daily traffic,
+                                        a night batch, slowly growing warnings, an incident with a restart gap at
+                                        14:20 and an error spike at 19:40
   benchmark <file> [--iterations N]     compare line-indexing strategies on a file
   parse <file> [--iterations N] [--pattern LAYOUT]
                                         measure parsing with the detected format, or the given pattern layout
@@ -35,6 +39,11 @@ fun main(args: Array<String>) {
             generateLog(
                 Path.of(positional[1]), parseSize(positional[2]), option("seed")?.toLong() ?: 1L, flag("mdc"),
                 option("errors")?.toInt(), option("warnings")?.toInt(), flag("json"), flag("rabbitmq"),
+            )
+        "scenario" if positional.size == 3 ->
+            generateScenarioLog(
+                Path.of(positional[1]), parseSize(positional[2]), option("seed")?.toLong() ?: 1L,
+                flag("mdc"), flag("json"), flag("rabbitmq"),
             )
         "benchmark" if positional.size == 2 ->
             benchmarkIndexing(Path.of(positional[1]), option("iterations")?.toInt() ?: 5)
