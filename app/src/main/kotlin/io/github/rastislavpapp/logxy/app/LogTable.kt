@@ -14,6 +14,9 @@ import javax.swing.table.DefaultTableCellRenderer
 
 private const val CELL_PADDING = 12
 
+/** The last column (usually the message) keeps this many characters; when columns do not fit, the others shrink first. */
+private const val MIN_LAST_COLUMN_CHARS = 40
+
 /** Table of log records; the last column always fills the viewport and long values are cut. */
 class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
 
@@ -103,7 +106,10 @@ class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
                 field.role == Role.LEVEL -> LevelRenderer()
                 else -> null
             }
-            if (column == columnModel.columnCount - 1) continue
+            if (column == columnModel.columnCount - 1) {
+                tableColumn.minWidth = MIN_LAST_COLUMN_CHARS * charWidth
+                continue
+            }
             val chars = when {
                 field == null -> maxOf(logModel.totalRowCount.toString().length, 3)
                 field.type == ColumnType.TIMESTAMP -> sampleLength(column, 23)
