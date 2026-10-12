@@ -32,6 +32,7 @@ abstract class PreferencesPage(val title: String, val icon: Icon) : JPanel() {
 /**
  * The app's settings, one section per page, opening on [section] (or the last one shown).
  * The parser being edited previews [previewFile]; [offerUse] adds a button that uses the selected parser for it.
+ * [adopt] is added to the parsers as a new one.
  */
 class PreferencesDialog(
     owner: Window?,
@@ -39,6 +40,7 @@ class PreferencesDialog(
     previewFile: Path? = null,
     select: LogFormat? = null,
     offerUse: Boolean = false,
+    adopt: LogFormat? = null,
 ) : JDialog(owner, "Preferences", ModalityType.APPLICATION_MODAL) {
 
     enum class Section { PARSERS, LEVELS, MEMORY, OPENING }
@@ -47,7 +49,7 @@ class PreferencesDialog(
     var formatToUse: LogFormat? = null
         private set
 
-    private val parsers = ParsersPage(previewFile, select)
+    private val parsers = ParsersPage(previewFile, select, adopt)
     private val pages = listOf(parsers, LevelsPage(), MemoryPage(), OpeningPage())
     private val cards = CardLayout()
     private val content = JPanel(cards)

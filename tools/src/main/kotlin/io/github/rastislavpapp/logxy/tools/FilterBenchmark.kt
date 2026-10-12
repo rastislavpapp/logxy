@@ -16,7 +16,7 @@ import java.nio.file.Path
 
 /** Parses [file] with the detected format and times typical filters, first and cached runs. */
 fun benchmarkFiltering(file: Path) {
-    val compiled = LogFormat.detect(file).compile() ?: error("No built-in format matches $file")
+    val compiled = LogFormat.detect(file).compile() ?: error("No format detected for $file")
     val started = System.nanoTime()
     val log = runBlocking { ParsedLog.build(file, compiled) }
     println("File: $file (${formatByteSize(Files.size(file))}), %,d records, parsed in %.2f s\n"

@@ -30,8 +30,15 @@ import javax.swing.table.DefaultTableCellRenderer
 
 private const val PREVIEW_LINES = 200
 
-/** Edits the saved parsers (formats), with a preview of [previewFile] read by the one being edited. */
-class ParsersPage(private val previewFile: Path?, select: LogFormat?) : PreferencesPage("Parsers", Icons.settings) {
+/**
+ * Edits the saved parsers (formats), with a preview of [previewFile] read by the one being edited.
+ * [adopt], e.g. a detected format, is added as a new parser.
+ */
+class ParsersPage(
+    private val previewFile: Path?,
+    select: LogFormat?,
+    adopt: LogFormat? = null,
+) : PreferencesPage("Parsers", Icons.settings) {
 
     private class Entry(val format: LogFormat, val builtIn: Boolean)
 
@@ -75,6 +82,7 @@ class ParsersPage(private val previewFile: Path?, select: LogFormat?) : Preferen
 
         val index = (0..<entries.size).firstOrNull { entries[it].format == select } ?: 0
         if (entries.size > 0) list.selectedIndex = index
+        adopt?.let { addFormat(named(it, uniqueName(it.name))) }
     }
 
     /** The selected parser, if it is one the user may use. */
@@ -114,7 +122,12 @@ class ParsersPage(private val previewFile: Path?, select: LogFormat?) : Preferen
             add(JScrollPane(list), "grow, wrap")
             add(JButton("New").apply { addActionListener { addFormat(newFormat()) } }, "split 3")
             add(JButton("Duplicate").apply { addActionListener { selected()?.let { addFormat(copyOf(it.format)) } } })
-            add(deleteButton)
+            add(deleteButton, "wrap")
+            add(JButton("Detect from File").apply {
+                isEnabled = previewFile != null
+                toolTipText = if (previewFile == null) "Open a file to detect its layout" else "Adds a parser guessed from the open file"
+                addActionListener { detect() }
+            })
         }
         previewTable.apply {
             autoResizeMode = JTable.AUTO_RESIZE_ALL_COLUMNS
@@ -240,6 +253,15 @@ class ParsersPage(private val previewFile: Path?, select: LogFormat?) : Preferen
         nameField.selectAll()
     }
 
+    private fun detect() {
+        val format = previewFile?.let { file -> runCatching { LogFormat.infer(file) }.getOrNull() }
+        if (format == null) {
+            status.text = "No layout found in the file."
+            return
+        }
+        addFormat(named(format, uniqueName(format.name)))
+    }
+
     private fun deleteSelected() {
         val entry = selected() ?: return
         if (entry.builtIn) return
@@ -255,10 +277,12 @@ class ParsersPage(private val previewFile: Path?, select: LogFormat?) : Preferen
 
     private fun newFormat() = LogFormat.Pattern(uniqueName("My parser"), "%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %-5p %c - %m%n")
 
-    private fun copyOf(format: LogFormat): LogFormat = when (format) {
-        is LogFormat.Pattern -> format.copy(name = uniqueName("${format.name} copy"))
-        is LogFormat.Regex -> format.copy(name = uniqueName("${format.name} copy"))
-        is LogFormat.Json -> format.copy(name = uniqueName("${format.name} copy"))
+    private fun copyOf(format: LogFormat): LogFormat = named(format, uniqueName("${format.name} copy"))
+
+    private fun named(format: LogFormat, name: String): LogFormat = when (format) {
+        is LogFormat.Pattern -> format.copy(name = name)
+        is LogFormat.Regex -> format.copy(name = name)
+        is LogFormat.Json -> format.copy(name = name)
         LogFormat.Raw -> newFormat()
     }
 

@@ -56,7 +56,7 @@ private fun measureAll(): Map<String, Double> {
     }
 
     val main = dataFile("main.log", MAIN_SIZE, 1)
-    val format = LogFormat.detect(main).compile() ?: error("No built-in format matches $main")
+    val format = LogFormat.detect(main).compile() ?: error("No format detected for $main")
     var log: ParsedLog? = null
     record("parse 1 GB file", best {
         log?.close()
@@ -95,7 +95,7 @@ private fun measureAll(): Map<String, Double> {
             parts.clear()
             System.gc()
             for (file in files) {
-                val compiled = LogFormat.detect(file).compile() ?: error("No built-in format matches $file")
+                val compiled = LogFormat.detect(file).compile() ?: error("No format detected for $file")
                 parts += runBlocking { ParsedLog.build(file, compiled) }
             }
         })
@@ -109,7 +109,7 @@ private fun measureAll(): Map<String, Double> {
                 files.map { file ->
                     async(Dispatchers.IO) {
                         permits.withPermit {
-                            val compiled = LogFormat.detect(file).compile() ?: error("No built-in format matches $file")
+                            val compiled = LogFormat.detect(file).compile() ?: error("No format detected for $file")
                             ParsedLog.build(file, compiled)
                         }
                     }

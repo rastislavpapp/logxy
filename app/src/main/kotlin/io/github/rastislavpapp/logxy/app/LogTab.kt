@@ -214,6 +214,9 @@ class LogTab(
                 add(PopupItem(format.name, selected = format == chosen, separatorBefore = i == 0, tools = tools) { session.useFormat(format) })
             }
             add(PopupItem("Edit Parsers", Icons.settings, separatorBefore = true) { editParsers(chosen ?: session.format) })
+            // A guessed format is none of the known ones; saving it makes it one the user can correct.
+            val detected = session.format.takeIf { chosen == null && session.formatDetected && it !in known }
+            if (detected != null) add(PopupItem("Save Detected Parser…") { editParsers(detected, adopt = true) })
         }
         showPopupList(parserButton, items)
     }
@@ -351,8 +354,11 @@ class LogTab(
 
     private fun autoLabel() = if (session.formatDetected) "Auto: ${session.format.name}" else "Auto-detect"
 
-    private fun editParsers(select: LogFormat) {
-        val dialog = PreferencesDialog(SwingUtilities.getWindowAncestor(this), PreferencesDialog.Section.PARSERS, path, select, offerUse = !isMerged)
+    private fun editParsers(select: LogFormat, adopt: Boolean = false) {
+        val dialog = PreferencesDialog(
+            SwingUtilities.getWindowAncestor(this), PreferencesDialog.Section.PARSERS, path, select, offerUse = !isMerged,
+            adopt = select.takeIf { adopt },
+        )
         dialog.isVisible = true
         session.useFormat(dialog.formatToUse ?: return)
     }
