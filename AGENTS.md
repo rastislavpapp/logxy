@@ -48,3 +48,17 @@ It renders with Linux fonts and look-and-feel, so Windows- or macOS-specific beh
 
 - Commit messages are a single short subject line in the imperative, e.g. `Set up project skeleton`. No body listing the changes; the diff shows them.
 - Add a body only when there is a non-obvious *why* that the diff cannot show, and keep it to a sentence or two.
+
+## Agent skills
+
+### Issue tracker
+
+Issues live in GitHub Issues on `rastislavpapp/logxy`, managed with the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Default vocabulary: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: one `CONTEXT.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.
