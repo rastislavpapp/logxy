@@ -4,7 +4,6 @@ import io.github.rastislavpapp.logxy.core.archive.ArchiveOrigin
 import io.github.rastislavpapp.logxy.core.config.SavedFilter
 import io.github.rastislavpapp.logxy.core.log.ColumnType
 import io.github.rastislavpapp.logxy.core.log.Level
-import io.github.rastislavpapp.logxy.core.log.Records
 import io.github.rastislavpapp.logxy.core.log.Role
 import io.github.rastislavpapp.logxy.core.parse.LogFormat
 import io.github.rastislavpapp.logxy.core.query.Highlighter
@@ -14,10 +13,11 @@ import io.github.rastislavpapp.logxy.core.query.QueryOp
 import io.github.rastislavpapp.logxy.core.query.QueryPrinter
 import io.github.rastislavpapp.logxy.core.query.TextSearch
 import io.github.rastislavpapp.logxy.core.query.TimeLiteral
-import io.github.rastislavpapp.logxy.core.session.FilteredRows
+import io.github.rastislavpapp.logxy.core.session.CopyResult
 import io.github.rastislavpapp.logxy.core.session.LogSession
 import io.github.rastislavpapp.logxy.core.session.SessionListener
 import io.github.rastislavpapp.logxy.core.session.SessionStatus
+import io.github.rastislavpapp.logxy.core.session.ShownLog
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -25,10 +25,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.swing.Swing
-import kotlinx.coroutines.withContext
 import net.miginfocom.swing.MigLayout
 import java.awt.BorderLayout
 import java.awt.Component
@@ -64,7 +62,6 @@ private const val MAX_DETAIL_BYTES = 1024 * 1024
 private const val MAX_TITLE_CHARS = 40
 private const val MAX_MENU_CHARS = 80
 private const val MAX_RULE_CHARS = 1000
-private const val MAX_UNTIMED_ROWS = 1000
 private val RANGE_OPS = listOf(QueryOp.AT_LEAST, QueryOp.ABOVE, QueryOp.AT_MOST, QueryOp.BELOW)
 private const val BOTTOM_TAB_PATTERNS = "patterns"
 
@@ -179,8 +176,8 @@ class LogTab(
             val first = selection.minSelectionIndex
             val last = selection.maxSelectionIndex
             if (first < 0 || first == last || last >= model.rowCount) return null
-            val start = model.records.timestamp(model.recordAt(first)) ?: return null
-            val end = model.records.timestamp(model.recordAt(last)) ?: return null
+            val start = model.shown.timestamp(model.recordAt(first)) ?: return null
+            val end = model.shown.timestamp(model.recordAt(last)) ?: return null
             return end - start
         }
 
@@ -311,27 +308,22 @@ class LogTab(
         popup.add(JMenuItem("Copy Column").apply {
             toolTipText = "The whole value of “${field.name}” of every shown row, one row per line"
             addActionListener {
-                copyColumn(model.records, model.records.schema.fields.indexOf(field), IntArray(model.totalRowCount) { model.recordAtIndex(it) })
+                val shown = model.shown
+                copyColumn { shown.copyColumn(shown.schema.fields.indexOf(field)) }
             }
         })
         popup.show(header, x, y)
     }
 
-    /** Copies [field] of [records], one per line; reading many may take a while, so it is done off the UI thread. */
-    private fun copyColumn(log: Records, field: Int, records: IntArray) {
+    /** Copies the column [read] gives; reading many values may take a while. Closing the tab cancels it. */
+    private fun copyColumn(read: suspend () -> CopyResult) {
         scope.launch {
-            val text = try {
-                withContext(Dispatchers.IO) {
-                    buildString { for (record in records) append(log.fieldText(record, field)).append('\n') }
-                }
-            } catch (e: Exception) {
-                // A reload closes the file under the read; closing the tab cancels this.
-                if (e is CancellationException) throw e
-                ensureActive()
-                JOptionPane.showMessageDialog(this@LogTab, "The file changed while copying; copy the column again.", "Copy Column", JOptionPane.ERROR_MESSAGE)
-                return@launch
+            val message = when (val result = read()) {
+                is CopyResult.Copied -> return@launch copy(result.text)
+                CopyResult.FileChanged -> "The file changed while copying; copy the column again."
+                is CopyResult.Failed -> "Cannot copy the column: ${result.message}"
             }
-            copy(text)
+            JOptionPane.showMessageDialog(this@LogTab, message, "Copy Column", JOptionPane.ERROR_MESSAGE)
         }
     }
 
@@ -341,9 +333,10 @@ class LogTab(
     private fun showCellMenu(table: LogTable, row: Int, column: Int, x: Int, y: Int) {
         val model = model ?: return
         val field = model.fieldAt(column) ?: return
-        val fieldIndex = model.records.schema.fields.indexOf(field)
+        val shown = model.shown
+        val fieldIndex = shown.schema.fields.indexOf(field)
         // The whole value, not the cell's text, which is cut to its first line and has its tabs expanded.
-        val value = model.records.fieldText(model.recordAt(row), fieldIndex)
+        val value = shown.fieldText(model.recordAt(row), fieldIndex)
         val level = model.level(row)?.takeIf { field.role == Role.LEVEL && it != Level.UNKNOWN }
         val firstLine = value.lineSequence().first()
         val escaped = firstLine.take(MAX_RULE_CHARS).replace("\\", "\\\\").replace("*", "\\*").replace("?", "\\?")
@@ -353,7 +346,7 @@ class LogTab(
             if (level != null) Query.Rule(field.name, op, level.name, bare = true) else Query.Rule(field.name, op, pattern)
         val popup = JPopupMenu()
         popup.add(JMenuItem("Copy Cell Value").apply {
-            addActionListener { copy(model.records.fieldText(model.recordAt(row), fieldIndex)) }
+            addActionListener { copy(shown.fieldText(model.recordAt(row), fieldIndex)) }
         })
         // Within a selection of several rows, the menu also copies from all of them.
         if (table.isRowSelected(row) && table.selectedRowCount > 1) {
@@ -361,7 +354,10 @@ class LogTab(
                 addActionListener { table.transferHandler.exportToClipboard(table, Toolkit.getDefaultToolkit().systemClipboard, TransferHandler.COPY) }
             })
             popup.add(JMenuItem("Copy Column “${field.name}”").apply {
-                addActionListener { copyColumn(model.records, fieldIndex, table.selectedRows.map(model::recordAt).toIntArray()) }
+                addActionListener {
+                    val records = table.selectedRows.map(model::recordAt).toIntArray()
+                    copyColumn { shown.copyColumn(fieldIndex, records) }
+                }
             })
         }
         popup.addSeparator()
@@ -374,7 +370,7 @@ class LogTab(
         // `== ""` is a placeholder that filters nothing; `!= ""` keeps records with a value.
         if (value.isNotEmpty()) add(rule(QueryOp.EQUALS))
         add(rule(QueryOp.NOT_EQUALS))
-        val template = if (field.role == Role.MESSAGE && model.records.schema.hasPatterns()) session.templateOf(model.recordAt(row)) else null
+        val template = if (field.role == Role.MESSAGE && shown.schema.hasPatterns()) session.templateOf(model.recordAt(row)) else null
         if (template != null) {
             popup.addSeparator()
             add(Query.Rule(Query.PATTERN_FIELD, QueryOp.EQUALS, template))
@@ -385,7 +381,7 @@ class LogTab(
             for (op in RANGE_OPS) add(Query.Rule(field.name, op, level.name, bare = true))
         }
         // The literal is written from the record's time, as the log's own layout may not parse back (e.g. offsets).
-        val time = model.records.timestamp(model.recordAt(row))?.takeIf { field.type == ColumnType.TIMESTAMP }
+        val time = shown.timestamp(model.recordAt(row))?.takeIf { field.type == ColumnType.TIMESTAMP }
         if (time != null) {
             val literal = TimeLiteral.format(time, ZoneId.systemDefault())
             popup.addSeparator()
@@ -468,8 +464,8 @@ class LogTab(
         showCentered(*components.toTypedArray())
     }
 
-    private fun showTable(records: Records) {
-        val model = LogTableModel(records)
+    private fun showTable(shown: ShownLog) {
+        val model = LogTableModel(shown)
         // Columns hidden before stay hidden, unless that would hide them all (the file changed meanwhile).
         model.hiddenColumns = hiddenColumns.takeIf { hidden -> model.columnChoices.any { it.name !in hidden } }.orEmpty()
         val table = LogTable(model)
@@ -499,7 +495,7 @@ class LogTab(
         val scrollPane = VirtualScrollPane(table, model)
         scrollPane.onFollowChanged = { session.follow = it }
         scrollPane.resumeFollowAtEnd = { session.isLive }
-        val timestampField = records.schema.fields.firstOrNull { it.role == Role.TIMESTAMP }?.name
+        val timestampField = shown.schema.fields.firstOrNull { it.role == Role.TIMESTAMP }?.name
         scrollPane.onRowsInViewChanged = ::showMarkedTimes
         val histogramBar = timestampField?.let { field ->
             TimeHistogramBar { session.histogram }.apply {
@@ -522,8 +518,8 @@ class LogTab(
         this.scrollPane = scrollPane
         this.histogramBar = histogramBar
         table.found = foundMarks
-        filterBar.setSchema(records.schema)
-        patterns.canFilter = records.schema.hasPatterns()
+        filterBar.setSchema(shown.schema)
+        patterns.canFilter = shown.schema.hasPatterns()
         setFilterVisible(true)
 
         detail.text = ""
@@ -556,7 +552,7 @@ class LogTab(
     }
 
     private fun showDetail(model: LogTableModel, row: Int) {
-        detail.show(if (row < 0 || row >= model.rowCount) "" else model.records.recordText(model.recordAt(row), MAX_DETAIL_BYTES))
+        detail.show(if (row < 0 || row >= model.rowCount) "" else model.shown.recordText(model.recordAt(row), MAX_DETAIL_BYTES))
         // A long record, e.g. with a stack trace, shows where the find bar's text is.
         detail.caretPosition = detail.firstFound
     }
@@ -566,7 +562,7 @@ class LogTab(
         val model = model ?: return
         val row = table?.selectionModel?.leadSelectionIndex ?: return
         if (row !in 0..<model.rowCount || model.recordAt(row) != record) return
-        val text = model.records.recordText(record, MAX_DETAIL_BYTES)
+        val text = model.shown.recordText(record, MAX_DETAIL_BYTES)
         if (text == detail.text) return
         val caret = detail.caretPosition
         detail.show(text)
@@ -575,7 +571,7 @@ class LogTab(
 
     /** Applies the filter bar's level and query to this file's records. */
     private fun applyFilter() {
-        if (session.records == null) return
+        if (session.shown == null) return
         try {
             // While suspended the query is not read: text that does not parse must not keep it from showing all.
             val query = if (filterBar.suspended) null else filterBar.query()
@@ -590,13 +586,13 @@ class LogTab(
         }
     }
 
-    private fun showRows(rows: FilteredRows?, keepView: Boolean) {
+    private fun showRows(keepView: Boolean, oldSize: Int, recordBefore: (row: Int) -> Int) {
         val model = model ?: return
         val table = table ?: return
         val scrollPane = scrollPane ?: return
-        val selected = table.selectedRow.takeIf { it >= 0 }?.let { model.recordAt(it) }
-        val top = if (model.totalRowCount > 0) model.recordAtIndex(scrollPane.firstVisibleRow) else null
-        model.showRows(rows)
+        val selected = (model.windowStart + table.selectedRow).takeIf { table.selectedRow >= 0 && it < oldSize }?.let(recordBefore)
+        val top = scrollPane.firstVisibleRow.takeIf { it < oldSize }?.let(recordBefore)
+        model.rowsReplaced()
         scrollPane.rowsReplaced()
         patterns.refresh()
         val selectedIndex = selected?.let { record -> model.indexOfRecord(record).takeIf { it >= 0 && model.recordAtIndex(it) == record } }
@@ -743,11 +739,11 @@ class LogTab(
         val first = selection.minSelectionIndex
         val last = selection.maxSelectionIndex
         bar.markedTimes = if (first >= 0 && last < model.rowCount) {
-            val from = model.records.timestamp(model.recordAt(first))
-            val to = model.records.timestamp(model.recordAt(last))
+            val from = model.shown.timestamp(model.recordAt(first))
+            val to = model.shown.timestamp(model.recordAt(last))
             if (from != null && to != null) minOf(from, to) to maxOf(from, to) else (from ?: to)?.let { it to it }
         } else if (model.totalRowCount > 0) {
-            model.records.timestamp(model.recordAtIndex(scrollPane.firstVisibleRow))?.let { it to it }
+            model.shown.timestamp(model.recordAtIndex(scrollPane.firstVisibleRow))?.let { it to it }
         } else {
             null
         }
@@ -757,26 +753,10 @@ class LogTab(
     private fun jumpToTime(time: Long) {
         val model = model ?: return
         val scrollPane = scrollPane ?: return
-        if (model.totalRowCount == 0) return
-        // Rows are about in time order; a few out of order only make the jump land near them.
-        var low = 0
-        var high = model.totalRowCount
-        while (low < high) {
-            val middle = (low + high) ushr 1
-            if (timeFrom(model, middle) < time) low = middle + 1 else high = middle
-        }
+        val row = model.shown.firstRowAt(time).takeIf { it >= 0 } ?: return
         session.follow = false
-        scrollPane.selectRow(minOf(low, model.totalRowCount - 1))
+        scrollPane.selectRow(row)
         table?.requestFocusInWindow()
-    }
-
-    /** The time of the shown row at [index], or of the next one that has a time; [Long.MAX_VALUE] if none near. */
-    private fun timeFrom(model: LogTableModel, index: Int): Long {
-        for (row in index..<minOf(model.totalRowCount, index + MAX_UNTIMED_ROWS)) {
-            val time = model.records.timestampNanos(model.recordAtIndex(row))
-            if (time != Records.NO_TIMESTAMP) return time
-        }
-        return Long.MAX_VALUE
     }
 
     private fun timeLiteral(nanos: Long) = TimeLiteral.format(nanos, ZoneId.systemDefault())
@@ -840,17 +820,20 @@ class LogTab(
     }
 
     private inner class Listener : SessionListener {
-        override fun indexing(fraction: () -> Double) {
+        override fun indexing(fraction: () -> Double) = showProgress(fraction)
+
+        override fun shownEnded() {
             columnsButton.isEnabled = false
             searchJob?.cancel()
             searchJob = null
             found = IntArray(0)
             histogramBar = null
             patterns.reset()
+            // The table may still be painted until indexing shows its progress: with no rows.
+            model?.rowsReplaced()
             model = null
             table = null
             scrollPane = null
-            showProgress(fraction)
         }
 
         override fun problem(title: String, detail: String, hint: String?) {
@@ -858,9 +841,9 @@ class LogTab(
             showProblem(title, detail, hint)
         }
 
-        override fun loaded(records: Records) {
+        override fun loaded(shown: ShownLog) {
             stopProgress()
-            showTable(records)
+            showTable(shown)
         }
 
         override fun notMergeable(paths: List<Path>) {
@@ -874,22 +857,18 @@ class LogTab(
         override fun fieldsShown() {
             val model = model ?: return
             model.schemaChanged()
-            filterBar.setSchema(model.records.schema)
+            filterBar.setSchema(model.shown.schema)
         }
 
-        override fun recordsAppended(oldRecordCount: Int, changed: IntArray) {
-            model?.recordsAppended(oldRecordCount, changed)
+        override fun recordsGrew(changed: IntArray) {
+            model?.recordsGrew(changed)
             changed.forEach(::refreshDetail)
-            if (session.shown == null) {
-                scrollPane?.rowsAppended()
-                patterns.refreshSoon()
-                searchAppendedSoon()
-            }
         }
 
-        override fun rowsReplaced(rows: FilteredRows?, keepView: Boolean) = showRows(rows, keepView)
+        override fun rowsReplaced(keepView: Boolean, oldSize: Int, recordBefore: (row: Int) -> Int) =
+            showRows(keepView, oldSize, recordBefore)
 
-        override fun rowsExtended(firstChanged: Int, oldSize: Int) {
+        override fun rowsChanged(firstChanged: Int, oldSize: Int) {
             model?.rowsChangedFrom(firstChanged, oldSize)
             scrollPane?.rowsAppended()
             patterns.refreshSoon()

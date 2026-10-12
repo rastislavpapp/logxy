@@ -69,8 +69,11 @@ interface SessionListener {
     /** The files could not be shown. */
     fun problem(title: String, detail: String, hint: String?)
 
-    /** [records] are ready to be shown; the view applies its filter next. */
-    fun loaded(records: Records)
+    /** [shown] is ready to be shown, all records for now; the view applies its filter next. */
+    fun loaded(shown: ShownLog)
+
+    /** The shown log of the last [loaded] ended, before its files are closed: drop it and what was read from it. */
+    fun shownEnded()
 
     /** [paths] have no timestamps, so they were left out of the merge; the view may open them on their own. */
     fun notMergeable(paths: List<Path>)
@@ -79,19 +82,22 @@ interface SessionListener {
     fun formatChanged()
 
     /**
-     * Records were appended; there were [oldRecordCount] before. The records at [changed] may have grown
-     * (the last record of each file that grew). With a filter, [rowsExtended] follows.
+     * Records at [changed] may have more text now (the last record of each file that grew); their rows
+     * stay where they are. New rows, if any, follow with [rowsChanged].
      */
-    fun recordsAppended(oldRecordCount: Int, changed: IntArray)
+    fun recordsGrew(changed: IntArray)
 
-    /** Appended records have a field no record had before, so the records' schema shows it now; [recordsAppended] follows. */
+    /** Appended records have a field no record had before, so the records' schema shows it now; [recordsGrew] follows. */
     fun fieldsShown()
 
-    /** All shown rows changed: [rows] with a filter, all records without. [keepView] keeps the rows on screen in place. */
-    fun rowsReplaced(rows: FilteredRows?, keepView: Boolean)
+    /**
+     * All shown rows changed, e.g. to a new filter's result; [keepView] keeps the rows on screen in place.
+     * There were [oldSize] rows before, [recordBefore] tells which record each of them showed.
+     */
+    fun rowsReplaced(keepView: Boolean, oldSize: Int, recordBefore: (row: Int) -> Int)
 
-    /** The filtered rows from position [firstChanged] on changed (new records); there were [oldSize] rows before. */
-    fun rowsExtended(firstChanged: Int, oldSize: Int)
+    /** The shown rows from [firstChanged] on changed, e.g. records were appended; there were [oldSize] rows before. */
+    fun rowsChanged(firstChanged: Int, oldSize: Int)
 
     /** The level mapping changed; shown levels may have different colors. */
     fun levelMappingChanged()
@@ -167,8 +173,12 @@ class LogSession(
     var formatDetected = false
         private set
 
-    /** What is shown: the log of a single file, or a [MergedLog]. */
-    var records: Records? = null
+    /** The log of a single file, or a [MergedLog]. */
+    internal var records: Records? = null
+        private set
+
+    /** What is shown of the files loaded, null while there is nothing to show (indexing, errors). */
+    var shown: ShownLog? = null
         private set
 
     private var engine: RecordFilter? = null
@@ -177,10 +187,6 @@ class LogSession(
 
     /** Whether the rows shown are [activeFilter]'s result (all records without one). */
     private var filterShown = false
-
-    /** The rows shown, or null for all records. */
-    var shown: FilteredRows? = null
-        private set
 
     // How much of the records the shown filter result covers: records, and bytes (the last record may grow without new ones).
     private var filteredRecords = 0
@@ -297,11 +303,10 @@ class LogSession(
     suspend fun patternCounts(): PatternCounts? {
         // Counting the times takes a fraction of finding the templates: let it have the threads first.
         while (true) countJob?.takeIf { it.isActive }?.join() ?: break
-        val records = records ?: return null
+        val shown = shown ?: return null
         val engine = engine ?: return null
-        if (records.schema.indexOf(Role.MESSAGE) < 0) return null
-        val rows = shown
-        return engine.countPatterns(rows?.array(), rows?.size ?: records.recordCount)
+        if (shown.schema.indexOf(Role.MESSAGE) < 0) return null
+        return engine.countPatterns(shown.rowArray, shown.rowCount)
     }
 
     /** The template of [record]'s message; null if it has none, or nothing is loaded. */
@@ -400,6 +405,8 @@ class LogSession(
             }
             engine = if (view is MergedLog) MergedFilter(view) else FilterEngine(view as LogData)
             records = view
+            val shown = ShownLog(view)
+            this.shown = shown
             indexMillis = (System.nanoTime() - started) / 1_000_000
             withContext(Dispatchers.IO) {
                 for (source in sources) {
@@ -409,7 +416,7 @@ class LogSession(
             }
             problem = null
             filterShown = false
-            listener.loaded(view)
+            listener.loaded(shown)
             if (isLive) follow = true
             updateStatus()
             return true
@@ -503,8 +510,13 @@ class LogSession(
                         return
                     }
                     if (records.schema !== oldSchema) listener.fieldsShown()
-                    listener.recordsAppended(oldRecordCount, changed.toIntArray())
-                    if (activeFilter != null) catchUpFilter() else countTimes(anew = false)
+                    listener.recordsGrew(changed.toIntArray())
+                    if (activeFilter != null) {
+                        catchUpFilter()
+                    } else {
+                        if (records.recordCount > oldRecordCount) listener.rowsChanged(oldRecordCount, oldRecordCount)
+                        countTimes(anew = false)
+                    }
                     if (promoted) follow = true
                 }
             } catch (e: IOException) {
@@ -567,12 +579,13 @@ class LogSession(
     private fun runFilter(keepView: Boolean, evaluation: PreparedFilter?) {
         filterJob?.cancel()
         filterShown = evaluation == null
+        val shown = shown ?: return
         if (evaluation == null) {
-            if (shown != null || !keepView || filtering) {
+            if (shown.isFiltered || !keepView || filtering) {
                 filtering = false
                 running = null
-                shown = null
-                listener.rowsReplaced(null, keepView)
+                val oldSize = shown.size
+                listener.rowsReplaced(keepView, oldSize, shown.showRows(null))
                 updateStatus()
                 countTimes(anew = true)
             }
@@ -602,12 +615,12 @@ class LogSession(
             indicator.cancel()
             filtering = false
             running = null
-            val rows = FilteredRows(result.rows)
-            shown = rows
+            val oldSize = shown.size
+            val recordBefore = shown.showRows(result.rows)
             filterShown = true
             filteredRecords = result.recordCount
             filteredBytes = result.indexedSize
-            listener.rowsReplaced(rows, keepView)
+            listener.rowsReplaced(keepView, oldSize, recordBefore)
             updateStatus()
             countTimes(anew = true)
             // Still the current job (a replaced one would have been cancelled), but done.
@@ -622,7 +635,7 @@ class LogSession(
      */
     private fun catchUpFilter() {
         val filter = activeFilter ?: return
-        val rows = shown ?: return
+        val shown = shown?.takeIf { it.isFiltered } ?: return
         if (filterJob?.isActive == true || filteredBytes >= indexedSize()) return
         // Records covered then may have grown since (the last one of each file), so they are filtered again.
         val engine = engine ?: return
@@ -630,11 +643,11 @@ class LogSession(
         val evaluation = engine.prepare(filter, from)
         filterJob = scope.launch {
             val result = evaluation.run()
-            val oldSize = rows.size
-            val firstChanged = rows.replaceFrom(from, result.rows)
+            val oldSize = shown.rowCount
+            val firstChanged = shown.replaceRowsFrom(from, result.rows)
             filteredRecords = result.recordCount
             filteredBytes = result.indexedSize
-            listener.rowsExtended(firstChanged, oldSize)
+            listener.rowsChanged(firstChanged, oldSize)
             updateStatus()
             countTimes(anew = false)
             filterJob = null
@@ -658,15 +671,15 @@ class LogSession(
             return
         }
         countAgain = false
-        val rows = shown
-        val size = rows?.size ?: records.recordCount
+        val shown = shown ?: return
+        val size = shown.rowCount
         // From the first record still growing on, rows may change: they are counted again each time.
-        val changing = engine.changedFrom(if (rows == null) records.recordCount else filteredRecords)
-        val settle = if (rows == null) minOf(changing, size) else rows.indexOf(changing).let { if (it < 0) size else it }
+        val changing = engine.changedFrom(if (shown.isFiltered) filteredRecords else records.recordCount)
+        val settle = shown.rowOf(changing).let { if (it < 0) size else it }
         val base = settled?.takeIf { !anew && settle >= settledRows }
         val from = if (base == null) 0 else settledRows
-        val (expectedFrom, expectedTo) = expectedTimes(records, rows, size)
-        val count = TimeCount(records, rows?.array(), from, size, settle, expectedFrom, expectedTo)
+        val (expectedFrom, expectedTo) = expectedTimes(shown)
+        val count = TimeCount(records, shown.rowArray, from, size, settle, expectedFrom, expectedTo)
         counting = count
         // Counted anew, the histogram is shown as it fills up; a stale part may still arrive after another count started.
         val onCounted: ((TimeHistogram) -> Unit)? = if (base != null) null else { counted ->
@@ -691,16 +704,9 @@ class LogSession(
     }
 
     /** The times of about the first and the last of the shown rows, for the bins to start with. */
-    private fun expectedTimes(records: Records, rows: FilteredRows?, size: Int): Pair<Long, Long> {
-        fun firstTime(indices: IntProgression): Long {
-            for (i in indices) {
-                val time = records.timestampNanos(if (rows == null) i else rows[i])
-                if (time != Records.NO_TIMESTAMP) return time
-            }
-            return Records.NO_TIMESTAMP
-        }
-        val first = firstTime(0..<minOf(TIME_PROBE_ROWS, size))
-        val last = firstTime(size - 1 downTo maxOf(0, size - TIME_PROBE_ROWS))
+    private fun expectedTimes(shown: ShownLog): Pair<Long, Long> {
+        val first = shown.timeFrom(0)
+        val last = shown.timeUntil(shown.size - 1)
         // An end without times takes the other's, so the bins do not start out spanning the years since the epoch.
         val from = if (first != Records.NO_TIMESTAMP) first else if (last != Records.NO_TIMESTAMP) last else 0
         val to = if (last != Records.NO_TIMESTAMP) last else from
@@ -720,7 +726,7 @@ class LogSession(
             SessionStatus(
                 size = indexedSize(),
                 records = records.recordCount,
-                shown = shown?.size,
+                shown = shown?.takeIf { it.isFiltered }?.rowCount,
                 unit = if (records.isRaw) "line" else "record",
                 live = isLive,
                 following = follow,
@@ -732,6 +738,12 @@ class LogSession(
     }
 
     private fun closeLogs() {
+        // Before closing: what the view still holds must not read closed files.
+        shown?.let {
+            it.end()
+            shown = null
+            listener.shownEnded()
+        }
         filterJob?.cancel()
         countJob?.cancel()
         countJob = null
@@ -744,7 +756,6 @@ class LogSession(
         filteredBytes = 0L
         filtering = false
         running = null
-        shown = null
         activeFilter = null
         for (source in sources) {
             source.log?.close()
@@ -758,8 +769,5 @@ class LogSession(
         const val LIVE_POLL_MILLIS = 500L
         const val STATIC_POLL_MILLIS = 2000L
         const val FILTERING_INDICATOR_MILLIS = 200L
-
-        /** Rows at each end of the shown rows looked at for the times they cover. */
-        const val TIME_PROBE_ROWS = 1000
     }
 }

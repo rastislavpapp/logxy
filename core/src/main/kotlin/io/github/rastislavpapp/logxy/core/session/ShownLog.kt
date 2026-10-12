@@ -156,9 +156,11 @@ class ShownLog internal constructor(private val records: Records) {
     /** The record count while all are shown, or the filter result's size; unlike [size], also once [ended]. */
     internal val rowCount: Int get() = rows?.size ?: records.recordCount
 
-    /** Shows [rows] (sorted records), or all records if null. */
-    internal fun showRows(rows: IntArray?) {
+    /** Shows [rows] (sorted records), or all records if null; returns the record each row showed before. */
+    internal fun showRows(rows: IntArray?): (row: Int) -> Int {
+        val old = this.rows
         this.rows = rows?.let(::FilteredRows)
+        return { row -> old?.get(row) ?: row }
     }
 
     /**

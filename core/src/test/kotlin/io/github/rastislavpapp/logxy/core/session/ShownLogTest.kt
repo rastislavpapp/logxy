@@ -68,8 +68,11 @@ class ShownLogTest {
     fun `replacing rows from a record tells the first row that changed`() {
         val shown = shown(*LongArray(8) { it * 10L })
         shown.showRows(intArrayOf(1, 3, 5))
-        assertEquals(2, shown.replaceRowsFrom(5, intArrayOf(5, 6, 7)))
+        // Record 5 is still shown: rows change only after it.
+        assertEquals(3, shown.replaceRowsFrom(5, intArrayOf(5, 6, 7)))
         assertEquals(listOf(1, 3, 5, 6, 7), shown.records())
+        assertEquals(2, shown.replaceRowsFrom(5, intArrayOf(6, 7)))
+        assertEquals(listOf(1, 3, 6, 7), shown.records())
     }
 
     @Test

@@ -15,7 +15,7 @@ class RecordCopyHandler(private val model: LogTableModel) : TransferHandler() {
         val rows = (c as JTable).selectedRows.takeIf { it.isNotEmpty() } ?: return null
         val text = StringBuilder()
         for (row in rows) {
-            text.append(model.records.sourceText(model.recordAt(row)))
+            text.append(model.shown.sourceText(model.recordAt(row)))
             // The file's last line may have no line end; the next record must still start on a line of its own.
             if (text.isNotEmpty() && text.last() != '\n') text.append('\n')
         }
