@@ -697,10 +697,13 @@ class LogSession(
                 val time = records.timestampNanos(if (rows == null) i else rows[i])
                 if (time != Records.NO_TIMESTAMP) return time
             }
-            return 0
+            return Records.NO_TIMESTAMP
         }
-        val from = firstTime(0..<minOf(TIME_PROBE_ROWS, size))
-        val to = firstTime(size - 1 downTo maxOf(0, size - TIME_PROBE_ROWS))
+        val first = firstTime(0..<minOf(TIME_PROBE_ROWS, size))
+        val last = firstTime(size - 1 downTo maxOf(0, size - TIME_PROBE_ROWS))
+        // An end without times takes the other's, so the bins do not start out spanning the years since the epoch.
+        val from = if (first != Records.NO_TIMESTAMP) first else if (last != Records.NO_TIMESTAMP) last else 0
+        val to = if (last != Records.NO_TIMESTAMP) last else from
         return from to maxOf(from, to)
     }
 

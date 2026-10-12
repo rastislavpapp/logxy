@@ -63,16 +63,17 @@ object Restart {
     }
 
     /**
-     * The options this JVM was started with, such as `-D` properties, so the new one runs alike; not the
-     * memory limit, which is set anew, nor those from JAVA_TOOL_OPTIONS, which the new one gets anyway.
-     * Not a debugger's either, whose port this JVM still holds.
+     * The `-D` properties and module options this JVM was started with, so the new one runs alike; not those
+     * from JAVA_TOOL_OPTIONS, which the new one gets anyway. Others are left out, as they can stop the new JVM
+     * from starting: heap sizes clashing with the new limit, or agents and JMX holding a port this JVM still has.
      */
     private fun jvmOptions(): List<String> {
         val inherited = System.getenv("JAVA_TOOL_OPTIONS").orEmpty().split(' ').toSet()
         return ManagementFactory.getRuntimeMXBean().inputArguments.filter { option ->
-            option !in inherited && option != "--enable-native-access=ALL-UNNAMED" &&
-                !option.startsWith("-Xmx") && !option.startsWith("-XX:MaxHeapSize") &&
-                !option.startsWith("-agentlib:jdwp") && !option.startsWith("-Xrunjdwp")
+            option !in inherited && !option.startsWith("-Dcom.sun.management.jmxremote") &&
+                (option.startsWith("-D") || MODULE_OPTIONS.any { option.startsWith("$it=") })
         }
     }
+
+    private val MODULE_OPTIONS = listOf("--add-opens", "--add-exports", "--add-reads", "--add-modules")
 }

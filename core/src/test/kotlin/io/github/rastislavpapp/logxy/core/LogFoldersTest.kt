@@ -43,5 +43,7 @@ class LogFoldersTest {
         Files.createSymbolicLink(containers.resolve("loop"), containers)
         Files.createSymbolicLink(containers.resolve("gone.log"), dir.resolve("missing.log"))
         assertEquals(listOf(containers.resolve("app.log")), LogFolders.files(containers))
+        // The link and its target are found once.
+        assertEquals(listOf(containers.resolve("app.log")), LogFolders.files(dir))
     }
 }

@@ -60,4 +60,16 @@ class HighlighterTest {
         val h = of(rule(QueryOp.EQUALS, "*abc*"), rule(QueryOp.EQUALS, "*bcd*"))
         assertContentEquals(intArrayOf(0, 4), h.ranges("message", "abcd"))
     }
+
+    @Test
+    fun sortsMatchesOfSeveralRules() {
+        val h = of(rule(QueryOp.EQUALS, "*y*"), rule(QueryOp.EQUALS, "*x*"))
+        assertContentEquals(intArrayOf(0, 1, 2, 3, 4, 6), h.ranges("message", "x y xy"))
+    }
+
+    @Test
+    fun marksManyMatches() {
+        val ranges = Highlighter.of(TextSearch("e")).ranges(null, "e.".repeat(500_000))
+        assertContentEquals(IntArray(1_000_000) { it }, ranges)
+    }
 }

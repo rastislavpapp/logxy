@@ -18,7 +18,7 @@ object LogFolders {
     /**
      * The files in [folder] and, if [recursive], its subfolders, sorted by path. Leaves out hidden files
      * and folders (such as `.git`), empty files and binary files, except zips and .gz or .zst files.
-     * Unreadable folders are skipped.
+     * Unreadable folders are skipped. Of the paths to one file, through links, keeps only the first.
      */
     fun files(folder: Path, recursive: Boolean = true): List<Path> {
         val found = ArrayList<Path>()
@@ -35,7 +35,8 @@ object LogFolders {
 
             override fun visitFileFailed(file: Path, exc: IOException) = FileVisitResult.CONTINUE
         })
-        return found.sorted()
+        // A link and its target are one log, which would otherwise show each record twice.
+        return found.sorted().distinctBy { file -> runCatching { file.toRealPath() }.getOrDefault(file) }
     }
 
     private fun isHidden(path: Path) = path.fileName.toString().startsWith(".") || runCatching { Files.isHidden(path) }.getOrDefault(false)

@@ -18,37 +18,40 @@ class Highlighter private constructor(private val terms: List<Term>) {
      */
     fun ranges(field: String?, text: String): IntArray {
         if (terms.isEmpty() || text.isEmpty()) return EMPTY
-        var found = IntArray(0)
+        // Each match packed as start << 32 | end, so sorting them sorts by start.
+        var found = LongArray(16)
+        var count = 0
+        var sorted = true
         for (term in terms) {
             if (field != null && term.field != null && !term.field.equals(field, ignoreCase = true)) continue
             val matcher = term.pattern.matcher(text)
             while (matcher.find()) {
                 if (matcher.end() == matcher.start()) continue
-                found += intArrayOf(matcher.start(), matcher.end())
+                val match = matcher.start().toLong() shl 32 or matcher.end().toLong()
+                if (count == found.size) found = found.copyOf(count * 2)
+                if (count > 0 && match < found[count - 1]) sorted = false
+                found[count++] = match
             }
         }
-        return merge(found)
+        if (count == 0) return EMPTY
+        if (!sorted) found.sort(0, count)
+        return merge(found, count)
     }
 
-    private fun merge(found: IntArray): IntArray {
-        if (found.size <= 2) return found
-        val order = (0..<found.size / 2).sortedBy { found[it * 2] }
-        val result = ArrayList<Int>()
-        var start = found[order[0] * 2]
-        var end = found[order[0] * 2 + 1]
-        for (i in order.drop(1)) {
-            if (found[i * 2] <= end) {
-                end = maxOf(end, found[i * 2 + 1])
+    private fun merge(found: LongArray, count: Int): IntArray {
+        val result = IntArray(count * 2)
+        var size = 0
+        for (i in 0..<count) {
+            val start = (found[i] ushr 32).toInt()
+            val end = found[i].toInt()
+            if (size > 0 && start <= result[size - 1]) {
+                result[size - 1] = maxOf(result[size - 1], end)
             } else {
-                result += start
-                result += end
-                start = found[i * 2]
-                end = found[i * 2 + 1]
+                result[size++] = start
+                result[size++] = end
             }
         }
-        result += start
-        result += end
-        return result.toIntArray()
+        return result.copyOf(size)
     }
 
     companion object {
