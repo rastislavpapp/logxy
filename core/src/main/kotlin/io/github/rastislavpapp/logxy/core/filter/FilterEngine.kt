@@ -133,7 +133,9 @@ class FilterEngine(private val log: LogData, private val maxCacheBytes: Long = D
         private val from: Int,
     ) : PreparedFilter {
         private val words = (snapshot.count + 63) / 64
-        private val chunkCount = (words + CHUNK_WORDS - 1) / CHUNK_WORDS
+        // Small logs, like the parts of a merge, get smaller tasks so that every core gets some.
+        private val chunkWords = (words / Runtime.getRuntime().availableProcessors()).coerceIn(MIN_CHUNK_WORDS, CHUNK_WORDS)
+        private val chunkCount = (words + chunkWords - 1) / chunkWords
 
         // Progress counts chunks of the conditions that read the file, as the others take next to no time.
         private val readsFile = leaves(root).any { it.readsFile }
@@ -226,15 +228,15 @@ class FilterEngine(private val log: LogData, private val maxCacheBytes: Long = D
         private suspend fun compute(leaf: Leaf, need: LongArray): Pair<LongArray, Int> = coroutineScope {
             val out = LongArray(words)
             // Only chunks with records to test, e.g. just the appended ones while tailing.
-            val chunks = (0..<words step CHUNK_WORDS).filter { first ->
-                (first..<minOf(words, first + CHUNK_WORDS)).any { need[it] != 0L }
+            val chunks = (0..<words step chunkWords).filter { first ->
+                (first..<minOf(words, first + chunkWords)).any { need[it] != 0L }
             }
             chunks.mapIndexed { task, first ->
                 async {
                     ensureActive()
                     val cursor = snapshot.cursor()
                     val reader = if (leaf.readsFile) SpanReader(snapshot.channels.forTask(task), snapshot.end) else null
-                    for (w in first..<minOf(words, first + CHUNK_WORDS)) {
+                    for (w in first..<minOf(words, first + chunkWords)) {
                         var mask = need[w]
                         while (mask != 0L) {
                             val bit = java.lang.Long.numberOfTrailingZeros(mask)
@@ -264,8 +266,11 @@ class FilterEngine(private val log: LogData, private val maxCacheBytes: Long = D
     }
 
     private companion object {
-        /** Records per parallel task: 4096 words of 64. */
+        /** Records per parallel task at most: 4096 words of 64. Smaller tasks cost more each. */
         const val CHUNK_WORDS = 4096
+
+        /** Records per parallel task at least. */
+        const val MIN_CHUNK_WORDS = 512
 
         /** About 25 conditions on 40M records. */
         const val DEFAULT_CACHE_BYTES = 256L * 1024 * 1024
