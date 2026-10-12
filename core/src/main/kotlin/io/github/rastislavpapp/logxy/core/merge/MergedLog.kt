@@ -101,6 +101,26 @@ class MergedLog private constructor(
     override fun sourceText(record: Int): String = parts[part(record)].sourceText(record(record))
 
     /**
+     * Reads [field] of the [count] merged records in [records] (null: the first [count]) by their index there,
+     * on any thread. Call on the owner thread, which resolves where each record is.
+     */
+    internal fun fieldReader(field: Int, records: IntArray?, count: Int): (Int) -> String {
+        val recordParts = ByteArray(count) { partOf[records?.get(it) ?: it] }
+        val partRecords = IntArray(count) { recordOf[records?.get(it) ?: it] }
+        val snapshots = parts.map { it.filterSnapshot() }
+        val partFields = IntArray(parts.size) { merged.partField(it, field) }
+        val names = names
+        return { i ->
+            val part = recordParts[i].toInt() and 0xFF
+            when {
+                field == MergedSchema.SOURCE -> names[part]
+                partFields[part] < 0 -> ""
+                else -> snapshots[part].fieldText(partRecords[i], partFields[part])
+            }
+        }
+    }
+
+    /**
      * Merges the records the parts got since the last merge and adds them at the end. Returns false if
      * a part now has fewer records than were merged (its last record was parsed differently); then the
      * merge cannot be continued and must be built again. Call on the owner thread after appending; the
