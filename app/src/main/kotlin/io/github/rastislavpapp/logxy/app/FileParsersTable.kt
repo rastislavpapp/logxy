@@ -141,7 +141,7 @@ class FileParsersTable(
                     foreground = if (file in excluded) UIManager.getColor("Label.disabledForeground") else null
                     super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column)
                     val format = value as LogFormat?
-                    text = (if (format == null) detected[file]?.let { "Auto: ${it.name}" } else null ?: parserName(format)) + "  ⌄"
+                    text = ((if (format == null) detected[file]?.let { "Auto: ${it.name}" } else null) ?: parserName(format)) + "  ⌄"
                     icon = when {
                         file in problems -> Icons.warning
                         file in fitting -> Icons.fits
