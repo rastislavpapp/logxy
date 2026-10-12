@@ -21,8 +21,12 @@ import java.awt.Dimension
 import java.awt.Graphics
 import java.awt.Graphics2D
 import java.awt.RenderingHints
+import java.awt.Toolkit
+import java.awt.datatransfer.StringSelection
 import java.awt.event.InputEvent
 import java.awt.event.KeyEvent
+import java.awt.event.MouseAdapter
+import java.awt.event.MouseEvent
 import java.io.File
 import java.nio.file.Files
 import java.nio.file.Path
@@ -44,6 +48,7 @@ import javax.swing.JMenuBar
 import javax.swing.JMenuItem
 import javax.swing.JOptionPane
 import javax.swing.JPanel
+import javax.swing.JPopupMenu
 import javax.swing.JRadioButtonMenuItem
 import javax.swing.JSeparator
 import javax.swing.JTabbedPane
@@ -116,6 +121,11 @@ class MainFrame : JFrame("logxy") {
             fileSlot.show(selectedTab()?.fileControls)
             updateStatus()
         }
+        tabs.addMouseListener(object : MouseAdapter() {
+            // Pressed on Linux and macOS, released on Windows.
+            override fun mousePressed(e: MouseEvent) = maybeShowTabMenu(e)
+            override fun mouseReleased(e: MouseEvent) = maybeShowTabMenu(e)
+        })
         center.add(DropZone(), CARD_PLACEHOLDER)
         center.add(tabs, CARD_TABS)
         statusBar.putClientProperty("FlatLaf.style", "border: 1,0,0,0,\$Component.borderColor")
@@ -472,6 +482,39 @@ class MainFrame : JFrame("logxy") {
         tab.dispose()
         if (tabs.tabCount == 0) cards.show(center, CARD_PLACEHOLDER)
         updateStatus()
+    }
+
+    /** Closes the tabs at [indices]; from the last, so the others keep their indices. */
+    private fun closeTabs(indices: IntRange) = indices.reversed().forEach(::closeTab)
+
+    private fun maybeShowTabMenu(e: MouseEvent) {
+        if (!e.isPopupTrigger) return
+        val index = tabs.indexAtLocation(e.x, e.y)
+        if (index < 0) return
+        val tab = tabs.getComponentAt(index) as LogTab
+        val last = tabs.tabCount - 1
+        val popup = JPopupMenu()
+        popup.add(JMenuItem("Close", Icons.close).apply {
+            accelerator = KeyStroke.getKeyStroke(KeyEvent.VK_W, shortcut)
+            addActionListener { closeTab(index) }
+        })
+        popup.add(JMenuItem("Close Other Tabs").apply {
+            isEnabled = last > 0
+            addActionListener { closeTabs(index + 1..last); closeTabs(0..<index) }
+        })
+        popup.add(JMenuItem("Close Tabs to the Right").apply {
+            isEnabled = index < last
+            addActionListener { closeTabs(index + 1..last) }
+        })
+        popup.add(JMenuItem("Close All Tabs").apply {
+            addActionListener { closeTabs(0..last) }
+        })
+        popup.addSeparator()
+        popup.add(JMenuItem(if (tab.isMerged) "Copy Paths" else "Copy Path", Icons.copy).apply {
+            // Extracted files by their zip or compressed file, as the tab's tooltip names them.
+            addActionListener { Toolkit.getDefaultToolkit().systemClipboard.setContents(StringSelection(tab.description), null) }
+        })
+        popup.show(tabs, e.x, e.y)
     }
 
     private fun updateStatus() {

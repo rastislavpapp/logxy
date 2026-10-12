@@ -24,6 +24,7 @@ object Icons {
     val close get() = get("general/close")
     val closeSmall get() = get("general/closeSmall")
     val exit get() = get("general/exit")
+    val copy get() = get("general/copy")
     val refresh get() = get("general/refresh")
     val follow get() = get("general/scrollDown")
     val filter get() = get("general/filter")
