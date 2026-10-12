@@ -136,7 +136,7 @@ class FindBar(
             total == 1 -> "1 match"
             else -> "${numbers.format(total)} matches"
         }
-        count.foreground = if (total == 0) UIManager.getColor("Component.error.focusedBorderColor") else UIManager.getColor("Label.foreground")
+        count.foreground = UIManager.getColor("Label.foreground")
         showCountLine()
     }
 
