@@ -27,11 +27,14 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.swing.Swing
+import kotlinx.coroutines.withContext
 import net.miginfocom.swing.MigLayout
 import java.awt.BorderLayout
 import java.awt.Component
 import java.awt.Container
 import java.awt.Dimension
+import java.awt.Toolkit
+import java.awt.datatransfer.StringSelection
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import java.nio.file.Path
@@ -51,6 +54,7 @@ import javax.swing.JTextArea
 import javax.swing.ScrollPaneConstants
 import javax.swing.SwingUtilities
 import javax.swing.Timer
+import javax.swing.TransferHandler
 import javax.swing.UIManager
 import javax.swing.text.JTextComponent
 
@@ -300,8 +304,27 @@ class LogTab(
             isEnabled = hiddenColumns.isNotEmpty()
             addActionListener { hideColumns(emptySet()) }
         })
+        popup.addSeparator()
+        popup.add(JMenuItem("Copy Column").apply {
+            toolTipText = "The whole value of “${field.name}” of every shown row, one row per line"
+            addActionListener {
+                copyColumn(model.records, model.records.schema.fields.indexOf(field), IntArray(model.totalRowCount) { model.recordAtIndex(it) })
+            }
+        })
         popup.show(header, x, y)
     }
+
+    /** Copies [field] of [records], one per line; reading many may take a while, so it is done off the UI thread. */
+    private fun copyColumn(log: Records, field: Int, records: IntArray) {
+        scope.launch {
+            val text = withContext(Dispatchers.IO) {
+                buildString { for (record in records) append(log.fieldText(record, field)).append('\n') }
+            }
+            copy(text)
+        }
+    }
+
+    private fun copy(text: String) = Toolkit.getDefaultToolkit().systemClipboard.setContents(StringSelection(text), null)
 
     /** The right-click menu of a cell: show only records with that value, or all but them. */
     private fun showCellMenu(table: LogTable, row: Int, column: Int, x: Int, y: Int) {
@@ -313,6 +336,20 @@ class LogTab(
         fun rule(op: QueryOp) =
             if (level != null) Query.Rule(field.name, op, level.name, bare = true) else Query.Rule(field.name, op, pattern)
         val popup = JPopupMenu()
+        val fieldIndex = model.records.schema.fields.indexOf(field)
+        popup.add(JMenuItem("Copy Value").apply {
+            addActionListener { copy(model.records.fieldText(model.recordAt(row), fieldIndex)) }
+        })
+        // Within a selection of several rows, the menu also copies from all of them.
+        if (table.isRowSelected(row) && table.selectedRowCount > 1) {
+            popup.add(JMenuItem("Copy Selected Rows").apply {
+                addActionListener { table.transferHandler.exportToClipboard(table, Toolkit.getDefaultToolkit().systemClipboard, TransferHandler.COPY) }
+            })
+            popup.add(JMenuItem("Copy “${field.name}” of Selected Rows").apply {
+                addActionListener { copyColumn(model.records, fieldIndex, table.selectedRows.map(model::recordAt).toIntArray()) }
+            })
+        }
+        popup.addSeparator()
         fun add(rule: Query.Rule) {
             val text = QueryPrinter.print(rule).let { if (it.length > MAX_MENU_CHARS) it.take(MAX_MENU_CHARS - 1) + "…" else it }
             popup.add(JMenuItem(text, Icons.filter).apply {
@@ -442,8 +479,8 @@ class LogTab(
                 if (e.isPopupTrigger && column >= 0) showHeaderMenu(table.tableHeader, column, e.x, e.y)
             }
         })
-        // The table has its own transfer handler (for copy), which would otherwise swallow file drops.
-        table.transferHandler = FileDropHandler(openFiles, table.transferHandler)
+        // Copying rows gives the records as written; file drops on the table still open files.
+        table.transferHandler = FileDropHandler(openFiles, RecordCopyHandler(model))
         val scrollPane = VirtualScrollPane(table, model)
         scrollPane.onFollowChanged = { session.follow = it }
         scrollPane.resumeFollowAtEnd = { session.isLive }

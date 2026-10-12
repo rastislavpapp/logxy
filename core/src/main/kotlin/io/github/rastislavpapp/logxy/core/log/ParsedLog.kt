@@ -194,6 +194,24 @@ class ParsedLog private constructor(
         return firstLine(decoded, 0, decoded.size, maxBytes)
     }
 
+    override fun fieldText(record: Int, field: Int): String {
+        val segment = segmentOf(record)
+        val columns = segments[segment]
+        val local = record - segmentFirst[segment]
+        val key = schema.fields[field].mapKey
+        if (key == null) columns.valueText(field, local, format, dictionaries[field])?.let { return it }
+        val start = columns.starts[local]
+        val bytes = read(start, minOf(recordEnd(record) - start, Int.MAX_VALUE / 2L).toInt())
+        if (key != null) return mapValue(columns, local, key, bytes, Int.MAX_VALUE - 2)
+        val length = columns.spanLength(field, local)
+        if (length == Columns.ABSENT_LENGTH) return ""
+        val relative = minOf(columns.ints[field]!![local], bytes.size)
+        if (length == Columns.TO_RECORD_END) return String(bytes, relative, Bytes.trimLineEnd(bytes, relative, bytes.size) - relative, Charsets.UTF_8)
+        val end = minOf(relative + length, bytes.size)
+        if (schema.fields[field].json) return String(Json.decode(bytes, relative, end), Charsets.UTF_8)
+        return String(bytes, relative, end - relative, Charsets.UTF_8)
+    }
+
     override fun recordText(record: Int, maxBytes: Int): String {
         val start = recordStart(record)
         val length = recordEnd(record) - start
@@ -202,6 +220,11 @@ class ParsedLog private constructor(
         val end = if (complete) Bytes.trimLineEnd(bytes, 0, bytes.size) else bytes.size
         if (complete) format.detailText(bytes, 0, end)?.let { return it }
         return Bytes.utf8Text(bytes, 0, end, maxBytes)
+    }
+
+    override fun sourceText(record: Int): String {
+        val start = recordStart(record)
+        return String(read(start, (recordEnd(record) - start).toInt()), Charsets.UTF_8)
     }
 
     override fun readAppended(size: Long): AppendedData {

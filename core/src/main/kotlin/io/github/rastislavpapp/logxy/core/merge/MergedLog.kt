@@ -90,6 +90,15 @@ class MergedLog private constructor(
 
     override fun recordText(record: Int, maxBytes: Int): String = parts[part(record)].recordText(record(record), maxBytes)
 
+    override fun fieldText(record: Int, field: Int): String {
+        val part = part(record)
+        if (field == MergedSchema.SOURCE) return names[part]
+        val partField = merged.partField(part, field)
+        return if (partField < 0) "" else parts[part].fieldText(record(record), partField)
+    }
+
+    override fun sourceText(record: Int): String = parts[part(record)].sourceText(record(record))
+
     /**
      * Merges the records the parts got since the last merge and adds them at the end. Returns false if
      * a part now has fewer records than were merged (its last record was parsed differently); then the

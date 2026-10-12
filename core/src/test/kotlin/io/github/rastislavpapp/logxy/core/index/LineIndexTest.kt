@@ -31,6 +31,14 @@ class LineIndexTest {
     private fun LineIndex.lines() = List(lineCount) { lineText(it) }
 
     @Test
+    fun `source text is the line as written, line end included`() {
+        index("one\r\ntwo").use { index ->
+            assertEquals("one\r\n", index.sourceText(0))
+            assertEquals("two", index.sourceText(1))
+        }
+    }
+
+    @Test
     fun `empty file has no lines`() {
         index("").use { assertEquals(0, it.lineCount) }
     }

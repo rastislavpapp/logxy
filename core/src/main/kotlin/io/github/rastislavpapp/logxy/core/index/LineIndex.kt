@@ -87,6 +87,14 @@ class LineIndex private constructor(
 
     override fun recordText(record: Int, maxBytes: Int) = lineText(record, maxBytes)
 
+    override fun fieldText(record: Int, field: Int) = lineText(record)
+
+    override fun sourceText(record: Int): String {
+        val bytes = ByteArray((lineLimit(record) - lineStart(record)).toInt())
+        val length = channels.main.readFully(ByteBuffer.wrap(bytes), lineStart(record))
+        return String(bytes, 0, length, Charsets.UTF_8)
+    }
+
     fun lineStart(line: Int): Long = starts[line]
 
     /** Offset just past the line, including its terminator. */

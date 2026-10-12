@@ -69,6 +69,30 @@ class ParsedLogTest {
     }
 
     @Test
+    fun `source text is the record as written, line ends included`() {
+        val first = "2026-10-01 08:00:00.001 [main] ERROR a.B - Failed\r\njava.lang.IllegalStateException: boom\r\n\tat a.B.run(B.java:1)\r\n"
+        val last = "2026-10-01 08:00:00.002 [main] INFO  a.B - {\"json\": 1}"
+        parse(first + last).use { log ->
+            assertEquals(first, log.sourceText(0))
+            assertEquals(last, log.sourceText(1))
+        }
+    }
+
+    @Test
+    fun `field text is the whole value`() {
+        val long = "x".repeat(5000)
+        parse("2026-10-01 08:00:00.001 [main] ERROR a.B - Failed $long\r\njava.lang.IllegalStateException: boom\n\tat a.B.run(B.java:1)\n").use { log ->
+            val fields = log.schema.fields.map { it.name }
+            assertEquals("main", log.fieldText(0, fields.indexOf("Thread")))
+            assertEquals("ERROR", log.fieldText(0, fields.indexOf("Level")))
+            assertEquals(
+                "Failed $long\r\njava.lang.IllegalStateException: boom\n\tat a.B.run(B.java:1)",
+                log.fieldText(0, fields.indexOf("Message")),
+            )
+        }
+    }
+
+    @Test
     fun `long values are cut`() {
         parse("2026-10-01 08:00:00.001 [main] INFO  a.B - ${"x".repeat(50)}\n").use { log ->
             assertEquals("x".repeat(10) + "…", log.rowValues(0, 10)[4])
