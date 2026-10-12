@@ -1,5 +1,6 @@
 package io.github.rastislavpapp.logxy.core.archive
 
+import io.github.rastislavpapp.logxy.core.LogFolders
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -29,9 +30,16 @@ class ZipSpool(val root: Path) {
         override fun toString() = "$zip$SEPARATOR$entry"
     }
 
+    /** A file of a zip that extracting left out, as it cannot be a log; [entry] as in [Origin.entry]. */
+    data class LeftOut(val entry: String, val reason: String)
+
     private val lock = Mutex()
     private val extracted = ConcurrentHashMap<String, List<Path>>()
     private val origins = ConcurrentHashMap<Path, Origin>()
+    private val leftOut = ConcurrentHashMap<Path, List<LeftOut>>()
+
+    /** The files that extracting [zip] the last time left out. */
+    fun leftOutOf(zip: Path): List<LeftOut> = leftOut[zip.toAbsolutePath().normalize()].orEmpty()
 
     /** The zip and entry [path] was extracted from, or null if it was not. */
     fun originOf(path: Path): Origin? = origins[path.toAbsolutePath().normalize()]
@@ -60,9 +68,11 @@ class ZipSpool(val root: Path) {
             val dir = base.resolve(absolute.fileName.toString())
             SpoolCache.deleteRecursively(base)
             try {
-                val files = unzip(absolute, dir, progress, depth = 0)
+                val left = ArrayList<LeftOut>()
+                val files = unzip(absolute, dir, progress, depth = 0, dir, left)
                 for (file in files) origins[file] = Origin(absolute, dir.relativize(file).joinToString("/"))
                 extracted[key] = files
+                leftOut[absolute] = left
                 files
             } catch (e: Throwable) {
                 runCatching { SpoolCache.deleteRecursively(base) }
@@ -71,7 +81,10 @@ class ZipSpool(val root: Path) {
         }
     }
 
-    private suspend fun unzip(zip: Path, dir: Path, progress: (Double) -> Unit, depth: Int): List<Path> {
+    /** Extracts [zip] into [dir]; adds the files left out to [left], named from [top], the outermost zip's folder. */
+    private suspend fun unzip(
+        zip: Path, dir: Path, progress: (Double) -> Unit, depth: Int, top: Path, left: MutableList<LeftOut>,
+    ): List<Path> {
         val files = ArrayList<Path>()
         open(zip).use { file ->
             val entries = file.entries().toList().filter { !it.isDirectory && isWanted(it.name) }
@@ -102,13 +115,30 @@ class ZipSpool(val root: Path) {
                 entry.lastModifiedTime?.let { Files.setLastModifiedTime(target, it) }
                 done += compressed
                 progress(done.toDouble() / total)
-                if (depth < MAX_DEPTH && isZip(target)) {
+                fun leaveOut(reason: String) = left.add(LeftOut(top.relativize(target).joinToString("/"), reason))
+                val zipped = isZip(target)
+                if (zipped && depth < MAX_DEPTH) {
                     val inner = target.resolveSibling(target.fileName.toString() + ".extracting")
                     Files.move(target, inner, StandardCopyOption.REPLACE_EXISTING)
-                    files.addAll(unzip(inner, target, {}, depth + 1))
+                    // A broken inner zip leaves out only its own files, not those of the zip around it.
+                    try {
+                        files.addAll(unzip(inner, target, {}, depth + 1, top, left))
+                    } catch (e: IOException) {
+                        SpoolCache.deleteRecursively(target)
+                        leaveOut("cannot be unzipped: ${e.message ?: e.javaClass.simpleName}")
+                    }
                     Files.delete(inner)
-                } else {
+                } else if (LogFolders.isText(target)) {
                     files.add(target)
+                } else {
+                    leaveOut(
+                        when {
+                            zipped -> "a zip nested too deep"
+                            Files.size(target) == 0L -> "empty"
+                            else -> "not text"
+                        },
+                    )
+                    Files.delete(target)
                 }
             }
         }

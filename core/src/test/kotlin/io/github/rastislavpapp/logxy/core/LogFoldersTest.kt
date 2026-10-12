@@ -6,6 +6,7 @@ import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.io.TempDir
 
 class LogFoldersTest {
@@ -31,5 +32,16 @@ class LogFoldersTest {
         fun names(recursive: Boolean) = LogFolders.files(dir, recursive).map { dir.relativize(it).joinToString("/") }
         assertEquals(listOf("a.log", "b.log", "old.zip", "sub/deep/c.txt"), names(recursive = true))
         assertEquals(listOf("a.log", "b.log", "old.zip"), names(recursive = false))
+    }
+
+    @Test
+    fun `finds linked log files and stops at link loops`() {
+        val target = write("pods/app/0.log", "one\n".toByteArray())
+        val containers = Files.createDirectories(dir.resolve("containers"))
+        // Windows creates links only with a privilege.
+        assumeTrue(runCatching { Files.createSymbolicLink(containers.resolve("app.log"), target) }.isSuccess)
+        Files.createSymbolicLink(containers.resolve("loop"), containers)
+        Files.createSymbolicLink(containers.resolve("gone.log"), dir.resolve("missing.log"))
+        assertEquals(listOf(containers.resolve("app.log")), LogFolders.files(containers))
     }
 }

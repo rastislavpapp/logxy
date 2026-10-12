@@ -371,7 +371,11 @@ class LogSession(
 
             var nothingToMerge = false
             if (isMerged) {
-                val unmergeable = sources.filter { it.log!!.schema.indexOf(Role.TIMESTAMP) < 0 }
+                // An optional timestamp no record had is hidden, e.g. JSON whose time key is unknown.
+                val unmergeable = sources.filter { source ->
+                    val schema = source.log!!.schema
+                    schema.indexOf(Role.TIMESTAMP).let { it < 0 || schema.fields[it].hidden }
+                }
                 if (unmergeable.isNotEmpty()) {
                     unmergeable.forEach { it.log!!.close() }
                     opened.removeAll(unmergeable.map { it.log!! }.toSet())

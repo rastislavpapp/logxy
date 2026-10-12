@@ -73,6 +73,7 @@ private const val QUERY_ARG = "--query"
 private const val LIVE_COLOR = "Actions.Green"
 private const val FOLLOW_COLOR = "Component.accentColor"
 private const val EXTRACT_DIALOG_DELAY_MILLIS = 300
+private const val MAX_LEFT_OUT_SHOWN = 15
 
 class MainFrame : JFrame("logxy") {
 
@@ -251,12 +252,28 @@ class MainFrame : JFrame("logxy") {
             return openFound(found)
         }
         extractThen(archives) { files ->
+            tellLeftOut(archives)
             tellNothingIn(empty + archives.filter { files[it].isNullOrEmpty() })
             openFound(found.flatMap { item -> files[item.path]?.map { Found(it, item.inSubfolder) } ?: listOf(item) })
         }
     }
 
     private fun isArchive(path: Path) = ZipSpool.isZip(path) || CompressedSpool.formatOf(path) != null
+
+    /** Tells the user which files of the zips among [archives] are not opened, and why. */
+    private fun tellLeftOut(archives: List<Path>) {
+        if (!spoolCreation.isInitialized()) return
+        val text = archives.mapNotNull { archive ->
+            val left = spool.leftOutOf(archive).ifEmpty { return@mapNotNull null }
+            val lines = left.take(MAX_LEFT_OUT_SHOWN).map { "    ${it.entry}: ${it.reason}" }
+            val more = if (left.size > MAX_LEFT_OUT_SHOWN) listOf("    …and ${left.size - MAX_LEFT_OUT_SHOWN} more") else emptyList()
+            (listOf("$archive") + lines + more).joinToString("\n")
+        }
+        if (text.isEmpty()) return
+        JOptionPane.showMessageDialog(
+            this, "These files are not opened:\n\n${text.joinToString("\n\n")}", "Files Left Out", JOptionPane.WARNING_MESSAGE,
+        )
+    }
 
     private fun tellNothingIn(folders: List<Path>) {
         if (folders.isEmpty()) return
@@ -389,6 +406,7 @@ class MainFrame : JFrame("logxy") {
         job = scope.launch {
             val files = LinkedHashMap<Path, List<Path>>()
             var failure = ""
+            var error: Exception? = null
             try {
                 for ((i, archive) in archives.withIndex()) {
                     val progress = { fraction: Double -> dialog.fraction = (i + fraction) / archives.size }
@@ -405,14 +423,17 @@ class MainFrame : JFrame("logxy") {
                 }
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
+                error = e
+            } finally {
+                finished = true
                 dialog.dispose()
+            }
+            // Only once finished: the timer fires while the message is open and would show the progress dialog over it.
+            error?.let { e ->
                 JOptionPane.showMessageDialog(
                     this@MainFrame, "$failure:\n${e.message ?: e.javaClass.simpleName}", "Cannot Open File", JOptionPane.ERROR_MESSAGE,
                 )
                 return@launch
-            } finally {
-                finished = true
-                dialog.dispose()
             }
             then(files)
         }

@@ -61,6 +61,7 @@ import javax.swing.text.JTextComponent
 private const val MAX_DETAIL_BYTES = 1024 * 1024
 private const val MAX_TITLE_CHARS = 40
 private const val MAX_MENU_CHARS = 80
+private const val MAX_RULE_CHARS = 1000
 private const val MAX_UNTIMED_ROWS = 1000
 private val RANGE_OPS = listOf(QueryOp.AT_LEAST, QueryOp.ABOVE, QueryOp.AT_MOST, QueryOp.BELOW)
 private const val BOTTOM_TAB_PATTERNS = "patterns"
@@ -330,13 +331,17 @@ class LogTab(
     private fun showCellMenu(table: LogTable, row: Int, column: Int, x: Int, y: Int) {
         val model = model ?: return
         val field = model.fieldAt(column) ?: return
-        val value = model.getValueAt(row, column) as String
+        val fieldIndex = model.records.schema.fields.indexOf(field)
+        // The whole value, not the cell's text, which is cut to its first line and has its tabs expanded.
+        val value = model.records.fieldText(model.recordAt(row), fieldIndex)
         val level = model.level(row)?.takeIf { field.role == Role.LEVEL && it != Level.UNKNOWN }
-        val pattern = value.replace("\\", "\\\\").replace("*", "\\*").replace("?", "\\?")
+        val firstLine = value.lineSequence().first()
+        val escaped = firstLine.take(MAX_RULE_CHARS).replace("\\", "\\\\").replace("*", "\\*").replace("?", "\\?")
+        // A long or multi-line value, such as a message with its stack trace, is matched by its start.
+        val pattern = if (firstLine.length > MAX_RULE_CHARS || firstLine.length < value.length) "$escaped*" else escaped
         fun rule(op: QueryOp) =
             if (level != null) Query.Rule(field.name, op, level.name, bare = true) else Query.Rule(field.name, op, pattern)
         val popup = JPopupMenu()
-        val fieldIndex = model.records.schema.fields.indexOf(field)
         popup.add(JMenuItem("Copy Cell Value").apply {
             addActionListener { copy(model.records.fieldText(model.recordAt(row), fieldIndex)) }
         })

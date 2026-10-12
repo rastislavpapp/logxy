@@ -280,9 +280,11 @@ class LogSessionTest {
         val a = Files.writeString(dir.resolve("a.log"), lines(10))
         val b = Files.writeString(dir.resolve("b.log"), lines(10))
         val raw = Files.writeString(dir.resolve("notes.txt"), "just\nsome\ntext\n")
+        // JSON has an optional timestamp field, without values when the time is under a key it does not know.
+        val json = Files.writeString(dir.resolve("events.json"), """{"when":"yesterday","message":"one"}""" + "\n")
         val recorder = Recorder()
-        val (session, records) = open(listOf(a, raw, b), recorder)
-        assertEquals(listOf(raw), withTimeout(1000) { recorder.notMergeable.await() })
+        val (session, records) = open(listOf(a, raw, json, b), recorder)
+        assertEquals(listOf(raw, json), withTimeout(1000) { recorder.notMergeable.await() })
         assertTrue(records is MergedLog)
         assertEquals(listOf(a, b), withContext(ui) { session.paths })
         assertEquals(20, withContext(ui) { records.recordCount })

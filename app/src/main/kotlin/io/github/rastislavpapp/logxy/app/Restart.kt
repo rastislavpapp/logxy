@@ -4,6 +4,7 @@ import org.slf4j.LoggerFactory
 import java.awt.Window
 import java.awt.event.WindowEvent
 import java.io.IOException
+import java.lang.management.ManagementFactory
 import java.nio.file.Path
 import javax.swing.JOptionPane
 
@@ -43,8 +44,8 @@ object Restart {
         // The jpackage launcher passes its arguments to the app, not the JVM, so the limit goes in JAVA_TOOL_OPTIONS.
         val command = System.getProperty("jpackage.app-path")?.let { listOf(it) } ?: listOf(
             Path.of(System.getProperty("java.home"), "bin", "java").toString(),
-            "--enable-native-access=ALL-UNNAMED", "-cp", System.getProperty("java.class.path"), MAIN_CLASS,
-        )
+            "--enable-native-access=ALL-UNNAMED",
+        ) + jvmOptions() + listOf("-cp", System.getProperty("java.class.path"), MAIN_CLASS)
         val builder = ProcessBuilder(command + args).inheritIO()
         val env = builder.environment()
         val original = if (env[RESTARTED] != null) env[ORIGINAL_OPTIONS] else env["JAVA_TOOL_OPTIONS"]
@@ -58,6 +59,20 @@ object Restart {
         } catch (e: IOException) {
             log.error("Cannot restart logxy", e)
             false
+        }
+    }
+
+    /**
+     * The options this JVM was started with, such as `-D` properties, so the new one runs alike; not the
+     * memory limit, which is set anew, nor those from JAVA_TOOL_OPTIONS, which the new one gets anyway.
+     * Not a debugger's either, whose port this JVM still holds.
+     */
+    private fun jvmOptions(): List<String> {
+        val inherited = System.getenv("JAVA_TOOL_OPTIONS").orEmpty().split(' ').toSet()
+        return ManagementFactory.getRuntimeMXBean().inputArguments.filter { option ->
+            option !in inherited && option != "--enable-native-access=ALL-UNNAMED" &&
+                !option.startsWith("-Xmx") && !option.startsWith("-XX:MaxHeapSize") &&
+                !option.startsWith("-agentlib:jdwp") && !option.startsWith("-Xrunjdwp")
         }
     }
 }
