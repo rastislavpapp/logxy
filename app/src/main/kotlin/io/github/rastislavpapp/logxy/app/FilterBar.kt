@@ -231,6 +231,9 @@ class FilterBar(private val onApply: () -> Unit) : JPanel(MigLayout("insets 6 8 
         g.fillRect(0, height - PROGRESS_HEIGHT, (width * fraction.coerceIn(0.0, 1.0)).toInt(), PROGRESS_HEIGHT)
     }
 
+    /** Call once this bar is no longer shown, so nothing app-wide keeps it. */
+    fun release() = textArea.release()
+
     fun showError(message: String?) {
         error.text = message
         error.isVisible = message != null

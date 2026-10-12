@@ -24,6 +24,8 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.swing.Swing
 import net.miginfocom.swing.MigLayout
 import java.awt.BorderLayout
+import java.awt.Component
+import java.awt.Container
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import java.nio.file.Path
@@ -43,6 +45,7 @@ import javax.swing.ScrollPaneConstants
 import javax.swing.SwingUtilities
 import javax.swing.Timer
 import javax.swing.UIManager
+import javax.swing.text.JTextComponent
 
 private const val MAX_DETAIL_BYTES = 1024 * 1024
 private const val MAX_TITLE_CHARS = 40
@@ -582,6 +585,14 @@ class LogTab(
         showFilterProgress(false)
         session.dispose()
         scope.cancel()
+        filterBar.release()
+        stopCarets(this)
+    }
+
+    // A caret blinks on a shared Swing timer, which would otherwise keep the closed tab, and its records, in memory.
+    private fun stopCarets(component: Component) {
+        if (component is JTextComponent) component.caret?.blinkRate = 0
+        if (component is Container) component.components.forEach(::stopCarets)
     }
 
     private inner class Listener : SessionListener {
