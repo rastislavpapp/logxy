@@ -30,15 +30,21 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.Collections
+import java.util.concurrent.atomic.AtomicReference
 
 /** A session's state for a status bar; [records] is null while there is nothing to show (indexing, errors). */
 data class SessionStatus(
@@ -312,22 +318,35 @@ class LogSession(
         setStatus(SessionStatus(message = "Indexing…"))
         // Logs opened so far, closed if loading is cancelled or fails.
         val opened = Collections.synchronizedList(ArrayList<LogData>())
-        var current = sources.first()
+        // The file whose error is reported; the others of a merge are only cancelled because of it.
+        val failed = AtomicReference<Source>()
+        fun current() = failed.get() ?: sources.first()
         try {
             val started = System.nanoTime()
             val preferred = settings.current.formats
             val levels = settings.current.levels
             // A merge filters its files in parallel, so each needs only its share of channels; this bounds file handles.
-            // At least a few each, as files are indexed one at a time and that slows down a lot with fewer.
+            // At least a few each, as a small file is parsed by one thread and that slows down a lot with fewer.
             val options = IndexOptions().let { it.copy(readChannels = maxOf(minOf(4, it.parallelism), it.parallelism / sources.size)) }
-            for ((i, source) in sources.withIndex()) {
-                current = source
-                // Taken before indexing, so a file replaced meanwhile shows up as a change on the first poll.
-                source.known = withContext(Dispatchers.IO) { FileSnapshot.take(source.path) }
-                    ?: throw IOException("${source.path.fileName}: file not found")
-                source.format = source.chosen ?: withContext(Dispatchers.IO) { LogFormat.detect(source.path, preferred) }
-                withContext(Dispatchers.IO) { opened += source.format.open(source.path, progresses[i], levels, options) }
-                source.log = opened.last()
+            // Files under the split size are parsed by one thread each, so a folder of them needs several at once.
+            val permits = Semaphore(options.parallelism)
+            coroutineScope {
+                sources.mapIndexed { i, source ->
+                    async(Dispatchers.IO) {
+                        permits.withPermit {
+                            try {
+                                // Taken before indexing, so a file replaced meanwhile shows up as a change on the first poll.
+                                source.known = FileSnapshot.take(source.path)
+                                    ?: throw IOException("${source.path.fileName}: file not found")
+                                source.format = source.chosen ?: LogFormat.detect(source.path, preferred)
+                                source.log = source.format.open(source.path, progresses[i], levels, options).also { opened += it }
+                            } catch (e: Throwable) {
+                                if (e !is CancellationException) failed.compareAndSet(null, source)
+                                throw e
+                            }
+                        }
+                    }
+                }.awaitAll()
             }
             formatDetected = true
             listener.formatChanged()
@@ -375,7 +394,7 @@ class LogSession(
         } catch (e: FormatMismatchException) {
             opened.forEach { it.close() }
             listener.problem(
-                "${current.path.fileName} does not match the parser “${current.format.name}”.",
+                "${current().path.fileName} does not match the parser “${current().format.name}”.",
                 e.message.orEmpty(),
                 if (isMerged) "Choose another parser for it in the toolbar, or edit the parser."
                 else "Choose another parser in the toolbar, or Raw text.",
@@ -384,7 +403,7 @@ class LogSession(
             return false
         } catch (e: Exception) {
             opened.forEach { it.close() }
-            listener.problem("Cannot open ${current.path.fileName}.", e.message ?: e.javaClass.simpleName, null)
+            listener.problem("Cannot open ${current().path.fileName}.", e.message ?: e.javaClass.simpleName, null)
             setStatus(SessionStatus(message = "Error"))
             return false
         } catch (e: OutOfMemoryError) {
@@ -392,7 +411,7 @@ class LogSession(
             opened.forEach { it.close() }
             opened.clear()
             sources.forEach { it.log = null }
-            val what = if (isMerged) "these ${sources.size} files" else "${current.path.fileName}"
+            val what = if (isMerged) "these ${sources.size} files" else "${current().path.fileName}"
             listener.problem(
                 "Not enough memory to open $what.",
                 "Logxy can use up to ${formatByteSize(Runtime.getRuntime().maxMemory())} of memory. " +

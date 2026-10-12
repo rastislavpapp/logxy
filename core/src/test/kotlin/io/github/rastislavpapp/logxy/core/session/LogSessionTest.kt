@@ -287,4 +287,16 @@ class LogSessionTest {
         val title = withTimeout(10_000) { recorder.problem.await() }
         assertTrue("does not match" in title, title)
     }
+
+    @Test
+    fun `a merge names the file its parser does not fit`() = runBlocking {
+        val files = (1..4).map { Files.writeString(dir.resolve("part-$it.log"), lines(100)) }
+        val other = Files.writeString(dir.resolve("other.log"), "plain text\n".repeat(20))
+        val recorder = Recorder()
+        withContext(ui) {
+            LogSession(files + listOf(other), scope, NoSettings, recorder, chosen = List(4) { null } + LogFormat.BUILT_IN.first()).start()
+        }
+        val title = withTimeout(10_000) { recorder.problem.await() }
+        assertTrue(title.startsWith("other.log does not match"), title)
+    }
 }

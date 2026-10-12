@@ -20,7 +20,12 @@ import java.util.Properties
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.condition.DisabledIfEnvironmentVariable
 
@@ -92,6 +97,23 @@ private fun measureAll(): Map<String, Double> {
             for (file in files) {
                 val compiled = LogFormat.detect(file).compile() ?: error("No built-in format matches $file")
                 parts += runBlocking { ParsedLog.build(file, compiled) }
+            }
+        })
+        // As a session opens a merge: several files at once, at most one per core.
+        record("merge: parse 8 files at once", best {
+            parts.forEach { it.close() }
+            parts.clear()
+            System.gc()
+            val permits = Semaphore(Runtime.getRuntime().availableProcessors())
+            parts += runBlocking {
+                files.map { file ->
+                    async(Dispatchers.IO) {
+                        permits.withPermit {
+                            val compiled = LogFormat.detect(file).compile() ?: error("No built-in format matches $file")
+                            ParsedLog.build(file, compiled)
+                        }
+                    }
+                }.awaitAll()
             }
         })
         record("merge: merge 8 files", best { runBlocking { MergedLog.build(parts) } })
