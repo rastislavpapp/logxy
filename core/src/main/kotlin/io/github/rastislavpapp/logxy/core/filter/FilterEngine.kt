@@ -308,6 +308,7 @@ private class Leaf(
 
     companion object {
         fun of(condition: Condition, snapshot: RecordSnapshot, patterns: PatternIndex): Leaf {
+            if (condition is RecordTextCondition) return recordTextLeaf(condition)
             val field = snapshot.schema.fields.indexOfFirst { it.name == condition.field }
             val type = snapshot.schema.fields.getOrNull(field)?.type
             fun constant(value: Boolean) = Leaf(condition, 0, false) { _, _ -> value }
@@ -339,6 +340,7 @@ private class Leaf(
                     Leaf(condition, 0, false, prepare) { c, _ -> matching.getOrElse(patterns.id(c.record)) { false } }
                 }
                 is NumberCondition -> numberLeaf(condition, snapshot, field, type)
+                is RecordTextCondition -> recordTextLeaf(condition)
             }
         }
 
@@ -362,6 +364,15 @@ private class Leaf(
                     if (nanos == Columns.ABSENT_TIMESTAMP) absent else matcher.matches(snapshot.formatTimestamp(field, nanos))
                 }
                 ColumnType.SPAN -> spanLeaf(condition, snapshot, field, absent, matcher::matches)
+            }
+        }
+
+        private fun recordTextLeaf(condition: RecordTextCondition): Leaf {
+            val matcher = TextMatcher(condition.asText())
+            return Leaf(condition, 3, true) { c, reader ->
+                val offset = reader!!.load(c.start, c.end)
+                val end = minOf(offset + (c.end - c.start).toInt(), reader.loaded)
+                matcher.matches(reader.buffer, offset, Bytes.trimLineEnd(reader.buffer, offset, end))
             }
         }
 
@@ -418,7 +429,7 @@ private class Leaf(
             is NumberCondition -> mapValueLeaf(condition, key, map, false) { bytes, from, to ->
                 condition.matches(Bytes.parseNumber(bytes, from, to))
             }
-            is LevelCondition, is TimeCondition, is PatternCondition -> Leaf(condition, 0, false) { _, _ -> false }
+            is LevelCondition, is TimeCondition, is PatternCondition, is RecordTextCondition -> Leaf(condition, 0, false) { _, _ -> false }
         }
 
         private fun mapValueLeaf(condition: Condition, key: MapKey, map: MapSyntax, absent: Boolean, test: ValueTest) =

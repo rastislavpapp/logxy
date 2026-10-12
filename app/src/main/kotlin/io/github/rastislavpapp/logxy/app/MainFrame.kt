@@ -21,7 +21,6 @@ import java.awt.Dimension
 import java.awt.Graphics
 import java.awt.Graphics2D
 import java.awt.RenderingHints
-import java.awt.event.ActionEvent
 import java.awt.event.InputEvent
 import java.awt.event.KeyEvent
 import java.io.File
@@ -30,7 +29,6 @@ import java.nio.file.Path
 import java.text.NumberFormat
 import java.util.Base64
 import java.util.function.IntConsumer
-import javax.swing.AbstractAction
 import javax.swing.Box
 import javax.swing.ButtonGroup
 import javax.swing.Icon
@@ -118,13 +116,6 @@ class MainFrame : JFrame("logxy") {
             fileSlot.show(selectedTab()?.fileControls)
             updateStatus()
         }
-        rootPane.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(KeyStroke.getKeyStroke(KeyEvent.VK_F, shortcut), "logxyEditFilter")
-        rootPane.actionMap.put("logxyEditFilter", object : AbstractAction() {
-            override fun actionPerformed(e: ActionEvent) {
-                selectedTab()?.focusFilter()
-            }
-        })
-
         center.add(DropZone(), CARD_PLACEHOLDER)
         center.add(tabs, CARD_TABS)
         statusBar.putClientProperty("FlatLaf.style", "border: 1,0,0,0,\$Component.borderColor")
@@ -162,6 +153,14 @@ class MainFrame : JFrame("logxy") {
             })
             addSeparator()
             add(menuItem("Exit", Icons.exit, null) { dispose() })
+        })
+        add(JMenu("Edit").apply {
+            mnemonic = KeyEvent.VK_E
+            add(menuItem("Find", Icons.get("general/search"), KeyEvent.VK_F, shortcut) { selectedTab()?.showFind() })
+            add(menuItem("Find Next", null, KeyEvent.VK_F3) { selectedTab()?.findNext(forward = true) })
+            add(menuItem("Find Previous", null, KeyEvent.VK_F3, InputEvent.SHIFT_DOWN_MASK) { selectedTab()?.findNext(forward = false) })
+            addSeparator()
+            add(menuItem("Edit Filter", Icons.filter, KeyEvent.VK_F, shortcut or InputEvent.SHIFT_DOWN_MASK) { selectedTab()?.focusFilter() })
         })
         add(JMenu("View").apply {
             mnemonic = KeyEvent.VK_V

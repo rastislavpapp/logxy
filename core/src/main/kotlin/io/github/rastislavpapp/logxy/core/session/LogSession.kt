@@ -26,6 +26,7 @@ import io.github.rastislavpapp.logxy.core.pattern.PatternIndex
 import io.github.rastislavpapp.logxy.core.query.Query
 import io.github.rastislavpapp.logxy.core.query.QueryCompiler
 import io.github.rastislavpapp.logxy.core.query.QueryException
+import io.github.rastislavpapp.logxy.core.query.TextSearch
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -265,6 +266,22 @@ class LogSession(
         }
         activeFilter = filter
         runFilter(keepView = false, evaluation)
+    }
+
+    /**
+     * Prepares finding the records that [search] matches among those the filter lets through; null if nothing is
+     * loaded. Records whose filter result is still on its way may be among them. Throws [QueryException] for an
+     * invalid regex.
+     */
+    fun prepareSearch(search: TextSearch): PreparedFilter? {
+        val engine = engine ?: return null
+        val condition = search.condition()
+        val filter = activeFilter?.let { Filter.And(listOf(it, condition)) } ?: condition
+        return try {
+            engine.prepare(filter)
+        } catch (e: IllegalArgumentException) {
+            throw QueryException(e.message ?: "Invalid search")
+        }
     }
 
     /** How far [patternCounts] got with finding the templates of new records, from 0 to 1. */

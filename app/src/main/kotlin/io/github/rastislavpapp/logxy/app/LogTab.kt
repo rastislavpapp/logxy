@@ -12,20 +12,26 @@ import io.github.rastislavpapp.logxy.core.query.Query
 import io.github.rastislavpapp.logxy.core.query.QueryException
 import io.github.rastislavpapp.logxy.core.query.QueryOp
 import io.github.rastislavpapp.logxy.core.query.QueryPrinter
+import io.github.rastislavpapp.logxy.core.query.TextSearch
 import io.github.rastislavpapp.logxy.core.query.TimeLiteral
 import io.github.rastislavpapp.logxy.core.session.FilteredRows
 import io.github.rastislavpapp.logxy.core.session.LogSession
 import io.github.rastislavpapp.logxy.core.session.SessionListener
 import io.github.rastislavpapp.logxy.core.session.SessionStatus
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.swing.Swing
 import net.miginfocom.swing.MigLayout
 import java.awt.BorderLayout
 import java.awt.Component
 import java.awt.Container
+import java.awt.Dimension
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import java.nio.file.Path
@@ -33,6 +39,7 @@ import java.time.ZoneId
 import javax.swing.JCheckBoxMenuItem
 import javax.swing.JComponent
 import javax.swing.JLabel
+import javax.swing.JLayeredPane
 import javax.swing.JMenuItem
 import javax.swing.JPanel
 import javax.swing.JPopupMenu
@@ -53,6 +60,16 @@ private const val MAX_MENU_CHARS = 80
 private const val MAX_UNTIMED_ROWS = 1000
 private val RANGE_OPS = listOf(QueryOp.AT_LEAST, QueryOp.ABOVE, QueryOp.AT_MOST, QueryOp.BELOW)
 private const val BOTTOM_TAB_PATTERNS = "patterns"
+
+/** A search taking longer than this shows its progress. */
+private const val SEARCH_PROGRESS_DELAY_MILLIS = 200L
+
+/** Where the find box floats: below the top of the rows, left of the scroll bar. */
+private const val FLOATING_TOP_GAP = 6
+private const val FLOATING_RIGHT_GAP = 24
+
+/** Records appended to a live log are searched at most this often. */
+private const val SEARCH_APPENDED_MILLIS = 1000
 
 /**
  * One open file, or several merged: shows the records of its [LogSession], with the filter bar and the
@@ -101,6 +118,7 @@ class LogTab(
     private val content = JPanel(BorderLayout())
     private val detail = LogDetailArea()
     private val filterBar = FilterBar(::applyFilter)
+    private val findBar = FindBar(::searchFor) { forward -> find(forward) }
     private val patterns = PatternsPanel(scope, { session.patternCounts() }, { session.patternProgress }, filterBar::addRules)
 
     /** Below the table: the selected record, or the message patterns of the shown rows. */
@@ -128,6 +146,20 @@ class LogTab(
     private var table: LogTable? = null
     private var scrollPane: VirtualScrollPane? = null
     private var histogramBar: TimeHistogramBar? = null
+
+    private var search: TextSearch? = null
+    private var foundMarks = Highlighter.NONE
+
+    /** Records the search found, in order; complete unless [searchJob] is running. */
+    private var found = IntArray(0)
+    private var searchJob: Job? = null
+
+    /** Records were appended while [searchJob] ran, so it is to run again. */
+    private var searchStale = false
+
+    /** A find asked for while the search was running: forward, and whether the current record counts. */
+    private var pendingFind: Pair<Boolean, Boolean>? = null
+    private val searchAppended = Timer(SEARCH_APPENDED_MILLIS) { runSearch(jump = false) }.apply { isRepeats = false }
 
     /** What the status bar shows for this file. */
     val status: SessionStatus get() = session.status
@@ -423,6 +455,7 @@ class LogTab(
             showMarkedTimes()
             if (!event.valueIsAdjusting) {
                 showDetail(model, table.selectionModel.leadSelectionIndex)
+                showFoundCount()
                 onStatusChanged()
             }
         }
@@ -430,6 +463,7 @@ class LogTab(
         this.table = table
         this.scrollPane = scrollPane
         this.histogramBar = histogramBar
+        table.found = foundMarks
         filterBar.setSchema(records.schema)
         patterns.canFilter = records.schema.hasPatterns()
         setFilterVisible(true)
@@ -437,7 +471,7 @@ class LogTab(
         detail.text = ""
         val rowsPanel = JPanel(BorderLayout()).apply {
             histogramBar?.let { add(it, BorderLayout.NORTH) }
-            add(scrollPane, BorderLayout.CENTER)
+            add(FloatingTopRight(scrollPane, findBar), BorderLayout.CENTER)
         }
         val split = JSplitPane(JSplitPane.VERTICAL_SPLIT, rowsPanel, bottomTabs).apply {
             resizeWeight = 0.75
@@ -465,7 +499,8 @@ class LogTab(
 
     private fun showDetail(model: LogTableModel, row: Int) {
         detail.show(if (row < 0 || row >= model.rowCount) "" else model.records.recordText(model.recordAt(row), MAX_DETAIL_BYTES))
-        detail.caretPosition = 0
+        // A long record, e.g. with a stack trace, shows where the find bar's text is.
+        detail.caretPosition = detail.firstFound
     }
 
     /** Shows [record] again if it is selected; it may have grown, e.g. by a stack trace written after it. */
@@ -515,6 +550,130 @@ class LogTab(
             }
         }
         if (selectedIndex != null) scrollPane.selectRow(selectedIndex, scroll = false)
+        if (search != null) runSearch(jump = false)
+    }
+
+    /** Opens the find bar, to find the text selected in the detail pane if it is one line. */
+    fun showFind() {
+        findBar.open(detail.selectedText?.takeIf { it.isNotBlank() && '\n' !in it })
+    }
+
+    /** Marks [search] and finds the records it matches, going to the first from the current one on. */
+    private fun searchFor(search: TextSearch?) {
+        this.search = search
+        foundMarks = search?.let(Highlighter::of) ?: Highlighter.NONE
+        table?.found = foundMarks
+        detail.found = foundMarks
+        found = IntArray(0)
+        if (!findBar.isVisible) table?.requestFocusInWindow()
+        runSearch(jump = search != null)
+    }
+
+    /** Finds the shown records [search] matches; with [jump], then selects the first from the current one on. */
+    private fun runSearch(jump: Boolean) {
+        searchJob?.cancel()
+        searchJob = null
+        searchStale = false
+        searchAppended.stop()
+        val evaluation = try {
+            search?.let(session::prepareSearch)
+        } catch (e: QueryException) {
+            found = IntArray(0)
+            pendingFind = null
+            findBar.showError(e.message)
+            return
+        }
+        if (evaluation == null) {
+            found = IntArray(0)
+            showFoundCount()
+            return
+        }
+        if (jump) {
+            pendingFind = true to true
+            findBar.showCount(0, null)
+        }
+        searchJob = scope.launch {
+            val progress = launch {
+                delay(SEARCH_PROGRESS_DELAY_MILLIS)
+                while (true) {
+                    findBar.showCount(0, null, evaluation.progress)
+                    delay(100)
+                }
+            }
+            val result = try {
+                evaluation.run()
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                searchJob = null
+                pendingFind = null
+                findBar.showError(e.message ?: e.javaClass.simpleName)
+                return@launch
+            } finally {
+                progress.cancel()
+            }
+            found = result.rows
+            searchJob = null
+            showFoundCount()
+            pendingFind?.let { (forward, inclusive) -> find(forward, inclusive) }
+            if (searchStale) searchAppended.start()
+        }
+    }
+
+    /** Searches appended records soon; not at once, as a live log may grow every moment. */
+    private fun searchAppendedSoon() {
+        if (search == null) return
+        if (searchJob != null) searchStale = true else if (!searchAppended.isRunning) searchAppended.start()
+    }
+
+    /**
+     * Selects the next record the search found after the current one, or the previous before it, wrapping around.
+     * The current record is the selected one, or the top one in view if none is; with [inclusive], or if none is
+     * selected, it can be found itself.
+     */
+    private fun find(forward: Boolean, inclusive: Boolean = false) {
+        if (search == null) return findBar.open()
+        pendingFind = null
+        if (searchJob != null) {
+            pendingFind = forward to inclusive
+            return
+        }
+        val model = model ?: return
+        val table = table ?: return
+        val scrollPane = scrollPane ?: return
+        if (found.isEmpty() || model.totalRowCount == 0) return
+        val lead = table.selectionModel.leadSelectionIndex
+        val selected = lead.takeIf { it in 0..<model.rowCount && table.selectionModel.isSelectedIndex(it) }
+        val current = selected?.let(model::recordAt) ?: model.recordAtIndex(scrollPane.firstVisibleRow)
+        val include = inclusive || selected == null
+        // The first found record at or after the current one.
+        val at = found.binarySearch(current).let { if (it >= 0) it else -it - 1 }
+        val isCurrent = at < found.size && found[at] == current
+        var i = when {
+            forward -> if (isCurrent && !include) at + 1 else at
+            else -> if (isCurrent && include) at else at - 1
+        }
+        // A record found may not be shown yet, while the filter's result is still on its way.
+        repeat(found.size) {
+            i = Math.floorMod(i, found.size)
+            val record = found[i]
+            val index = model.indexOfRecord(record)
+            if (index >= 0 && model.recordAtIndex(index) == record) {
+                session.follow = false
+                scrollPane.selectRow(index, scroll = index !in scrollPane.firstVisibleRow..scrollPane.lastVisibleRow)
+                return
+            }
+            i += if (forward) 1 else -1
+        }
+    }
+
+    /** Shows how many records the search found, and which of them is selected. */
+    private fun showFoundCount() {
+        if (searchJob != null) return
+        val model = model
+        val lead = table?.selectionModel?.leadSelectionIndex ?: -1
+        val selected = if (model != null && lead in 0..<model.rowCount) model.recordAt(lead) else -1
+        val position = if (selected >= 0) found.binarySearch(selected) else -1
+        findBar.showCount(if (position >= 0) position + 1 else 0, found.size)
     }
 
     /** Marks the times of the selected rows on the histogram, or of the top row in view if none is selected. */
@@ -577,6 +736,9 @@ class LogTab(
 
     fun focusFilter() = filterBar.focusFilter()
 
+    /** Goes to the next record with the find bar's text, or the previous; opens the bar if it is closed. */
+    fun findNext(forward: Boolean) = find(forward)
+
     fun clearFilter() = filterBar.clear()
 
     /** The filter as edited in this tab. */
@@ -587,6 +749,7 @@ class LogTab(
         stopProgress()
         patterns.reset()
         showFilterProgress(false)
+        searchAppended.stop()
         session.dispose()
         scope.cancel()
         filterBar.release()
@@ -599,9 +762,31 @@ class LogTab(
         if (component is Container) component.components.forEach(::stopCarets)
     }
 
+    /** Shows [floating] at its preferred size over the top right corner of [base], clear of the scroll bar. */
+    private class FloatingTopRight(private val base: JComponent, private val floating: JComponent) : JLayeredPane() {
+        init {
+            // As Any: an Int would pick the overload that takes an index, not a layer.
+            add(base, DEFAULT_LAYER as Any)
+            add(floating, PALETTE_LAYER as Any)
+        }
+
+        override fun doLayout() {
+            base.setBounds(0, 0, width, height)
+            val size = floating.preferredSize
+            floating.setBounds(maxOf(0, width - size.width - FLOATING_RIGHT_GAP), FLOATING_TOP_GAP, minOf(size.width, width), size.height)
+        }
+
+        override fun getPreferredSize(): Dimension = base.preferredSize
+
+        override fun getMinimumSize(): Dimension = base.minimumSize
+    }
+
     private inner class Listener : SessionListener {
         override fun indexing(fraction: () -> Double) {
             columnsButton.isEnabled = false
+            searchJob?.cancel()
+            searchJob = null
+            found = IntArray(0)
             histogramBar = null
             patterns.reset()
             model = null
@@ -634,6 +819,7 @@ class LogTab(
             if (session.shown == null) {
                 scrollPane?.rowsAppended()
                 patterns.refreshSoon()
+                searchAppendedSoon()
             }
         }
 
@@ -643,6 +829,7 @@ class LogTab(
             model?.rowsChangedFrom(firstChanged, oldSize)
             scrollPane?.rowsAppended()
             patterns.refreshSoon()
+            searchAppendedSoon()
         }
 
         override fun levelMappingChanged() {

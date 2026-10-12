@@ -19,6 +19,9 @@ private const val SYNTAX_STYLE = "text/x-logxy-record"
 /** Background of text matched by the filter, translucent to suit light and dark looks. */
 val HIGHLIGHT_COLOR = Color(255, 200, 0, 110)
 
+/** Background of text the find bar found; unlike the filter's, also shown on selected rows. */
+val FOUND_COLOR = Color(40, 200, 90, 130)
+
 /** Applies the editor colors matching the light or dark look and the monospaced UI font. */
 fun RSyntaxTextArea.applyEditorTheme() {
     val name = if (FlatLaf.isLafDark()) "dark.xml" else "default.xml"
@@ -33,6 +36,7 @@ class LogDetailArea : RSyntaxTextArea() {
 
     private var initialized = false
     private val painter = DefaultHighlighter.DefaultHighlightPainter(HIGHLIGHT_COLOR)
+    private val foundPainter = DefaultHighlighter.DefaultHighlightPainter(FOUND_COLOR)
 
     /** Marks what this filter matched in the shown text. */
     var matches: Highlighter = Highlighter.NONE
@@ -40,6 +44,16 @@ class LogDetailArea : RSyntaxTextArea() {
             field = value
             mark()
         }
+
+    /** Marks what the find bar found in the shown text. */
+    var found: Highlighter = Highlighter.NONE
+        set(value) {
+            field = value
+            mark()
+        }
+
+    /** Where the find bar's text first occurs in the shown text; 0 if it does not. */
+    val firstFound: Int get() = found.ranges(null, text).firstOrNull() ?: 0
 
     init {
         (TokenMakerFactory.getDefaultInstance() as AbstractTokenMakerFactory)
@@ -70,6 +84,8 @@ class LogDetailArea : RSyntaxTextArea() {
         highlighter.removeAllHighlights()
         val ranges = matches.ranges(null, text)
         for (i in ranges.indices step 2) highlighter.addHighlight(ranges[i], ranges[i + 1], painter)
+        val found = found.ranges(null, text)
+        for (i in found.indices step 2) highlighter.addHighlight(found[i], found[i + 1], foundPainter)
     }
 
     /** The editor theme, with levels in the same colors as the table's level badges. */

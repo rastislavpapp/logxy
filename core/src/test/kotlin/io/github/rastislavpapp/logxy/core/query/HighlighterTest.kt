@@ -12,6 +12,13 @@ class HighlighterTest {
     private fun of(vararg items: Query) = Highlighter.of(Query.Group(all = true, items = items.toList()))
 
     @Test
+    fun marksSearchedTextInAnyField() {
+        val h = Highlighter.of(TextSearch("a*b"))
+        assertContentEquals(intArrayOf(1, 4, 5, 8), h.ranges("thread", "xA*bya*b ab"))
+        assertContentEquals(intArrayOf(), Highlighter.of(TextSearch("(", regex = true)).ranges(null, "("))
+    }
+
+    @Test
     fun marksWildcardLiteralsIgnoringCase() {
         val h = of(rule(QueryOp.EQUALS, "*Timeout*"))
         assertContentEquals(intArrayOf(8, 15, 17, 24), h.ranges("message", "failed: timeout, TIMEOUT"))

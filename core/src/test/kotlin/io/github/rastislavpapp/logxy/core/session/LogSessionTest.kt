@@ -14,6 +14,7 @@ import io.github.rastislavpapp.logxy.core.merge.MergedLog
 import io.github.rastislavpapp.logxy.core.parse.LogFormat
 import io.github.rastislavpapp.logxy.core.query.Query
 import io.github.rastislavpapp.logxy.core.query.QueryOp
+import io.github.rastislavpapp.logxy.core.query.TextSearch
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
@@ -218,6 +219,15 @@ class LogSessionTest {
         awaitHistogram(session, 800, 200, 200)
         withContext(ui) { session.applyFilter(Level.ERROR, Query.EMPTY) }
         awaitHistogram(session, 200, 0, 200)
+    }
+
+    @Test
+    fun `a search finds records among those the filter lets through`() = runBlocking {
+        val file = Files.writeString(dir.resolve("search.log"), lines(20))
+        val (session, _) = open(file, Recorder())
+        withContext(ui) { session.applyFilter(Level.WARN, Query.EMPTY) }
+        val found = withContext(ui) { session.prepareSearch(TextSearch("MESSAGE 1"))!!.run() }
+        assertEquals(listOf(1, 11, 13, 15, 17, 19), found.rows.toList())
     }
 
     @Test

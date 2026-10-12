@@ -9,6 +9,8 @@ import io.github.rastislavpapp.logxy.core.log.LogData
 import io.github.rastislavpapp.logxy.core.log.ParsedLog
 import io.github.rastislavpapp.logxy.core.parse.PatternFormat
 import io.github.rastislavpapp.logxy.core.pattern.Templates
+import io.github.rastislavpapp.logxy.core.query.QueryException
+import io.github.rastislavpapp.logxy.core.query.TextSearch
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Files
@@ -49,6 +51,25 @@ class FilterEngineTest {
     private fun FilterEngine.rows(filter: Filter) = runBlocking { prepare(filter).run() }.rows.toList()
 
     private fun nanos(text: String) = LocalDateTime.parse(text).toEpochSecond(ZoneOffset.UTC) * 1_000_000_000
+
+    @Test
+    fun `searches the whole text of records, across fields and lines`() {
+        parse(sample).use { log ->
+            val engine = FilterEngine(log)
+            fun find(search: TextSearch) = engine.rows(search.condition())
+            assertEquals(listOf(2), find(TextSearch("sqlexception: BOOM")))
+            assertEquals(emptyList(), find(TextSearch("sqlexception", matchCase = true)))
+            assertEquals(listOf(2, 5), find(TextSearch("[worker-1] error")))
+            assertEquals(listOf(1), find(TextSearch("ŽLUŤOUČKÝ")))
+            assertEquals(listOf(0), find(TextSearch("banner")))
+            // Wildcards are text like any other.
+            assertEquals(emptyList(), find(TextSearch("Db.java:4*")))
+            assertEquals(listOf(4), find(TextSearch("tick", wholeWords = true)))
+            assertEquals(emptyList(), find(TextSearch("tic", wholeWords = true)))
+            assertEquals(listOf(3), find(TextSearch("worker-\\d] WARN", regex = true)))
+            assertFailsWith<QueryException> { TextSearch("(", regex = true).condition() }
+        }
+    }
 
     @Test
     fun `conditions on each kind of field`() {
@@ -309,7 +330,7 @@ class FilterEngineTest {
         is Filter.Or -> filter.parts.any { matches(log, record, it) }
         is Filter.Not -> !matches(log, record, filter.part)
         is LevelCondition -> log.level(record) in filter.levels
-        is NumberCondition -> error("unused")
+        is NumberCondition, is RecordTextCondition -> error("unused")
         is TimeCondition -> {
             val text = log.rowValues(record, 1000)[0]
             text.isNotEmpty() && nanos(text.replace(' ', 'T')) >= (filter.from ?: Long.MIN_VALUE)

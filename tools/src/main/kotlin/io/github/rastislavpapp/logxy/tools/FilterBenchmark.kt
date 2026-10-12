@@ -3,6 +3,7 @@ package io.github.rastislavpapp.logxy.tools
 import io.github.rastislavpapp.logxy.core.filter.Filter
 import io.github.rastislavpapp.logxy.core.filter.FilterEngine
 import io.github.rastislavpapp.logxy.core.filter.LevelCondition
+import io.github.rastislavpapp.logxy.core.filter.RecordTextCondition
 import io.github.rastislavpapp.logxy.core.filter.TextCondition
 import io.github.rastislavpapp.logxy.core.filter.TextOp
 import io.github.rastislavpapp.logxy.core.formatByteSize
@@ -34,6 +35,7 @@ fun benchmarkFiltering(file: Path) {
         "not (level >= WARN) or thread = main" to
             Filter.Or(listOf(Filter.Not(warn), TextCondition("Thread", TextOp.EQUALS, "main"))),
         "message matches regex 'order \\d{6}:'" to TextCondition("Message", TextOp.MATCHES, "order \\d{6}:"),
+        "search 'timeout' in whole records" to RecordTextCondition(TextOp.EQUALS, "*timeout*", ignoreCase = true),
     )
     log.use {
         val engine = FilterEngine(log)

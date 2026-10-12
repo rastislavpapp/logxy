@@ -46,6 +46,13 @@ class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
             repaint()
         }
 
+    /** Marks what the find bar found in the cells, also of selected rows. */
+    var found: Highlighter = Highlighter.NONE
+        set(value) {
+            field = value
+            repaint()
+        }
+
     init {
         autoResizeMode = AUTO_RESIZE_LAST_COLUMN
         setShowGrid(false)
@@ -168,6 +175,7 @@ class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
     /** Paints the matches behind the text of left-aligned cells. */
     private open inner class HighlightRenderer : DefaultTableCellRenderer() {
         private var ranges = IntArray(0)
+        private var foundRanges = IntArray(0)
 
         override fun getTableCellRendererComponent(
             table: JTable, value: Any?, isSelected: Boolean, hasFocus: Boolean, row: Int, column: Int,
@@ -175,11 +183,20 @@ class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
             super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column)
             val field = logModel.fieldAt(column)
             ranges = if (field == null || value !is String || isSelected) IntArray(0) else matches.ranges(field.name, value)
+            foundRanges = if (field == null || value !is String) IntArray(0) else found.ranges(field.name, value)
             return this
         }
 
         override fun paintComponent(g: Graphics) {
-            if (ranges.isNotEmpty()) {
+            var cleared = false
+            if (ranges.isNotEmpty() || foundRanges.isNotEmpty()) {
+                // An opaque cell, e.g. a selected one, would paint its background over the marks: paint it first.
+                if (isOpaque) {
+                    g.color = background
+                    g.fillRect(0, 0, width, height)
+                    isOpaque = false
+                    cleared = true
+                }
                 val metrics = getFontMetrics(font)
                 val insets = insets
                 val view = Rectangle(insets.left, insets.top, width - insets.left - insets.right, height - insets.top - insets.bottom)
@@ -190,16 +207,21 @@ class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
                     verticalTextPosition, horizontalTextPosition, view, Rectangle(), textBounds, 0,
                 )
                 val visible = if (shown == text) text.length else (shown.length - CLIP.length).coerceAtLeast(0)
-                g.color = HIGHLIGHT_COLOR
-                for (i in ranges.indices step 2) {
-                    val start = ranges[i]
-                    val end = minOf(ranges[i + 1], visible)
-                    if (start >= end) break
-                    val x = textBounds.x + metrics.stringWidth(text.substring(0, start))
-                    g.fillRect(x, 1, metrics.stringWidth(text.substring(start, end)), height - 2)
+                fun mark(ranges: IntArray, color: Color) {
+                    g.color = color
+                    for (i in ranges.indices step 2) {
+                        val start = ranges[i]
+                        val end = minOf(ranges[i + 1], visible)
+                        if (start >= end) break
+                        val x = textBounds.x + metrics.stringWidth(text.substring(0, start))
+                        g.fillRect(x, 1, metrics.stringWidth(text.substring(start, end)), height - 2)
+                    }
                 }
+                mark(ranges, HIGHLIGHT_COLOR)
+                mark(foundRanges, FOUND_COLOR)
             }
             super.paintComponent(g)
+            if (cleared) isOpaque = true
         }
     }
 

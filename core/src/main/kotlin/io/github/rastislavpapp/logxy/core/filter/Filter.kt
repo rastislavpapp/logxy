@@ -25,6 +25,17 @@ data class TextCondition(
     val ignoreCase: Boolean = false,
 ) : Condition
 
+/** Compares a record's whole text as written in the file, e.g. for searching; [field] is not one of the log's. */
+data class RecordTextCondition(val op: TextOp, val value: String, val ignoreCase: Boolean = false) : Condition {
+    override val field get() = RECORD_TEXT
+
+    internal fun asText() = TextCondition(RECORD_TEXT, op, value, ignoreCase)
+
+    companion object {
+        const val RECORD_TEXT = "\u0000record"
+    }
+}
+
 data class PresenceCondition(override val field: String, val present: Boolean = true) : Condition
 
 /** The record's canonical level is one of [levels]. */

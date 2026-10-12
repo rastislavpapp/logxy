@@ -309,16 +309,17 @@ class QueryEditor(private val onApply: () -> Unit) : JPanel(MigLayout("insets 0,
     }
 
     private inner class RuleView(rule: Query.Rule, private val group: GroupView) :
-        JPanel(MigLayout("insets 0", "[][][grow, fill][][][]")) {
+        JPanel(MigLayout("insets 0", "[][][grow, fill][][]")) {
 
         private val field = JComboBox<String>()
         private val op = JComboBox<RuleOp>()
+        private val case = fieldToggle("inline/matchCase", "Match exact case")
         private val text = JTextField(12).apply {
             addActionListener { onApply() }
             toolTipText = "* matches any text, ? one character"
+            withToggles(case)
         }
         private val level = JComboBox(Level.entries.filter { it != Level.UNKNOWN }.toTypedArray())
-        private val case = accentToggle(null, "Match exact case", "Aa", flat = false)
         private var valueSlot: JComponent = text
         val remove = toolBarButton(Icons.closeSmall, "Remove this condition", focusable = true) {
             // Only a condition with a value filtered anything.
@@ -344,7 +345,6 @@ class QueryEditor(private val onApply: () -> Unit) : JPanel(MigLayout("insets 0,
             add(field)
             add(op)
             add(text, "wmin 60")
-            add(case)
             add(toolBarButton(null, "Create a group from this condition", "( )", focusable = true) { group.wrapInGroup(this) })
             add(remove)
             load(rule)

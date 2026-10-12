@@ -7,7 +7,8 @@ import java.util.regex.PatternSyntaxException
 /** Finds the text a query's positive text conditions matched, to mark it in the table and the detail pane. */
 class Highlighter private constructor(private val terms: List<Term>) {
 
-    private class Term(val field: String, val pattern: Pattern)
+    /** A [field] of null marks text in any field. */
+    private class Term(val field: String?, val pattern: Pattern)
 
     val isEmpty get() = terms.isEmpty()
 
@@ -19,7 +20,7 @@ class Highlighter private constructor(private val terms: List<Term>) {
         if (terms.isEmpty() || text.isEmpty()) return EMPTY
         var found = IntArray(0)
         for (term in terms) {
-            if (field != null && !term.field.equals(field, ignoreCase = true)) continue
+            if (field != null && term.field != null && !term.field.equals(field, ignoreCase = true)) continue
             val matcher = term.pattern.matcher(text)
             while (matcher.find()) {
                 if (matcher.end() == matcher.start()) continue
@@ -57,6 +58,17 @@ class Highlighter private constructor(private val terms: List<Term>) {
         val NONE = Highlighter(emptyList())
 
         private fun isWordChar(c: Char) = c.isLetterOrDigit() || c == '_'
+
+        /** Marks what [search] finds, in any field; nothing for an empty or invalid one. */
+        fun of(search: TextSearch): Highlighter {
+            if (search.isEmpty) return NONE
+            val pattern = try {
+                search.pattern()
+            } catch (e: QueryException) {
+                return NONE
+            }
+            return Highlighter(listOf(Term(null, pattern)))
+        }
 
         /** Negated rules, groups and ops, comparisons and empty values mark nothing; neither do invalid regexes. */
         fun of(query: Query): Highlighter {

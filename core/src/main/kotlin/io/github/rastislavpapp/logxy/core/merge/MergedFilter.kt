@@ -11,6 +11,7 @@ import io.github.rastislavpapp.logxy.core.filter.PatternCondition
 import io.github.rastislavpapp.logxy.core.filter.PreparedFilter
 import io.github.rastislavpapp.logxy.core.filter.PresenceCondition
 import io.github.rastislavpapp.logxy.core.filter.RecordFilter
+import io.github.rastislavpapp.logxy.core.filter.RecordTextCondition
 import io.github.rastislavpapp.logxy.core.filter.TextCondition
 import io.github.rastislavpapp.logxy.core.filter.TextMatcher
 import io.github.rastislavpapp.logxy.core.filter.TimeCondition
@@ -105,6 +106,7 @@ class MergedFilter(private val log: MergedLog) : RecordFilter {
         is Filter.And -> Filter.And(filter.parts.map { partFilter(it, part) })
         is Filter.Or -> Filter.Or(filter.parts.map { partFilter(it, part) })
         is Filter.Not -> Filter.Not(partFilter(filter.part, part))
+        is RecordTextCondition -> filter
         is Condition -> {
             val field = log.schema.fields.indexOfFirst { it.name == filter.field }
             if (field == MergedSchema.SOURCE) {
@@ -121,7 +123,7 @@ class MergedFilter(private val log: MergedLog) : RecordFilter {
         is TextCondition -> constant(TextMatcher(condition).matches(name))
         is PresenceCondition -> constant(condition.present)
         is NumberCondition -> constant(condition.matches(Bytes.parseNumber(name)))
-        is LevelCondition, is TimeCondition, is PatternCondition -> constant(false)
+        is LevelCondition, is TimeCondition, is PatternCondition, is RecordTextCondition -> constant(false)
     }
 
     private fun renamed(condition: Condition, field: String): Condition = when (condition) {
@@ -131,6 +133,7 @@ class MergedFilter(private val log: MergedLog) : RecordFilter {
         is TimeCondition -> condition.copy(field = field)
         is PatternCondition -> condition.copy(field = field)
         is NumberCondition -> condition.copy(field = field)
+        is RecordTextCondition -> condition
     }
 
     private fun constant(matches: Boolean): Filter = if (matches) Filter.And(emptyList()) else Filter.Or(emptyList())
