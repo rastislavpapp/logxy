@@ -276,4 +276,36 @@ class ParsedLogTest {
             assertFalse(log.schema.fields.any { it.hidden })
         }
     }
+
+    private fun ParsedLog.fieldTexts() = List(recordCount) { record -> List(schema.fields.size) { fieldText(record, it) } }
+
+    @Test
+    fun `a snapshot reads field texts like the log`() {
+        val content = buildString {
+            repeat(100) { i ->
+                append("2026-10-01 08:00:%02d.%03d [t-${i % 7}] ${if (i % 5 == 0) "ERROR" else "INFO "} log.L${i % 3} {tenant=t$i} - message $i\n".format(i % 60, i))
+                if (i % 5 == 0) append("java.lang.RuntimeException: $i\r\n\tat x.Y.z(Y.java:$i)\n")
+            }
+        }
+        for (format in listOf(format, mdc)) {
+            parse(content, format, IndexOptions(parallelism = 4, minRangeSize = 1)).use { log ->
+                val snapshot = log.filterSnapshot()
+                assertEquals(log.fieldTexts(), List(log.recordCount) { record -> List(log.schema.fields.size) { snapshot.fieldText(record, it) } })
+            }
+        }
+    }
+
+    @Test
+    fun `a snapshot keeps reading its records while more are appended`() {
+        val file = Files.writeString(dir.resolve("live.log"), "2026-10-01 08:00:00.001 [main] INFO  a.B - one\n2026-10-01 08:00:00.002 [main] WARN  a.C - two\n")
+        runBlocking { ParsedLog.build(file, format) }.use { log ->
+            val snapshot = log.filterSnapshot()
+            Files.writeString(file, "java.lang.Exception: x\n2026-10-01 08:00:00.003 [main] INFO  a.D - three\n", StandardOpenOption.APPEND)
+            log.append(log.readAppended(Files.size(file)))
+            assertEquals(3, log.recordCount)
+            val message = log.schema.fields.indexOfFirst { it.name == "Message" }
+            assertEquals(listOf("one", "two"), List(snapshot.count) { snapshot.fieldText(it, message) })
+            assertEquals("a.C", snapshot.fieldText(1, log.schema.fields.indexOfFirst { it.name == "Logger" }))
+        }
+    }
 }

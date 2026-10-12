@@ -109,6 +109,17 @@ class LineIndexTest {
     }
 
     @Test
+    fun `a snapshot reads lines like the index, also while more are appended`() {
+        val (file, index) = growing("one\r\n\ntwo\nthree")
+        index.use {
+            val snapshot = it.filterSnapshot()
+            assertEquals(it.lines(), List(snapshot.count) { line -> snapshot.fieldText(line, 0) })
+            it.appendFrom(file, " and more\nfour\n")
+            assertEquals(listOf("one", "", "two", "three"), List(snapshot.count) { line -> snapshot.fieldText(line, 0) })
+        }
+    }
+
+    @Test
     fun `appending after a trailing newline adds lines`() {
         val (file, index) = growing("a\n")
         index.use {

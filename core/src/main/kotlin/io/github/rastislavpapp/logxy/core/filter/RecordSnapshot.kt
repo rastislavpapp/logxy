@@ -1,11 +1,15 @@
 package io.github.rastislavpapp.logxy.core.filter
 
+import io.github.rastislavpapp.logxy.core.Bytes
 import io.github.rastislavpapp.logxy.core.ReadChannels
 import io.github.rastislavpapp.logxy.core.index.LongChunkList
 import io.github.rastislavpapp.logxy.core.log.Columns
 import io.github.rastislavpapp.logxy.core.log.LevelMapping
+import io.github.rastislavpapp.logxy.core.log.ParsedLog
 import io.github.rastislavpapp.logxy.core.log.Schema
 import io.github.rastislavpapp.logxy.core.parse.RecordFormat
+import io.github.rastislavpapp.logxy.core.readFully
+import java.nio.ByteBuffer
 
 /**
  * The first [count] records of a log, taken on the thread that owns it and readable from any thread:
@@ -28,6 +32,15 @@ internal abstract class RecordSnapshot(
 
     /** Walks records, cheapest in increasing order; one per thread. */
     abstract fun cursor(): RecordCursor
+
+    protected fun readBytes(position: Long, length: Int): ByteArray {
+        val bytes = ByteArray(length)
+        val read = channels.main.readFully(ByteBuffer.wrap(bytes), position)
+        return if (read == length) bytes else bytes.copyOf(read)
+    }
+
+    /** The whole value of [field] in [record], like [io.github.rastislavpapp.logxy.core.log.Records.fieldText]. */
+    abstract fun fieldText(record: Int, field: Int): String
 }
 
 internal interface RecordCursor {
@@ -73,6 +86,20 @@ internal class ParsedSnapshot(
         // Empty segments share their first record number with the next one; the search lands on the last of those.
         while (record >= first[low] + segments[low].size) low++
         return low
+    }
+
+    override fun fieldText(record: Int, field: Int): String {
+        require(record in 0..<count) { "Record $record, count $count" }
+        val segment = segmentOf(record)
+        val end = if (record + 1 < count) recordStart(record + 1) else end
+        return ParsedLog.fieldText(schema, segments[segment], record - first[segment], field, format, { texts[field]!![it] }) { start ->
+            readBytes(start, minOf(end - start, Int.MAX_VALUE / 2L).toInt())
+        }
+    }
+
+    private fun recordStart(record: Int): Long {
+        val segment = segmentOf(record)
+        return segments[segment].starts[record - first[segment]]
     }
 
     override fun cursor(): RecordCursor = object : RecordCursor {
@@ -127,6 +154,15 @@ internal class LineSnapshot(
 
     override fun dictionaryTexts(field: Int) = throw UnsupportedOperationException("Raw logs have no dictionaries")
 
+    /** Offset just past [line], its terminator included. */
+    private fun lineEnd(line: Int) = if (line + 1 < count) starts[line + 1] else end
+
+    override fun fieldText(record: Int, field: Int): String {
+        require(record in 0..<count) { "Line $record, count $count" }
+        val bytes = readBytes(starts[record], (lineEnd(record) - starts[record]).toInt())
+        return String(bytes, 0, Bytes.trimLineEnd(bytes, 0, bytes.size), Charsets.UTF_8)
+    }
+
     override fun cursor(): RecordCursor = object : RecordCursor {
         override var record = 0
             private set
@@ -136,7 +172,7 @@ internal class LineSnapshot(
         }
 
         override val start get() = starts[record]
-        override val end get() = if (record + 1 < count) starts[record + 1] else this@LineSnapshot.end
+        override val end get() = lineEnd(record)
         override fun timestamp(field: Int) = Columns.ABSENT_TIMESTAMP
         override fun levelId(field: Int) = Columns.MAX_LEVEL_ID + 1
         override fun dictId(field: Int) = -1
