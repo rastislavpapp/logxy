@@ -410,7 +410,7 @@ class LogTab(
         scrollPane.onFollowChanged = { session.follow = it }
         scrollPane.resumeFollowAtEnd = { session.isLive }
         val timestampField = records.schema.fields.firstOrNull { it.role == Role.TIMESTAMP }?.name
-        scrollPane.onRowsInViewChanged = ::showVisibleTimes
+        scrollPane.onRowsInViewChanged = ::showMarkedTimes
         val histogramBar = timestampField?.let { field ->
             TimeHistogramBar { session.histogram }.apply {
                 onJump = ::jumpToTime
@@ -420,6 +420,7 @@ class LogTab(
             }
         }
         table.selectionModel.addListSelectionListener { event ->
+            showMarkedTimes()
             if (!event.valueIsAdjusting) {
                 showDetail(model, table.selectionModel.leadSelectionIndex)
                 onStatusChanged()
@@ -516,20 +517,23 @@ class LogTab(
         if (selectedIndex != null) scrollPane.selectRow(selectedIndex, scroll = false)
     }
 
-    /** Shades the times of the rows in view on the histogram. */
-    private fun showVisibleTimes() {
+    /** Marks the times of the selected rows on the histogram, or of the top row in view if none is selected. */
+    private fun showMarkedTimes() {
         val bar = histogramBar ?: return
         val model = model ?: return
         val scrollPane = scrollPane ?: return
-        val first = scrollPane.firstVisibleRow
-        val last = scrollPane.lastVisibleRow
-        if (last < first) {
-            bar.visibleTimes = null
-            return
+        val selection = table?.selectionModel ?: return
+        val first = selection.minSelectionIndex
+        val last = selection.maxSelectionIndex
+        bar.markedTimes = if (first >= 0 && last < model.rowCount) {
+            val from = model.records.timestamp(model.recordAt(first))
+            val to = model.records.timestamp(model.recordAt(last))
+            if (from != null && to != null) minOf(from, to) to maxOf(from, to) else (from ?: to)?.let { it to it }
+        } else if (model.totalRowCount > 0) {
+            model.records.timestamp(model.recordAtIndex(scrollPane.firstVisibleRow))?.let { it to it }
+        } else {
+            null
         }
-        val from = model.records.timestamp(model.recordAtIndex(first))
-        val to = model.records.timestamp(model.recordAtIndex(last))
-        bar.visibleTimes = if (from != null && to != null) from to to else null
     }
 
     /** Selects the first shown row at [time] or later, or the last row if none is. */
@@ -647,7 +651,7 @@ class LogTab(
         }
 
         override fun histogramChanged() {
-            showVisibleTimes()
+            showMarkedTimes()
             histogramBar?.repaint()
         }
 

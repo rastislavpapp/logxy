@@ -50,7 +50,8 @@ private val TICK_STEPS = longArrayOf(
 /**
  * Shown records over time: their volume as an area, with lines for warnings and errors over it on the same
  * scale, so heights compare truthfully. The scale is the square root, so one spike does not flatten the rest
- * and a burst that is a small share of all records still rises well off the bottom. The rows in view are outlined.
+ * and a burst that is a small share of all records still rises well off the bottom. The selected rows, or the
+ * top row in view, are marked.
  * Clicking calls [onJump] with the time there; dragging calls [onRange] with the times covered; the
  * context menu calls [onShowAllTimes] when [hasTimeRange].
  */
@@ -63,8 +64,8 @@ class TimeHistogramBar(private val histogram: () -> TimeHistogram?) : JComponent
     var onShowAllTimes: () -> Unit = {}
     var hasTimeRange: () -> Boolean = { false }
 
-    /** Times of the first and last row in view; null if unknown. */
-    var visibleTimes: Pair<Long, Long>? = null
+    /** Times of the first and last marked row; null if unknown. */
+    var markedTimes: Pair<Long, Long>? = null
         set(value) {
             if (field == value) return
             field = value
@@ -188,7 +189,7 @@ class TimeHistogramBar(private val histogram: () -> TimeHistogram?) : JComponent
             paintLine(g2, slices, slices.errors, peak, UIManager.getColor("Actions.Red"))
             paintPeak(g2, slices)
             val accent = UIManager.getColor("Component.accentColor")
-            visibleTimes?.let { (from, to) ->
+            markedTimes?.let { (from, to) ->
                 val x1 = timeX(slices, from)
                 paintRegion(g2, x1, maxOf(x1 + UIScale.scale(2), timeX(slices, to)), accent, 0.12f)
             }
