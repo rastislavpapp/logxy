@@ -31,14 +31,18 @@ object Templates {
                 out[n++] = bytes[i++]
                 continue
             }
+            // The word is copied as it is scanned, and replaced by a placeholder only if it turns out variable.
             val start = i
-            var digit = false
-            var hex = true
+            val outStart = n
+            var any = 0
+            var all = HEX
             while (i < limit) {
-                val k = CLASSES[bytes[i].toInt() and 0xFF].toInt()
+                val b = bytes[i]
+                val k = CLASSES[b.toInt() and 0xFF].toInt()
                 if (k and (DELIMITER or LINE_END) != 0) break
-                if (k and DIGIT != 0) digit = true
-                if (k and HEX == 0) hex = false
+                any = any or k
+                all = all and k
+                out[n++] = b
                 i++
             }
             // Punctuation around a word stays: `id 42:` becomes `id {}:`, JSON's `"id":42` becomes `"id":{}`.
@@ -46,20 +50,16 @@ object Templates {
             while (valueStart < i && bytes[valueStart] == COLON) valueStart++
             var valueEnd = i
             while (valueEnd > valueStart && (bytes[valueEnd - 1] == DOT || bytes[valueEnd - 1] == COLON)) valueEnd--
+            var hex = all and HEX != 0
             if ((valueStart > start || valueEnd < i) && !hex) {
                 hex = (valueStart..<valueEnd).all { CLASSES[bytes[it].toInt() and 0xFF].toInt() and HEX != 0 }
             }
-            System.arraycopy(bytes, start, out, n, valueStart - start)
-            n += valueStart - start
-            if (valueEnd > valueStart && (digit || (hex && valueEnd - valueStart >= MIN_HEX_LENGTH))) {
+            if (valueEnd > valueStart && (any and DIGIT != 0 || (hex && valueEnd - valueStart >= MIN_HEX_LENGTH))) {
+                n = outStart + (valueStart - start)
                 out[n++] = OPEN
                 out[n++] = CLOSE
-            } else {
-                System.arraycopy(bytes, valueStart, out, n, valueEnd - valueStart)
-                n += valueEnd - valueStart
+                for (j in valueEnd..<i) out[n++] = bytes[j]
             }
-            System.arraycopy(bytes, valueEnd, out, n, i - valueEnd)
-            n += i - valueEnd
         }
         return n
     }
