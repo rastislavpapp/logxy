@@ -18,6 +18,7 @@ Fast desktop log viewer (Kotlin, Swing, FlatLaf, Gradle).
 - Prefer primitive arrays over boxed collections or per-row objects for anything that scales with file size.
 - Declare all dependency and plugin versions in `gradle/libs.versions.toml`. Do not add dependencies without a clear reason.
 - Speed is the top goal: after a change to parsing, indexing, filtering or merging, run `./gradlew -q :tools:benchmark`. If it fails, find the cause.
+- Make code edits with the Edit / Write tools only, never through shell or Python pipelines (`sed`, `python - <<EOF`, ...): each layer eats a level of backslashes, so `\n` escapes in string literals become real line breaks, and `sed -i` rewrites line endings.
 
 ## Trying the app
 
