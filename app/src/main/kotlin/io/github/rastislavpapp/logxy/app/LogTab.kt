@@ -25,6 +25,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.swing.Swing
 import kotlinx.coroutines.withContext
@@ -44,6 +45,7 @@ import javax.swing.JComponent
 import javax.swing.JLabel
 import javax.swing.JLayeredPane
 import javax.swing.JMenuItem
+import javax.swing.JOptionPane
 import javax.swing.JPanel
 import javax.swing.JPopupMenu
 import javax.swing.JProgressBar
@@ -318,8 +320,16 @@ class LogTab(
     /** Copies [field] of [records], one per line; reading many may take a while, so it is done off the UI thread. */
     private fun copyColumn(log: Records, field: Int, records: IntArray) {
         scope.launch {
-            val text = withContext(Dispatchers.IO) {
-                buildString { for (record in records) append(log.fieldText(record, field)).append('\n') }
+            val text = try {
+                withContext(Dispatchers.IO) {
+                    buildString { for (record in records) append(log.fieldText(record, field)).append('\n') }
+                }
+            } catch (e: Exception) {
+                // A reload closes the file under the read; closing the tab cancels this.
+                if (e is CancellationException) throw e
+                ensureActive()
+                JOptionPane.showMessageDialog(this@LogTab, "The file changed while copying; copy the column again.", "Copy Column", JOptionPane.ERROR_MESSAGE)
+                return@launch
             }
             copy(text)
         }
