@@ -337,7 +337,7 @@ class LogTab(
             if (level != null) Query.Rule(field.name, op, level.name, bare = true) else Query.Rule(field.name, op, pattern)
         val popup = JPopupMenu()
         val fieldIndex = model.records.schema.fields.indexOf(field)
-        popup.add(JMenuItem("Copy Value").apply {
+        popup.add(JMenuItem("Copy Cell Value").apply {
             addActionListener { copy(model.records.fieldText(model.recordAt(row), fieldIndex)) }
         })
         // Within a selection of several rows, the menu also copies from all of them.
@@ -345,7 +345,7 @@ class LogTab(
             popup.add(JMenuItem("Copy Selected Rows").apply {
                 addActionListener { table.transferHandler.exportToClipboard(table, Toolkit.getDefaultToolkit().systemClipboard, TransferHandler.COPY) }
             })
-            popup.add(JMenuItem("Copy “${field.name}” of Selected Rows").apply {
+            popup.add(JMenuItem("Copy Column “${field.name}”").apply {
                 addActionListener { copyColumn(model.records, fieldIndex, table.selectedRows.map(model::recordAt).toIntArray()) }
             })
         }
