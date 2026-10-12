@@ -124,7 +124,6 @@ class LogTab(
     private var model: LogTableModel? = null
     private var table: LogTable? = null
     private var scrollPane: VirtualScrollPane? = null
-    private var summary: RowSummary? = null
     private var histogramBar: TimeHistogramBar? = null
 
     /** What the status bar shows for this file. */
@@ -408,15 +407,9 @@ class LogTab(
         scrollPane.onFollowChanged = { session.follow = it }
         scrollPane.resumeFollowAtEnd = { session.isLive }
         val timestampField = records.schema.fields.firstOrNull { it.role == Role.TIMESTAMP }?.name
-        val summary = timestampField?.let {
-            RowSummary(model, scope) {
-                showVisibleTimes()
-                histogramBar?.repaint()
-            }
-        }
         scrollPane.onRowsInViewChanged = ::showVisibleTimes
         val histogramBar = timestampField?.let { field ->
-            TimeHistogramBar { summary?.histogram }.apply {
+            TimeHistogramBar { session.histogram }.apply {
                 onJump = ::jumpToTime
                 onRange = { from, to -> filterBar.setTimeRange(field, timeLiteral(from), timeLiteral(to)) }
                 onShowAllTimes = { filterBar.setTimeRange(field, null, null) }
@@ -432,7 +425,6 @@ class LogTab(
         this.model = model
         this.table = table
         this.scrollPane = scrollPane
-        this.summary = summary
         this.histogramBar = histogramBar
         filterBar.setSchema(records.schema)
         patterns.canFilter = records.schema.hasPatterns()
@@ -509,7 +501,6 @@ class LogTab(
         val top = if (model.totalRowCount > 0) model.recordAtIndex(scrollPane.firstVisibleRow) else null
         model.showRows(rows)
         scrollPane.rowsReplaced()
-        summary?.reset()
         patterns.refresh()
         val selectedIndex = selected?.let { record -> model.indexOfRecord(record).takeIf { it >= 0 && model.recordAtIndex(it) == record } }
         if (!session.follow) {
@@ -596,8 +587,6 @@ class LogTab(
     private inner class Listener : SessionListener {
         override fun indexing(fraction: () -> Double) {
             columnsButton.isEnabled = false
-            summary?.cancel()
-            summary = null
             histogramBar = null
             patterns.reset()
             model = null
@@ -629,7 +618,6 @@ class LogTab(
             changed.forEach(::refreshDetail)
             if (session.shown == null) {
                 scrollPane?.rowsAppended()
-                summary?.changedFrom(changed.fold(oldRecordCount, ::minOf))
                 patterns.refreshSoon()
             }
         }
@@ -639,14 +627,17 @@ class LogTab(
         override fun rowsExtended(firstChanged: Int, oldSize: Int) {
             model?.rowsChangedFrom(firstChanged, oldSize)
             scrollPane?.rowsAppended()
-            summary?.changedFrom(firstChanged)
             patterns.refreshSoon()
         }
 
         override fun levelMappingChanged() {
             model?.let { it.fireTableRowsUpdated(0, maxOf(0, it.rowCount - 1)) }
-            summary?.reset()
             patterns.refresh()
+        }
+
+        override fun histogramChanged() {
+            showVisibleTimes()
+            histogramBar?.repaint()
         }
 
         override fun followChanged(follow: Boolean) {

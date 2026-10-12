@@ -55,18 +55,45 @@ class TimeHistogram(
 
     fun binStart(bin: Int): Long = start + bin * width
 
-    fun add(time: Long, level: Level?) {
+    fun add(time: Long, level: Level?) = add(time, category(level), 1)
+
+    /** Adds [count] records of [category] at [time]. */
+    fun add(time: Long, category: Int, count: Int) {
         val bin = fit(time)
-        counts[category(level)][bin]++
+        counts[category][bin] += count
         if (bin < firstBin) firstBin = bin
         if (bin > lastBin) lastBin = bin
     }
 
-    /** Takes back a record added with the same [time] and [level], e.g. one that changed. */
-    fun remove(time: Long, level: Level?) {
-        val bin = Math.floorDiv(time - start, width)
-        if (bin !in 0..<BINS) return
-        counts[category(level)][bin.toInt()]--
+    /** Makes the bins reach [time] without counting anything there, e.g. for times still to be counted. */
+    fun cover(time: Long) {
+        val bin = fit(time)
+        if (bin < firstBin) firstBin = bin
+        if (bin > lastBin) lastBin = bin
+    }
+
+    /** Adds the records counted in [other]. */
+    fun addAll(other: TimeHistogram) {
+        if (other.isEmpty) return
+        // Each of the other's bins must fall into one of these: widen them to a multiple of its width.
+        if (width % other.width != 0L) {
+            val common = width / gcd(width, other.width) * other.width
+            move(Math.floorDiv(start, common) * common, common)
+        }
+        for (bin in other.firstBin..other.lastBin) {
+            for (category in 0..<CATEGORIES) {
+                val count = other.counts[category][bin]
+                if (count != 0) add(other.binStart(bin), category, count)
+            }
+        }
+    }
+
+    fun copy(): TimeHistogram = TimeHistogram(start, start).also {
+        it.start = start
+        it.width = width
+        it.firstBin = firstBin
+        it.lastBin = lastBin
+        it.counts = Array(CATEGORIES) { category -> counts[category].copyOf() }
     }
 
     /** The bin [time] falls into, making room for it first. */
@@ -115,6 +142,8 @@ class TimeHistogram(
             Level.WARN -> WARN
             else -> OTHER
         }
+
+        private tailrec fun gcd(a: Long, b: Long): Long = if (b == 0L) a else gcd(b, a % b)
 
         /** The smallest round width that covers [span] in [BINS] bins. */
         private fun roundWidth(span: Long): Long {

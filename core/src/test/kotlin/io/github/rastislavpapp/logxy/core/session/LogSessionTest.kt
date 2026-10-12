@@ -70,6 +70,7 @@ class LogSessionTest {
         override fun rowsReplaced(rows: FilteredRows?, keepView: Boolean) { replaced++ }
         override fun rowsExtended(firstChanged: Int, oldSize: Int) {}
         override fun levelMappingChanged() {}
+        override fun histogramChanged() {}
         override fun followChanged(follow: Boolean) {}
         override fun statusChanged(status: SessionStatus) {}
     }
@@ -176,6 +177,47 @@ class LogSessionTest {
             session.applyFilter(null, empty)
             assertEquals(3, recorder.replaced)
         }
+    }
+
+    /** Waits until the histogram counts [records] records, [warnings] warnings and [errors] errors. */
+    private suspend fun awaitHistogram(session: LogSession, records: Int, warnings: Int, errors: Int) = withTimeout(10_000) {
+        while (true) {
+            val counts = withContext(ui) {
+                session.histogram?.let { h ->
+                    IntArray(TimeHistogram.CATEGORIES) { c -> (h.firstBin..h.lastBin).sumOf { h.count(c, it) } }
+                }
+            }
+            if (counts != null && counts.sum() == records && counts[TimeHistogram.WARN] == warnings && counts[TimeHistogram.ERROR] == errors) return@withTimeout
+            delay(50)
+        }
+    }
+
+    @Test
+    fun `counts the times of the shown rows, also of records appended later`() = runBlocking {
+        val file = Files.writeString(dir.resolve("histogram.log"), lines(1000))
+        val (session, _) = open(file, Recorder())
+        withContext(ui) { session.applyFilter(null, Query.EMPTY) }
+        awaitHistogram(session, 1000, 250, 250)
+        // Ends in the middle of an ERROR record, which counts once completed with the next append.
+        append(file, lines(100) + "2026-10-01 08:00:00.000 [main] ERR")
+        awaitHistogram(session, 1100, 275, 275)
+        append(file, "OR app.L - completed\n")
+        awaitHistogram(session, 1101, 275, 276)
+        withContext(ui) { session.applyFilter(Level.WARN, Query.EMPTY) }
+        awaitHistogram(session, 551, 275, 276)
+        append(file, lines(4))
+        awaitHistogram(session, 553, 276, 277)
+    }
+
+    @Test
+    fun `merged files are counted file by file`() = runBlocking {
+        val a = Files.writeString(dir.resolve("a.log"), lines(300))
+        val b = Files.writeString(dir.resolve("b.log"), lines(500))
+        val (session, _) = open(listOf(a, b), Recorder())
+        withContext(ui) { session.applyFilter(null, Query.EMPTY) }
+        awaitHistogram(session, 800, 200, 200)
+        withContext(ui) { session.applyFilter(Level.ERROR, Query.EMPTY) }
+        awaitHistogram(session, 200, 0, 200)
     }
 
     @Test

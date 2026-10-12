@@ -86,6 +86,9 @@ interface SessionListener {
     /** The level mapping changed; shown levels may have different colors. */
     fun levelMappingChanged()
 
+    /** [LogSession.histogram] changed; while counted anew, it fills up from its earliest times. */
+    fun histogramChanged()
+
     fun followChanged(follow: Boolean)
 
     fun statusChanged(status: SessionStatus)
@@ -178,6 +181,17 @@ class LogSession(
     /** How far the filter over all records got, from 0 to 1, while [SessionStatus.filtering]. */
     val filterProgress: Double get() = running?.progress ?: 0.0
 
+    /** Times of the shown rows; null until they are counted, or if the records have no timestamps. */
+    var histogram: TimeHistogram? = null
+        private set
+
+    // The shown rows before [settledRows], which no longer change, counted apart from the rest, which may.
+    private var settled: TimeHistogram? = null
+    private var settledRows = 0
+    private var countJob: Job? = null
+    private var counting: TimeCount? = null
+    private var countAgain = false
+
     private var indexMillis = 0L
     private var problem: String? = null
 
@@ -255,6 +269,8 @@ class LogSession(
      * null if there is nothing loaded or the records have no message. Cancelling the caller stops it.
      */
     suspend fun patternCounts(): PatternCounts? {
+        // Counting the times takes a fraction of finding the templates: let it have the threads first.
+        while (true) countJob?.takeIf { it.isActive }?.join() ?: break
         val records = records ?: return null
         val engine = engine ?: return null
         if (records.schema.indexOf(Role.MESSAGE) < 0) return null
@@ -442,7 +458,7 @@ class LogSession(
                         return
                     }
                     listener.recordsAppended(oldRecordCount, changed.toIntArray())
-                    if (activeFilter != null) catchUpFilter()
+                    if (activeFilter != null) catchUpFilter() else countTimes(anew = false)
                     if (promoted) follow = true
                 }
             } catch (e: IOException) {
@@ -482,6 +498,8 @@ class LogSession(
             reload()
         } else if (levelsChanged && activeFilter != null) {
             runFilter(keepView = true, activeFilter?.let { engine?.prepare(it) })
+        } else if (levelsChanged) {
+            countTimes(anew = true)
         }
     }
 
@@ -510,6 +528,7 @@ class LogSession(
                 shown = null
                 listener.rowsReplaced(null, keepView)
                 updateStatus()
+                countTimes(anew = true)
             }
             return
         }
@@ -544,6 +563,7 @@ class LogSession(
             filteredBytes = result.indexedSize
             listener.rowsReplaced(rows, keepView)
             updateStatus()
+            countTimes(anew = true)
             // Still the current job (a replaced one would have been cancelled), but done.
             filterJob = null
             catchUpFilter()
@@ -570,9 +590,72 @@ class LogSession(
             filteredBytes = result.indexedSize
             listener.rowsExtended(firstChanged, oldSize)
             updateStatus()
+            countTimes(anew = false)
             filterJob = null
             catchUpFilter()
         }
+    }
+
+    /**
+     * Counts the times of the shown rows on other threads: [anew] all of them, keeping [histogram] meanwhile,
+     * or only those added or changed since the last count. A count of new rows asked for while another runs
+     * follows it.
+     */
+    private fun countTimes(anew: Boolean) {
+        val records = records ?: return
+        val engine = engine ?: return
+        if (records.schema.indexOf(Role.TIMESTAMP) < 0) return
+        if (anew) {
+            countJob?.cancel()
+        } else if (countJob?.isActive == true) {
+            countAgain = true
+            return
+        }
+        countAgain = false
+        val rows = shown
+        val size = rows?.size ?: records.recordCount
+        // From the first record still growing on, rows may change: they are counted again each time.
+        val changing = engine.changedFrom(if (rows == null) records.recordCount else filteredRecords)
+        val settle = if (rows == null) minOf(changing, size) else rows.indexOf(changing).let { if (it < 0) size else it }
+        val base = settled?.takeIf { !anew && settle >= settledRows }
+        val from = if (base == null) 0 else settledRows
+        val (expectedFrom, expectedTo) = expectedTimes(records, rows, size)
+        val count = TimeCount(records, rows?.array(), from, size, settle, expectedFrom, expectedTo)
+        counting = count
+        // Counted anew, the histogram is shown as it fills up; a stale part may still arrive after another count started.
+        val onCounted: ((TimeHistogram) -> Unit)? = if (base != null) null else { counted ->
+            scope.launch {
+                if (counting === count) {
+                    histogram = counted
+                    listener.histogramChanged()
+                }
+            }
+        }
+        countJob = scope.launch {
+            val (settledPart, restPart) = count.run(onCounted)
+            val all = base?.apply { addAll(settledPart) } ?: settledPart
+            settled = all
+            settledRows = settle
+            histogram = all.copy().apply { addAll(restPart) }
+            counting = null
+            countJob = null
+            listener.histogramChanged()
+            if (countAgain) countTimes(anew = false)
+        }
+    }
+
+    /** The times of about the first and the last of the shown rows, for the bins to start with. */
+    private fun expectedTimes(records: Records, rows: FilteredRows?, size: Int): Pair<Long, Long> {
+        fun firstTime(indices: IntProgression): Long {
+            for (i in indices) {
+                val time = records.timestampNanos(if (rows == null) i else rows[i])
+                if (time != Records.NO_TIMESTAMP) return time
+            }
+            return 0
+        }
+        val from = firstTime(0..<minOf(TIME_PROBE_ROWS, size))
+        val to = firstTime(size - 1 downTo maxOf(0, size - TIME_PROBE_ROWS))
+        return from to maxOf(from, to)
     }
 
     private fun indexedSize(): Long = sources.sumOf { it.log?.indexedSize ?: 0L }
@@ -601,6 +684,13 @@ class LogSession(
 
     private fun closeLogs() {
         filterJob?.cancel()
+        countJob?.cancel()
+        countJob = null
+        counting = null
+        countAgain = false
+        histogram = null
+        settled = null
+        settledRows = 0
         filteredRecords = 0
         filteredBytes = 0L
         filtering = false
@@ -619,5 +709,8 @@ class LogSession(
         const val LIVE_POLL_MILLIS = 500L
         const val STATIC_POLL_MILLIS = 2000L
         const val FILTERING_INDICATOR_MILLIS = 200L
+
+        /** Rows at each end of the shown rows looked at for the times they cover. */
+        const val TIME_PROBE_ROWS = 1000
     }
 }

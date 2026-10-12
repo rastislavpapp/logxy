@@ -62,6 +62,19 @@ internal class ParsedSnapshot(
 
     override fun formatTimestamp(field: Int, nanos: Long) = format.formatTimestamp(field, nanos)
 
+    /** The segment holding [record]: the last one starting at or before it that is not empty. */
+    private fun segmentOf(record: Int): Int {
+        var low = 0
+        var high = first.size - 1
+        while (low < high) {
+            val middle = (low + high + 1) ushr 1
+            if (first[middle] <= record) low = middle else high = middle - 1
+        }
+        // Empty segments share their first record number with the next one; the search lands on the last of those.
+        while (record >= first[low] + segments[low].size) low++
+        return low
+    }
+
     override fun cursor(): RecordCursor = object : RecordCursor {
         private var segment = 0
         private var columns = segments.firstOrNull()
@@ -72,8 +85,14 @@ internal class ParsedSnapshot(
         override fun moveTo(record: Int) {
             this.record = record
             if (record < first[segment] || record >= first[segment] + columns!!.size) {
-                segment = first.indexOfLast { it <= record && it >= 0 }
-                while (record >= first[segment] + segments[segment].size) segment++
+                // Records are mostly walked in order: the next segment, or else a search.
+                if (record < first[segment]) {
+                    segment = segmentOf(record)
+                } else {
+                    var next = segment + 1
+                    while (next < segments.size && segments[next].size == 0) next++
+                    segment = if (next < segments.size && record < first[next] + segments[next].size) next else segmentOf(record)
+                }
                 columns = segments[segment]
             }
             local = record - first[segment]

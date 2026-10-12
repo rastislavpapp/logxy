@@ -62,12 +62,21 @@ class TimeHistogramTest {
     }
 
     @Test
-    fun `remove takes back a record`() {
-        val histogram = TimeHistogram(T0, T0 + 10 * SECOND)
-        histogram.add(T0 + SECOND, Level.ERROR)
-        histogram.remove(T0 + SECOND, Level.ERROR)
-        histogram.add(T0 + SECOND, Level.INFO)
-        assertEquals(0, histogram.total(TimeHistogram.ERROR))
+    fun `adds another histogram of a width that does not divide its own`() {
+        val histogram = TimeHistogram(T0, T0 + 3600 * SECOND)
+        histogram.add(T0 + 7 * SECOND, Level.INFO)
+        val other = TimeHistogram(T0, T0 + 4096 * 15 * SECOND)
+        assertEquals(15 * SECOND, other.width)
+        other.add(T0 + 7 * SECOND, Level.ERROR)
+        other.add(T0 + 20_000 * SECOND, Level.WARN)
+        val before = histogram.copy()
+        histogram.addAll(other)
+        assertEquals(0, histogram.width % (15 * SECOND))
         assertEquals(1, histogram.total(TimeHistogram.OTHER))
+        assertEquals(1, histogram.total(TimeHistogram.ERROR))
+        assertEquals(1, histogram.count(TimeHistogram.WARN, histogram.binOf(T0 + 20_000 * SECOND)))
+        assertEquals(histogram.binOf(T0 + 7 * SECOND), histogram.firstBin)
+        assertEquals(1 * SECOND, before.width)
+        assertEquals(0, before.total(TimeHistogram.ERROR))
     }
 }
