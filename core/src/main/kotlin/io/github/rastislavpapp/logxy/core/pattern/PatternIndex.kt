@@ -5,10 +5,9 @@ import io.github.rastislavpapp.logxy.core.index.IntChunkList
 import io.github.rastislavpapp.logxy.core.log.ByteDictionary
 import io.github.rastislavpapp.logxy.core.log.Role
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -63,32 +62,48 @@ internal class PatternIndex(private val maxTemplates: Int = MAX_TEMPLATES, priva
         val starts = (from..<count step chunkSize).toList()
         doneChunks.set(0)
         totalChunks = starts.size
-        val scanned = coroutineScope {
-            starts.mapIndexed { task, start ->
-                async {
-                    ensureActive()
-                    scan(snapshot, field, task, start, minOf(count, start + chunkSize)).also { doneChunks.incrementAndGet() }
-                }
-            }.awaitAll()
-        }
-        for ((chunk, start) in starts.withIndex()) {
-            val (local, localIds) = scanned[chunk]
-            val global = IntArray(local.size) { id ->
-                val key = local.key(id)
-                val found = templates.find(key, 0, key.size)
-                when {
-                    found >= 0 -> found
-                    templates.size < maxTemplates -> templates.idOf(key, 0, key.size)
-                    else -> OTHER
+        // Chunks are added in order as soon as they and all before them are scanned, so a cancelled update keeps them.
+        val scanned = arrayOfNulls<Pair<ByteDictionary, IntArray>>(starts.size)
+        var next = 0
+        try {
+            coroutineScope {
+                for ((task, start) in starts.withIndex()) {
+                    launch {
+                        ensureActive()
+                        val chunk = scan(snapshot, field, task, start, minOf(count, start + chunkSize))
+                        doneChunks.incrementAndGet()
+                        synchronized(scanned) {
+                            scanned[task] = chunk
+                            while (next < starts.size) {
+                                val (local, localIds) = scanned[next] ?: break
+                                scanned[next] = null
+                                add(starts[next++], local, localIds)
+                            }
+                        }
+                    }
                 }
             }
-            for (i in localIds.indices) {
-                val record = start + i
-                if (record < ids.size) ids[record] = global[localIds[i]] else ids.add(global[localIds[i]])
+            coveredEnd = snapshot.end
+        } finally {
+            totalChunks = 0
+        }
+    }
+
+    /** Gives the records from [start] on the templates [localIds] refer to in [local]. */
+    private fun add(start: Int, local: ByteDictionary, localIds: IntArray) {
+        val global = IntArray(local.size) { id ->
+            val key = local.key(id)
+            val found = templates.find(key, 0, key.size)
+            when {
+                found >= 0 -> found
+                templates.size < maxTemplates -> templates.idOf(key, 0, key.size)
+                else -> OTHER
             }
         }
-        coveredEnd = snapshot.end
-        totalChunks = 0
+        for (i in localIds.indices) {
+            val record = start + i
+            if (record < ids.size) ids[record] = global[localIds[i]] else ids.add(global[localIds[i]])
+        }
     }
 
     /** Templates of the records `[from, to)`: a dictionary of them and the id there of each record. */

@@ -12,7 +12,11 @@ import io.github.rastislavpapp.logxy.core.merge.MergedFilter
 import io.github.rastislavpapp.logxy.core.merge.MergedLog
 import io.github.rastislavpapp.logxy.core.parse.JsonFormat
 import io.github.rastislavpapp.logxy.core.parse.PatternFormat
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.yield
 import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Files
 import java.nio.file.Path
@@ -59,6 +63,21 @@ class PatternIndexTest {
     private fun PatternCounts.entries() = List(size) { templates[it] to total(it) }
 
     private fun FilterEngine.rows(filter: Filter) = runBlocking { prepare(filter).run() }.rows.toList()
+
+    @Test
+    fun `an update cancelled part way keeps what it finished, and the next one completes it`() {
+        val content = buildString { repeat(2000) { append("2026-10-01 08:00:00.000 [main] INFO  app.Main - Job ${it % 7} took $it ms\n") } }
+        parse(content).use { log ->
+            val expected = PatternIndex().templates(log)
+            val index = PatternIndex(chunkSize = 10)
+            runBlocking {
+                val update = launch(Dispatchers.Default) { index.update(log.filterSnapshot()) }
+                while (index.progress == 1.0 && update.isActive) yield()
+                update.cancelAndJoin()
+            }
+            assertEquals(expected, index.templates(log))
+        }
+    }
 
     @Test
     fun `counts records per template and level`() {

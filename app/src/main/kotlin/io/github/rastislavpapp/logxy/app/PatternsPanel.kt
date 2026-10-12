@@ -1,5 +1,6 @@
 package io.github.rastislavpapp.logxy.app
 
+import com.formdev.flatlaf.util.UIScale
 import io.github.rastislavpapp.logxy.core.log.Level
 import io.github.rastislavpapp.logxy.core.log.Role
 import io.github.rastislavpapp.logxy.core.log.Schema
@@ -13,20 +14,23 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import net.miginfocom.swing.MigLayout
 import java.awt.BorderLayout
+import java.awt.CardLayout
+import java.awt.Color
 import java.awt.Component
 import java.awt.Font
 import java.awt.Graphics
 import java.awt.Graphics2D
+import java.awt.RenderingHints
 import java.awt.Toolkit
 import java.awt.datatransfer.StringSelection
 import java.awt.event.HierarchyEvent
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
+import javax.swing.JComponent
 import javax.swing.JLabel
 import javax.swing.JMenuItem
 import javax.swing.JPanel
 import javax.swing.JPopupMenu
-import javax.swing.JProgressBar
 import javax.swing.JScrollPane
 import javax.swing.JTable
 import javax.swing.RowSorter
@@ -39,12 +43,22 @@ import javax.swing.border.EmptyBorder
 import javax.swing.plaf.basic.BasicGraphicsUtils
 import javax.swing.table.AbstractTableModel
 import javax.swing.table.DefaultTableCellRenderer
+import kotlin.math.PI
+import kotlin.math.sin
 
 /** Counting again while a file is tailed waits this long, so a busy file does not keep it counting. */
 private const val REFRESH_MILLIS = 1000
 
 /** Counts that take longer show their progress. */
 private const val PROGRESS_DELAY_MILLIS = 200
+
+private const val PROGRESS_HEIGHT = 3
+
+/** How long the strip's segment takes to cross while the progress is unknown, and the placeholders to pulse. */
+private const val CYCLE_MILLIS = 1200.0
+
+private const val TABLE_CARD = "table"
+private const val PLACEHOLDERS_CARD = "placeholders"
 
 private val PADDING = EmptyBorder(0, 0, 0, 12)
 
@@ -66,7 +80,15 @@ class PatternsPanel(
     private val model = PatternsModel()
     private val table = JTable(model)
     private val summary = JLabel(" ")
-    private val progressBar = JProgressBar(0, 1000).apply { isVisible = false }
+    private val scrollPane = JScrollPane(table).apply { border = null }
+    private val placeholders = Placeholders()
+    private val center = JPanel(CardLayout()).apply {
+        add(scrollPane, TABLE_CARD)
+        add(placeholders, PLACEHOLDERS_CARD)
+    }
+
+    /** How far a slow count got, from 0 to 1, or -1 if unknown; null while not counting. */
+    private var shownProgress: Double? = null
     private var job: Job? = null
     private val throttle = Timer(REFRESH_MILLIS) { refresh() }.apply { isRepeats = false }
 
@@ -77,16 +99,13 @@ class PatternsPanel(
     var canFilter = true
 
     init {
-        add(JPanel(MigLayout("insets 2 8 2 8", "[grow][]")).apply {
-            add(summary)
-            add(progressBar, "w 160!, hidemode 3")
-        }, BorderLayout.NORTH)
+        add(JPanel(MigLayout("insets 4 8 2 8", "[grow]")).apply { add(summary) }, BorderLayout.NORTH)
         table.autoCreateRowSorter = true
         table.autoResizeMode = JTable.AUTO_RESIZE_LAST_COLUMN
         table.setShowGrid(false)
         table.tableHeader.reorderingAllowed = false
         (table.tableHeader.defaultRenderer as? JLabel)?.horizontalAlignment = SwingConstants.LEADING
-        add(JScrollPane(table).apply { border = null }, BorderLayout.CENTER)
+        add(center, BorderLayout.CENTER)
         updateLook()
         addHierarchyListener { e ->
             if (e.changeFlags and HierarchyEvent.SHOWING_CHANGED.toLong() != 0L && isShowing && stale) refresh()
@@ -132,7 +151,7 @@ class PatternsPanel(
         if (!isShowing) return
         stale = false
         job = scope.launch {
-            val timer = Timer(100) { showProgress() }.apply {
+            val timer = Timer(40) { showProgress() }.apply {
                 initialDelay = PROGRESS_DELAY_MILLIS
                 start()
             }
@@ -144,7 +163,7 @@ class PatternsPanel(
                 summary.text = "Cannot find patterns: ${e.message ?: e.javaClass.simpleName}"
             } finally {
                 timer.stop()
-                progressBar.isVisible = false
+                hideProgress()
             }
         }
     }
@@ -166,9 +185,31 @@ class PatternsPanel(
     private fun showProgress() {
         val fraction = progress()
         // Indexing the templates of new records has a progress; counting the rows after it has none.
-        progressBar.isIndeterminate = fraction >= 1.0
-        progressBar.value = (fraction * 1000).toInt()
-        progressBar.isVisible = true
+        shownProgress = if (fraction >= 1.0) -1.0 else fraction
+        (center.layout as CardLayout).show(center, PLACEHOLDERS_CARD)
+        placeholders.repaint()
+        repaint(0, 0, width, PROGRESS_HEIGHT)
+    }
+
+    private fun hideProgress() {
+        if (shownProgress == null) return
+        shownProgress = null
+        (center.layout as CardLayout).show(center, TABLE_CARD)
+        repaint(0, 0, width, PROGRESS_HEIGHT)
+    }
+
+    // Painted over the top inset, like the filter bar's strip, so showing it moves nothing.
+    override fun paint(g: Graphics) {
+        super.paint(g)
+        val fraction = shownProgress ?: return
+        g.color = UIManager.getColor("Component.accentColor")
+        if (fraction >= 0) {
+            g.fillRect(0, 0, (width * fraction.coerceIn(0.0, 1.0)).toInt(), PROGRESS_HEIGHT)
+        } else {
+            val segment = width / 4
+            val x = (System.currentTimeMillis() % CYCLE_MILLIS.toLong() / CYCLE_MILLIS * (width + segment)).toInt() - segment
+            g.fillRect(x, 0, segment, PROGRESS_HEIGHT)
+        }
     }
 
     private fun show(counts: PatternCounts?) {
@@ -240,6 +281,41 @@ class PatternsPanel(
         if (!canFilter || templates.isEmpty()) return
         val rules = templates.map { Query.Rule(Query.PATTERN_FIELD, QueryOp.EQUALS, it) }
         addRules(listOf(rules.singleOrNull() ?: Query.Group(all = false, items = rules)))
+    }
+
+    /** Pulsing boxes where the counts and patterns will be, while they are counted. */
+    private inner class Placeholders : JComponent() {
+        override fun paintComponent(g: Graphics) {
+            val g2 = g.create() as Graphics2D
+            try {
+                g2.color = table.background
+                g2.fillRect(0, 0, width, height)
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+                val pulse = (1 + sin(System.currentTimeMillis() / CYCLE_MILLIS * 2 * PI)) / 2
+                val base = UIManager.getColor("Label.disabledForeground")
+                g2.color = Color(base.red, base.green, base.blue, (40 + 40 * pulse).toInt())
+                val metrics = table.getFontMetrics(table.font)
+                val rowHeight = table.rowHeight
+                val boxHeight = rowHeight / 2
+                val countWidth = metrics.stringWidth("000,000")
+                val patternX = metrics.stringWidth("0,000,000,000") + 24
+                val arc = UIScale.scale(6)
+                var y = table.tableHeader.preferredSize.height + (rowHeight - boxHeight) / 2
+                var row = 0
+                while (y < height) {
+                    // Varied, but the same on every repaint, so the boxes do not jump about.
+                    val shape = ((row + 1) * -7046029254386353131L ushr 56) / 255.0
+                    val count = (countWidth * (0.5 + shape / 2)).toInt()
+                    g2.fillRoundRect(patternX - 24 - count, y, count, boxHeight, arc, arc)
+                    val pattern = ((width - patternX - 16) * (0.3 + 0.55 * shape)).toInt()
+                    if (pattern > 0) g2.fillRoundRect(patternX, y, pattern, boxHeight, arc, arc)
+                    y += rowHeight
+                    row++
+                }
+            } finally {
+                g2.dispose()
+            }
+        }
     }
 
     /** Columns: the total, one per level that some counted row has, and the template. */
