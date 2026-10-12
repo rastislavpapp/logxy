@@ -351,7 +351,7 @@ class PatternsPanel(
             else -> levels[column - 1].name
         }
 
-        override fun getColumnClass(column: Int): Class<*> = if (column < columnCount - 1) Integer::class.java else String::class.java
+        override fun getColumnClass(column: Int): Class<*> = if (column < columnCount - 1) Int::class.javaObjectType else String::class.java
 
         override fun getValueAt(row: Int, column: Int): Any? {
             val counts = counts ?: return null

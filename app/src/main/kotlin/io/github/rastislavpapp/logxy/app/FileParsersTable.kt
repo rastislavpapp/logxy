@@ -257,7 +257,7 @@ class FileParsersTable(
             parserColumn -> "Parser"
             else -> "Open"
         }
-        override fun getColumnClass(column: Int): Class<*> = if (column < fileColumn) java.lang.Boolean::class.java else Any::class.java
+        override fun getColumnClass(column: Int): Class<*> = if (column < fileColumn) Boolean::class.javaObjectType else Any::class.java
         override fun isCellEditable(row: Int, column: Int) = column != fileColumn
 
         override fun getValueAt(row: Int, column: Int): Any? {
