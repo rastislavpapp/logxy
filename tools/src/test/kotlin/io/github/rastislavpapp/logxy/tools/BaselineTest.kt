@@ -15,6 +15,7 @@ import io.github.rastislavpapp.logxy.core.parse.LogFormat
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
+import java.util.Locale
 import java.util.Properties
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -24,6 +25,8 @@ import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.condition.DisabledIfEnvironmentVariable
 
 private val BASELINE_FILE = Path.of("tools/benchmark-baseline.properties")
+/** Recorded on first run on a machine that does not match [BASELINE_FILE]; gitignored. */
+private val LOCAL_BASELINE_FILE = Path.of("tools/benchmark-baseline.local.properties")
 private val DATA_DIR = Path.of("build/benchmark")
 
 // Changing any of these changes what is measured, so the saved results no longer apply.
@@ -118,6 +121,42 @@ private fun dataFile(name: String, size: Long, seed: Long): Path {
     return file
 }
 
+/** What the times depend on; a baseline applies to this machine if every key it records matches. */
+private fun machine(): Map<String, String> = linkedMapOf(
+    "cpu" to cpuName(),
+    "cores" to Runtime.getRuntime().availableProcessors().toString(),
+)
+
+private fun cpuName(): String {
+    val os = System.getProperty("os.name").lowercase()
+    val name = runCatching {
+        when {
+            os.startsWith("windows") -> System.getenv("PROCESSOR_IDENTIFIER")
+            os.startsWith("mac") -> ProcessBuilder("sysctl", "-n", "machdep.cpu.brand_string").start()
+                .inputStream.bufferedReader().readText()
+            else -> Files.readAllLines(Path.of("/proc/cpuinfo"))
+                .firstOrNull { it.startsWith("model name") }?.substringAfter(':')
+        }
+    }.getOrNull()?.trim()
+    return if (name.isNullOrEmpty()) System.getProperty("os.arch") else name
+}
+
+private fun load(file: Path): Properties? =
+    if (Files.exists(file)) Properties().apply { Files.newBufferedReader(file).use { load(it) } } else null
+
+private fun Properties.matches(machine: Map<String, String>) = machine.all { (key, value) -> getProperty(key) in setOf(null, value) }
+
+private fun save(file: Path, machine: Map<String, String>, results: Map<String, Double>, kept: Properties? = null) {
+    val props = Properties()
+    kept?.let { props.putAll(it) }
+    props["setup"] = SETUP
+    props.putAll(machine)
+    for ((name, seconds) in results) props.putIfAbsent(name, "%.4f".format(Locale.ROOT, seconds))
+    Files.newBufferedWriter(file).use {
+        props.store(it, "Benchmark baseline of this machine, best times in seconds; delete it to record again.")
+    }
+}
+
 /** Allowed slowdown in percent. */
 private val TOLERANCE = System.getProperty("baseline.tolerance")?.toDouble() ?: 25.0
 
@@ -131,13 +170,20 @@ class BaselineTest {
 
     @Test
     fun `is not slower than the saved baseline`() {
-        assertTrue(Files.exists(BASELINE_FILE), "No baseline at $BASELINE_FILE")
-        val saved = Properties().apply { Files.newBufferedReader(BASELINE_FILE).use { load(it) } }
-        assertEquals(SETUP, saved.getProperty("setup"), "The baseline was saved for a different benchmark setup.")
-        val cores = Runtime.getRuntime().availableProcessors()
-        if (saved.getProperty("cores") != cores.toString()) {
-            println("Warning: the baseline was saved with ${saved.getProperty("cores")} cores, this machine has $cores.")
+        val machine = machine()
+        val committed = load(BASELINE_FILE)
+        val local = load(LOCAL_BASELINE_FILE)
+        val (file, saved) = when {
+            committed != null && committed.matches(machine) -> BASELINE_FILE to committed
+            local != null && local.getProperty("setup") == SETUP && local.matches(machine) -> LOCAL_BASELINE_FILE to local
+            else -> {
+                println("No baseline for this machine ($machine), recording one in $LOCAL_BASELINE_FILE.")
+                save(LOCAL_BASELINE_FILE, machine, measureAll())
+                return
+            }
         }
+        assertEquals(SETUP, saved.getProperty("setup"), "The baseline in $file was saved for a different benchmark setup.")
+        println("Comparing with $file")
         val tolerance = TOLERANCE / 100
         val results = measureAll()
         println()
@@ -157,6 +203,8 @@ class BaselineTest {
             }
             println("%-40s %7.3f s  baseline %7.3f s  %+6.1f%%  %s".format(name, seconds, before, change, verdict))
         }
+        // Measurements added since the local baseline was recorded join it, so they are checked from now on.
+        if (file == LOCAL_BASELINE_FILE && results.keys.any { saved.getProperty(it) == null }) save(file, machine, results, saved)
         assertTrue(slower.isEmpty(), "Slower than the baseline by more than %.0f%%:\n%s".format(TOLERANCE, slower.joinToString("\n")))
     }
 }
