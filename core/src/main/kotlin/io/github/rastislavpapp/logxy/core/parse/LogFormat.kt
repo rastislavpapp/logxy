@@ -48,7 +48,9 @@ sealed interface LogFormat {
 
         private const val SAMPLE_LINES = 1000
 
-        private data class Detection(val path: Path, val size: Long, val modified: Long, val preferred: List<LogFormat>)
+        private data class Detection(
+            val path: Path, val size: Long, val modified: Long, val preferred: List<LogFormat>, val builtIn: List<LogFormat>,
+        )
 
         /** Recent results, so the open dialog's checks are not repeated when the files open. */
         private val detected = object : LinkedHashMap<Detection, LogFormat>(16, 0.75f, true) {
@@ -57,25 +59,27 @@ sealed interface LogFormat {
 
         /**
          * The candidate that matches most of the file's first lines: the user's own formats ([preferred]),
-         * the built-in ones, and one guessed from the lines. On a tie one of [preferred], then the one with
-         * more fields, being more specific, then a built-in one over the guess. [Raw] if none matches at
-         * least 5% of the lines that do not look like continuations (a single record may be followed by a
-         * huge stack trace or dump).
+         * the [builtIn] ones the user kept, and one guessed from the lines. On a tie one of [preferred], then
+         * the one with more fields, being more specific, then a built-in one over the guess. [Raw] if none
+         * matches at least 5% of the lines that do not look like continuations (a single record may be
+         * followed by a huge stack trace or dump).
          */
-        fun detect(path: Path, preferred: List<LogFormat> = emptyList()): LogFormat {
-            val key = Detection(path.toAbsolutePath().normalize(), Files.size(path), Files.getLastModifiedTime(path).toMillis(), preferred)
+        fun detect(path: Path, preferred: List<LogFormat> = emptyList(), builtIn: List<LogFormat> = BUILT_IN): LogFormat {
+            val key = Detection(
+                path.toAbsolutePath().normalize(), Files.size(path), Files.getLastModifiedTime(path).toMillis(), preferred, builtIn,
+            )
             synchronized(detected) { detected[key] }?.let { return it }
-            return detectFresh(path, preferred).also { synchronized(detected) { detected[key] = it } }
+            return detectFresh(path, preferred, builtIn).also { synchronized(detected) { detected[key] = it } }
         }
 
-        private fun detectFresh(path: Path, preferred: List<LogFormat>): LogFormat {
+        private fun detectFresh(path: Path, preferred: List<LogFormat>, builtIn: List<LogFormat>): LogFormat {
             val sample = FormatPreview.sample(path, SAMPLE_LINES, skipEmpty = true)
             if (sample.isEmpty()) return Raw
             val realLines = sample.count { !FormatCheck.looksLikeContinuation(it, 0, it.size) }
             val guess = FormatInference.infer(sample)
             // Guessed JSON keys refine the built-in JSON format, which reads the same lines.
-            val builtIn = if (guess is Json) BUILT_IN.filter { it !is Json } else BUILT_IN
-            val scored = (preferred + builtIn + listOfNotNull(guess)).mapNotNull { candidate ->
+            val kept = if (guess is Json) builtIn.filter { it !is Json } else builtIn
+            val scored = (preferred + kept + listOfNotNull(guess)).mapNotNull { candidate ->
                 val compiled = runCatching { candidate.compile() }.getOrNull() ?: return@mapNotNull null
                 val parser = compiled.newParser()
                 val matches = sample.count { parser.match(it, 0, it.size) }
@@ -84,9 +88,6 @@ sealed interface LogFormat {
             val best = scored.maxWithOrNull(compareBy({ it.matches }, { it.preferred }, { it.fields }, { !it.guessed })) ?: return Raw
             return if (best.matches > 0 && best.matches * 20 >= realLines) best.format else Raw
         }
-
-        /** The format guessed from the first lines of [path], or null if they show none. */
-        fun infer(path: Path): LogFormat? = FormatInference.infer(FormatPreview.sample(path, SAMPLE_LINES, skipEmpty = true))
     }
 }
 

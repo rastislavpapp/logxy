@@ -48,7 +48,7 @@ class FileParsersTable(
     private val excludable: Boolean = false,
     private val onChange: () -> Unit = {},
 ) {
-    private val parsers: List<LogFormat?> = listOf(null, LogFormat.Raw) + AppSettings.current.formats + LogFormat.BUILT_IN
+    private val parsers: List<LogFormat?> = listOf(null, LogFormat.Raw) + AppSettings.current.formats + AppSettings.current.builtInFormats
     private val chosen = HashMap<Path, LogFormat?>().apply { files.forEachIndexed { i, file -> put(file, initial.getOrNull(i)) } }
     private val fileColumn = if (excludable) 1 else 0
     private val parserColumn = fileColumn + 1
@@ -178,11 +178,12 @@ class FileParsersTable(
         detected.remove(file)
         val chosen = chosen[file]
         val preferred = AppSettings.current.formats
+        val builtIn = AppSettings.current.builtInFormats
         checks[file] = scope.launch {
             var found: LogFormat? = null
             val problem = withContext(Dispatchers.IO) {
                 try {
-                    val format = chosen ?: LogFormat.detect(file, preferred).also { found = it }
+                    val format = chosen ?: LogFormat.detect(file, preferred, builtIn).also { found = it }
                     format.mismatch(file)
                 } catch (e: IOException) {
                     e.message ?: e.javaClass.simpleName

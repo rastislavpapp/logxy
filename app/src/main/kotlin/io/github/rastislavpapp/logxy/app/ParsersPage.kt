@@ -57,9 +57,10 @@ class ParsersPage(
     private val keyFields = JSON_ROLES.map { JTextField(30) }
     private val keyLabels = JSON_ROLES.map { (label, _) -> JLabel("$label keys:") }
     private val status = JLabel(" ")
-    private val deleteButton = JButton("Delete").apply {
-        toolTipText = "Built-in parsers cannot be deleted"
-        addActionListener { deleteSelected() }
+    private val deleteButton = JButton("Delete").apply { addActionListener { deleteSelected() } }
+    private val restoreButton = JButton("Restore Built-ins").apply {
+        toolTipText = "Brings back the deleted built-in parsers"
+        addActionListener { restoreBuiltIns() }
     }
     private val previewModel = PreviewModel()
     private val previewTable = JTable(previewModel)
@@ -75,7 +76,8 @@ class ParsersPage(
 
     init {
         AppSettings.current.formats.forEach { entries.addElement(Entry(it, builtIn = false)) }
-        LogFormat.BUILT_IN.forEach { entries.addElement(Entry(it, builtIn = true)) }
+        AppSettings.current.builtInFormats.forEach { entries.addElement(Entry(it, builtIn = true)) }
+        updateRestoreButton()
 
         layout = MigLayout("fill, insets 0", "[grow]", "[grow]")
         add(editor(), "grow")
@@ -123,11 +125,7 @@ class ParsersPage(
             add(JButton("New").apply { addActionListener { addFormat(newFormat()) } }, "split 3")
             add(JButton("Duplicate").apply { addActionListener { selected()?.let { addFormat(copyOf(it.format)) } } })
             add(deleteButton, "wrap")
-            add(JButton("Detect from File").apply {
-                isEnabled = previewFile != null
-                toolTipText = if (previewFile == null) "Open a file to detect its layout" else "Adds a parser guessed from the open file"
-                addActionListener { detect() }
-            })
+            add(restoreButton)
         }
         previewTable.apply {
             autoResizeMode = JTable.AUTO_RESIZE_ALL_COLUMNS
@@ -177,8 +175,7 @@ class ParsersPage(
             val keys = (format as? LogFormat.Json)?.keys ?: JsonKeys()
             for ((field, role) in keyFields.zip(JSON_ROLES)) field.text = role.second(keys).joinToString(", ")
             val editable = entry != null && !entry.builtIn
-            deleteButton.isEnabled = editable
-            deleteButton.toolTipText = if (entry?.builtIn == true) "Built-in parsers cannot be deleted" else null
+            deleteButton.isEnabled = entry != null
             (listOf(nameField, patternChoice, regexChoice, jsonChoice, layoutField) + keyFields).forEach { it.isEnabled = editable }
             timestampField.isEnabled = editable && regexChoice.isSelected
             showKindFields()
@@ -253,21 +250,30 @@ class ParsersPage(
         nameField.selectAll()
     }
 
-    private fun detect() {
-        val format = previewFile?.let { file -> runCatching { LogFormat.infer(file) }.getOrNull() }
-        if (format == null) {
-            status.text = "No layout found in the file."
-            return
-        }
-        addFormat(named(format, uniqueName(format.name)))
-    }
-
     private fun deleteSelected() {
-        val entry = selected() ?: return
-        if (entry.builtIn) return
+        selected() ?: return
         val index = list.selectedIndex
         entries.remove(index)
-        if (entries.size > 0) list.selectedIndex = minOf(index, entries.size - 1)
+        if (entries.size > 0) list.selectedIndex = minOf(index, entries.size - 1) else showSelected()
+        updateRestoreButton()
+    }
+
+    private fun builtIns() = (0..<entries.size).map { entries[it] }.filter { it.builtIn }.map { it.format }
+
+    private fun restoreBuiltIns() {
+        val kept = builtIns()
+        val selectedFormat = selected()?.format
+        val firstBuiltIn = (0..<entries.size).count { !entries[it].builtIn }
+        // Re-added in their original order, after the user's parsers.
+        LogFormat.BUILT_IN.forEachIndexed { i, format ->
+            if (format !in kept) entries.add(firstBuiltIn + i, Entry(format, builtIn = true))
+        }
+        list.setSelectedValue((0..<entries.size).map { entries[it] }.firstOrNull { it.format == selectedFormat }, true)
+        updateRestoreButton()
+    }
+
+    private fun updateRestoreButton() {
+        restoreButton.isEnabled = builtIns().size < LogFormat.BUILT_IN.size
     }
 
     private fun uniqueName(base: String): String {
@@ -293,7 +299,7 @@ class ParsersPage(
         return formats.firstNotNullOfOrNull { format ->
             when {
                 format.name.isBlank() -> "A parser has no name."
-                formats.count { it.name == format.name } > 1 || LogFormat.BUILT_IN.any { it.name == format.name } ->
+                formats.count { it.name == format.name } > 1 || builtIns().any { it.name == format.name } ->
                     "The name “${format.name}” is used more than once."
                 else -> try {
                     format.compile()
@@ -305,7 +311,10 @@ class ParsersPage(
         }
     }
 
-    override fun applyTo(settings: Settings) = settings.copy(formats = formats())
+    override fun applyTo(settings: Settings): Settings {
+        val kept = builtIns()
+        return settings.copy(formats = formats(), deletedBuiltIns = LogFormat.BUILT_IN.filter { it !in kept }.map { it.name }.toSet())
+    }
 
     private companion object {
         /** Label and keys of each role, in the order of [JsonKeys]' constructor. */

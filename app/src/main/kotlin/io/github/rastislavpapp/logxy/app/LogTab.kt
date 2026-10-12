@@ -210,7 +210,7 @@ class LogTab(
         if (isMerged) return showMergedParsers()
         val chosen = session.chosenFormat
         val custom = AppSettings.current.formats
-        val known = listOf(LogFormat.Raw) + custom + LogFormat.BUILT_IN
+        val known = listOf(LogFormat.Raw) + custom + AppSettings.current.builtInFormats
         val items = buildList {
             add(PopupItem(autoLabel(), selected = chosen == null) { session.useFormat(null) })
             (if (chosen == null || chosen in known) known else known + chosen).forEachIndexed { i, format ->
@@ -235,7 +235,7 @@ class LogTab(
         // The parser of all files when not mixed; null is Auto-detect.
         val same = chosen.first()
         val custom = AppSettings.current.formats
-        val known = listOf(LogFormat.Raw) + custom + LogFormat.BUILT_IN
+        val known = listOf(LogFormat.Raw) + custom + AppSettings.current.builtInFormats
         val items = buildList {
             val auto = if (session.formatDetected) "Auto: per file" else "Auto-detect"
             add(PopupItem(auto, selected = !mixed && same == null) { session.useFormats(chosen.map { null }) })

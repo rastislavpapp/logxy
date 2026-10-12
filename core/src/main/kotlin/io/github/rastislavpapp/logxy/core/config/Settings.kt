@@ -22,7 +22,7 @@ enum class OpenMode(val key: String) {
 /**
  * The user's saved formats (parsers), level names, filters, the memory limit (e.g. `8g`, null for the JVM
  * default), how to open files without asking ([openMode], null to ask) and whether opened folders include
- * their subfolders.
+ * their subfolders, and the names of the built-in formats the user deleted.
  */
 data class Settings(
     val formats: List<LogFormat> = emptyList(),
@@ -31,7 +31,11 @@ data class Settings(
     val maxMemory: String? = null,
     val openMode: OpenMode? = null,
     val includeSubfolders: Boolean = true,
+    val deletedBuiltIns: Set<String> = emptySet(),
 ) {
+    /** The built-in formats the user kept. */
+    val builtInFormats: List<LogFormat> get() = LogFormat.BUILT_IN.filter { it.name !in deletedBuiltIns }
+
     companion object {
         /** `%APPDATA%\logxy` on Windows, `$XDG_CONFIG_HOME/logxy` or `~/.config/logxy` elsewhere. */
         fun directory(): Path {
@@ -64,6 +68,7 @@ data class Settings(
          * format.2.name=My JSON
          * format.2.type=json
          * format.2.keys.level=level,severity
+         * deleted-built-in.1.name=Spring Boot 3
          * level-names=custom
          * level.NOTE=INFO
          * filter.1.name=Slow DB
@@ -110,8 +115,12 @@ data class Settings(
             // Without the marker, level entries only add to the built-in names (as first released).
             val openMode = properties.getProperty("open.mode")?.let { mode -> OpenMode.entries.firstOrNull { it.key == mode } }
             val includeSubfolders = properties.getProperty("open.subfolders") != "false"
+            val deletedBuiltIns = numbered(properties, "deleted-built-in")
+                .mapNotNull { n -> properties.getProperty("deleted-built-in.$n.name")?.trim()?.takeIf { it.isNotEmpty() } }
+                .toSet()
             return Settings(
                 formats, LevelMapping(if (custom) levels else Level.BUILT_IN_NAMES + levels), filters, maxMemory, openMode, includeSubfolders,
+                deletedBuiltIns,
             )
         }
 
@@ -138,6 +147,7 @@ data class Settings(
                 }
                 properties["format.$n.name"] = format.name
             }
+            settings.deletedBuiltIns.forEachIndexed { i, name -> properties["deleted-built-in.${i + 1}.name"] = name }
             settings.filters.forEachIndexed { i, filter ->
                 properties["filter.${i + 1}.name"] = filter.name
                 properties["filter.${i + 1}.level"] = filter.minimumLevel?.name.orEmpty()

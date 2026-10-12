@@ -341,6 +341,7 @@ class LogSession(
         try {
             val started = System.nanoTime()
             val preferred = settings.current.formats
+            val builtIn = settings.current.builtInFormats
             val levels = settings.current.levels
             // A merge filters its files in parallel, so each needs only its share of channels; this bounds file handles.
             // At least a few each, as a small file is parsed by one thread and that slows down a lot with fewer.
@@ -355,7 +356,7 @@ class LogSession(
                                 // Taken before indexing, so a file replaced meanwhile shows up as a change on the first poll.
                                 source.known = FileSnapshot.take(source.path)
                                     ?: throw IOException("${source.path.fileName}: file not found")
-                                source.format = source.chosen ?: LogFormat.detect(source.path, preferred)
+                                source.format = source.chosen ?: LogFormat.detect(source.path, preferred, builtIn)
                                 source.log = source.format.open(source.path, progresses[i], levels, options).also { opened += it }
                             } catch (e: Throwable) {
                                 if (e !is CancellationException) failed.compareAndSet(null, source)
