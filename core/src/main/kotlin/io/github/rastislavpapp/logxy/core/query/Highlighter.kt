@@ -14,24 +14,29 @@ class Highlighter private constructor(private val terms: List<Term>) {
 
     /**
      * Sorted, non-overlapping `[start, end)` pairs, flattened, of matches in [text]; of rules on [field], or of
-     * all rules when [field] is null. Wildcard rules mark each literal part between the `*`s.
+     * all rules when [field] is null. Wildcard rules mark each literal part between the `*`s. Gives up after
+     * [budgetNanos] with the matches found so far, as a user's regex can backtrack for minutes.
      */
-    fun ranges(field: String?, text: String): IntArray {
+    fun ranges(field: String?, text: String, budgetNanos: Long = CELL_BUDGET_NANOS): IntArray {
         if (terms.isEmpty() || text.isEmpty()) return EMPTY
+        val timed = TimedText(text, System.nanoTime() + budgetNanos)
         // Each match packed as start << 32 | end, so sorting them sorts by start.
         var found = LongArray(16)
         var count = 0
         var sorted = true
-        for (term in terms) {
-            if (field != null && term.field != null && !term.field.equals(field, ignoreCase = true)) continue
-            val matcher = term.pattern.matcher(text)
-            while (matcher.find()) {
-                if (matcher.end() == matcher.start()) continue
-                val match = matcher.start().toLong() shl 32 or matcher.end().toLong()
-                if (count == found.size) found = found.copyOf(count * 2)
-                if (count > 0 && match < found[count - 1]) sorted = false
-                found[count++] = match
+        try {
+            for (term in terms) {
+                if (field != null && term.field != null && !term.field.equals(field, ignoreCase = true)) continue
+                val matcher = term.pattern.matcher(timed)
+                while (matcher.find()) {
+                    if (matcher.end() == matcher.start()) continue
+                    val match = matcher.start().toLong() shl 32 or matcher.end().toLong()
+                    if (count == found.size) found = found.copyOf(count * 2)
+                    if (count > 0 && match < found[count - 1]) sorted = false
+                    found[count++] = match
+                }
             }
+        } catch (_: TimeOut) {
         }
         if (count == 0) return EMPTY
         if (!sorted) found.sort(0, count)
@@ -54,7 +59,30 @@ class Highlighter private constructor(private val terms: List<Term>) {
         return result.copyOf(size)
     }
 
+    /** [text] for a matcher, stopping it once [deadline] passes. */
+    private class TimedText(private val text: String, private val deadline: Long) : CharSequence {
+        private var reads = 0
+        override val length get() = text.length
+
+        override fun get(index: Int): Char {
+            // The clock costs more than a read: check it now and then.
+            if (++reads and 0xFFF == 0 && System.nanoTime() > deadline) throw TimeOut
+            return text[index]
+        }
+
+        override fun subSequence(startIndex: Int, endIndex: Int) = text.subSequence(startIndex, endIndex)
+        override fun toString() = text
+    }
+
+    private object TimeOut : RuntimeException(null, null, false, false)
+
     companion object {
+        /** Time a table cell may take: many are painted at once. */
+        const val CELL_BUDGET_NANOS = 5_000_000L
+
+        /** Time the detail pane's whole record may take. */
+        const val DETAIL_BUDGET_NANOS = 50_000_000L
+
         private val EMPTY = IntArray(0)
         private const val NOT_AFTER_WORD = "(?<![\\p{L}\\p{N}_])"
         private const val NOT_BEFORE_WORD = "(?![\\p{L}\\p{N}_])"

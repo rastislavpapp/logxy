@@ -52,8 +52,10 @@ class LogDetailArea : RSyntaxTextArea() {
             mark()
         }
 
+    private var foundRanges = IntArray(0)
+
     /** Where the find bar's text first occurs in the shown text; 0 if it does not. */
-    val firstFound: Int get() = found.ranges(null, text).firstOrNull() ?: 0
+    val firstFound: Int get() = foundRanges.firstOrNull() ?: 0
 
     init {
         (TokenMakerFactory.getDefaultInstance() as AbstractTokenMakerFactory)
@@ -82,10 +84,10 @@ class LogDetailArea : RSyntaxTextArea() {
     private fun mark() {
         if (!initialized) return
         highlighter.removeAllHighlights()
-        val ranges = matches.ranges(null, text)
+        val ranges = matches.ranges(null, text, Highlighter.DETAIL_BUDGET_NANOS)
         for (i in ranges.indices step 2) highlighter.addHighlight(ranges[i], ranges[i + 1], painter)
-        val found = found.ranges(null, text)
-        for (i in found.indices step 2) highlighter.addHighlight(found[i], found[i + 1], foundPainter)
+        foundRanges = found.ranges(null, text, Highlighter.DETAIL_BUDGET_NANOS)
+        for (i in foundRanges.indices step 2) highlighter.addHighlight(foundRanges[i], foundRanges[i + 1], foundPainter)
     }
 
     /** The editor theme, with levels in the same colors as the table's level badges. */

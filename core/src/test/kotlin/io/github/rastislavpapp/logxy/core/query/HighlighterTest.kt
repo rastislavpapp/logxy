@@ -69,7 +69,16 @@ class HighlighterTest {
 
     @Test
     fun marksManyMatches() {
-        val ranges = Highlighter.of(TextSearch("e")).ranges(null, "e.".repeat(500_000))
+        val ranges = Highlighter.of(TextSearch("e")).ranges(null, "e.".repeat(500_000), budgetNanos = 10_000_000_000)
         assertContentEquals(IntArray(1_000_000) { it }, ranges)
+    }
+
+    @Test
+    fun givesUpOnARegexThatBacktracksForLong() {
+        val h = of(rule(QueryOp.EQUALS, "*start*"), rule(QueryOp.MATCHES, "(a+)+b"))
+        val started = System.nanoTime()
+        val ranges = h.ranges("message", "start " + "a".repeat(40), budgetNanos = 50_000_000)
+        assertTrue(System.nanoTime() - started < 2_000_000_000)
+        assertContentEquals(intArrayOf(0, 5), ranges)
     }
 }
