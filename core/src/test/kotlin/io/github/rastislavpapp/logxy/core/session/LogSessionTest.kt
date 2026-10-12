@@ -66,7 +66,8 @@ class LogSessionTest {
         override fun notMergeable(paths: List<Path>) { notMergeable.complete(paths) }
         override fun formatChanged() {}
         override fun recordsAppended(oldRecordCount: Int, changed: IntArray) {}
-        override fun rowsReplaced(rows: FilteredRows?, keepView: Boolean) {}
+        var replaced = 0
+        override fun rowsReplaced(rows: FilteredRows?, keepView: Boolean) { replaced++ }
         override fun rowsExtended(firstChanged: Int, oldSize: Int) {}
         override fun levelMappingChanged() {}
         override fun followChanged(follow: Boolean) {}
@@ -153,6 +154,28 @@ class LogSessionTest {
         }
         // Half of the 1600 lines are WARN or ERROR, plus the three completed WARN records.
         assertEquals(803, awaitShown(session, file, warnOrWorse).size)
+    }
+
+    @Test
+    fun `applying the filter that is already shown does not replace the rows`() = runBlocking {
+        val file = Files.writeString(dir.resolve("same.log"), lines(100))
+        val recorder = Recorder()
+        val (session, _) = open(file, recorder)
+        val empty = Query.Group(all = true, items = emptyList())
+        withContext(ui) {
+            session.applyFilter(null, empty)
+            session.applyFilter(null, empty)
+            assertEquals(1, recorder.replaced)
+            session.applyFilter(Level.WARN, empty)
+            session.applyFilter(Level.WARN, empty)
+        }
+        awaitShown(session, file, LevelCondition.atLeast("Level", Level.WARN))
+        withContext(ui) {
+            session.applyFilter(Level.WARN, empty)
+            assertEquals(2, recorder.replaced)
+            session.applyFilter(null, empty)
+            assertEquals(3, recorder.replaced)
+        }
     }
 
     @Test

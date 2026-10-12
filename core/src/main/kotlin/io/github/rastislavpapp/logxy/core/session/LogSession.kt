@@ -162,6 +162,9 @@ class LogSession(
     private var activeFilter: Filter? = null
     private var filterJob: Job? = null
 
+    /** Whether the rows shown are [activeFilter]'s result (all records without one). */
+    private var filterShown = false
+
     /** The rows shown, or null for all records. */
     var shown: FilteredRows? = null
         private set
@@ -233,6 +236,8 @@ class LogSession(
         // Only placeholders (empty values): nothing to filter.
         if (compiled != Filter.And(emptyList())) parts += compiled
         val filter = if (parts.isEmpty()) null else Filter.And(parts)
+        // The same filter again, e.g. clearing an empty one: its result is shown or on its way.
+        if (filter == activeFilter && (filterShown || running != null)) return
         val evaluation = try {
             filter?.let { engine?.prepare(it) }
         } catch (e: IllegalArgumentException) {
@@ -343,6 +348,7 @@ class LogSession(
                 }
             }
             problem = null
+            filterShown = false
             listener.loaded(view)
             if (isLive) follow = true
             updateStatus()
@@ -496,6 +502,7 @@ class LogSession(
     /** Runs [evaluation] of [activeFilter] over all records, or shows all records without a filter. */
     private fun runFilter(keepView: Boolean, evaluation: PreparedFilter?) {
         filterJob?.cancel()
+        filterShown = evaluation == null
         if (evaluation == null) {
             if (shown != null || !keepView || filtering) {
                 filtering = false
@@ -532,6 +539,7 @@ class LogSession(
             running = null
             val rows = FilteredRows(result.rows)
             shown = rows
+            filterShown = true
             filteredRecords = result.recordCount
             filteredBytes = result.indexedSize
             listener.rowsReplaced(rows, keepView)
