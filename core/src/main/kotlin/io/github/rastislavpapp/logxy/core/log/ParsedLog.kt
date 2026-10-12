@@ -59,7 +59,7 @@ class ParsedLog private constructor(
     val format: RecordFormat,
     /** How [Columns] store the fields: the format's schema, with DICT fields stored as spans where needed. */
     private val storage: Schema,
-    override val schema: Schema,
+    schema: Schema,
     private val segments: ArrayList<Columns>,
     private val dictionaries: Array<ByteDictionary?>,
     indexedSize: Long,
@@ -67,6 +67,10 @@ class ParsedLog private constructor(
 ) : LogData() {
 
     override var indexedSize = indexedSize
+        private set
+
+    /** Changes only when appended records have an optional field none had before, which is then shown. */
+    override var schema = schema
         private set
 
     private var segmentFirst = firstRecords()
@@ -255,9 +259,21 @@ class ParsedLog private constructor(
                 local.idsIn(dictionaries[field]!!)
             }
             for (i in 0..<source.size) copyRecord(source, i, target, remaps)
+            showPresent(source)
         }
         indexedSize = appended.to
         tail = appended.tail
+    }
+
+    /** Shows the optional fields hidden as absent that [source] has values of, e.g. a JSON log's first exception. */
+    private fun showPresent(source: Columns) {
+        val fields = schema.fields
+        // A map split into its keys stays hidden: it is shown through them.
+        val split = fields.mapNotNull { it.mapKey?.field }.toSet()
+        val present = fields.indices.filter { field ->
+            fields[field].hidden && fields[field].optional && field !in split && field < source.present.size && source.present[field]
+        }
+        if (present.isNotEmpty()) schema = Schema(fields.mapIndexed { i, field -> if (i in present) field.copy(hidden = false) else field })
     }
 
     private fun copyRecord(source: Columns, i: Int, target: Columns, remaps: Array<IntArray?>) {

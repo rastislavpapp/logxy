@@ -33,6 +33,7 @@ import java.nio.file.StandardOpenOption
 import java.util.concurrent.Executors
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class LogSessionTest {
@@ -67,6 +68,8 @@ class LogSessionTest {
         override fun notMergeable(paths: List<Path>) { notMergeable.complete(paths) }
         override fun formatChanged() {}
         override fun recordsAppended(oldRecordCount: Int, changed: IntArray) {}
+        val fieldsShown = Channel<Unit>(Channel.UNLIMITED)
+        override fun fieldsShown() { fieldsShown.trySend(Unit) }
         var replaced = 0
         override fun rowsReplaced(rows: FilteredRows?, keepView: Boolean) { replaced++ }
         override fun rowsExtended(firstChanged: Int, oldSize: Int) {}
@@ -273,6 +276,23 @@ class LogSessionTest {
             awaitShown(session, listOf(a, b), bWarnOrWorse)
         }
         assertEquals(500 + 4 * 80 + 2, withContext(ui) { session.records!!.recordCount })
+    }
+
+    @Test
+    fun `a field that appended records are the first to have is shown, also in a merge`() = runBlocking {
+        fun json(n: Int, extra: String = "") = """{"timestamp":"2026-10-01T08:00:0$n.000Z","message":"m$n"$extra}""" + "\n"
+        for (merged in listOf(false, true)) {
+            val events = Files.writeString(dir.resolve("events-$merged.json"), json(1) + json(2))
+            val files = if (merged) listOf(events, Files.writeString(dir.resolve("a.log"), lines(5))) else listOf(events)
+            val recorder = Recorder()
+            val (session, records) = open(files, recorder)
+            fun exceptionHidden() = records.schema.fields.single { it.name == "Exception" }.hidden
+            assertTrue(withContext(ui) { exceptionHidden() })
+            append(events, json(3, ""","stack_trace":"boom""""))
+            withTimeout(10_000) { recorder.fieldsShown.receive() }
+            assertFalse(withContext(ui) { exceptionHidden() })
+            withContext(ui) { session.dispose() }
+        }
     }
 
     @Test

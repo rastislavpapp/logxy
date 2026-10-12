@@ -23,9 +23,17 @@ class LogTableModel(val records: Records) : AbstractTableModel(), RowWindow {
     val showsLineNumbers = records.isRaw
 
     /** Fields that can be shown as columns, in column order. */
-    val columnChoices: List<Field> = records.schema.fields
-        .filter { !it.hidden }
-        .sortedBy { it.role == Role.MESSAGE }
+    var columnChoices: List<Field> = choices()
+        private set
+
+    private fun choices() = records.schema.fields.filter { !it.hidden }.sortedBy { it.role == Role.MESSAGE }
+
+    /** Shows the fields the records' schema shows now, e.g. one that appended records are the first to have. */
+    fun schemaChanged() {
+        columnChoices = choices()
+        columnFields = fieldsShown()
+        fireTableStructureChanged()
+    }
 
     var hiddenColumns: Set<String> = emptySet()
         set(value) {

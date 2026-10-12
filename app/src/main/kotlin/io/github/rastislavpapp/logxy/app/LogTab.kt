@@ -861,6 +861,12 @@ class LogTab(
 
         override fun formatChanged() = showFormat()
 
+        override fun fieldsShown() {
+            val model = model ?: return
+            model.schemaChanged()
+            filterBar.setSchema(model.records.schema)
+        }
+
         override fun recordsAppended(oldRecordCount: Int, changed: IntArray) {
             model?.recordsAppended(oldRecordCount, changed)
             changed.forEach(::refreshDetail)

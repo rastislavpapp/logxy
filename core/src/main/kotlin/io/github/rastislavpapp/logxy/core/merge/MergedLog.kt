@@ -29,7 +29,8 @@ class MergedLog private constructor(
     val names: List<String>,
 ) : Records {
 
-    private val merged = MergedSchema(parts.map { it.schema })
+    private var partSchemas = parts.map { it.schema }
+    private var merged = MergedSchema(partSchemas)
     private val timestampFields = IntArray(parts.size) { parts[it].schema.indexOf(Role.TIMESTAMP) }
 
     // Per merged record: its part and its record there. Per part: where each of its records is.
@@ -107,6 +108,11 @@ class MergedLog private constructor(
      */
     suspend fun appendNew(): Boolean {
         if (parts.indices.any { parts[it].recordCount < mergedCount(it) }) return false
+        // A part shows a field now that its appended records are the first to have; fields keep their places.
+        if (parts.indices.any { parts[it].schema !== partSchemas[it] }) {
+            partSchemas = parts.map { it.schema }
+            merged = MergedSchema(partSchemas)
+        }
         val snapshots = parts.map { it.filterSnapshot() }
         add(withContext(Dispatchers.Default) { order(snapshots) })
         return true

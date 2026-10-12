@@ -84,6 +84,9 @@ interface SessionListener {
      */
     fun recordsAppended(oldRecordCount: Int, changed: IntArray)
 
+    /** Appended records have a field no record had before, so the records' schema shows it now; [recordsAppended] follows. */
+    fun fieldsShown()
+
     /** All shown rows changed: [rows] with a filter, all records without. [keepView] keeps the rows on screen in place. */
     fun rowsReplaced(rows: FilteredRows?, keepView: Boolean)
 
@@ -451,6 +454,7 @@ class LogSession(
             val records = records ?: return
             try {
                 val oldRecordCount = records.recordCount
+                val oldSchema = records.schema
                 val changed = ArrayList<Int>()
                 val problems = ArrayList<String>()
                 var grown = false
@@ -498,6 +502,7 @@ class LogSession(
                         reload()
                         return
                     }
+                    if (records.schema !== oldSchema) listener.fieldsShown()
                     listener.recordsAppended(oldRecordCount, changed.toIntArray())
                     if (activeFilter != null) catchUpFilter() else countTimes(anew = false)
                     if (promoted) follow = true
