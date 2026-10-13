@@ -1,0 +1,4 @@
+# Style-only commits, skipped by git blame (git config blame.ignoreRevsFile .git-blame-ignore-revs).
+
+# Apply detekt's automatic style fixes
+b355ccdb824d2a078455a4b9250b73dd9b0e2388
