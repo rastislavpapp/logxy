@@ -22,10 +22,13 @@ import java.nio.ByteBuffer
 import java.nio.channels.FileChannel
 import java.nio.file.Path
 
+/** How a file is read when indexed or parsed; the defaults suit the app, tests shrink them to exercise ranges. */
 data class IndexOptions(
+    /** The most ranges a file is split into, scanned in parallel. */
     val parallelism: Int = Runtime.getRuntime().availableProcessors(),
     /** Files are only split into ranges of at least this size, so small files use one thread. */
     val minRangeSize: Long = 64L * 1024 * 1024,
+    /** Bytes read per call into each range's buffer. */
     val bufferSize: Int = 1024 * 1024,
     /** Channels per file where positional reads are serial (Windows); fewer when many files are open together. */
     val readChannels: Int = parallelism,
@@ -41,6 +44,7 @@ data class IndexOptions(
     fun rangeCount(size: Long): Int = (size / minRangeSize).coerceIn(1, parallelism.toLong()).toInt()
 }
 
+/** Bytes `[from, to)` appended to a raw file, read off the UI thread, and the starts of the lines found in them. */
 class AppendedLines internal constructor(
     internal val from: Long,
     internal val to: Long,
@@ -95,6 +99,7 @@ class LineIndex private constructor(
         return String(bytes, 0, length, Charsets.UTF_8)
     }
 
+    /** File offset where [line] starts. */
     fun lineStart(line: Int): Long = starts[line]
 
     /** Offset just past the line, including its terminator. */

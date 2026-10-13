@@ -13,12 +13,15 @@ class IndexProgress {
 
     val bytesDone: Long get() = done.get()
 
+    /** [bytesDone] of [totalBytes], from 0 to 1; 0 until the total is known. */
     val fraction: Double get() = if (totalBytes == 0L) 0.0 else (bytesDone.toDouble() / totalBytes).coerceIn(0.0, 1.0)
 
+    /** Counts [bytes] more as scanned; safe from any thread. */
     internal fun add(bytes: Long) {
         done.addAndGet(bytes)
     }
 
+    /** Starts counting from zero again, when a parse starts over (a dictionary column turned out mostly distinct). */
     internal fun reset() {
         done.set(0)
     }
