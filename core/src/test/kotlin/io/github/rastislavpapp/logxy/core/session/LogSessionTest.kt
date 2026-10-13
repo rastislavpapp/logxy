@@ -45,8 +45,13 @@ class LogSessionTest {
     @TempDir
     lateinit var dir: Path
 
+    /** What escaped to the UI thread's uncaught-exception handler, as the app logs it. */
+    private val uncaught = java.util.concurrent.CopyOnWriteArrayList<Throwable>()
+
     // Stands in for the UI thread: the session and its listener run only here.
-    private val executor = Executors.newSingleThreadExecutor()
+    private val executor = Executors.newSingleThreadExecutor { task ->
+        Thread(task).apply { setUncaughtExceptionHandler { _, e -> uncaught += e } }
+    }
     private val ui = executor.asCoroutineDispatcher()
     private val scope = CoroutineScope(SupervisorJob() + ui)
 
@@ -90,9 +95,17 @@ class LogSessionTest {
         val fieldsShown = Channel<Unit>(Channel.UNLIMITED)
         override fun fieldsShown() { fieldsShown.trySend(Unit) }
         var replaced = 0
-        override fun rowsReplaced(keepView: Boolean, oldSize: Int, recordBefore: (row: Int) -> Int) { replaced++ }
+        /** Whether the listener fails each time the rows change, as a UI bug would. */
+        var failOnRows = false
+        override fun rowsReplaced(keepView: Boolean, oldSize: Int, recordBefore: (row: Int) -> Int) {
+            replaced++
+            if (failOnRows) throw IllegalStateException("rowsReplaced failed")
+        }
         val rowsChanged = ArrayList<Pair<Int, Int>>()
-        override fun rowsChanged(firstChanged: Int, oldSize: Int) { rowsChanged += firstChanged to oldSize }
+        override fun rowsChanged(firstChanged: Int, oldSize: Int) {
+            rowsChanged += firstChanged to oldSize
+            if (failOnRows) throw IllegalStateException("rowsChanged failed")
+        }
         var levelMappingChanged = 0
         override fun levelMappingChanged() { levelMappingChanged++ }
         var histogramChanged = 0
@@ -182,6 +195,34 @@ class LogSessionTest {
         }
         // Half of the 1600 lines are WARN or ERROR, plus the three completed WARN records.
         assertEquals(803, awaitShown(session, file, warnOrWorse).size)
+    }
+
+    @Test
+    fun `a listener failing on changed rows leaves the session's own state complete`() = runBlocking {
+        val file = Files.writeString(dir.resolve("failing.log"), lines(1000))
+        val recorder = Recorder()
+        val (session, _) = open(file, recorder)
+        recorder.failOnRows = true
+        val warnOrWorse = LevelCondition.atLeast("Level", Level.WARN)
+        // A filter result, appended records it catches up with, and showing all records again.
+        withContext(ui) { session.applyFilter(Level.WARN, Query.EMPTY) }
+        assertEquals(500, awaitShown(session, file, warnOrWorse).size)
+        awaitHistogram(session, 500, 250, 250)
+        append(file, lines(100))
+        assertEquals(550, awaitShown(session, file, warnOrWorse).size)
+        awaitHistogram(session, 550, 275, 275)
+        withContext(ui) {
+            session.applyFilter(null, Query.EMPTY)
+            assertEquals(null to 1100, session.status.shown to session.status.records)
+        }
+        awaitHistogram(session, 1100, 275, 275)
+        // Appended records without a filter: the session keeps following the file.
+        append(file, lines(100))
+        awaitHistogram(session, 1200, 300, 300)
+        append(file, lines(100))
+        awaitHistogram(session, 1300, 325, 325)
+        withContext(ui) { assertEquals(1300, session.status.records) }
+        assertTrue(uncaught.isNotEmpty() && uncaught.all { it is IllegalStateException }, uncaught.toString())
     }
 
     @Test

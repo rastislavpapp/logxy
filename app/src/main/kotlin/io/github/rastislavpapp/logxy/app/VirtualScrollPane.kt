@@ -119,8 +119,11 @@ class VirtualScrollPane(private val table: JTable, private val window: RowWindow
         if (follow) scrollToEnd()
     }
 
-    /** Index of the topmost visible row in the whole list. */
-    val firstVisibleRow get() = topRow
+    /**
+     * Index of the topmost visible row in the whole list. Never past its last row: when the list is replaced,
+     * the table tells its listeners before [rowsReplaced] moves the view, which may still be further down.
+     */
+    val firstVisibleRow get() = minOf(topRow, maxOf(0, window.totalRowCount - 1))
 
     /** Index of the lowest visible row in the whole list; below [firstVisibleRow] if there are no rows. */
     val lastVisibleRow get() = minOf(topRow + visibleRows, window.totalRowCount) - 1

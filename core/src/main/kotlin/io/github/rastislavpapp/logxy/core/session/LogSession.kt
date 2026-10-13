@@ -540,7 +540,7 @@ class LogSession internal constructor(
                     if (activeFilter != null) {
                         catchUpFilter()
                     } else {
-                        if (loaded.records.recordCount > oldRecordCount) listener.rowsChanged(oldRecordCount, oldRecordCount)
+                        if (loaded.records.recordCount > oldRecordCount) notifyRows { rowsChanged(oldRecordCount, oldRecordCount) }
                         countTimes(anew = false)
                         searchShown(anew = false)
                     }
@@ -604,7 +604,8 @@ class LogSession internal constructor(
                 running = null
                 val oldSize = shown.size
                 shownFilter = null
-                listener.rowsReplaced(keepView, oldSize, shown.showRows(null))
+                val recordBefore = shown.showRows(null)
+                notifyRows { rowsReplaced(keepView, oldSize, recordBefore) }
                 updateStatus()
                 countTimes(anew = true)
                 searchShown(anew = true)
@@ -642,7 +643,7 @@ class LogSession internal constructor(
             filteredRecords = result.recordCount
             filteredBytes = result.indexedSize
             shownFilter = filter
-            listener.rowsReplaced(keepView, oldSize, recordBefore)
+            notifyRows { rowsReplaced(keepView, oldSize, recordBefore) }
             updateStatus()
             countTimes(anew = true)
             searchShown(anew = true)
@@ -670,7 +671,7 @@ class LogSession internal constructor(
             val firstChanged = shown.replaceRowsFrom(from, result.rows)
             filteredRecords = result.recordCount
             filteredBytes = result.indexedSize
-            listener.rowsChanged(firstChanged, oldSize)
+            notifyRows { rowsChanged(firstChanged, oldSize) }
             updateStatus()
             countTimes(anew = false)
             searchShown(anew = false)
@@ -828,6 +829,21 @@ class LogSession internal constructor(
     private fun setStatus(status: SessionStatus) {
         this.status = status
         listener.statusChanged(status)
+    }
+
+    /**
+     * Tells the listener the shown rows changed. Its failure is reported to the thread's uncaught-exception
+     * handler instead of thrown, so the session still completes its own update (status, counts, search, jobs)
+     * and keeps following the files.
+     */
+    private inline fun notifyRows(notify: SessionListener.() -> Unit) {
+        try {
+            listener.notify()
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            val thread = Thread.currentThread()
+            thread.uncaughtExceptionHandler.uncaughtException(thread, e)
+        }
     }
 
     private fun updateStatus() {
