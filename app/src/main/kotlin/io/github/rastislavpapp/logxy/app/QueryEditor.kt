@@ -318,6 +318,7 @@ class QueryEditor(private val onApply: () -> Unit) : JPanel(MigLayout("insets 0,
             addActionListener { onApply() }
             toolTipText = "* matches any text, ? one character"
             withToggles(case)
+            limitPaste()
         }
         private val level = JComboBox(Level.entries.filter { it != Level.UNKNOWN }.toTypedArray())
         private var valueSlot: JComponent = text

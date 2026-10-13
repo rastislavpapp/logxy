@@ -7,6 +7,10 @@ import javax.swing.JButton
 import javax.swing.JTextField
 import javax.swing.JToggleButton
 import javax.swing.JToolBar
+import javax.swing.text.AbstractDocument
+import javax.swing.text.AttributeSet
+import javax.swing.text.DocumentFilter
+import javax.swing.text.DocumentFilter.FilterBypass
 
 /** A flat button, as in a toolbar; not focusable unless [focusable], so clicking it leaves the focus where it was. */
 fun toolBarButton(icon: Icon?, tooltip: String, text: String = "", focusable: Boolean = false, action: (JButton) -> Unit) =
@@ -37,6 +41,28 @@ fun JTextField.withToggles(vararg toggles: JToggleButton) = apply {
         toggles.forEach(::add)
     })
 }
+
+/**
+ * Keeps only the first non-empty line of a multi-line text pasted or set into this field, cut to
+ * [MAX_FIELD_INSERT] characters: Swing measures a field's whole line on every caret move.
+ */
+fun JTextField.limitPaste() = apply {
+    // A replace (paste, setText) sees the text before the field's document turns line breaks into spaces.
+    (document as AbstractDocument).documentFilter = object : DocumentFilter() {
+        override fun insertString(fb: FilterBypass, offset: Int, text: String?, attr: AttributeSet?) =
+            super.insertString(fb, offset, text?.let(::fieldInsert), attr)
+
+        override fun replace(fb: FilterBypass, offset: Int, length: Int, text: String?, attrs: AttributeSet?) =
+            super.replace(fb, offset, length, text?.let(::fieldInsert), attrs)
+    }
+}
+
+private fun fieldInsert(text: String): String {
+    val line = if ('\n' in text || '\r' in text) text.lineSequence().firstOrNull { it.isNotBlank() }.orEmpty() else text
+    return line.take(MAX_FIELD_INSERT)
+}
+
+private const val MAX_FIELD_INSERT = 4000
 
 internal fun AbstractButton.flat(focusable: Boolean = false) {
     putClientProperty("JButton.buttonType", "toolBarButton")

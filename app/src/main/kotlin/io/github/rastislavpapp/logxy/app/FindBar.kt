@@ -41,6 +41,7 @@ class FindBar(
         putClientProperty(FlatClientProperties.PLACEHOLDER_TEXT, "Find in records")
         putClientProperty(FlatClientProperties.TEXT_FIELD_LEADING_ICON, Icons.get("general/search"))
         withToggles(matchCase, wholeWords, regex)
+        limitPaste()
     }
     private val count = JLabel()
     private val typing = Timer(TYPING_DELAY_MILLIS) { onSearch(search) }.apply { isRepeats = false }
