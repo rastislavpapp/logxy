@@ -158,6 +158,9 @@ class LogSession internal constructor(
     private var job: Job? = null
     private val settingsListener = { settingsChanged() }
 
+    /** The saved formats before the latest change, to tell a detected saved format from a guess of the same name. */
+    private var savedFormats = settings.current.formats
+
     /** The files shown; files of a merge that turned out to have no timestamps are left out. */
     val paths: List<Path> get() = sources.map { it.path }
 
@@ -564,7 +567,7 @@ class LogSession internal constructor(
         // A saved format this session uses was edited: read the files with the new definition.
         var edited = false
         for (source in sources) {
-            val used = source.chosen ?: source.format.takeIf { it !in LogFormat.BUILT_IN } ?: continue
+            val used = source.chosen ?: source.format.takeIf { it in savedFormats } ?: continue
             val changed = settings.formats.firstOrNull { it.name == used.name && it != used } ?: continue
             // A detected format is detected again, as the edit may no longer fit the file best.
             if (source.chosen != null) source.chosen = changed
@@ -573,6 +576,7 @@ class LogSession internal constructor(
         // Only renamed: nothing to read again, just show the new name.
         for (source in sources) source.chosen?.let { renamed(it, settings.formats) }?.let { source.chosen = it }
         for (source in sources) renamed(source.format, settings.formats)?.let { source.format = it }
+        savedFormats = settings.formats
         listener.formatChanged()
         if (edited) {
             reload()
