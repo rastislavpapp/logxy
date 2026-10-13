@@ -18,9 +18,9 @@ import io.github.rastislavpapp.logxy.core.query.TextSearch
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
-import kotlinx.coroutines.async
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
@@ -69,8 +69,12 @@ class LogSessionTest {
 
     private class ChangingSettings(override var current: Settings) : SettingsStore {
         private val listeners = ArrayList<() -> Unit>()
-        override fun addListener(listener: () -> Unit) { listeners += listener }
-        override fun removeListener(listener: () -> Unit) { listeners -= listener }
+        override fun addListener(listener: () -> Unit) {
+            listeners += listener
+        }
+        override fun removeListener(listener: () -> Unit) {
+            listeners -= listener
+        }
 
         /** Must run on the session's thread, as listeners run on the thread that changed the settings. */
         fun change(settings: Settings) {
@@ -84,17 +88,28 @@ class LogSessionTest {
         val problem = CompletableDeferred<String>()
         val notMergeable = CompletableDeferred<List<Path>>()
         override fun indexing(fraction: () -> Double) {}
-        override fun problem(title: String, detail: String, hint: String?) { problem.complete(title) }
-        override fun loaded(shown: ShownLog) { loads.trySend(shown) }
+        override fun problem(title: String, detail: String, hint: String?) {
+            problem.complete(title)
+        }
+        override fun loaded(shown: ShownLog) {
+            loads.trySend(shown)
+        }
         var onShownEnded = {}
         override fun shownEnded() = onShownEnded()
-        override fun notMergeable(paths: List<Path>) { notMergeable.complete(paths) }
+        override fun notMergeable(paths: List<Path>) {
+            notMergeable.complete(paths)
+        }
         var parserChanged = 0
-        override fun parserChanged() { parserChanged++ }
+        override fun parserChanged() {
+            parserChanged++
+        }
         override fun recordsGrew(changed: IntArray) {}
         val fieldsShown = Channel<Unit>(Channel.UNLIMITED)
-        override fun fieldsShown() { fieldsShown.trySend(Unit) }
+        override fun fieldsShown() {
+            fieldsShown.trySend(Unit)
+        }
         var replaced = 0
+
         /** Whether the listener fails each time the rows change, as a UI bug would. */
         var failOnRows = false
         override fun rowsReplaced(keepView: Boolean, oldSize: Int, recordBefore: (row: Int) -> Int) {
@@ -107,11 +122,17 @@ class LogSessionTest {
             if (failOnRows) throw IllegalStateException("rowsChanged failed")
         }
         var levelMappingChanged = 0
-        override fun levelMappingChanged() { levelMappingChanged++ }
+        override fun levelMappingChanged() {
+            levelMappingChanged++
+        }
         var histogramChanged = 0
-        override fun histogramChanged() { histogramChanged++ }
+        override fun histogramChanged() {
+            histogramChanged++
+        }
         var foundChanged = 0
-        override fun foundChanged() { foundChanged++ }
+        override fun foundChanged() {
+            foundChanged++
+        }
         override fun followChanged(follow: Boolean) {}
         override fun statusChanged(status: SessionStatus) {}
     }

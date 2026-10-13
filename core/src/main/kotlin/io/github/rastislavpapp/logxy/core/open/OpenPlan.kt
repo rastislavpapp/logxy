@@ -40,7 +40,10 @@ object OpenPlan {
         val empty = ArrayList<Path>()
         val problems = ArrayList<Pair<Path, String>>()
         val files = paths.map { it.toAbsolutePath().normalize() }.distinct().flatMap { path ->
-            problem(path)?.let { problems += path to it; return@flatMap emptyList() }
+            problem(path)?.let {
+                problems += path to it
+                return@flatMap emptyList()
+            }
             if (!Files.isDirectory(path)) return@flatMap listOf(FoundFile(path))
             LogFolders.files(path) { onFound(path, it) }.map { FoundFile(it, it.parent != path) }.also { if (it.isEmpty()) empty.add(path) }
         }

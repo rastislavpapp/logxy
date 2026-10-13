@@ -50,7 +50,7 @@ class BytesTest {
 
     @Test
     fun `long text is cut on a character boundary`() {
-        val bytes = "ab€cd".toByteArray()   // € is three bytes
+        val bytes = "ab€cd".toByteArray() // € is three bytes
         assertEquals("ab€cd", Bytes.utf8Text(bytes, 0, bytes.size, 7))
         assertEquals("ab…", Bytes.utf8Text(bytes, 0, bytes.size, 4))
         assertEquals("ab€…", Bytes.utf8Text(bytes, 0, bytes.size, 5))

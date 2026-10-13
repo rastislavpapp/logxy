@@ -57,7 +57,10 @@ fun generateScenarioLog(
 
     // A thin run over the whole day tells how many bytes the mix of records takes.
     var sampleBytes = 0L
-    write(1.0 / CALIBRATION_GAP, SplittableRandom(seed + 1)) { sampleBytes += it.size; true }
+    write(1.0 / CALIBRATION_GAP, SplittableRandom(seed + 1)) {
+        sampleBytes += it.size
+        true
+    }
     val perMilli = size.toDouble() / sampleBytes / CALIBRATION_GAP
 
     val started = System.nanoTime()

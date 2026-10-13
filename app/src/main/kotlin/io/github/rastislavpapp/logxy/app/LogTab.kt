@@ -253,6 +253,7 @@ class LogTab(
                 putClientProperty("CheckBoxMenuItem.doNotCloseOnMouseClick", true)
             }
         }
+
         // At least one column stays: the last checked one cannot be unchecked.
         fun enableBoxes() {
             val single = boxes.count { it.isSelected } == 1
@@ -561,8 +562,11 @@ class LogTab(
         try {
             // While suspended the query is not read: text that does not parse must not keep it from showing all.
             val query = if (filterBar.suspended) null else filterBar.query()
-            if (query == null) session.applyFilter(null, Query.Group(all = true, items = emptyList()))
-            else session.applyFilter(filterBar.minimumLevel, query)
+            if (query == null) {
+                session.applyFilter(null, Query.Group(all = true, items = emptyList()))
+            } else {
+                session.applyFilter(filterBar.minimumLevel, query)
+            }
             val matches = query?.let(Highlighter::of) ?: Highlighter.NONE
             table?.matches = matches
             detail.matches = matches

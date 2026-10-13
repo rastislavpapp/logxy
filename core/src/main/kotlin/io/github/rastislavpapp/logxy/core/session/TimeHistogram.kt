@@ -111,8 +111,11 @@ class TimeHistogram(
             val low = minOf(bin, firstBin.toLong())
             val high = maxOf(bin, lastBin.toLong())
             // Moving costs a pass over the bins: move so that times keep coming in without another move soon.
-            if (high - low < BINS) move(start + low * width, width)
-            else move(Math.floorDiv(start, 2 * width) * 2 * width, 2 * width)
+            if (high - low < BINS) {
+                move(start + low * width, width)
+            } else {
+                move(Math.floorDiv(start, 2 * width) * 2 * width, 2 * width)
+            }
         }
     }
 

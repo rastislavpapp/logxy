@@ -22,7 +22,11 @@ class PropertiesFilesTest {
     fun `store replaces the file with sorted keys and leaves no temporary file`() {
         val file = dir.resolve("nested/state.properties")
         PropertiesFiles.store(file, Properties().apply { this["old"] = "1" }, "state")
-        val properties = Properties().apply { this["b"] = "2"; this["a"] = "1"; this["c"] = "x = y" }
+        val properties = Properties().apply {
+            this["b"] = "2"
+            this["a"] = "1"
+            this["c"] = "x = y"
+        }
         PropertiesFiles.store(file, properties, "state")
 
         assertEquals(properties, PropertiesFiles.load(file))

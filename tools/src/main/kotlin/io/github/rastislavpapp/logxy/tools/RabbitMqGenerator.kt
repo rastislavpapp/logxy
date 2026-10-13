@@ -99,7 +99,7 @@ internal class RabbitMqGenerator(
         return when {
             opening -> {
                 val connection = Connection(pid(), "10.0.${random.nextInt(1, 8)}.${random.nextInt(2, 250)}:${random.nextInt(32768, 61000)}",
-                    USERS[random.nextInt(USERS.size)], VHOSTS[random.nextInt(VHOSTS.size)])
+                    USERS[random.nextInt(USERS.size)], VHOSTS[random.nextInt(VHOSTS.size)],)
                 open += connection
                 Event("info", "accepting AMQP connection ${connection.name}", "rabbitmq.connection", "rabbit_reader", "start_connection", 3, 398, connection.pid)
             }
@@ -126,11 +126,11 @@ internal class RabbitMqGenerator(
 
     private fun debug(): Event = when (random.nextInt(3)) {
         0 -> Event("debug", "Applying policy '${POLICIES[random.nextInt(POLICIES.size)]}' to queue '${queue()}' in vhost '${vhost()}'",
-            "rabbitmq.queue", "rabbit_policy", "update_matched_objects", 3, 412)
+            "rabbitmq.queue", "rabbit_policy", "update_matched_objects", 3, 412,)
         1 -> Event("debug", "Queue '${queue()}' in vhost '${vhost()}' has ${random.nextInt(10_000)} messages ready, ${random.nextInt(200)} unacknowledged",
-            "rabbitmq.queue", "rabbit_amqqueue_process", "handle_info", 2, 1710)
+            "rabbitmq.queue", "rabbit_amqqueue_process", "handle_info", 2, 1710,)
         else -> Event("debug", "Writing ${random.nextInt(1, 500)} messages to segment ${random.nextInt(1, 300)}.idx of queue '${queue()}'",
-            "rabbitmq.queue", "rabbit_queue_index", "flush_journal", 1, 879)
+            "rabbitmq.queue", "rabbit_queue_index", "flush_journal", 1, 879,)
     }
 
     private fun notice(): Event = Event(
@@ -152,10 +152,10 @@ internal class RabbitMqGenerator(
         val connection = if (open.isEmpty()) null else open.removeAt(random.nextInt(open.size))
         return if (connection != null) {
             Event("warning", "closing AMQP connection ${connection.described}:\nclient unexpectedly closed TCP connection",
-                "rabbitmq.connection", "rabbit_reader", "log_connection_exception", 3, 532, connection.pid)
+                "rabbitmq.connection", "rabbit_reader", "log_connection_exception", 3, 532, connection.pid,)
         } else {
             Event("warning", "Detected an unclean shutdown of the message store, rebuilding indices for vhost '${vhost()}'",
-                "rabbitmq", "rabbit_msg_store", "init", 1, 734)
+                "rabbitmq", "rabbit_msg_store", "init", 1, 734,)
         }
     }
 

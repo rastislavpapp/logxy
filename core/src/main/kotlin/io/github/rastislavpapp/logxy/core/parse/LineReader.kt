@@ -1,8 +1,8 @@
 package io.github.rastislavpapp.logxy.core.parse
 
-import io.github.rastislavpapp.logxy.core.readFully
 import io.github.rastislavpapp.logxy.core.Bytes
 import io.github.rastislavpapp.logxy.core.index.NewlineScanner
+import io.github.rastislavpapp.logxy.core.readFully
 import java.nio.ByteBuffer
 import java.nio.channels.FileChannel
 

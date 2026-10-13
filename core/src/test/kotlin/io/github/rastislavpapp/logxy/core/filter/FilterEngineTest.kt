@@ -297,7 +297,7 @@ class FilterEngineTest {
             for (i in from..<from + count) {
                 append("2026-10-01 %02d:%02d:%02d.000 [t-%d] %s log.L%d - message %d %s\n"
                     .format(i / 3600 % 24, i / 60 % 60, i % 60, random.nextInt(9), levels[random.nextInt(5)], random.nextInt(4), i,
-                        if (random.nextInt(10) == 0) "needle" else "hay"))
+                        if (random.nextInt(10) == 0) "needle" else "hay",))
                 if (random.nextInt(20) == 0) append("java.lang.Exception: deep needle\n\tat x.Y(Y.java:1)\n")
             }
         }

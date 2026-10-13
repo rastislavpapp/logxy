@@ -5,6 +5,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.job
 import kotlinx.coroutines.runBlocking
+import org.junit.jupiter.api.Assumptions.assumeTrue
+import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.zip.ZipEntry
@@ -12,8 +14,6 @@ import java.util.zip.ZipOutputStream
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
-import org.junit.jupiter.api.Assumptions.assumeTrue
-import org.junit.jupiter.api.io.TempDir
 
 class LogFoldersTest {
 
@@ -33,7 +33,11 @@ class LogFoldersTest {
         write(".hidden.log", "no\n".toByteArray())
         write(".git/config", "no\n".toByteArray())
         val zip = dir.resolve("old.zip")
-        ZipOutputStream(Files.newOutputStream(zip)).use { it.putNextEntry(ZipEntry("x.log")); it.write(0); it.closeEntry() }
+        ZipOutputStream(Files.newOutputStream(zip)).use {
+            it.putNextEntry(ZipEntry("x.log"))
+            it.write(0)
+            it.closeEntry()
+        }
 
         suspend fun names(recursive: Boolean) = LogFolders.files(dir, recursive).map { dir.relativize(it).joinToString("/") }
         assertEquals(listOf("a.log", "b.log", "old.zip", "sub/deep/c.txt"), names(recursive = true))

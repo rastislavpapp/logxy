@@ -1,5 +1,6 @@
 package io.github.rastislavpapp.logxy.core.merge
 
+import io.github.rastislavpapp.logxy.core.archive.ZipSpool
 import io.github.rastislavpapp.logxy.core.filter.Filter
 import io.github.rastislavpapp.logxy.core.filter.LevelCondition
 import io.github.rastislavpapp.logxy.core.filter.PresenceCondition
@@ -13,16 +14,15 @@ import io.github.rastislavpapp.logxy.core.log.ParsedLog
 import io.github.rastislavpapp.logxy.core.log.Role
 import io.github.rastislavpapp.logxy.core.log.Schema
 import io.github.rastislavpapp.logxy.core.parse.CompiledPattern
+import kotlinx.coroutines.runBlocking
+import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Files
-import io.github.rastislavpapp.logxy.core.archive.ZipSpool
 import java.nio.file.Path
 import java.nio.file.StandardOpenOption
 import java.time.ZoneOffset
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
-import kotlinx.coroutines.runBlocking
-import org.junit.jupiter.api.io.TempDir
 
 class MergedLogTest {
 

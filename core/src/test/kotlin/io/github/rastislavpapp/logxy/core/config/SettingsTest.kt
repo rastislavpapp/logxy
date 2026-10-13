@@ -2,8 +2,8 @@ package io.github.rastislavpapp.logxy.core.config
 
 import io.github.rastislavpapp.logxy.core.log.Level
 import io.github.rastislavpapp.logxy.core.log.LevelMapping
-import io.github.rastislavpapp.logxy.core.parse.RoleKeys
 import io.github.rastislavpapp.logxy.core.parse.Parser
+import io.github.rastislavpapp.logxy.core.parse.RoleKeys
 import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Files
 import java.nio.file.Path

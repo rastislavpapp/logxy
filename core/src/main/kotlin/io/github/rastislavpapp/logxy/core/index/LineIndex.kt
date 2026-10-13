@@ -1,14 +1,7 @@
 package io.github.rastislavpapp.logxy.core.index
 
-import io.github.rastislavpapp.logxy.core.ReadChannels
-import io.github.rastislavpapp.logxy.core.readFully
 import io.github.rastislavpapp.logxy.core.Bytes
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.job
-import kotlinx.coroutines.withContext
+import io.github.rastislavpapp.logxy.core.ReadChannels
 import io.github.rastislavpapp.logxy.core.filter.LineSnapshot
 import io.github.rastislavpapp.logxy.core.filter.RecordSnapshot
 import io.github.rastislavpapp.logxy.core.log.AppendedData
@@ -17,6 +10,13 @@ import io.github.rastislavpapp.logxy.core.log.Level
 import io.github.rastislavpapp.logxy.core.log.LevelMapping
 import io.github.rastislavpapp.logxy.core.log.LogData
 import io.github.rastislavpapp.logxy.core.log.Schema
+import io.github.rastislavpapp.logxy.core.readFully
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.job
+import kotlinx.coroutines.withContext
 import java.lang.foreign.Arena
 import java.nio.ByteBuffer
 import java.nio.channels.FileChannel

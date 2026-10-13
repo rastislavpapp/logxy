@@ -11,15 +11,13 @@ import java.awt.Component
 import java.awt.Graphics
 import java.awt.Graphics2D
 import java.awt.RenderingHints
-import java.awt.geom.Path2D
 import java.awt.event.ActionEvent
 import java.awt.event.KeyEvent
+import java.awt.geom.Path2D
 import javax.swing.AbstractAction
-import javax.swing.BorderFactory
 import javax.swing.DefaultListCellRenderer
 import javax.swing.JComboBox
 import javax.swing.JComponent
-import javax.swing.JLabel
 import javax.swing.JList
 import javax.swing.JPanel
 import javax.swing.JTextField
@@ -49,7 +47,8 @@ private enum class RuleOp(val label: String) {
     NUMBER_AT_LEAST("≥"),
     NUMBER_ABOVE(">"),
     NUMBER_AT_MOST("≤"),
-    NUMBER_BELOW("<");
+    NUMBER_BELOW("<"),
+    ;
 
     val usesLevel get() = name.startsWith("LEVEL_")
     val usesCase get() = this in setOf(CONTAINS, NOT_CONTAINS, STARTS_WITH, ENDS_WITH, IS, IS_NOT)
@@ -69,7 +68,8 @@ private enum class Match(val label: String, val all: Boolean, val negated: Boole
     ALL("AND", true, false),
     ANY("OR", false, false),
     NONE("NONE OF", false, true),
-    NOT_ALL("NOT ALL OF", true, true);
+    NOT_ALL("NOT ALL OF", true, true),
+    ;
 
     override fun toString() = label
 
@@ -185,11 +185,13 @@ class QueryEditor(private val onApply: () -> Unit) : JPanel(MigLayout("insets 0,
         val header = JPanel(MigLayout("insets 0", "[]push[]")).apply {
             isOpaque = false
             add(match)
-            if (!isRoot) add(toolBarButton(Icons.closeSmall, "Remove this group", focusable = true) {
-                val counted = query(includeEmpty = false) != null
-                removeFromParent(this@GroupView)
-                if (counted) onApply()
-            }, "cell 1 0")
+            if (!isRoot) {
+                add(toolBarButton(Icons.closeSmall, "Remove this group", focusable = true) {
+                    val counted = query(includeEmpty = false) != null
+                    removeFromParent(this@GroupView)
+                    if (counted) onApply()
+                }, "cell 1 0")
+            }
         }
 
         // Sits right after the last item, where new ones are added.
@@ -360,10 +362,14 @@ class QueryEditor(private val onApply: () -> Unit) : JPanel(MigLayout("insets 0,
         private fun isPattern() = isPattern(field.selectedItem as String)
 
         // Templates match exactly.
-        private fun ops(): List<RuleOp> = if (isPattern()) listOf(RuleOp.IS, RuleOp.IS_NOT) else when (fieldType()) {
-            ColumnType.LEVEL -> RuleOp.LEVEL + RuleOp.TEXT
-            ColumnType.TIMESTAMP -> RuleOp.TIME + RuleOp.TEXT
-            else -> RuleOp.TEXT + RuleOp.NUMBER
+        private fun ops(): List<RuleOp> = if (isPattern()) {
+            listOf(RuleOp.IS, RuleOp.IS_NOT)
+        } else {
+            when (fieldType()) {
+                ColumnType.LEVEL -> RuleOp.LEVEL + RuleOp.TEXT
+                ColumnType.TIMESTAMP -> RuleOp.TIME + RuleOp.TEXT
+                else -> RuleOp.TEXT + RuleOp.NUMBER
+            }
         }
 
         private fun fillOps(selected: RuleOp) {

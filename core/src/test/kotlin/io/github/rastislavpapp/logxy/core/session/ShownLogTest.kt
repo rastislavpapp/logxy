@@ -168,10 +168,12 @@ class ShownLogTest {
         val a = parse("a.log", "2026-10-01 10:00:01.000 INFO  a.A - A1\n2026-10-01 10:00:03.000 INFO  a.A - A2\n")
         val b = parse("b.log", "2026-10-01 10:00:02.000 WARN  b.B - B1\n")
         val merged = runBlocking { MergedLog.build(listOf(a, b)) }
-        a.use { b.use {
-            val shown = ShownLog(MergedLoad(merged))
-            assertEquals(CopyResult.Copied("A1\nB1\nA2\n"), runBlocking { shown.copyColumn(merged.field("Message")) })
-            assertEquals(CopyResult.Copied("b.log\na.log\n"), runBlocking { shown.copyColumn(merged.field("Source"), intArrayOf(1, 2)) })
-        } }
+        a.use {
+            b.use {
+                val shown = ShownLog(MergedLoad(merged))
+                assertEquals(CopyResult.Copied("A1\nB1\nA2\n"), runBlocking { shown.copyColumn(merged.field("Message")) })
+                assertEquals(CopyResult.Copied("b.log\na.log\n"), runBlocking { shown.copyColumn(merged.field("Source"), intArrayOf(1, 2)) })
+            }
+        }
     }
 }

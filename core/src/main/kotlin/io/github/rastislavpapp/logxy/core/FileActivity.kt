@@ -6,7 +6,8 @@ import java.time.Instant
 /** Whether a file looks finished or is still being written to. A heuristic, not a guarantee. */
 enum class FileActivity {
     STATIC,
-    LIVE;
+    LIVE,
+    ;
 
     companion object {
         val DEFAULT_LIVE_WINDOW: Duration = Duration.ofSeconds(60)

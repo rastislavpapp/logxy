@@ -15,19 +15,27 @@ class MemoryPage : PreferencesPage("Memory", Icons.memory) {
 
     // The packaged launcher raises the JVM default; see the jpackage task.
     private val default = JRadioButton(
-        if (System.getProperty("jpackage.app-path") != null) "Default (half of this computer's memory)"
-        else "Java default (a quarter of this computer's memory)"
+        if (System.getProperty("jpackage.app-path") != null) {
+            "Default (half of this computer's memory)"
+        } else {
+            "Java default (a quarter of this computer's memory)"
+        },
     )
     private val custom = JRadioButton("Up to")
     private val gigabytes = JSpinner(SpinnerNumberModel(8, 1, 1024, 1))
 
     init {
         val saved = AppSettings.current.maxMemory
-        if (saved == null) default.isSelected = true else {
+        if (saved == null) {
+            default.isSelected = true
+        } else {
             custom.isSelected = true
             gigabytes.value = gigabytesOf(saved)
         }
-        ButtonGroup().apply { add(default); add(custom) }
+        ButtonGroup().apply {
+            add(default)
+            add(custom)
+        }
         gigabytes.isEnabled = custom.isSelected
         custom.addChangeListener { gigabytes.isEnabled = custom.isSelected }
 

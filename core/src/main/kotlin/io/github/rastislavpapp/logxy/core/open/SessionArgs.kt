@@ -35,9 +35,15 @@ object SessionArgs {
         for (session in sessions) {
             add(SESSION_ARG)
             addAll(session.paths)
-            session.filter?.minimumLevel?.let { add(LEVEL_ARG); add(it.name) }
+            session.filter?.minimumLevel?.let {
+                add(LEVEL_ARG)
+                add(it.name)
+            }
             // Encoded, as Windows command lines do not reliably keep the quotes queries are full of.
-            session.filter?.query?.takeIf { it.isNotBlank() }?.let { add(QUERY_ARG); add(encode(it)) }
+            session.filter?.query?.takeIf { it.isNotBlank() }?.let {
+                add(QUERY_ARG)
+                add(encode(it))
+            }
             if (session.parsers.any { it != null }) {
                 val properties = Properties()
                 session.parsers.forEachIndexed { i, parser -> if (parser != null) Settings.writeParser(properties, "${i + 1}.", parser) }
@@ -60,16 +66,18 @@ object SessionArgs {
         var selected = 0
         val iterator = args.iterator()
         fun value() = if (iterator.hasNext()) iterator.next() else ""
-        while (iterator.hasNext()) when (val arg = iterator.next()) {
-            SESSION_ARG -> groups += Group()
-            LEVEL_ARG -> value().let { level -> groups.last().level = Level.entries.firstOrNull { it.name == level } }
-            QUERY_ARG -> groups.last().query = decode(value()).orEmpty()
-            PARSERS_ARG -> groups.last().let { group ->
-                val properties = Properties().apply { load(StringReader(decode(value()).orEmpty())) }
-                group.parsers = group.paths.indices.map { Settings.readParser(properties, "${it + 1}.") }
+        while (iterator.hasNext()) {
+            when (val arg = iterator.next()) {
+                SESSION_ARG -> groups += Group()
+                LEVEL_ARG -> value().let { level -> groups.last().level = Level.entries.firstOrNull { it.name == level } }
+                QUERY_ARG -> groups.last().query = decode(value()).orEmpty()
+                PARSERS_ARG -> groups.last().let { group ->
+                    val properties = Properties().apply { load(StringReader(decode(value()).orEmpty())) }
+                    group.parsers = group.paths.indices.map { Settings.readParser(properties, "${it + 1}.") }
+                }
+                SELECT_ARG -> selected = value().toIntOrNull() ?: 0
+                else -> groups.last().paths.add(arg)
             }
-            SELECT_ARG -> selected = value().toIntOrNull() ?: 0
-            else -> groups.last().paths.add(arg)
         }
         return Reopen(groups.map { it.session() }, selected)
     }

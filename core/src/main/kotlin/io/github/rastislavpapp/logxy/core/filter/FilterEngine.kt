@@ -1,6 +1,5 @@
 package io.github.rastislavpapp.logxy.core.filter
 
-import io.github.rastislavpapp.logxy.core.readFully
 import io.github.rastislavpapp.logxy.core.Bytes
 import io.github.rastislavpapp.logxy.core.log.ColumnType
 import io.github.rastislavpapp.logxy.core.log.Columns
@@ -12,6 +11,7 @@ import io.github.rastislavpapp.logxy.core.parse.MapSyntax
 import io.github.rastislavpapp.logxy.core.parse.MdcMap
 import io.github.rastislavpapp.logxy.core.pattern.PatternCounts
 import io.github.rastislavpapp.logxy.core.pattern.PatternIndex
+import io.github.rastislavpapp.logxy.core.readFully
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -137,6 +137,7 @@ class FilterEngine(private val log: LogData, private val maxCacheBytes: Long = D
         private val from: Int,
     ) : PreparedFilter {
         private val words = (snapshot.count + 63) / 64
+
         // Small logs, like the parts of a merge, get smaller tasks so that every core gets some.
         private val chunkWords = (words / Runtime.getRuntime().availableProcessors()).coerceIn(MIN_CHUNK_WORDS, CHUNK_WORDS)
         private val chunkCount = (words + chunkWords - 1) / chunkWords

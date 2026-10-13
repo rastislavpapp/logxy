@@ -3,8 +3,8 @@ package io.github.rastislavpapp.logxy.core.log
 import io.github.rastislavpapp.logxy.core.index.ByteChunkList
 import io.github.rastislavpapp.logxy.core.index.IntChunkList
 import io.github.rastislavpapp.logxy.core.index.LongChunkList
-import io.github.rastislavpapp.logxy.core.parse.MdcMap
 import io.github.rastislavpapp.logxy.core.parse.CompiledParser
+import io.github.rastislavpapp.logxy.core.parse.MdcMap
 
 /**
  * Field values of consecutive records, one primitive list per field. While a segment is being

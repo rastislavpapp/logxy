@@ -96,7 +96,11 @@ internal class TimeCount(
                         counted[next++] = null
                     }
                     if (onCounted != null && next > first && next < tasks) {
-                        onCounted(before.copy().apply { addAll(after); cover(expectedFrom); cover(expectedTo) })
+                        onCounted(before.copy().apply {
+                            addAll(after)
+                            cover(expectedFrom)
+                            cover(expectedTo)
+                        })
                     }
                 }
             }

@@ -19,6 +19,18 @@ import io.github.rastislavpapp.logxy.core.open.SessionFiles
 import io.github.rastislavpapp.logxy.core.open.TabAction
 import io.github.rastislavpapp.logxy.core.open.TabPlan
 import io.github.rastislavpapp.logxy.core.parse.Parser
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.swing.Swing
 import net.miginfocom.swing.MigLayout
 import java.awt.BasicStroke
 import java.awt.BorderLayout
@@ -63,18 +75,6 @@ import javax.swing.SwingConstants
 import javax.swing.Timer
 import javax.swing.UIManager
 import javax.swing.WindowConstants
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.CoroutineStart
-import kotlinx.coroutines.Deferred
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.async
-import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.swing.Swing
 
 private const val CARD_PLACEHOLDER = "placeholder"
 private const val CARD_TABS = "tabs"
@@ -277,7 +277,9 @@ class MainFrame : JFrame("logxy") {
         lateinit var walk: Deferred<Found>
         var finished = false
         val dialog = OpeningProgressDialog(this@MainFrame, indeterminate = true) { walk.cancel() }
-        fun tell(folder: Path, count: Int) { dialog.text = "Looking for logs in $folder… ($count found)" }
+        fun tell(folder: Path, count: Int) {
+            dialog.text = "Looking for logs in $folder… ($count found)"
+        }
         tell(paths.first { Files.isDirectory(it) }, 0)
         walk = async(Dispatchers.IO) { OpenPlan.find(paths, ::tell) }
         Timer(PROGRESS_DIALOG_DELAY_MILLIS) { if (!finished) dialog.isVisible = true }.apply { isRepeats = false }.start()
@@ -500,7 +502,10 @@ class MainFrame : JFrame("logxy") {
         })
         popup.add(JMenuItem("Close Other Tabs").apply {
             isEnabled = last > 0
-            addActionListener { closeTabs(index + 1..last); closeTabs(0..<index) }
+            addActionListener {
+                closeTabs(index + 1..last)
+                closeTabs(0..<index)
+            }
         })
         popup.add(JMenuItem("Close Tabs to the Right").apply {
             isEnabled = index < last
