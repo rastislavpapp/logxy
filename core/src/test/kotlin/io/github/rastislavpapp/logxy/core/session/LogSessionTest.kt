@@ -9,6 +9,7 @@ import io.github.rastislavpapp.logxy.core.filter.RecordFilter
 import io.github.rastislavpapp.logxy.core.filter.TextCondition
 import io.github.rastislavpapp.logxy.core.filter.TextOp
 import io.github.rastislavpapp.logxy.core.log.Level
+import io.github.rastislavpapp.logxy.core.log.LevelMapping
 import io.github.rastislavpapp.logxy.core.parse.LogFormat
 import io.github.rastislavpapp.logxy.core.query.Query
 import io.github.rastislavpapp.logxy.core.query.QueryException
@@ -26,6 +27,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Files
@@ -60,6 +62,18 @@ class LogSessionTest {
         override fun removeListener(listener: () -> Unit) {}
     }
 
+    private class ChangingSettings(override var current: Settings) : SettingsStore {
+        private val listeners = ArrayList<() -> Unit>()
+        override fun addListener(listener: () -> Unit) { listeners += listener }
+        override fun removeListener(listener: () -> Unit) { listeners -= listener }
+
+        /** Must run on the session's thread, as listeners run on the thread that changed the settings. */
+        fun change(settings: Settings) {
+            current = settings
+            listeners.toList().forEach { it() }
+        }
+    }
+
     private class Recorder : SessionListener {
         val loads = Channel<ShownLog>(Channel.UNLIMITED)
         val problem = CompletableDeferred<String>()
@@ -70,7 +84,8 @@ class LogSessionTest {
         var onShownEnded = {}
         override fun shownEnded() = onShownEnded()
         override fun notMergeable(paths: List<Path>) { notMergeable.complete(paths) }
-        override fun formatChanged() {}
+        var formatChanged = 0
+        override fun formatChanged() { formatChanged++ }
         override fun recordsGrew(changed: IntArray) {}
         val fieldsShown = Channel<Unit>(Channel.UNLIMITED)
         override fun fieldsShown() { fieldsShown.trySend(Unit) }
@@ -78,8 +93,10 @@ class LogSessionTest {
         override fun rowsReplaced(keepView: Boolean, oldSize: Int, recordBefore: (row: Int) -> Int) { replaced++ }
         val rowsChanged = ArrayList<Pair<Int, Int>>()
         override fun rowsChanged(firstChanged: Int, oldSize: Int) { rowsChanged += firstChanged to oldSize }
-        override fun levelMappingChanged() {}
-        override fun histogramChanged() {}
+        var levelMappingChanged = 0
+        override fun levelMappingChanged() { levelMappingChanged++ }
+        var histogramChanged = 0
+        override fun histogramChanged() { histogramChanged++ }
         var foundChanged = 0
         override fun foundChanged() { foundChanged++ }
         override fun followChanged(follow: Boolean) {}
@@ -562,6 +579,101 @@ class LogSessionTest {
         assertEquals("message 0", readable)
         withTimeout(10_000) { recorder.loads.receive() }
         withContext(ui) { session.dispose() }
+    }
+
+    private val mine = LogFormat.Pattern("Mine", "%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %-5p %c - %m%n")
+
+    // Without the logger, its name becomes part of the message.
+    private val edited = LogFormat.Pattern("Mine", "%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %-5p %m%n")
+
+    private suspend fun openWith(settings: SettingsStore, file: Path, recorder: Recorder, chosen: LogFormat?): Pair<LogSession, ShownLog> {
+        val session = withContext(ui) { LogSession(listOf(file), scope, settings, recorder, chosen = listOf(chosen)).also { it.start() } }
+        return session to withTimeout(10_000) { recorder.loads.receive() }
+    }
+
+    @Test
+    fun `a saved parser renamed only changes the name shown`() = runBlocking {
+        val file = Files.writeString(dir.resolve("renamed.log"), lines(10))
+        val settings = ChangingSettings(Settings(formats = listOf(mine)))
+        val recorder = Recorder()
+        val (session, shown) = openWith(settings, file, recorder, chosen = mine)
+        val announced = withContext(ui) { recorder.formatChanged }
+        withContext(ui) { settings.change(Settings(formats = listOf(mine.copy(name = "Ours")))) }
+        withContext(ui) {
+            assertEquals("Ours", session.chosenFormat?.name)
+            assertEquals(announced + 1, recorder.formatChanged)
+            assertFalse(shown.ended)
+        }
+        assertEquals(null, withTimeoutOrNull(500) { recorder.loads.receive() })
+        withContext(ui) { session.dispose() }
+    }
+
+    @Test
+    fun `a saved parser edited reads the files again`() = runBlocking {
+        val file = Files.writeString(dir.resolve("edited.log"), lines(10))
+        val settings = ChangingSettings(Settings(formats = listOf(mine)))
+        val recorder = Recorder()
+        val (session, shown) = openWith(settings, file, recorder, chosen = mine)
+        withContext(ui) { settings.change(Settings(formats = listOf(edited))) }
+        withTimeout(10_000) { recorder.loads.receive() }
+        withContext(ui) {
+            assertTrue(shown.ended)
+            assertEquals(edited, session.chosenFormat)
+            assertEquals("app.L - message 0", session.records!!.fieldText(0, 3))
+            session.dispose()
+        }
+    }
+
+    @Test
+    fun `a saved parser that detection chose reads the files again when edited`() = runBlocking {
+        val file = Files.writeString(dir.resolve("detected.log"), lines(10))
+        val settings = ChangingSettings(Settings(formats = listOf(mine)))
+        val recorder = Recorder()
+        val (session, shown) = openWith(settings, file, recorder, chosen = null)
+        assertEquals(mine, withContext(ui) { session.format })
+        withContext(ui) { settings.change(Settings(formats = listOf(edited))) }
+        withTimeout(10_000) { recorder.loads.receive() }
+        withContext(ui) {
+            assertTrue(shown.ended)
+            assertEquals(null, session.chosenFormat)
+            assertEquals(edited, session.format)
+            assertEquals("app.L - message 0", session.records!!.fieldText(0, 3))
+            session.dispose()
+        }
+    }
+
+    private fun withNotes(count: Int) = lines(100) + buildString {
+        repeat(count) { append("2026-10-01 08:00:00.000 [main] NOTE  app.L - note $it\n") }
+    }
+
+    private val notesAreErrors = Settings(levels = LevelMapping(Level.BUILT_IN_NAMES + ("NOTE" to Level.ERROR)))
+
+    @Test
+    fun `a changed level mapping filters again`() = runBlocking {
+        val file = Files.writeString(dir.resolve("levels.log"), withNotes(10))
+        val settings = ChangingSettings(Settings())
+        val recorder = Recorder()
+        val (session, _) = openWith(settings, file, recorder, chosen = null)
+        withContext(ui) { session.applyFilter(Level.ERROR, Query.EMPTY) }
+        val errors = LevelCondition.atLeast("Level", Level.ERROR)
+        assertEquals(25, awaitShown(session, file, errors).size)
+        withContext(ui) { settings.change(notesAreErrors) }
+        assertEquals(35, awaitShown(session, file, errors).size)
+        assertEquals(1, withContext(ui) { recorder.levelMappingChanged })
+    }
+
+    @Test
+    fun `a changed level mapping counts the times again without a filter`() = runBlocking {
+        val file = Files.writeString(dir.resolve("levels.log"), withNotes(10))
+        val settings = ChangingSettings(Settings())
+        val recorder = Recorder()
+        val (session, _) = openWith(settings, file, recorder, chosen = null)
+        withContext(ui) { session.applyFilter(null, Query.EMPTY) }
+        awaitHistogram(session, 110, 25, 25)
+        val counted = withContext(ui) { recorder.histogramChanged }
+        withContext(ui) { settings.change(notesAreErrors) }
+        awaitHistogram(session, 110, 25, 35)
+        assertTrue(withContext(ui) { recorder.histogramChanged } > counted)
     }
 
     @Test
