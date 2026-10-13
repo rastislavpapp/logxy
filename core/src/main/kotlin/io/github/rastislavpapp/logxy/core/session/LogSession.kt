@@ -564,9 +564,10 @@ class LogSession internal constructor(
         // A saved format this session uses was edited: read the files with the new definition.
         var edited = false
         for (source in sources) {
-            val chosen = source.chosen ?: continue
-            val changed = settings.formats.firstOrNull { it.name == chosen.name && it != chosen } ?: continue
-            source.chosen = changed
+            val used = source.chosen ?: source.format.takeIf { it !in LogFormat.BUILT_IN } ?: continue
+            val changed = settings.formats.firstOrNull { it.name == used.name && it != used } ?: continue
+            // A detected format is detected again, as the edit may no longer fit the file best.
+            if (source.chosen != null) source.chosen = changed
             edited = true
         }
         // Only renamed: nothing to read again, just show the new name.
