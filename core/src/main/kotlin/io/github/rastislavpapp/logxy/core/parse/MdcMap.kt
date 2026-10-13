@@ -63,10 +63,6 @@ internal object MdcMap : MapSyntax {
 
     /** The range `[from, to)` in one long, so map lookups return a range without allocating; read back with [from] and [to]. */
     fun pack(from: Int, to: Int): Long = (from.toLong() shl 32) or to.toLong()
-
-    /** The start of a range made by [pack]. */
     fun from(packed: Long): Int = (packed ushr 32).toInt()
-
-    /** The end of a range made by [pack]. */
     fun to(packed: Long): Int = packed.toInt()
 }

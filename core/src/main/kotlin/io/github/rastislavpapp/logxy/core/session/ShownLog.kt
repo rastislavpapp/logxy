@@ -17,7 +17,6 @@ sealed interface CopyResult {
     /** The session reloaded or closed the files while copying. */
     data object FileChanged : CopyResult
 
-    /** Reading the file failed, for the reason [message] gives. */
     data class Failed(val message: String) : CopyResult
 }
 

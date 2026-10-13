@@ -15,7 +15,6 @@ abstract class ChunkList<A : Any> internal constructor(empty: A) {
     var size = 0
         protected set
 
-    /** A new chunk of [CHUNK_SIZE] elements. */
     protected abstract fun newChunk(): A
 
     /** The chunk the next added element goes into, at offset `size and MASK`. */
