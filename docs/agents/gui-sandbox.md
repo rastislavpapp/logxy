@@ -8,12 +8,14 @@
 2. **Pick the smallest log the check needs.** A few MB for UI behaviour; large files only when the change is about scale, as files are read through a container mount, slower than native disk. Look for fitting logs first (`testdata/`, and earlier ones in `tools/gui-sandbox/out/`), else generate one into `tools/gui-sandbox/out/` with `./gradlew -q :tools:run --args="generate <file> 5m"` (run `tools:run` without arguments for the formats and the `scenario` and `simulate` variants).
 3. **Start** with `gui.sh start <paths>`, and keep one sandbox running across checks. Each start begins with default settings.
 4. **Drive it as a loop:** take a `shot`, read the image, choose one action (`click`, `rclick`, `key`, `type`) from what it shows, repeat. Wait by taking another shot rather than sleeping. Chain actions in one command only when the screen between them is already known.
+   Every image read costs by its size, so take a full shot only to learn the layout (after start, after opening a dialog or menu), then **crop** to the region the next question needs: `shot NAME X Y W H`, e.g. the status bar, one dialog, the first rows of the table.
 5. **Check the log** with `gui.sh logs | grep -A8 Uncaught` after the scenario. An exception on the UI thread is logged but often leaves the screen merely stale (old rows, an old count), so a screenshot alone can look plausible.
 6. **Stop** with `gui.sh stop` when done.
 
 ## Reference
 
-- **Coordinates** come from the latest screenshot only. Dialogs and popups open at varying places, so take a shot after opening one before clicking inside it.
+- **Coordinates** are screen coordinates from the latest full shot. In a crop, add its X and Y to a position read off it. Dialogs and popups open at varying places, so take a shot after opening one before clicking inside it.
+- **Regions** at the default 1600x1000 screen with the main window unmoved: the status bar is about `200 875 1200 25`, the table's first rows `200 340 1200 200`. Confirm against a full shot once per session; the layout changes with the file's columns.
 - **Context menus**: `rclick X Y` opens the table's menu on a cell (copy value, filter by it).
 - **Keys** are xdotool names: `Page_Down`, `Return`, `Escape`, `ctrl+f`, `ctrl+space` (toggles the selection of the focused row).
 - **Shot names**: reuse a few names (`a1`, `a2`, …) per scenario; `out/` is git-ignored and grows with every name.
