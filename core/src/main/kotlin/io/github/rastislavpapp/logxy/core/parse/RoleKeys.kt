@@ -24,6 +24,16 @@ data class RoleKeys(
         ROLES.associate { (role, keys) -> prefix + role.name.lowercase() to keys(this).joinToString(",") }
 
     companion object {
+        /** The keys Go and other logfmt loggers write. */
+        val LOGFMT = RoleKeys(
+            timestamp = listOf("ts", "time", "timestamp", "t"),
+            level = listOf("level", "lvl", "severity"),
+            message = listOf("msg", "message"),
+            logger = listOf("logger", "caller", "module", "component"),
+            thread = listOf("thread", "goroutine"),
+            exception = listOf("stacktrace", "exception", "error", "err"),
+        )
+
         /** Each role and its keys, in the order of the constructor. */
         val ROLES: List<Pair<Role, (RoleKeys) -> List<String>>> = listOf(
             Role.TIMESTAMP to RoleKeys::timestamp, Role.LEVEL to RoleKeys::level, Role.MESSAGE to RoleKeys::message,

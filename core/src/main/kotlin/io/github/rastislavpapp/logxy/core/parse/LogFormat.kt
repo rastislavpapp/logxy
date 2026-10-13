@@ -81,9 +81,21 @@ sealed interface LogFormat {
         }
     }
 
+    data class Logfmt(override val name: String, val keys: RoleKeys = RoleKeys.LOGFMT) : LogFormat {
+        override val kind get() = Companion
+        override fun compile() = LogfmtFormat(keys)
+        override fun withName(name: String) = copy(name = name)
+        override fun properties() = keys.properties("keys.")
+
+        companion object : Kind("logfmt") {
+            override fun read(name: String, properties: (String) -> String?) =
+                Logfmt(name, RoleKeys.read(properties, "keys.", RoleKeys.LOGFMT))
+        }
+    }
+
     companion object {
         /** Every kind of parser, as settings store them. Lazy, as [Raw] may be what is initializing this companion. */
-        val KINDS: List<Kind> by lazy { listOf(Raw.kind, Pattern, Regex, Json) }
+        val KINDS: List<Kind> by lazy { listOf(Raw.kind, Pattern, Regex, Json, Logfmt) }
 
         /** The most common layouts; others are guessed from the file. */
         val BUILT_IN: List<LogFormat> = listOf(
@@ -91,6 +103,7 @@ sealed interface LogFormat {
             Pattern("time [thread] LEVEL logger - message", "%d{HH:mm:ss.SSS} [%thread] %-5level %logger - %msg%n"),
             Pattern("Spring Boot 3", "%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} %5p %pid --- [%t] %-40.40logger{39} : %m%n"),
             Pattern("Python logging", "%d{yyyy-MM-dd HH:mm:ss,SSS} - %c - %p - %m%n"),
+            Logfmt("logfmt"),
             Json("JSON lines"),
         )
 

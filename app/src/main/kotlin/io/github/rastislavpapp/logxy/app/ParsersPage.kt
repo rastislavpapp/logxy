@@ -323,6 +323,7 @@ class ParsersPage(
                 listOf(Setting("Layout:", "layout", ""), Setting("Timestamp:", "timestamp", LogFormat.Regex.DEFAULT_TIMESTAMP)),
             ),
             KindChoice("JSON lines", LogFormat.Json, roleKeys(RoleKeys())),
+            KindChoice("logfmt (key=value)", LogFormat.Logfmt, roleKeys(RoleKeys.LOGFMT)),
         )
 
         /** One setting per role, listing the keys that fill it. */
