@@ -75,10 +75,20 @@ class AccessLogTest {
         val text = sample.lines().first()
         val line = text.toByteArray()
         val parser = AccessLogFormat().newParser()
-        // Only cuts within the size (a common line) and the whole line are records; others must be rejected, not fail.
+        // Only cuts within or right after the size (a common line) and the whole line are records; others must be
+        // rejected, not fail.
         val accepted = (0..line.size).filter { parser.match(line, 0, it) }
         val size = text.indexOf(" 512 ") + 1
-        assertEquals(listOf(size + 1, size + 2, size + 3, line.size), accepted)
+        assertEquals(listOf(size + 1, size + 2, size + 3, size + 4, line.size), accepted)
+    }
+
+    @Test
+    fun `trailing spaces end a line`() {
+        val parser = AccessLogFormat().newParser()
+        for (line in listOf("""192.0.2.1 - - [13/Oct/2026:08:00:00 +0000] "GET / HTTP/1.1" 200 5 """, """192.0.2.1 - - [13/Oct/2026:08:00:00 +0000] "GET / HTTP/1.1" 200 5 "-" "-"  """)) {
+            val bytes = line.toByteArray()
+            assertEquals(true, parser.match(bytes, 0, bytes.size), line)
+        }
     }
 
     @Test

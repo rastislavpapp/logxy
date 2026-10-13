@@ -163,9 +163,8 @@ class ParsersPage(
             val format = entry?.format
             nameField.text = format?.name.orEmpty()
             kindBox.selectedItem = choices.firstOrNull { it.kind == format?.kind } ?: choices.first()
-            // Every kind starts from this parser's values, so switching kind keeps those they share (the layout).
             val properties = format?.properties().orEmpty()
-            settings().forEach { it.show(properties) }
+            for (choice in choices) choice.settings.forEach { it.show(if (choice.kind == format?.kind) properties else emptyMap()) }
             val editable = entry != null && !entry.builtIn
             deleteButton.isEnabled = entry != null
             (listOf(nameField, kindBox) + settings().map { it.field }).forEach { it.isEnabled = editable }
@@ -178,11 +177,11 @@ class ParsersPage(
 
     private fun kindChanged() {
         if (loadingEditor) return
-        // Carry over what the new kind shares with the one edited so far.
+        // Carry over what the new kind shares with the one edited so far (the layout); role keys have defaults per kind.
         val properties = selected()?.format?.properties().orEmpty()
         loadingEditor = true
         try {
-            choice().settings.filter { it.key in properties }.forEach { it.show(properties) }
+            choice().settings.filter { it.key in properties && !it.list }.forEach { it.show(properties) }
         } finally {
             loadingEditor = false
         }
