@@ -331,13 +331,15 @@ class MainFrame : JFrame("logxy") {
 
     /** Opens a tab for each of [reopen]'s sessions with its parsers and filter, its paths read with [path], then selects one. */
     private fun openGroups(reopen: Reopen, path: (String) -> Path) {
-        for (session in reopen.sessions) {
+        // The tab each session ended up in: sessions with nothing openable are skipped, so indices shift.
+        val opened = reopen.sessions.map { session ->
             val openable = session.paths.map(path).zip(session.formats).filter { (file, _) -> checkOpenable(file) }
-            if (openable.isEmpty() || selectTab(openable.map { it.first })) continue
-            val tab = LogTab(openable.map { it.first }, ::openFiles, ::openEach, session.filter, ::originOf, openable.map { it.second }) { updateStatus() }
-            addTab(tab)
+            if (openable.isEmpty()) return@map null
+            tabIndexOf(openable.map { it.first })?.let { return@map tabs.getComponentAt(it) }
+            LogTab(openable.map { it.first }, ::openFiles, ::openEach, session.filter, ::originOf, openable.map { it.second }) { updateStatus() }
+                .also(::addTab)
         }
-        if (tabs.tabCount > 0) tabs.selectedIndex = reopen.selected.coerceIn(0, tabs.tabCount - 1)
+        opened.getOrNull(reopen.selected)?.let { tabs.selectedComponent = it }
     }
 
     /**
@@ -419,10 +421,13 @@ class MainFrame : JFrame("logxy") {
 
     /** Selects the tab showing exactly [paths], if there is one. */
     private fun selectTab(paths: List<Path>): Boolean {
-        val existing = (0..<tabs.tabCount).firstOrNull { (tabs.getComponentAt(it) as LogTab).paths.toSet() == paths.toSet() }
+        val existing = tabIndexOf(paths)
         if (existing != null) tabs.selectedIndex = existing
         return existing != null
     }
+
+    private fun tabIndexOf(paths: List<Path>): Int? =
+        (0..<tabs.tabCount).firstOrNull { (tabs.getComponentAt(it) as LogTab).paths.toSet() == paths.toSet() }
 
     private fun addTab(tab: LogTab) {
         tabs.addTab(tab.title, if (tab.isMerged) Icons.merged else Icons.logFile, tab, tab.description)
