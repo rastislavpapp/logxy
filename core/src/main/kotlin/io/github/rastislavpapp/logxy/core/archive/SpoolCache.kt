@@ -11,6 +11,7 @@ object SpoolCache {
     fun hash(text: String): String =
         MessageDigest.getInstance("SHA-256").digest(text.toByteArray()).take(8).joinToString("") { "%02x".format(it) }
 
+    /** Deletes [path] and, if it is a folder, everything in it; nothing if it does not exist. */
     fun deleteRecursively(path: Path) {
         if (!Files.exists(path)) return
         Files.walk(path).use { paths -> paths.sorted(Comparator.reverseOrder()).forEach(Files::delete) }

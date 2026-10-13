@@ -29,11 +29,13 @@ internal class TextMatcher(condition: TextCondition) {
     /** What an absent value counts as: only negated conditions accept it. */
     val matchesAbsent get() = negated
 
+    /** Whether [text], a value as shown, satisfies the condition: a wildcard pattern must match all of it, a regex any part. */
     fun matches(text: String): Boolean {
         val matcher = regex.matcher(text)
         return (if (glob != null) matcher.matches() else matcher.find()) != negated
     }
 
+    /** As [matches] on the UTF-8 text `bytes[from, to)`, without decoding it when the pattern allows. */
     fun matches(bytes: ByteArray, from: Int, to: Int): Boolean {
         val segments = segments ?: return matches(String(bytes, from, to - from, Charsets.UTF_8))
         return globMatches(segments, bytes, from, to) != negated
@@ -104,6 +106,7 @@ internal class Glob private constructor(
 ) {
     val hasAnyOne = segments.any { ANY_ONE in it }
 
+    /** The same pattern as a regex that must match the whole text; literal text is quoted. */
     fun toRegex(): String = segments.joinToString(".*", prefix = if (leadingStar) ".*" else "", postfix = if (trailingStar) ".*" else "") { segment ->
         segment.split(ANY_ONE).joinToString(".") { if (it.isEmpty()) "" else Pattern.quote(it) }
     }
@@ -112,6 +115,7 @@ internal class Glob private constructor(
         /** Stands for `?` inside [segments]; a code point that does not occur in logs. */
         const val ANY_ONE = '￿'
 
+        /** The wildcard pattern [pattern] as the user typed it; every string is a valid pattern. */
         fun parse(pattern: String): Glob {
             val segments = ArrayList<String>()
             val current = StringBuilder()

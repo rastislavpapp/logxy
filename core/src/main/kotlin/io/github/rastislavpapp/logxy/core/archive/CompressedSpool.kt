@@ -30,6 +30,7 @@ class CompressedSpool(val root: Path) {
         override fun toString() = source.toString()
     }
 
+    /** A compression format a single file can be in, and the file name [extension] that tells it. */
     enum class Format(val extension: String) {
         GZIP(".gz"),
         ZSTD(".zst"),

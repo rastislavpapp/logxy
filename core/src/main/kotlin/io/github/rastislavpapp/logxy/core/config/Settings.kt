@@ -49,6 +49,7 @@ data class Settings(
             }
         }
 
+        /** The user's settings file: `logxy.properties` in [directory]. */
         fun defaultPath(): Path = directory().resolve("logxy.properties")
 
         /** For files that can be made again: `%LOCALAPPDATA%\logxy\cache` on Windows, `$XDG_CACHE_HOME/logxy` or `~/.cache/logxy` elsewhere. */
@@ -144,6 +145,7 @@ data class Settings(
             return kind.read(name) { properties.getProperty(prefix + it) }
         }
 
+        /** Stores [format] under [prefix] (e.g. `format.1.`) as [readFormat] reads it back; also used for the arguments a restart passes on. */
         internal fun writeFormat(properties: Properties, prefix: String, format: LogFormat) {
             properties["${prefix}type"] = format.kind.type
             format.properties().forEach { (key, value) -> properties[prefix + key] = value }

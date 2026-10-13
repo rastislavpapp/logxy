@@ -72,6 +72,7 @@ internal object Bytes {
         return if (isDecimal(bytes, digits, end)) String(bytes, start, end - start, Charsets.ISO_8859_1).toDouble() else Double.NaN
     }
 
+    /** The decimal number [text] holds, as [parseNumber] reads bytes; NaN if it holds none. */
     fun parseNumber(text: String): Double = text.toByteArray().let { parseNumber(it, 0, it.size) }
 
     /** Whether `bytes[from, to)` is digits with an optional fraction and exponent; toDouble would also take e.g. `NaN` or `1f`. */
