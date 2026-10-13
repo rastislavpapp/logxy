@@ -14,18 +14,21 @@ import kotlinx.coroutines.withContext
 /** Rows counted per parallel task. */
 private const val TASK_ROWS = 1 shl 20
 
-/** Counts the times of all records of [log], as a session does; for measuring it. Call on the thread that owns [log]. */
-suspend fun countTimes(log: LogData): TimeHistogram = countAll(SingleLoad(log))
+/**
+ * Counts the times of [rows] (sorted records) of [log], or of all records if null, as a session does; for measuring it.
+ * Call on the thread that owns [log].
+ */
+suspend fun countTimes(log: LogData, rows: IntArray? = null): TimeHistogram = countAll(SingleLoad(log), rows)
 
-/** Counts the times of all records of [log], as a session does; for measuring it. Call on the thread that owns [log]. */
-suspend fun countTimes(log: MergedLog): TimeHistogram = countAll(MergedLoad(log))
+/** Like [countTimes] of a single log, for a merge. */
+suspend fun countTimes(log: MergedLog, rows: IntArray? = null): TimeHistogram = countAll(MergedLoad(log), rows)
 
-private suspend fun countAll(loaded: LoadedLog): TimeHistogram {
+private suspend fun countAll(loaded: LoadedLog, rows: IntArray?): TimeHistogram {
     val records = loaded.records
-    val count = records.recordCount
-    val from = if (count == 0) 0 else records.timestampNanos(0)
-    val to = if (count == 0) 0 else records.timestampNanos(count - 1)
-    val (before, after) = TimeCount(loaded, null, 0, count, count, from, maxOf(from, to)).run()
+    val count = rows?.size ?: records.recordCount
+    val from = if (count == 0) 0 else records.timestampNanos(rows?.first() ?: 0)
+    val to = if (count == 0) 0 else records.timestampNanos(rows?.last() ?: (count - 1))
+    val (before, after) = TimeCount(loaded, rows, 0, count, count, from, maxOf(from, to)).run()
     return before.apply { addAll(after) }
 }
 

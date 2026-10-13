@@ -150,6 +150,9 @@ private fun measureAll(): Map<String, Double> {
         record("merge: filter message contains 'timeout'", best { runBlocking { MergedFilter(merged).prepare(timeout, 0).run() } })
         record("merge: count patterns", best { runBlocking { MergedFilter(merged).countPatterns(null, merged.recordCount) } })
         record("merge: count times", best { runBlocking { countTimes(merged) } })
+        // As for a filter's result: positions to look up.
+        val everyOther = IntArray(merged.recordCount / 2) { it * 2 }
+        record("merge: count times of every other row", best { runBlocking { countTimes(merged, everyOther) } })
     } finally {
         parts.forEach { it.close() }
     }
