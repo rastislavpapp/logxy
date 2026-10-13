@@ -20,6 +20,7 @@ enum class ColumnType {
 /** What a field means, independent of the format it came from. */
 enum class Role { TIMESTAMP, LEVEL, MESSAGE, THREAD, LOGGER, EXCEPTION, SOURCE }
 
+/** A field of a log's records: a column of the table unless [hidden], named [name], stored as [type]. */
 class Field internal constructor(
     val name: String,
     val type: ColumnType,
@@ -39,6 +40,7 @@ class Field internal constructor(
 ) {
     internal val isMap get() = map != null
 
+    /** This field stored as another [type] (a DICT field turned SPAN), or [hidden] changed (an optional field once a record has it). */
     internal fun copy(type: ColumnType = this.type, hidden: Boolean = this.hidden) =
         Field(name, type, role, toRecordEnd, hidden, map, mapKey, json, optional)
 }
@@ -51,11 +53,14 @@ class MapKey internal constructor(internal val field: Int, val key: String) {
     internal val prefix = "$key=".toByteArray()
 }
 
+/** The fields of a log's records, in column order; a field's index is how [Columns] and readers address it. */
 class Schema(val fields: List<Field>) {
 
+    /** The index of the first field with [role], or -1 if none has it. */
     fun indexOf(role: Role): Int = fields.indexOfFirst { it.role == role }
 
     companion object {
+        /** Raw text: one field, the whole line. */
         val RAW = Schema(listOf(Field("Line", ColumnType.SPAN, Role.MESSAGE)))
     }
 }
