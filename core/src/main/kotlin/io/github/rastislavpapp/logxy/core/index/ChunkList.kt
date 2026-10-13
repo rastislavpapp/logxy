@@ -31,7 +31,10 @@ abstract class ChunkList<A : Any> internal constructor(empty: A) {
         return chunks[index ushr SHIFT] as A
     }
 
-    /** Drops the last element, e.g. a line or record that turned out incomplete; its chunk stays allocated for the next add. Throws if empty. */
+    /**
+     * Drops the last element, e.g. a record whose first line was unfinished, or a line start at the very end of
+     * the indexed bytes; its chunk stays allocated for the next add. Throws if empty.
+     */
     @Suppress("UNCHECKED_CAST")
     fun removeLast() {
         if (size == 0) throw NoSuchElementException("List is empty")

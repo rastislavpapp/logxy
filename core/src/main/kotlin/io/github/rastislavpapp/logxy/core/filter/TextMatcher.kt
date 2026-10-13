@@ -29,7 +29,7 @@ internal class TextMatcher(condition: TextCondition) {
     /** What an absent value counts as: only negated conditions accept it. */
     val matchesAbsent get() = negated
 
-    /** Whether [text], a value as shown, satisfies the condition: a wildcard pattern must match all of it, a regex any part. */
+    /** Whether [text] (a value as shown, or a record's text as written) satisfies the condition: a wildcard pattern must match all of it, a regex any part. */
     fun matches(text: String): Boolean {
         val matcher = regex.matcher(text)
         return (if (glob != null) matcher.matches() else matcher.find()) != negated

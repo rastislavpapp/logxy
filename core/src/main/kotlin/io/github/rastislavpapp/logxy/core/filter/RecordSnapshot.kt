@@ -51,7 +51,7 @@ internal abstract class RecordSnapshot(
  * moves through the records it tests in increasing order. Not thread-safe.
  */
 internal interface RecordCursor {
-    /** Makes [record] the current one. */
+    /** Makes [record], below the snapshot's count, the current one; the next record or a later one in the same segment is cheapest. */
     fun moveTo(record: Int)
 
     /** The record moved to. */

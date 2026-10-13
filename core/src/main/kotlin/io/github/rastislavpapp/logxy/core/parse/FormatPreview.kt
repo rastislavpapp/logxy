@@ -14,7 +14,7 @@ class PreviewLine(
     val continuation: Boolean,
 )
 
-/** Reads a file's first lines the way a parser would, for detection and for the Parsers page's preview. */
+/** Reads a file's first lines the way a parser would, for detection and for previewing a parser while editing it. */
 object FormatPreview {
 
     private const val SAMPLE_BYTES = 256 * 1024
