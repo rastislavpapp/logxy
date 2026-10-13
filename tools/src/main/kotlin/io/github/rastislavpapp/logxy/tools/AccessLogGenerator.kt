@@ -10,9 +10,17 @@ private val ACCESS_SECONDS: DateTimeFormatter =
     DateTimeFormatter.ofPattern("dd/MMM/yyyy:HH:mm:ss Z", Locale.ENGLISH).withZone(ZoneId.systemDefault())
 
 private val METHODS = listOf("GET" to 70, "POST" to 18, "PUT" to 6, "DELETE" to 3, "HEAD" to 2, "OPTIONS" to 1)
-private val PATHS = listOf("/", "/api/v1/orders", "/api/v1/orders/{id}", "/api/v1/users/{id}", "/static/app.js", "/static/app.css", "/login", "/search?q={id}")
+private val PATHS = listOf(
+    "/", "/api/v1/orders", "/api/v1/orders/{id}", "/api/v1/users/{id}",
+    "/static/app.js", "/static/app.css", "/login", "/search?q={id}",
+)
 private val BROWSERS = listOf("Firefox", "Chrome", "Safari", "Edg")
-private val SYSTEMS = listOf("Windows NT 10.0; Win64; x64", "X11; Linux x86_64", "Macintosh; Intel Mac OS X 14_5", "iPhone; CPU iPhone OS 17_5 like Mac OS X")
+private val SYSTEMS = listOf(
+    "Windows NT 10.0; Win64; x64",
+    "X11; Linux x86_64",
+    "Macintosh; Intel Mac OS X 14_5",
+    "iPhone; CPU iPhone OS 17_5 like Mac OS X",
+)
 private val REFERERS = listOf("https://www.example.com/", "https://www.google.com/", "https://shop.example.com/cart")
 
 /**
@@ -70,7 +78,8 @@ internal class AccessLogGenerator(private val random: SplittableRandom) : Record
         if (random.nextInt(8) == 0) return "curl/8.${random.nextInt(12)}.${random.nextInt(3)}"
         val browser = BROWSERS[random.nextInt(BROWSERS.size)]
         val version = "${random.nextInt(100, 131)}.0.${random.nextInt(7000)}.${random.nextInt(200)}"
-        return "Mozilla/5.0 (${SYSTEMS[random.nextInt(SYSTEMS.size)]}) AppleWebKit/537.36 (KHTML, like Gecko) $browser/$version"
+        val system = SYSTEMS[random.nextInt(SYSTEMS.size)]
+        return "Mozilla/5.0 ($system) AppleWebKit/537.36 (KHTML, like Gecko) $browser/$version"
     }
 
     private fun timestamp(): String {

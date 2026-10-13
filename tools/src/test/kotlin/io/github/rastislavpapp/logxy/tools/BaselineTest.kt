@@ -84,7 +84,9 @@ private fun measureAll(): Map<String, Double> {
             record(name, best { runBlocking { FilterEngine(parsed).prepare(filter).run() } })
         }
         // New engines find the templates anew; a used one only counts.
-        record("patterns: count all", best { runBlocking { FilterEngine(parsed).countPatterns(null, parsed.recordCount) } })
+        record("patterns: count all", best {
+            runBlocking { FilterEngine(parsed).countPatterns(null, parsed.recordCount) }
+        })
         val engine = FilterEngine(parsed)
         val top = runBlocking { engine.countPatterns(null, parsed.recordCount) }.templates.first()!!
         record("patterns: count all again", best { runBlocking { engine.countPatterns(null, parsed.recordCount) } })
@@ -148,8 +150,12 @@ private fun measureAll(): Map<String, Double> {
         record("merge: merge 8 files", best { runBlocking { MergedLog.build(parts) } })
         val merged = runBlocking { MergedLog.build(parts) }
         val timeout = TextCondition("Message", TextOp.EQUALS, "*timeout*")
-        record("merge: filter message contains 'timeout'", best { runBlocking { MergedFilter(merged).prepare(timeout, 0).run() } })
-        record("merge: count patterns", best { runBlocking { MergedFilter(merged).countPatterns(null, merged.recordCount) } })
+        record("merge: filter message contains 'timeout'", best {
+            runBlocking { MergedFilter(merged).prepare(timeout, 0).run() }
+        })
+        record("merge: count patterns", best {
+            runBlocking { MergedFilter(merged).countPatterns(null, merged.recordCount) }
+        })
         record("merge: count times", best { runBlocking { countTimes(merged) } })
         // As for a filter's result: positions to look up.
         val everyOther = IntArray(merged.recordCount / 2) { it * 2 }
@@ -166,7 +172,10 @@ private fun best(block: () -> Unit): Double = (1..RUNS).minOf {
     (System.nanoTime() - started) / 1e9
 }
 
-/** A generated log with a fixed [seed], kept between runs; written aside first so an interrupted run leaves no partial file. */
+/**
+ * A generated log with a fixed [seed], kept between runs; written aside first so an interrupted run leaves no
+ * partial file.
+ */
 private fun dataFile(name: String, size: Long, seed: Long): Path {
     val file = DATA_DIR.resolve(name)
     if (Files.exists(file) && Files.size(file) >= size) return file
@@ -199,7 +208,8 @@ private fun cpuName(): String {
 private fun load(file: Path): Properties? =
     if (Files.exists(file)) Properties().apply { Files.newBufferedReader(file).use { load(it) } } else null
 
-private fun Properties.matches(machine: Map<String, String>) = machine.all { (key, value) -> getProperty(key) in setOf(null, value) }
+private fun Properties.matches(machine: Map<String, String>) =
+    machine.all { (key, value) -> getProperty(key) in setOf(null, value) }
 
 private fun save(file: Path, machine: Map<String, String>, results: Map<String, Double>, kept: Properties? = null) {
     val props = Properties()
@@ -230,14 +240,16 @@ class BaselineTest {
         val local = load(LOCAL_BASELINE_FILE)
         val (file, saved) = when {
             committed != null && committed.matches(machine) -> BASELINE_FILE to committed
-            local != null && local.getProperty("setup") == SETUP && local.matches(machine) -> LOCAL_BASELINE_FILE to local
+            local != null && local.getProperty("setup") == SETUP && local.matches(machine) ->
+                LOCAL_BASELINE_FILE to local
             else -> {
                 println("No baseline for this machine ($machine), recording one in $LOCAL_BASELINE_FILE.")
                 save(LOCAL_BASELINE_FILE, machine, measureAll())
                 return
             }
         }
-        assertEquals(SETUP, saved.getProperty("setup"), "The baseline in $file was saved for a different benchmark setup.")
+        val message = "The baseline in $file was saved for a different benchmark setup."
+        assertEquals(SETUP, saved.getProperty("setup"), message)
         println("Comparing with $file")
         val tolerance = TOLERANCE / 100
         val results = measureAll()
@@ -252,14 +264,20 @@ class BaselineTest {
             val limit = before * (1 + tolerance) + NOISE_SECONDS
             val change = (seconds / before - 1) * 100
             val verdict = when {
-                seconds > limit -> "SLOWER".also { slower += "%s: %.3f s, baseline %.3f s (%+.1f%%)".format(name, seconds, before, change) }
+                seconds > limit -> {
+                    slower += "%s: %.3f s, baseline %.3f s (%+.1f%%)".format(name, seconds, before, change)
+                    "SLOWER"
+                }
                 seconds < before * (1 - tolerance) - NOISE_SECONDS -> "faster"
                 else -> "ok"
             }
             println("%-40s %7.3f s  baseline %7.3f s  %+6.1f%%  %s".format(name, seconds, before, change, verdict))
         }
         // Measurements added since the local baseline was recorded join it, so they are checked from now on.
-        if (file == LOCAL_BASELINE_FILE && results.keys.any { saved.getProperty(it) == null }) save(file, machine, results, saved)
-        assertTrue(slower.isEmpty(), "Slower than the baseline by more than %.0f%%:\n%s".format(TOLERANCE, slower.joinToString("\n")))
+        if (file == LOCAL_BASELINE_FILE && results.keys.any { saved.getProperty(it) == null }) {
+            save(file, machine, results, saved)
+        }
+        val report = "Slower than the baseline by more than %.0f%%:\n%s".format(TOLERANCE, slower.joinToString("\n"))
+        assertTrue(slower.isEmpty(), report)
     }
 }
