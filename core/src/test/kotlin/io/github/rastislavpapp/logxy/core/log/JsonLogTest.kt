@@ -1,7 +1,7 @@
 package io.github.rastislavpapp.logxy.core.log
 
-import io.github.rastislavpapp.logxy.core.filter.FilterEngine
 import io.github.rastislavpapp.logxy.core.filter.Filter
+import io.github.rastislavpapp.logxy.core.filter.FilterEngine
 import io.github.rastislavpapp.logxy.core.filter.LevelCondition
 import io.github.rastislavpapp.logxy.core.filter.NumberCondition
 import io.github.rastislavpapp.logxy.core.filter.PresenceCondition
@@ -10,14 +10,14 @@ import io.github.rastislavpapp.logxy.core.filter.TextOp
 import io.github.rastislavpapp.logxy.core.index.IndexOptions
 import io.github.rastislavpapp.logxy.core.index.IndexProgress
 import io.github.rastislavpapp.logxy.core.parse.CompiledJson
+import kotlinx.coroutines.runBlocking
+import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Files
 import java.nio.file.Path
 import java.time.ZoneOffset
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
-import kotlinx.coroutines.runBlocking
-import org.junit.jupiter.api.io.TempDir
 
 class JsonLogTest {
 

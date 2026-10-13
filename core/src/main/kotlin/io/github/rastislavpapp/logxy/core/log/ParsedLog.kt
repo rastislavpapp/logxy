@@ -1,17 +1,17 @@
 package io.github.rastislavpapp.logxy.core.log
 
-import io.github.rastislavpapp.logxy.core.ReadChannels
-import io.github.rastislavpapp.logxy.core.readFully
 import io.github.rastislavpapp.logxy.core.Bytes
-import io.github.rastislavpapp.logxy.core.index.IndexOptions
+import io.github.rastislavpapp.logxy.core.ReadChannels
 import io.github.rastislavpapp.logxy.core.filter.ParsedSnapshot
 import io.github.rastislavpapp.logxy.core.filter.RecordSnapshot
+import io.github.rastislavpapp.logxy.core.index.IndexOptions
 import io.github.rastislavpapp.logxy.core.index.IndexProgress
-import io.github.rastislavpapp.logxy.core.parse.ParserCheck
+import io.github.rastislavpapp.logxy.core.parse.CompiledParser
 import io.github.rastislavpapp.logxy.core.parse.Json
 import io.github.rastislavpapp.logxy.core.parse.LineReader
 import io.github.rastislavpapp.logxy.core.parse.MdcMap
-import io.github.rastislavpapp.logxy.core.parse.CompiledParser
+import io.github.rastislavpapp.logxy.core.parse.ParserCheck
+import io.github.rastislavpapp.logxy.core.readFully
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -167,7 +167,9 @@ class ParsedLog private constructor(
             if (key != null) return@Array mapValue(columns, local, key, bytes, maxBytes)
             columns.valueText(field, local, parser, dictionaries[field]) ?: run {
                 val length = columns.spanLength(field, local)
-                if (length == Columns.ABSENT_LENGTH) "" else {
+                if (length == Columns.ABSENT_LENGTH) {
+                    ""
+                } else {
                     val relative = columns.ints[field]!![local]
                     val end = if (length == Columns.TO_RECORD_END) bytes.size else minOf(relative + length, bytes.size)
                     // Lines that are no JSON run to the record end and are shown as written.

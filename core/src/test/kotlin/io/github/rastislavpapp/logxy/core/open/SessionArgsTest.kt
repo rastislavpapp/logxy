@@ -2,8 +2,8 @@ package io.github.rastislavpapp.logxy.core.open
 
 import io.github.rastislavpapp.logxy.core.config.SavedFilter
 import io.github.rastislavpapp.logxy.core.log.Level
-import io.github.rastislavpapp.logxy.core.parse.RoleKeys
 import io.github.rastislavpapp.logxy.core.parse.Parser
+import io.github.rastislavpapp.logxy.core.parse.RoleKeys
 import kotlin.test.Test
 import kotlin.test.assertEquals
 

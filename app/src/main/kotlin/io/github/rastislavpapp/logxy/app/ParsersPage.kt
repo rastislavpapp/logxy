@@ -1,8 +1,8 @@
 package io.github.rastislavpapp.logxy.app
 
 import io.github.rastislavpapp.logxy.core.config.Settings
-import io.github.rastislavpapp.logxy.core.parse.ParserPreview
 import io.github.rastislavpapp.logxy.core.parse.Parser
+import io.github.rastislavpapp.logxy.core.parse.ParserPreview
 import io.github.rastislavpapp.logxy.core.parse.PreviewLine
 import io.github.rastislavpapp.logxy.core.parse.RoleKeys
 import net.miginfocom.swing.MigLayout
@@ -356,7 +356,15 @@ class ParsersPage(
 
         override fun getValueAt(row: Int, column: Int): Any {
             val line = lines[row]
-            if (column == 0) return if (line.values != null) "✓" else if (line.continuation) "↳" else "✗"
+            if (column == 0) {
+                return if (line.values != null) {
+                    "✓"
+                } else if (line.continuation) {
+                    "↳"
+                } else {
+                    "✗"
+                }
+            }
             val values = line.values ?: return if (column == 1) line.text else ""
             return values.getOrElse(column - 1) { "" }
         }

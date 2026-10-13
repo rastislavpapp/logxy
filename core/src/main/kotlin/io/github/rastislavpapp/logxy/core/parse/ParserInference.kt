@@ -256,6 +256,7 @@ internal object ParserInference {
             name.append(label)
             fieldLast = true
         }
+
         // A field directly before `{` or `(` would read it as its options; and the message needs text before it.
         fun literal(text: String): Boolean {
             if (fieldLast && text[0] in "{(") return false
@@ -420,7 +421,7 @@ internal object ParserInference {
 
     private fun isLevel(value: String) = value.length in 1..12 && value.all(Char::isLetter) && Level.BUILT_IN_NAMES.containsKey(value.uppercase())
 
-    /** A trace id, or trace and span ids joined by `-` or `,`: long hex numbers. */
+    /** A trace id, or trace and span ids joined by `-` or `, `: long hex numbers. */
     private fun isTraceId(value: String) = TRACE_ID.matches(value)
 
     /** Names threads usually have, such as `main`, `worker-1` or `pool-1-thread-2`. */
@@ -442,8 +443,8 @@ internal object ParserInference {
     private const val PUNCTUATION = "-:>=*#~"
     private val CLOSING = mapOf('[' to ']', '(' to ')', '{' to '}')
     private val TRACE_ID = Regex("[0-9a-f]{16,32}([-,][0-9a-f]{16,32})*")
-    private val THREAD_NAME =Regex("[\\w.-]*(-\\d+|[Tt]hread[\\w-]*|exec[\\w-]*)")
-    private val DOTTED =Regex("[A-Za-z_$][\\w$]*(\\.[A-Za-z_$][\\w$]*)+")
+    private val THREAD_NAME = Regex("[\\w.-]*(-\\d+|[Tt]hread[\\w-]*|exec[\\w-]*)")
+    private val DOTTED = Regex("[A-Za-z_$][\\w$]*(\\.[A-Za-z_$][\\w$]*)+")
 
     /** A JSON-escaped line break and the start of a stack frame. */
     private val TRACE = "\\n\\tat ".toByteArray()

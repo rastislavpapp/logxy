@@ -126,8 +126,11 @@ class TimeHistogramBar(private val histogram: () -> TimeHistogram?) : JComponent
                 selection = null
                 repaint()
                 if (slices == null) return
-                if (dragging && range != null) onRange(slices.start(range.first), slices.start(range.last + 1))
-                else if (!dragging) onJump(slices.start(sliceAt(slices, e.x)))
+                if (dragging && range != null) {
+                    onRange(slices.start(range.first), slices.start(range.last + 1))
+                } else if (!dragging) {
+                    onJump(slices.start(sliceAt(slices, e.x)))
+                }
             }
         }
         addMouseListener(mouse)

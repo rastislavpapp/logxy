@@ -1,11 +1,11 @@
 package io.github.rastislavpapp.logxy.core.parse
 
+import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
-import org.junit.jupiter.api.io.TempDir
 
 class ParserTest {
 
@@ -70,14 +70,14 @@ class ParserTest {
     @Test
     fun `detects Spring Boot layouts`() {
         val boot2 = Files.writeString(dir.resolve("boot2.log"),
-            "2026-10-08 12:00:00.123  INFO 12345 --- [           main] c.e.demo.DemoApplication                 : Started\n")
+            "2026-10-08 12:00:00.123  INFO 12345 --- [           main] c.e.demo.DemoApplication                 : Started\n",)
         assertEquals("date LEVEL pid --- [thread] logger : message", Parser.detect(boot2).name)
         val boot3 = Files.writeString(dir.resolve("boot3.log"),
-            "2026-10-08T12:00:00.123+02:00  WARN 12345 --- [           main] c.e.demo.DemoApplication                 : Slow\n")
+            "2026-10-08T12:00:00.123+02:00  WARN 12345 --- [           main] c.e.demo.DemoApplication                 : Slow\n",)
         assertEquals("Spring Boot 3", Parser.detect(boot3).name)
         val boot3named = Files.writeString(dir.resolve("boot3n.log"),
             "2026-10-08T12:00:00.123+02:00  WARN 12345 --- [demo] [           main] c.e.demo.DemoApplication                 : Slow\n" +
-                "2026-10-08T12:00:00.124+02:00  INFO 12345 --- [demo] [  restartedMain] c.e.demo.DemoApplication                 : Up\n")
+                "2026-10-08T12:00:00.124+02:00  INFO 12345 --- [demo] [  restartedMain] c.e.demo.DemoApplication                 : Up\n",)
         assertEquals("date LEVEL pid --- [field] [thread] logger : message", Parser.detect(boot3named).name)
     }
 

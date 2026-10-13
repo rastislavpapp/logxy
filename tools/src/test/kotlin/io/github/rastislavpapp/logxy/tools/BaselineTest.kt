@@ -14,6 +14,14 @@ import io.github.rastislavpapp.logxy.core.merge.MergedFilter
 import io.github.rastislavpapp.logxy.core.merge.MergedLog
 import io.github.rastislavpapp.logxy.core.parse.Parser
 import io.github.rastislavpapp.logxy.core.session.countTimes
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
+import org.junit.jupiter.api.Tag
+import org.junit.jupiter.api.condition.DisabledIfEnvironmentVariable
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
@@ -23,16 +31,9 @@ import java.util.Properties
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.sync.Semaphore
-import kotlinx.coroutines.sync.withPermit
-import org.junit.jupiter.api.Tag
-import org.junit.jupiter.api.condition.DisabledIfEnvironmentVariable
 
 private val BASELINE_FILE = Path.of("tools/benchmark-baseline.properties")
+
 /** Recorded on first run on a machine that does not match [BASELINE_FILE]; gitignored. */
 private val LOCAL_BASELINE_FILE = Path.of("tools/benchmark-baseline.local.properties")
 private val DATA_DIR = Path.of("build/benchmark")

@@ -24,8 +24,11 @@ internal class MergedSchema(parts: List<Schema>) {
             for ((index, field) in part.fields.withIndex()) {
                 val existing = fields.indices.firstOrNull { merged ->
                     merged !in mapping && sameKind(fields[merged].type, field.type) &&
-                        if (field.role != null) fields[merged].role == field.role
-                        else fields[merged].role == null && fields[merged].name.equals(field.name, ignoreCase = true)
+                        if (field.role != null) {
+                            fields[merged].role == field.role
+                        } else {
+                            fields[merged].role == null && fields[merged].name.equals(field.name, ignoreCase = true)
+                        }
                 }
                 val merged = existing ?: fields.size.also {
                     fields += Field(uniqueName(field.name, fields), field.type, field.role, hidden = field.hidden)

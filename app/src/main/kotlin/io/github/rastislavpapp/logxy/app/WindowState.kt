@@ -65,6 +65,7 @@ object WindowState {
     private fun restore(window: Window, key: String) {
         try {
             val properties = PropertiesFiles.load(path)
+
             // The main window's entries had no prefix before other windows were remembered too.
             fun value(name: String) = properties.getProperty("$key.$name") ?: if (key == MAIN) properties.getProperty(name) else null
             val x = value("x") ?: return

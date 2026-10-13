@@ -46,7 +46,8 @@ enum class QueryOp(val symbol: String) {
     AT_LEAST(">="),
     ABOVE(">"),
     AT_MOST("<="),
-    BELOW("<");
+    BELOW("<"),
+    ;
 
     val comparison get() = this == AT_LEAST || this == ABOVE || this == AT_MOST || this == BELOW
 

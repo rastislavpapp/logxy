@@ -2,6 +2,8 @@ package io.github.rastislavpapp.logxy.core.archive
 
 import com.github.luben.zstd.Zstd
 import io.github.rastislavpapp.logxy.core.merge.MergedLog
+import kotlinx.coroutines.runBlocking
+import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.attribute.FileTime
@@ -10,8 +12,6 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
-import kotlinx.coroutines.runBlocking
-import org.junit.jupiter.api.io.TempDir
 
 class CompressedSpoolTest {
 

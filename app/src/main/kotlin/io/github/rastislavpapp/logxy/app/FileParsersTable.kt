@@ -27,8 +27,8 @@ import javax.swing.JPanel
 import javax.swing.JScrollPane
 import javax.swing.JTable
 import javax.swing.SwingConstants
-import javax.swing.UIManager
 import javax.swing.SwingUtilities
+import javax.swing.UIManager
 import javax.swing.table.AbstractTableModel
 import javax.swing.table.DefaultTableCellRenderer
 import javax.swing.table.TableCellRenderer

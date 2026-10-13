@@ -34,8 +34,11 @@ class TimestampFormat(pattern: String, private val zone: ZoneId = ZoneId.systemD
     }
     private val pattern = NAMED[pattern] ?: pattern
     private val javaPattern = toJavaPattern(this.pattern)
-    private val formatter: DateTimeFormatter? = if (unixUnit != null) null else
+    private val formatter: DateTimeFormatter? = if (unixUnit != null) {
+        null
+    } else {
         DateTimeFormatter.ofPattern(javaPattern, Locale.ENGLISH).withZone(zone)
+    }
     private val layout: List<Element>? = if (unixUnit != null) null else fixedLayout(this.pattern)
 
     /** Epoch [nanos] written in this layout, in [zone]; a UNIX layout writes the number in its unit. */
@@ -67,8 +70,13 @@ class TimestampFormat(pattern: String, private val zone: ZoneId = ZoneId.systemD
             if (from + length > limit) return -1
             val prefixCached = cachedSeconds != Long.MIN_VALUE &&
                 java.util.Arrays.equals(bytes, from, from + prefixLength, cachedPrefix, 0, prefixLength)
-            var year = 1970; var month = 1; var day = 1; var hour = 0; var minute = 0
-            var second = 0; var fraction = 0L
+            var year = 1970
+            var month = 1
+            var day = 1
+            var hour = 0
+            var minute = 0
+            var second = 0
+            var fraction = 0L
             var i = from
             for (element in elements) {
                 if (element.kind == LITERAL) {
@@ -165,7 +173,10 @@ class TimestampFormat(pattern: String, private val zone: ZoneId = ZoneId.systemD
     companion object {
         private const val NANOS = 1_000_000_000L
         private const val LITERAL = '\''
-        private val POWERS = LongArray(10).also { p -> p[0] = 1; for (i in 1..9) p[i] = p[i - 1] * 10 }
+        private val POWERS = LongArray(10).also { p ->
+            p[0] = 1
+            for (i in 1..9) p[i] = p[i - 1] * 10
+        }
 
         /** log4j2's named formats; logback's ISO8601 is matched by the lenient 'T'. */
         private val NAMED = mapOf(

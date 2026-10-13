@@ -3,12 +3,12 @@ package io.github.rastislavpapp.logxy.core.open
 import io.github.rastislavpapp.logxy.core.config.OpenMode
 import io.github.rastislavpapp.logxy.core.merge.MergedLog
 import kotlinx.coroutines.runBlocking
+import org.junit.jupiter.api.Assumptions.assumeTrue
+import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import org.junit.jupiter.api.Assumptions.assumeTrue
-import org.junit.jupiter.api.io.TempDir
 
 class OpenPlanTest {
 

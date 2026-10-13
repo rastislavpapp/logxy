@@ -1,14 +1,14 @@
 package io.github.rastislavpapp.logxy.core.session
 
 import io.github.rastislavpapp.logxy.core.FileActivity
-import io.github.rastislavpapp.logxy.core.archive.ArchiveOrigin
 import io.github.rastislavpapp.logxy.core.FileChange
 import io.github.rastislavpapp.logxy.core.FileSnapshot
-import io.github.rastislavpapp.logxy.core.formatByteSize
+import io.github.rastislavpapp.logxy.core.archive.ArchiveOrigin
 import io.github.rastislavpapp.logxy.core.filter.Filter
 import io.github.rastislavpapp.logxy.core.filter.LevelCondition
 import io.github.rastislavpapp.logxy.core.filter.PreparedFilter
 import io.github.rastislavpapp.logxy.core.filter.RecordFilter
+import io.github.rastislavpapp.logxy.core.formatByteSize
 import io.github.rastislavpapp.logxy.core.index.IndexOptions
 import io.github.rastislavpapp.logxy.core.index.IndexProgress
 import io.github.rastislavpapp.logxy.core.log.Level
@@ -16,8 +16,8 @@ import io.github.rastislavpapp.logxy.core.log.LogData
 import io.github.rastislavpapp.logxy.core.log.Records
 import io.github.rastislavpapp.logxy.core.log.Role
 import io.github.rastislavpapp.logxy.core.merge.MergedLog
-import io.github.rastislavpapp.logxy.core.parse.ParserMismatchException
 import io.github.rastislavpapp.logxy.core.parse.Parser
+import io.github.rastislavpapp.logxy.core.parse.ParserMismatchException
 import io.github.rastislavpapp.logxy.core.parse.open
 import io.github.rastislavpapp.logxy.core.pattern.PatternCounts
 import io.github.rastislavpapp.logxy.core.query.Query
@@ -458,8 +458,11 @@ class LogSession internal constructor(
             listener.problem(
                 "${current().path.fileName} does not match the parser “${current().parser.name}”.",
                 e.message.orEmpty(),
-                if (isMerged) "Choose another parser for it in the toolbar, or edit the parser."
-                else "Choose another parser in the toolbar, or Raw text.",
+                if (isMerged) {
+                    "Choose another parser for it in the toolbar, or edit the parser."
+                } else {
+                    "Choose another parser in the toolbar, or Raw text."
+                },
             )
             setStatus(SessionStatus(message = "Parser does not match"))
             return false
@@ -796,11 +799,15 @@ class LogSession internal constructor(
         val count = TimeCount(loaded, shown.rowArray, from, size, settle, expectedFrom, expectedTo)
         counting = count
         // Counted anew, the histogram is shown as it fills up; a stale part may still arrive after another count started.
-        val onCounted: ((TimeHistogram) -> Unit)? = if (base != null) null else { counted ->
-            scope.launch {
-                if (counting === count) {
-                    histogram = counted
-                    listener.histogramChanged()
+        val onCounted: ((TimeHistogram) -> Unit)? = if (base != null) {
+            null
+        } else {
+            { counted ->
+                scope.launch {
+                    if (counting === count) {
+                        histogram = counted
+                        listener.histogramChanged()
+                    }
                 }
             }
         }
@@ -822,7 +829,13 @@ class LogSession internal constructor(
         val first = shown.timeFrom(0)
         val last = shown.timeUntil(shown.size - 1)
         // An end without times takes the other's, so the bins do not start out spanning the years since the epoch.
-        val from = if (first != Records.NO_TIMESTAMP) first else if (last != Records.NO_TIMESTAMP) last else 0
+        val from = if (first != Records.NO_TIMESTAMP) {
+            first
+        } else if (last != Records.NO_TIMESTAMP) {
+            last
+        } else {
+            0
+        }
         val to = if (last != Records.NO_TIMESTAMP) last else from
         return from to maxOf(from, to)
     }

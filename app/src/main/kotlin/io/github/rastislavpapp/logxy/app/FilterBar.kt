@@ -40,6 +40,7 @@ class FilterBar(private val onApply: () -> Unit) : JPanel(MigLayout("insets 6 8 
             field = value
             levelButton.text = value?.let { "≥ $it" } ?: ALL
         }
+
     // Any change to the filter resumes a suspended one.
     private val applyFilter: () -> Unit = {
         pauseButton.isSelected = false
@@ -183,10 +184,14 @@ class FilterBar(private val onApply: () -> Unit) : JPanel(MigLayout("insets 6 8 
      * only removes them if [from] and [to] are null, and applies it.
      */
     fun setTimeRange(field: String, from: String?, to: String?) {
-        val rules = if (from == null || to == null) emptyList() else listOf(
-            Query.Rule(field, QueryOp.AT_LEAST, from),
-            Query.Rule(field, QueryOp.BELOW, to),
-        )
+        val rules = if (from == null || to == null) {
+            emptyList()
+        } else {
+            listOf(
+                Query.Rule(field, QueryOp.AT_LEAST, from),
+                Query.Rule(field, QueryOp.BELOW, to),
+            )
+        }
         combine(rules) { items -> items.filterNot { isTimeRule(it, field) } }
     }
 

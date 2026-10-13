@@ -61,7 +61,7 @@ private fun measure(name: String, bytes: Long, iterations: Int, run: () -> Long)
     println(
         "%-36s best %6.3f s (%5.2f GB/s)   median %6.3f s   first %6.3f s   -> %,d".format(
             name, best, bytes / best / 1e9, median, times.first(), result,
-        )
+        ),
     )
     return result
 }

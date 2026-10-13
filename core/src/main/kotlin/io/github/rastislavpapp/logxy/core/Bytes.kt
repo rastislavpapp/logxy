@@ -79,10 +79,16 @@ internal object Bytes {
     private fun isDecimal(bytes: ByteArray, from: Int, to: Int): Boolean {
         var i = from
         var mantissa = 0
-        while (i < to && bytes[i] in ZERO..NINE) { i++; mantissa++ }
+        while (i < to && bytes[i] in ZERO..NINE) {
+            i++
+            mantissa++
+        }
         if (i < to && bytes[i] == DOT) {
             i++
-            while (i < to && bytes[i] in ZERO..NINE) { i++; mantissa++ }
+            while (i < to && bytes[i] in ZERO..NINE) {
+                i++
+                mantissa++
+            }
         }
         if (mantissa == 0) return false
         if (i < to && (bytes[i] == 'e'.code.toByte() || bytes[i] == 'E'.code.toByte())) {

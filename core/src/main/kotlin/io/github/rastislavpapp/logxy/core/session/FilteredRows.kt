@@ -10,7 +10,13 @@ internal fun nextRecord(records: IntArray, size: Int, current: Int, forward: Boo
     if (found >= 0 && inclusive) return current
     // The index of the first record after [current].
     val after = if (found >= 0) found + 1 else -found - 1
-    val at = if (forward) after else if (found >= 0) found - 1 else after - 1
+    val at = if (forward) {
+        after
+    } else if (found >= 0) {
+        found - 1
+    } else {
+        after - 1
+    }
     return records[Math.floorMod(at, size)]
 }
 

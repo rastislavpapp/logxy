@@ -51,7 +51,11 @@ class CompiledLogfmt(val keys: RoleKeys = RoleKeys.LOGFMT, private val zone: Zon
                 valueFrom[count] = vFrom
                 valueTo[count] = vTo
                 count++
-                if (vFrom > kTo) withValue++ else if (count == 1) return false
+                if (vFrom > kTo) {
+                    withValue++
+                } else if (count == 1) {
+                    return false
+                }
             }
             if (!valid || withValue < 2) return false
             this.bytes = bytes

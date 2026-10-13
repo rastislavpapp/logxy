@@ -2,6 +2,7 @@ package io.github.rastislavpapp.logxy.core.parse
 
 import io.github.rastislavpapp.logxy.core.log.Level
 import io.github.rastislavpapp.logxy.core.log.LevelMapping
+import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Files
 import java.nio.file.Path
 import java.time.Instant
@@ -12,7 +13,6 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
-import org.junit.jupiter.api.io.TempDir
 
 class CompiledJsonTest {
 
@@ -139,7 +139,7 @@ class CompiledJsonTest {
         val parser = CompiledJson(zone = ZoneOffset.UTC)
         val names = parser.schema.fields.map { it.name }
         fun read(line: String, field: String) =
-            ParserPreview.preview(parser,listOf(line.toByteArray()))[0].values!![names.indexOf(field)]
+            ParserPreview.preview(parser, listOf(line.toByteArray()))[0].values!![names.indexOf(field)]
 
         val docker = """{"log":"Started\n","stream":"stdout","time":"2026-10-01T08:00:00.123456789Z"}"""
         assertEquals("Started\n", read(docker, "Message"))

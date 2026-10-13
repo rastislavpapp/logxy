@@ -2,7 +2,14 @@ package io.github.rastislavpapp.logxy.core.log
 
 /** Canonical level scale; ordinals are ordered by severity, so "at least WARN" is a numeric compare. */
 enum class Level {
-    TRACE, DEBUG, INFO, WARN, ERROR, FATAL, UNKNOWN;
+    TRACE,
+    DEBUG,
+    INFO,
+    WARN,
+    ERROR,
+    FATAL,
+    UNKNOWN,
+    ;
 
     companion object {
         /** Level names of common logging frameworks; the starting point of [LevelMapping.DEFAULT]. */

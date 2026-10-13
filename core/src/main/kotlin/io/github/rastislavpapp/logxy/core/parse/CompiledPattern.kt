@@ -178,6 +178,7 @@ class CompiledPattern(val pattern: String, private val zone: ZoneId = ZoneId.sys
         private val timestampParsers = arrayOfNulls<TimestampParser>(fields.size).also { parsers ->
             timestamps.forEach { (field, format) -> parsers[field] = format.newParser() }
         }
+
         // Arrays and index loops: this runs for every line of the file.
         private val tokenArray = tokens.toTypedArray()
 

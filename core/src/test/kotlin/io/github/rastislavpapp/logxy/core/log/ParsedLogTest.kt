@@ -6,13 +6,15 @@ import io.github.rastislavpapp.logxy.core.filter.TextCondition
 import io.github.rastislavpapp.logxy.core.filter.TextOp
 import io.github.rastislavpapp.logxy.core.index.IndexOptions
 import io.github.rastislavpapp.logxy.core.index.IndexProgress
-import io.github.rastislavpapp.logxy.core.parse.ParserMismatchException
-import io.github.rastislavpapp.logxy.core.parse.MdcMap
-import io.github.rastislavpapp.logxy.core.parse.CompiledPattern
 import io.github.rastislavpapp.logxy.core.parse.CompiledParser
+import io.github.rastislavpapp.logxy.core.parse.CompiledPattern
 import io.github.rastislavpapp.logxy.core.parse.CompiledRegex
+import io.github.rastislavpapp.logxy.core.parse.MdcMap
+import io.github.rastislavpapp.logxy.core.parse.ParserMismatchException
 import io.github.rastislavpapp.logxy.core.query.QueryCompiler
 import io.github.rastislavpapp.logxy.core.query.QueryParser
+import kotlinx.coroutines.runBlocking
+import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardOpenOption
@@ -22,8 +24,6 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
-import kotlinx.coroutines.runBlocking
-import org.junit.jupiter.api.io.TempDir
 
 class ParsedLogTest {
 
@@ -109,12 +109,14 @@ class ParsedLogTest {
         }
         val single = parse(content, options = IndexOptions(parallelism = 1))
         val parallel = parse(content, options = IndexOptions(parallelism = 8, minRangeSize = 1))
-        single.use { parallel.use {
-            assertEquals(300, single.recordCount)
-            assertEquals(single.rows(), parallel.rows())
-            assertEquals(List(300) { single.recordText(it, 10_000) }, List(300) { parallel.recordText(it, 10_000) })
-            assertFalse(parallel.timestampsSorted)
-        } }
+        single.use {
+            parallel.use {
+                assertEquals(300, single.recordCount)
+                assertEquals(single.rows(), parallel.rows())
+                assertEquals(List(300) { single.recordText(it, 10_000) }, List(300) { parallel.recordText(it, 10_000) })
+                assertFalse(parallel.timestampsSorted)
+            }
+        }
     }
 
     @Test
@@ -288,7 +290,7 @@ class ParsedLogTest {
             }
         }
         for (parser in listOf(parser, mdc)) {
-            parse(content, parser,IndexOptions(parallelism = 4, minRangeSize = 1)).use { log ->
+            parse(content, parser, IndexOptions(parallelism = 4, minRangeSize = 1)).use { log ->
                 val snapshot = log.filterSnapshot()
                 assertEquals(log.fieldTexts(), List(log.recordCount) { record -> List(log.schema.fields.size) { snapshot.fieldText(record, it) } })
             }

@@ -97,7 +97,12 @@ class PreferencesDialog(
         }, "wmin 0")
         if (offerUse) {
             add(JButton("Save and Use for This File").apply {
-                addActionListener { if (save()) { parserToUse = parsers.selectedParser; close() } }
+                addActionListener {
+                    if (save()) {
+                        parserToUse = parsers.selectedParser
+                        close()
+                    }
+                }
             })
         }
         add(JButton("Save").apply {
