@@ -31,7 +31,8 @@ fun benchmarkFiltering(file: Path) {
         "ERROR and logger starts with com.example.order" to
             Filter.And(listOf(error, TextCondition("Logger", TextOp.EQUALS, "com.example.order*"))),
         "message contains 'timeout' (whole file)" to timeout,
-        "ERROR and message contains 'timeout'" to Filter.And(listOf(error, TextCondition("Message", TextOp.EQUALS, "*Timeout*", ignoreCase = true))),
+        "ERROR and message contains 'timeout'" to
+            Filter.And(listOf(error, TextCondition("Message", TextOp.EQUALS, "*Timeout*", ignoreCase = true))),
         "not (level >= WARN) or thread = main" to
             Filter.Or(listOf(Filter.Not(warn), TextCondition("Thread", TextOp.EQUALS, "main"))),
         "message matches regex 'order \\d{6}:'" to TextCondition("Message", TextOp.MATCHES, "order \\d{6}:"),
@@ -45,7 +46,10 @@ fun benchmarkFiltering(file: Path) {
                 val result = runBlocking { engine.prepare(filter).run() }
                 (System.nanoTime() - t) / 1e9 to result.rows.size
             }
-            println("%-50s first %7.3f s   cached %7.3f s   -> %,d records".format(name, times[0].first, times[1].first, times[0].second))
+            println(
+                "%-50s first %7.3f s   cached %7.3f s   -> %,d records"
+                    .format(name, times[0].first, times[1].first, times[0].second),
+            )
         }
     }
 }

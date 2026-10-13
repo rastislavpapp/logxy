@@ -57,7 +57,8 @@ fun benchmarkMerging(files: List<Path>, iterations: Int, readChannels: Int?) {
     )) {
         val first = measured { runBlocking { filter.prepare(condition, 0).run() } }
         val cached = measured { runBlocking { filter.prepare(condition, 0).run() } }
-        println("%-30s first %.3f s, cached %.3f s -> %,d records".format(name, first.second, cached.second, first.first.rows.size))
+        val records = first.first.rows.size
+        println("%-30s first %.3f s, cached %.3f s -> %,d records".format(name, first.second, cached.second, records))
     }
     parts.forEach { it.close() }
 }

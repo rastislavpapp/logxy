@@ -54,7 +54,9 @@ fun generateLog(
     val random = SplittableRandom(seed)
     val placed = listOfNotNull(errors?.let { "ERROR" to it }, warnings?.let { "WARN" to it })
     // Byte offsets at which a placed record is written next, sorted.
-    val places = placed.flatMap { (level, count) -> List(count) { random.nextLong(size) to level } }.sortedBy { it.first }
+    val places = placed
+        .flatMap { (level, count) -> List(count) { random.nextLong(size) to level } }
+        .sortedBy { it.first }
     var nextPlace = 0
     val excluded = placed.map { it.first }.toSet()
     val generator = when {
@@ -104,7 +106,8 @@ internal class LogGenerator(
         val modules = listOf("order", "billing", "auth", "inventory", "shipping", "search", "notification", "report")
         val layers = listOf("api", "service", "repository", "client", "config", "job")
         val nouns = listOf("Order", "Invoice", "User", "Session", "Stock", "Parcel", "Query", "Email", "Cache", "Token")
-        val roles = listOf("Controller", "Service", "Repository", "Client", "Handler", "Mapper", "Validator", "Scheduler")
+        val roles =
+            listOf("Controller", "Service", "Repository", "Client", "Handler", "Mapper", "Validator", "Scheduler")
         List(300) {
             "com.example.${modules[random.nextInt(modules.size)]}.${layers[random.nextInt(layers.size)]}." +
                 "${nouns[random.nextInt(nouns.size)]}${roles[random.nextInt(roles.size)]}"
@@ -138,7 +141,9 @@ internal class LogGenerator(
         val sb = StringBuilder(200)
         sb.append(timestamp()).append(" [").append(threads[thread]).append("] ")
         sb.append(level.padEnd(5)).append(' ').append(logger)
-        if (context != null) sb.append(' ').append(context.joinToString(", ", "{", "}") { (key, value) -> "$key=$value" })
+        if (context != null) {
+            sb.append(' ').append(context.joinToString(", ", "{", "}") { (key, value) -> "$key=$value" })
+        }
         sb.append(" - ")
         sb.append(message).append('\n')
         if (trace != null) sb.append(trace)
@@ -252,7 +257,10 @@ internal class LogGenerator(
         "WARN" -> when (random.nextInt(3)) {
             0 -> "Retrying operation sync-${id()} (attempt ${random.nextInt(1, 6)}/5)"
             1 -> "Slow query detected: ${ms()} ms for findByCustomerId(${id()})"
-            else -> "Connection pool nearly exhausted: active=${random.nextInt(40, 50)}, idle=0, waiting=${random.nextInt(1, 20)}"
+            else -> {
+                val active = random.nextInt(40, 50)
+                "Connection pool nearly exhausted: active=$active, idle=0, waiting=${random.nextInt(1, 20)}"
+            }
         }
         else -> when (random.nextInt(8)) {
             0 -> "User ${id()} logged in from 10.${random.nextInt(256)}.${random.nextInt(256)}.${random.nextInt(256)}"
@@ -274,7 +282,9 @@ internal class LogGenerator(
     private fun payload(): String {
         val items = random.nextInt(1, 40)
         return (0..<items).joinToString(",", "{\"orderId\":${id()},\"items\":[", "]}") {
-            "{\"sku\":\"SKU-${id()}\",\"qty\":${random.nextInt(1, 10)},\"price\":${random.nextInt(100, 100_000) / 100.0}}"
+            val sku = id()
+            val quantity = random.nextInt(1, 10)
+            "{\"sku\":\"SKU-$sku\",\"qty\":$quantity,\"price\":${random.nextInt(100, 100_000) / 100.0}}"
         }
     }
 

@@ -25,13 +25,17 @@ fun benchmarkParsing(file: Path, iterations: Int, pattern: String? = null) {
         val parsed = runBlocking { ParsedLog.build(file, compiled) }
         val seconds = (System.nanoTime() - started) / 1e9
         log = parsed
-        println("run ${i + 1}: %.3f s (%.2f GB/s), %,d records".format(seconds, size / seconds / 1e9, parsed.recordCount))
+        val rate = size / seconds / 1e9
+        println("run ${i + 1}: %.3f s (%.2f GB/s), %,d records".format(seconds, rate, parsed.recordCount))
     }
     val runtime = Runtime.getRuntime()
     System.gc()
     val heap = runtime.totalMemory() - runtime.freeMemory()
     val last = log!!
-    val spans = last.schema.fields.filterIndexed { i, field -> compiled.schema.fields.getOrNull(i)?.type.let { it != null && it != field.type } }
+    val spans = last.schema.fields.filterIndexed { i, field ->
+        val declared = compiled.schema.fields.getOrNull(i)?.type
+        declared != null && declared != field.type
+    }
     if (spans.isNotEmpty()) println("stored as spans, having mostly distinct values: ${spans.joinToString { it.name }}")
     val keys = last.schema.fields.drop(compiled.schema.fields.size)
     if (keys.isNotEmpty()) println("Map keys as columns: ${keys.joinToString { it.name }}")
