@@ -61,7 +61,7 @@ internal object FormatInference {
         }
         if (objects == 0 || objects < lines.size * AGREEMENT) return null
 
-        val defaults = JsonKeys()
+        val defaults = RoleKeys()
         val known = defaults.byRole.flatMap { it.second }.toSet()
         val used = HashSet<String>()
         fun pick(defaultKeys: List<String>, minCount: Int, test: (String, KeyStats) -> Boolean): String? {
@@ -86,7 +86,7 @@ internal object FormatInference {
         fun first(key: String?, rest: List<String>) = listOfNotNull(key) + rest
         return LogFormat.Json(
             "JSON lines: ${found.joinToString(", ")}",
-            JsonKeys(
+            RoleKeys(
                 first(timestamp, defaults.timestamp), first(level, defaults.level), first(message, defaults.message),
                 first(logger, defaults.logger), first(thread, defaults.thread), first(exception, defaults.exception),
             ),

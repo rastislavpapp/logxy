@@ -2,7 +2,7 @@ package io.github.rastislavpapp.logxy.core.config
 
 import io.github.rastislavpapp.logxy.core.log.Level
 import io.github.rastislavpapp.logxy.core.log.LevelMapping
-import io.github.rastislavpapp.logxy.core.parse.JsonKeys
+import io.github.rastislavpapp.logxy.core.parse.RoleKeys
 import io.github.rastislavpapp.logxy.core.parse.LogFormat
 import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Files
@@ -22,7 +22,7 @@ class SettingsTest {
         val settings = Settings(
             formats = (1..12).map { LogFormat.Pattern("Format $it", "%d [%t] %-5p %c - %m%n") } + listOf(
                 LogFormat.Regex("Tricky: = and \\ ž", """^(?<timestamp>\S+) \\d+ = (?<message>.*)$""", "HH:mm:ss"),
-                LogFormat.Json("JSON", JsonKeys(level = listOf("lvl", "log.level"), exception = emptyList())),
+                LogFormat.Json("JSON", RoleKeys(level = listOf("lvl", "log.level"), exception = emptyList())),
             ),
             levels = LevelMapping(Level.BUILT_IN_NAMES - "CONFIG" + mapOf("note" to Level.INFO, "40" to Level.ERROR)),
             filters = listOf(
@@ -60,6 +60,39 @@ class SettingsTest {
         val settings = Settings.load(file)
         assertEquals(listOf<LogFormat>(LogFormat.Pattern("Good", "%m%n")), settings.formats)
         assertEquals(LevelMapping(Level.BUILT_IN_NAMES + ("NOTE" to Level.INFO)), settings.levels)
+    }
+
+    @Test
+    fun `reads parsers of every kind as earlier versions wrote them`() {
+        val file = Files.writeString(dir.resolve("logxy.properties"), """
+            format.1.name=Pattern
+            format.1.type=pattern
+            format.1.layout=%d [%t] %-5p %c - %m%n
+            format.2.name=Regex
+            format.2.type=regex
+            format.2.layout=^(?<message>.*)$
+            format.2.timestamp=HH:mm:ss
+            format.3.name=Regex without timestamp
+            format.3.type=regex
+            format.3.layout=^(?<message>.*)$
+            format.4.name=JSON
+            format.4.type=json
+            format.4.keys.timestamp=t
+            format.4.keys.level=lvl,severity
+            format.4.keys.message=
+            format.5.name=No type
+            format.5.layout=%m%n
+        """.trimIndent())
+        assertEquals(
+            listOf(
+                LogFormat.Pattern("Pattern", "%d [%t] %-5p %c - %m%n"),
+                LogFormat.Regex("Regex", "^(?<message>.*)$", "HH:mm:ss"),
+                LogFormat.Regex("Regex without timestamp", "^(?<message>.*)$", "yyyy-MM-dd HH:mm:ss.SSS"),
+                LogFormat.Json("JSON", RoleKeys(timestamp = listOf("t"), level = listOf("lvl", "severity"), message = emptyList())),
+                LogFormat.Pattern("No type", "%m%n"),
+            ),
+            Settings.load(file).formats,
+        )
     }
 
     @Test

@@ -2,20 +2,19 @@ package io.github.rastislavpapp.logxy.app
 
 import io.github.rastislavpapp.logxy.core.config.Settings
 import io.github.rastislavpapp.logxy.core.parse.FormatPreview
-import io.github.rastislavpapp.logxy.core.parse.JsonKeys
 import io.github.rastislavpapp.logxy.core.parse.LogFormat
 import io.github.rastislavpapp.logxy.core.parse.PreviewLine
+import io.github.rastislavpapp.logxy.core.parse.RoleKeys
 import net.miginfocom.swing.MigLayout
 import java.awt.Component
 import java.nio.file.Path
-import javax.swing.ButtonGroup
 import javax.swing.DefaultListCellRenderer
 import javax.swing.DefaultListModel
 import javax.swing.JButton
+import javax.swing.JComboBox
 import javax.swing.JLabel
 import javax.swing.JList
 import javax.swing.JPanel
-import javax.swing.JRadioButton
 import javax.swing.JScrollPane
 import javax.swing.JSplitPane
 import javax.swing.JTable
@@ -42,20 +41,30 @@ class ParsersPage(
 
     private class Entry(val format: LogFormat, val builtIn: Boolean)
 
+    /** A setting of a parser kind: the property it is stored as, and its value for a parser that has none. */
+    private class Setting(val label: String, val key: String, val default: String, val list: Boolean = false) {
+        val labelComponent = JLabel(label)
+        val field = JTextField(if (key == "layout") 40 else 30)
+
+        /** Shows the value of [properties], or the default. */
+        fun show(properties: Map<String, String>) {
+            val value = properties[key] ?: default
+            field.text = if (list) value.split(',').filter { it.isNotBlank() }.joinToString(", ") else value
+        }
+    }
+
+    /** A parser kind as the kind selector offers it, with the settings shown for it. */
+    private class KindChoice(val label: String, val kind: LogFormat.Kind, val settings: List<Setting>) {
+        fun format(name: String): LogFormat? = settings.associate { it.key to it.field.text }.let { values -> kind.read(name) { values[it] } }
+
+        override fun toString() = label
+    }
+
     private val entries = DefaultListModel<Entry>()
     private val list = JList(entries)
     private val nameField = JTextField(30)
-    private val patternChoice = JRadioButton("log4j / logback pattern")
-    private val regexChoice = JRadioButton("Regex with named groups")
-    private val jsonChoice = JRadioButton("JSON lines")
-    private val layoutField = JTextField(40)
-    private val timestampField = JTextField(30)
-    private val layoutLabel = JLabel("Layout:")
-    private val timestampLabel = JLabel("Timestamp:")
-
-    /** Comma-separated keys per role of a JSON parser, in the order of [JsonKeys.byRole]. */
-    private val keyFields = JSON_ROLES.map { JTextField(30) }
-    private val keyLabels = JSON_ROLES.map { (label, _) -> JLabel("$label keys:") }
+    private val choices = kindChoices()
+    private val kindBox = JComboBox(choices.toTypedArray())
     private val status = JLabel(" ")
     private val deleteButton = JButton("Delete").apply { addActionListener { deleteSelected() } }
     private val restoreButton = JButton("Restore Built-ins").apply {
@@ -107,18 +116,13 @@ class ParsersPage(
         }
         list.addListSelectionListener { if (!it.valueIsAdjusting) showSelected() }
 
-        ButtonGroup().apply {
-            add(patternChoice)
-            add(regexChoice)
-            add(jsonChoice)
-        }
         val onChange = object : DocumentListener {
             override fun insertUpdate(e: DocumentEvent) = edited()
             override fun removeUpdate(e: DocumentEvent) = edited()
             override fun changedUpdate(e: DocumentEvent) = edited()
         }
-        (listOf(nameField, layoutField, timestampField) + keyFields).forEach { it.document.addDocumentListener(onChange) }
-        listOf(patternChoice, regexChoice, jsonChoice).forEach { choice -> choice.addActionListener { edited() } }
+        (listOf(nameField) + settings().map { it.field }).forEach { it.document.addDocumentListener(onChange) }
+        kindBox.addActionListener { kindChanged() }
 
         val left = JPanel(MigLayout("fill, insets 0", "[grow]", "[grow][]")).apply {
             add(JScrollPane(list), "grow, wrap")
@@ -135,16 +139,11 @@ class ParsersPage(
         val right = JPanel(MigLayout("fill, insets 0 8 0 0, wrap 2, hidemode 3", "[][grow, fill]")).apply {
             add(JLabel("Name:"))
             add(nameField)
-            add(patternChoice, "skip, split 3")
-            add(regexChoice)
-            add(jsonChoice)
-            add(layoutLabel)
-            add(layoutField)
-            add(timestampLabel)
-            add(timestampField)
-            for ((label, field) in keyLabels.zip(keyFields)) {
-                add(label)
-                add(field)
+            add(JLabel("Kind:"))
+            add(kindBox, "growx 0")
+            for (setting in settings()) {
+                add(setting.labelComponent)
+                add(setting.field)
             }
             add(status, "span 2")
             add(JScrollPane(previewTable), "span 2, grow, push")
@@ -163,21 +162,13 @@ class ParsersPage(
         try {
             val format = entry?.format
             nameField.text = format?.name.orEmpty()
-            patternChoice.isSelected = format !is LogFormat.Regex && format !is LogFormat.Json
-            regexChoice.isSelected = format is LogFormat.Regex
-            jsonChoice.isSelected = format is LogFormat.Json
-            layoutField.text = when (format) {
-                is LogFormat.Pattern -> format.pattern
-                is LogFormat.Regex -> format.regex
-                else -> ""
-            }
-            timestampField.text = (format as? LogFormat.Regex)?.timestampPattern ?: Settings.DEFAULT_TIMESTAMP
-            val keys = (format as? LogFormat.Json)?.keys ?: JsonKeys()
-            for ((field, role) in keyFields.zip(JSON_ROLES)) field.text = role.second(keys).joinToString(", ")
+            kindBox.selectedItem = choices.firstOrNull { it.kind == format?.kind } ?: choices.first()
+            // Every kind starts from this parser's values, so switching kind keeps those they share (the layout).
+            val properties = format?.properties().orEmpty()
+            settings().forEach { it.show(properties) }
             val editable = entry != null && !entry.builtIn
             deleteButton.isEnabled = entry != null
-            (listOf(nameField, patternChoice, regexChoice, jsonChoice, layoutField) + keyFields).forEach { it.isEnabled = editable }
-            timestampField.isEnabled = editable && regexChoice.isSelected
+            (listOf(nameField, kindBox) + settings().map { it.field }).forEach { it.isEnabled = editable }
             showKindFields()
         } finally {
             loadingEditor = false
@@ -185,31 +176,43 @@ class ParsersPage(
         updatePreview()
     }
 
+    private fun kindChanged() {
+        if (loadingEditor) return
+        // Carry over what the new kind shares with the one edited so far.
+        val properties = selected()?.format?.properties().orEmpty()
+        loadingEditor = true
+        try {
+            choice().settings.filter { it.key in properties }.forEach { it.show(properties) }
+        } finally {
+            loadingEditor = false
+        }
+        edited()
+    }
+
     private fun edited() {
         if (loadingEditor) return
-        timestampField.isEnabled = regexChoice.isSelected
         showKindFields()
         val index = list.selectedIndex
         val entry = selected() ?: return
         if (entry.builtIn) return
-        entries.setElementAt(Entry(editedFormat(), builtIn = false), index)
+        val format = choice().format(nameField.text.trim()) ?: return
+        entries.setElementAt(Entry(format, builtIn = false), index)
         previewTimer.restart()
     }
 
-    /** Shows the layout fields, or the key fields of a JSON parser. */
-    private fun showKindFields() {
-        val json = jsonChoice.isSelected
-        listOf(layoutLabel, layoutField, timestampLabel, timestampField).forEach { it.isVisible = !json }
-        (keyLabels + keyFields).forEach { it.isVisible = json }
-    }
+    private fun choice() = kindBox.selectedItem as KindChoice
 
-    private fun editedFormat(): LogFormat = when {
-        regexChoice.isSelected -> LogFormat.Regex(nameField.text.trim(), layoutField.text, timestampField.text)
-        jsonChoice.isSelected -> {
-            val keys = keyFields.map { field -> field.text.split(',').map { it.trim() }.filter { it.isNotEmpty() } }
-            LogFormat.Json(nameField.text.trim(), JsonKeys(keys[0], keys[1], keys[2], keys[3], keys[4], keys[5]))
+    private fun settings() = choices.flatMap { it.settings }
+
+    /** Shows the settings of the chosen kind only. */
+    private fun showKindFields() {
+        for (choice in choices) {
+            val shown = choice === choice()
+            choice.settings.forEach {
+                it.labelComponent.isVisible = shown
+                it.field.isVisible = shown
+            }
         }
-        else -> LogFormat.Pattern(nameField.text.trim(), layoutField.text)
     }
 
     private fun updatePreview() {
@@ -285,12 +288,7 @@ class ParsersPage(
 
     private fun copyOf(format: LogFormat): LogFormat = named(format, uniqueName("${format.name} copy"))
 
-    private fun named(format: LogFormat, name: String): LogFormat = when (format) {
-        is LogFormat.Pattern -> format.copy(name = name)
-        is LogFormat.Regex -> format.copy(name = name)
-        is LogFormat.Json -> format.copy(name = name)
-        LogFormat.Raw -> newFormat()
-    }
+    private fun named(format: LogFormat, name: String): LogFormat = if (format == LogFormat.Raw) newFormat() else format.withName(name)
 
     private fun formats() = (0..<entries.size).map { entries[it] }.filterNot { it.builtIn }.map { it.format }
 
@@ -317,11 +315,20 @@ class ParsersPage(
     }
 
     private companion object {
-        /** Label and keys of each role, in the order of [JsonKeys]' constructor. */
-        val JSON_ROLES: List<Pair<String, (JsonKeys) -> List<String>>> = listOf(
-            "Timestamp" to JsonKeys::timestamp, "Level" to JsonKeys::level, "Message" to JsonKeys::message,
-            "Logger" to JsonKeys::logger, "Thread" to JsonKeys::thread, "Exception" to JsonKeys::exception,
+        /** The kinds a user can choose; each new kind of parser adds its line here. */
+        fun kindChoices() = listOf(
+            KindChoice("log4j / logback pattern", LogFormat.Pattern, listOf(Setting("Layout:", "layout", ""))),
+            KindChoice(
+                "Regex with named groups", LogFormat.Regex,
+                listOf(Setting("Layout:", "layout", ""), Setting("Timestamp:", "timestamp", LogFormat.Regex.DEFAULT_TIMESTAMP)),
+            ),
+            KindChoice("JSON lines", LogFormat.Json, roleKeys(RoleKeys())),
         )
+
+        /** One setting per role, listing the keys that fill it. */
+        fun roleKeys(defaults: RoleKeys) = defaults.properties("keys.").map { (key, value) ->
+            Setting("${key.removePrefix("keys.").replaceFirstChar { it.uppercase() }} keys:", key, value, list = true)
+        }
     }
 
     /** Sample lines as the edited format reads them: one row per line, one column per field. */

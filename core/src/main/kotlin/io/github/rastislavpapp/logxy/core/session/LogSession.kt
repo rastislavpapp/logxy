@@ -590,15 +590,7 @@ class LogSession internal constructor(
     /** The saved format that [format] became by a rename, i.e. with the same definition under a new name. */
     private fun renamed(format: LogFormat, saved: List<LogFormat>): LogFormat? {
         if (format == LogFormat.Raw || format in LogFormat.BUILT_IN || saved.any { it.name == format.name }) return null
-        return saved.firstOrNull { candidate ->
-            when (format) {
-                is LogFormat.Pattern -> candidate is LogFormat.Pattern && candidate.pattern == format.pattern
-                is LogFormat.Regex -> candidate is LogFormat.Regex && candidate.regex == format.regex &&
-                    candidate.timestampPattern == format.timestampPattern
-                is LogFormat.Json -> candidate is LogFormat.Json && candidate.keys == format.keys
-                LogFormat.Raw -> false
-            }
-        }
+        return saved.firstOrNull { format.sameDefinition(it) }
     }
 
     /** Runs [evaluation] of [activeFilter] over all records, or shows all records without a filter. */
