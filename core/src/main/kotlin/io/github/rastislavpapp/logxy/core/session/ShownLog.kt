@@ -32,8 +32,29 @@ class ShownLog internal constructor(private val records: Records) {
     // The rows shown, or null for all records.
     private var rows: FilteredRows? = null
 
+    // The records the search found, all of them shown.
+    private var found = FilteredRows(IntArray(0))
+
     var ended = false
         private set
+
+    /** Whether the search runs over all rows; until it is done, nothing is found. */
+    var isSearching = false
+        get() = field && !ended
+        private set
+
+    /** Number of records the search found. */
+    val foundCount: Int get() = if (ended) 0 else found.size
+
+    /** 1-based position of [record] among the found records, 0 if it is not one. */
+    fun foundPosition(record: Int): Int = if (ended) 0 else found.positionOf(record)
+
+    /**
+     * The found record after [record], or before it unless [forward], wrapping around; with [inclusive],
+     * [record] itself counts. -1 if none is found.
+     */
+    fun nextFound(record: Int, forward: Boolean, inclusive: Boolean): Int =
+        if (ended) -1 else found.next(record, forward, inclusive)
 
     val schema: Schema get() = records.schema
 
@@ -168,6 +189,19 @@ class ShownLog internal constructor(private val records: Records) {
      * result for appended records. Returns the first row that changed.
      */
     internal fun replaceRowsFrom(from: Int, rows: IntArray): Int = this.rows!!.replaceFrom(from, rows)
+
+    /** Shows the records a search over all rows found (sorted), or with null, that it runs and found nothing yet. */
+    internal fun showFound(records: IntArray?) {
+        found = FilteredRows(records ?: IntArray(0))
+        isSearching = records == null
+    }
+
+    /** Replaces the found records from record [from] on with [records] (sorted, all `>= from`). */
+    internal fun replaceFoundFrom(from: Int, records: IntArray) {
+        found.replaceFrom(from, records)
+    }
+
+    internal fun clearFound() = showFound(IntArray(0))
 
     internal fun end() {
         ended = true

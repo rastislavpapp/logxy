@@ -3,7 +3,10 @@ package io.github.rastislavpapp.logxy.core.session
 import io.github.rastislavpapp.logxy.core.config.Settings
 import io.github.rastislavpapp.logxy.core.filter.Filter
 import io.github.rastislavpapp.logxy.core.filter.FilterEngine
+import io.github.rastislavpapp.logxy.core.filter.FilterResult
 import io.github.rastislavpapp.logxy.core.filter.LevelCondition
+import io.github.rastislavpapp.logxy.core.filter.PreparedFilter
+import io.github.rastislavpapp.logxy.core.filter.RecordFilter
 import io.github.rastislavpapp.logxy.core.filter.TextCondition
 import io.github.rastislavpapp.logxy.core.filter.TextOp
 import io.github.rastislavpapp.logxy.core.log.Level
@@ -13,6 +16,7 @@ import io.github.rastislavpapp.logxy.core.merge.MergedFilter
 import io.github.rastislavpapp.logxy.core.merge.MergedLog
 import io.github.rastislavpapp.logxy.core.parse.LogFormat
 import io.github.rastislavpapp.logxy.core.query.Query
+import io.github.rastislavpapp.logxy.core.query.QueryException
 import io.github.rastislavpapp.logxy.core.query.QueryOp
 import io.github.rastislavpapp.logxy.core.query.TextSearch
 import kotlinx.coroutines.CompletableDeferred
@@ -35,6 +39,7 @@ import java.nio.file.StandardOpenOption
 import java.util.concurrent.Executors
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -80,6 +85,8 @@ class LogSessionTest {
         override fun rowsChanged(firstChanged: Int, oldSize: Int) { rowsChanged += firstChanged to oldSize }
         override fun levelMappingChanged() {}
         override fun histogramChanged() {}
+        var foundChanged = 0
+        override fun foundChanged() { foundChanged++ }
         override fun followChanged(follow: Boolean) {}
         override fun statusChanged(status: SessionStatus) {}
     }
@@ -229,13 +236,245 @@ class LogSessionTest {
         awaitHistogram(session, 200, 0, 200)
     }
 
+    /** The records [shown] found, in order. */
+    private fun found(shown: ShownLog): List<Int> {
+        var record = -1
+        return List(shown.foundCount) { i ->
+            record = shown.nextFound(record, forward = true, inclusive = i == 0)
+            record
+        }
+    }
+
+    /**
+     * Waits until the session has read all of [files] and found what a fresh evaluation of [search] among
+     * the records [filter] lets through gives; the found records are shown rows all the while.
+     */
+    private suspend fun awaitFound(session: LogSession, files: List<Path>, filter: Filter?, search: TextSearch): List<Int> =
+        withTimeout(10_000) {
+            var done = false
+            var expected = emptyList<Int>()
+            while (!done) {
+                delay(50)
+                withContext(ui) {
+                    val shown = session.shown!!
+                    assertFoundShown(shown)
+                    val records = session.records!!
+                    val fresh = if (records is MergedLog) MergedFilter(records) else FilterEngine(records as LogData)
+                    val condition = search.condition()
+                    val result = fresh.prepare(filter?.let { Filter.And(listOf(it, condition)) } ?: condition).run()
+                    expected = result.rows.toList()
+                    val size = files.sumOf { Files.size(it) }
+                    done = result.indexedSize == size && session.status.size == size && !shown.isSearching && found(shown) == expected
+                }
+            }
+            expected
+        }
+
+    private fun assertFoundShown(shown: ShownLog) {
+        for (record in found(shown)) {
+            val row = shown.rowOf(record)
+            assertTrue(row >= 0 && shown.recordAt(row) == record, "Found record $record is not shown")
+        }
+    }
+
     @Test
     fun `a search finds records among those the filter lets through`() = runBlocking {
         val file = Files.writeString(dir.resolve("search.log"), lines(20))
-        val (session, _) = open(file, Recorder())
-        withContext(ui) { session.applyFilter(Level.WARN, Query.EMPTY) }
-        val found = withContext(ui) { session.prepareSearch(TextSearch("MESSAGE 1"))!!.run() }
-        assertEquals(listOf(1, 11, 13, 15, 17, 19), found.rows.toList())
+        val recorder = Recorder()
+        val (session, shown) = open(file, recorder)
+        val search = TextSearch("MESSAGE 1")
+        withContext(ui) {
+            session.applyFilter(Level.WARN, Query.EMPTY)
+            session.search(search)
+        }
+        val found = awaitFound(session, listOf(file), LevelCondition.atLeast("Level", Level.WARN), search)
+        assertEquals(listOf(1, 11, 13, 15, 17, 19), found)
+        withContext(ui) {
+            assertEquals(2, shown.foundPosition(11))
+            assertEquals(0, shown.foundPosition(12))
+            assertEquals(1, shown.nextFound(19, forward = true, inclusive = false))
+            assertTrue(recorder.foundChanged > 0)
+            session.search(null)
+            assertEquals(0, shown.foundCount)
+        }
+    }
+
+    @Test
+    fun `an invalid regex is reported and finds nothing`() = runBlocking {
+        val file = Files.writeString(dir.resolve("regex.log"), lines(20))
+        val (session, shown) = open(file, Recorder())
+        withContext(ui) { session.applyFilter(null, Query.EMPTY) }
+        awaitFound(session, listOf(file), null, TextSearch("message 1").also { withContext(ui) { session.search(it) } })
+        withContext(ui) {
+            assertFailsWith<QueryException> { session.search(TextSearch("(", regex = true)) }
+            assertEquals(0, shown.foundCount)
+            assertFalse(shown.isSearching)
+        }
+    }
+
+    @Test
+    fun `a search follows appended records, with and without a filter, also in a merge`() = runBlocking {
+        val warnOrWorse = LevelCondition.atLeast("Level", Level.WARN)
+        val search = TextSearch("message 1")
+        for ((merged, filter) in listOf(false to null, false to warnOrWorse, true to null, true to warnOrWorse)) {
+            val a = Files.writeString(dir.resolve("a-$merged-${filter != null}.log"), lines(200))
+            val files = if (merged) listOf(a, Files.writeString(dir.resolve("b-${filter != null}.log"), lines(100))) else listOf(a)
+            val (session, _) = open(files, Recorder())
+            withContext(ui) {
+                session.applyFilter(if (filter != null) Level.WARN else null, Query.EMPTY)
+                session.search(search)
+            }
+            awaitFound(session, files, filter, search)
+            repeat(4) { round ->
+                for (file in files) {
+                    // A record whose level and message only arrive with the next batch.
+                    append(file, lines(50) + if (round % 2 == 0) "2026-10-01 08:00:00.000 [main] WA" else "")
+                }
+                delay(300)
+                if (round % 2 == 0) for (file in files) append(file, "RN  app.L - message 1 completed\n")
+                awaitFound(session, files, filter, search)
+            }
+            withContext(ui) { session.dispose() }
+        }
+    }
+
+    /** Records each search prepared and from which record on; filters without the search wait for [gate]. */
+    private class Recording(private val engine: RecordFilter, private val search: Filter) : RecordFilter by engine {
+        val searchedFrom = ArrayList<Int>()
+        var gate = CompletableDeferred(Unit)
+        var searchFails = false
+
+        override fun prepare(filter: Filter, from: Int): PreparedFilter {
+            val prepared = engine.prepare(filter, from)
+            if (filter == search || (filter is Filter.And && search in filter.parts)) {
+                searchedFrom += from
+                if (!searchFails) return prepared
+                return object : PreparedFilter by prepared {
+                    override suspend fun run(): FilterResult = throw IllegalStateException("Disk on fire")
+                }
+            }
+            val gate = gate
+            return object : PreparedFilter by prepared {
+                override suspend fun run(): FilterResult {
+                    gate.await()
+                    return prepared.run()
+                }
+            }
+        }
+    }
+
+    private suspend fun openRecording(file: Path, search: TextSearch): Triple<LogSession, ShownLog, Recording> {
+        var recording: Recording? = null
+        val recorder = Recorder()
+        val session = withContext(ui) {
+            LogSession(listOf(file), scope, NoSettings, recorder, { null }, emptyList()) { records ->
+                Recording(FilterEngine(records as LogData), search.condition()).also { recording = it }
+            }.also { it.start() }
+        }
+        val shown = withTimeout(10_000) { recorder.loads.receive() }
+        return Triple(session, shown, recording!!)
+    }
+
+    @Test
+    fun `only appended records are searched again`() = runBlocking {
+        val file = Files.writeString(dir.resolve("again.log"), lines(1000))
+        val search = TextSearch("message 1")
+        val (session, _, recording) = openRecording(file, search)
+        withContext(ui) {
+            session.applyFilter(null, Query.EMPTY)
+            session.search(search)
+        }
+        awaitFound(session, listOf(file), null, search)
+        append(file, lines(100))
+        awaitFound(session, listOf(file), null, search)
+        withContext(ui) {
+            assertEquals(0, recording.searchedFrom.first())
+            // The last record may have grown, so it is searched again with the appended ones.
+            assertEquals(listOf(999), recording.searchedFrom.drop(1).distinct())
+        }
+    }
+
+    @Test
+    fun `a failed search tells why and stops following the rows until the next one`() = runBlocking {
+        val file = Files.writeString(dir.resolve("failed.log"), lines(100))
+        val search = TextSearch("message 1")
+        val (session, shown, recording) = openRecording(file, search)
+        withContext(ui) {
+            session.applyFilter(null, Query.EMPTY)
+            recording.searchFails = true
+            session.search(search)
+        }
+        withTimeout(10_000) { while (withContext(ui) { session.searchError } == null) delay(20) }
+        withContext(ui) {
+            assertEquals("Disk on fire", session.searchError)
+            assertFalse(shown.isSearching)
+            assertEquals(0, shown.foundCount)
+        }
+        append(file, lines(10))
+        withTimeout(10_000) { while (withContext(ui) { shown.size } < 110) delay(50) }
+        delay(600)
+        withContext(ui) {
+            assertEquals(listOf(0), recording.searchedFrom)
+            recording.searchFails = false
+            session.search(search)
+            assertEquals(null, session.searchError)
+        }
+        assertEquals(21, awaitFound(session, listOf(file), null, search).size)
+    }
+
+    @Test
+    fun `while a new filter runs, the found records are among the shown rows`() = runBlocking {
+        val file = Files.writeString(dir.resolve("running.log"), lines(1000))
+        val search = TextSearch("message 1")
+        val (session, shown, recording) = openRecording(file, search)
+        val warnOrWorse = LevelCondition.atLeast("Level", Level.WARN)
+        withContext(ui) {
+            session.applyFilter(Level.WARN, Query.EMPTY)
+            session.search(search)
+        }
+        awaitFound(session, listOf(file), warnOrWorse, search)
+        val gate = CompletableDeferred<Unit>()
+        withContext(ui) {
+            recording.gate = gate
+            session.applyFilter(Level.ERROR, Query.EMPTY)
+            // A search started meanwhile is among the rows of the filter shown, too.
+            session.search(TextSearch("message 1"))
+        }
+        val shownWhileFiltering = awaitFound(session, listOf(file), warnOrWorse, search)
+        // The shown rows wait for the filter before they take in appended records, and so do the found ones.
+        append(file, lines(100))
+        delay(1000)
+        withContext(ui) {
+            assertFoundShown(shown)
+            assertEquals(shownWhileFiltering, found(shown))
+        }
+        gate.complete(Unit)
+        val error = awaitFound(session, listOf(file), LevelCondition.atLeast("Level", Level.ERROR), search)
+        withContext(ui) { assertFoundShown(shown) }
+        assertTrue(error.size < shownWhileFiltering.size)
+    }
+
+    @Test
+    fun `a reload clears the found records and finds them again`() = runBlocking {
+        val file = Files.writeString(dir.resolve("found-reload.log"), lines(100))
+        val recorder = Recorder()
+        val (session, first) = open(file, recorder)
+        val search = TextSearch("message 1")
+        withContext(ui) {
+            session.applyFilter(null, Query.EMPTY)
+            session.search(search)
+        }
+        assertEquals(11, awaitFound(session, listOf(file), null, search).size)
+        Files.writeString(file, lines(30))
+        val second = withTimeout(10_000) { recorder.loads.receive() }
+        withContext(ui) {
+            assertEquals(0, first.foundCount)
+            assertEquals(-1, first.nextFound(0, forward = true, inclusive = true))
+            session.applyFilter(null, Query.EMPTY)
+        }
+        // Messages 100 to 129.
+        assertEquals(30, awaitFound(session, listOf(file), null, search).size)
+        withContext(ui) { assertEquals(30, second.foundCount) }
     }
 
     @Test

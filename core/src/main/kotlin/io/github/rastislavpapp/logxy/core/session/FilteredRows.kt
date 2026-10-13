@@ -1,6 +1,23 @@
 package io.github.rastislavpapp.logxy.core.session
 
-/** The records a filter lets through, in order; grows while the log is tailed. Used on one thread. */
+/**
+ * The record of [records] (sorted, the first [size] count) after [current], or before it unless [forward],
+ * wrapping around; with [inclusive], [current] itself counts if it is one of them. -1 if there are none.
+ */
+internal fun nextRecord(records: IntArray, size: Int, current: Int, forward: Boolean, inclusive: Boolean): Int {
+    if (size == 0) return -1
+    val found = records.binarySearch(current, 0, size)
+    if (found >= 0 && inclusive) return current
+    // The index of the first record after [current].
+    val after = if (found >= 0) found + 1 else -found - 1
+    val at = if (forward) after else if (found >= 0) found - 1 else after - 1
+    return records[Math.floorMod(at, size)]
+}
+
+/**
+ * Records in order, e.g. those a filter lets through or a search found; grows while the log is tailed.
+ * Used on one thread.
+ */
 internal class FilteredRows(rows: IntArray) {
 
     // May have room to grow beyond [size].
@@ -24,6 +41,12 @@ internal class FilteredRows(rows: IntArray) {
         val index = if (found >= 0) found else -found - 1
         return if (index < size) index else -1
     }
+
+    /** 1-based position of [record], 0 if it is not one of the rows. */
+    fun positionOf(record: Int): Int = rows.binarySearch(record, 0, size).let { if (it >= 0) it + 1 else 0 }
+
+    /** The record after [current], or before it unless [forward], wrapping around; see [nextRecord]. */
+    fun next(current: Int, forward: Boolean, inclusive: Boolean): Int = nextRecord(rows, size, current, forward, inclusive)
 
     /**
      * Replaces the records from [from] on with [rows] (sorted, all `>= from`), e.g. a filter result
