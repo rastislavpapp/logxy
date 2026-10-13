@@ -8,8 +8,9 @@ Fast desktop log viewer (Kotlin, Swing, FlatLaf, Gradle).
 
 ## Code style
 
-- **Comments only when they add real value.** Explain *why* something is done, non-obvious constraints, or tricky algorithms. Do not comment what the code already says, and do not add comments everywhere.
-- **Keep comments short.** One line is usually enough.
+- **Comments carry what the code cannot show**: why it is done this way, constraints, contracts, tricky algorithms.
+- **Length follows the content**: one line by default, more when the contract needs it (units, threading, nullability, edge cases, the reason for a non-obvious approach).
+- **KDoc in `core`** on every class and non-private function; elsewhere, where the name and signature leave something out.
 - Match the style of the surrounding code.
 
 ## Rules
@@ -26,8 +27,8 @@ Check UI behaviour in the GUI sandbox (`tools/gui-sandbox/gui.sh`), which keeps 
 
 ## Commits
 
-- Commit messages are a single short subject line in the imperative, e.g. `Set up project skeleton`. No body listing the changes; the diff shows them.
-- Add a body only when there is a non-obvious *why* that the diff cannot show, and keep it to a sentence or two.
+- The subject is one imperative line, e.g. `Set up project skeleton`, aiming for about 72 characters; go over when the thought needs it.
+- A body is optional: a non-obvious *why* the diff cannot show, or, when one commit bundles several separate changes, a short bullet list naming them.
 
 ## Agent skills
 
