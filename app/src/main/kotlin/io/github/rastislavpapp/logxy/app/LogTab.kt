@@ -18,13 +18,10 @@ import io.github.rastislavpapp.logxy.core.session.LogSession
 import io.github.rastislavpapp.logxy.core.session.SessionListener
 import io.github.rastislavpapp.logxy.core.session.SessionStatus
 import io.github.rastislavpapp.logxy.core.session.ShownLog
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.swing.Swing
 import net.miginfocom.swing.MigLayout
@@ -66,14 +63,11 @@ private val RANGE_OPS = listOf(QueryOp.AT_LEAST, QueryOp.ABOVE, QueryOp.AT_MOST,
 private const val BOTTOM_TAB_PATTERNS = "patterns"
 
 /** A search taking longer than this shows its progress. */
-private const val SEARCH_PROGRESS_DELAY_MILLIS = 200L
+private const val SEARCH_PROGRESS_DELAY_MILLIS = 200
 
 /** Where the find box floats: below the top of the rows, left of the scroll bar. */
 private const val FLOATING_TOP_GAP = 6
 private const val FLOATING_RIGHT_GAP = 24
-
-/** Records appended to a live log are searched at most this often. */
-private const val SEARCH_APPENDED_MILLIS = 1000
 
 /**
  * One open file, or several merged: shows the records of its [LogSession], with the filter bar and the
@@ -145,6 +139,7 @@ class LogTab(
     private var hiddenColumns = emptySet<String>()
     private var progressTimer: Timer? = null
     private var filterTimer: Timer? = null
+    private var searchTimer: Timer? = null
 
     private var model: LogTableModel? = null
     private var table: LogTable? = null
@@ -154,16 +149,8 @@ class LogTab(
     private var search: TextSearch? = null
     private var foundMarks = Highlighter.NONE
 
-    /** Records the search found, in order; complete unless [searchJob] is running. */
-    private var found = IntArray(0)
-    private var searchJob: Job? = null
-
-    /** Records were appended while [searchJob] ran, so it is to run again. */
-    private var searchStale = false
-
     /** A find asked for while the search was running: forward, and whether the current record counts. */
     private var pendingFind: Pair<Boolean, Boolean>? = null
-    private val searchAppended = Timer(SEARCH_APPENDED_MILLIS) { runSearch(jump = false) }.apply { isRepeats = false }
 
     /** What the status bar shows for this file. */
     val status: SessionStatus get() = session.status
@@ -604,7 +591,6 @@ class LogTab(
             }
         }
         if (selectedIndex != null) scrollPane.selectRow(selectedIndex, scroll = false)
-        if (search != null) runSearch(jump = false)
     }
 
     /** Opens the find bar, to find the text selected in the detail pane if it is one line. */
@@ -618,65 +604,42 @@ class LogTab(
         foundMarks = search?.let(Highlighter::of) ?: Highlighter.NONE
         table?.found = foundMarks
         detail.found = foundMarks
-        found = IntArray(0)
         if (!findBar.isVisible) table?.requestFocusInWindow()
-        runSearch(jump = search != null)
-    }
-
-    /** Finds the shown records [search] matches; with [jump], then selects the first from the current one on. */
-    private fun runSearch(jump: Boolean) {
-        searchJob?.cancel()
-        searchJob = null
-        searchStale = false
-        searchAppended.stop()
-        val evaluation = try {
-            search?.let(session::prepareSearch)
+        pendingFind = null
+        try {
+            session.search(search)
         } catch (e: QueryException) {
-            found = IntArray(0)
-            pendingFind = null
-            findBar.showError(e.message)
-            return
+            return findBar.showError(e.message)
         }
-        if (evaluation == null) {
-            found = IntArray(0)
-            showFoundCount()
-            return
-        }
-        if (jump) {
-            pendingFind = true to true
-            findBar.showCount(0, null)
-        }
-        searchJob = scope.launch {
-            val progress = launch {
-                delay(SEARCH_PROGRESS_DELAY_MILLIS)
-                while (true) {
-                    findBar.showCount(0, null, evaluation.progress)
-                    delay(100)
-                }
-            }
-            val result = try {
-                evaluation.run()
-            } catch (e: Exception) {
-                if (e is CancellationException) throw e
-                searchJob = null
-                pendingFind = null
-                findBar.showError(e.message ?: e.javaClass.simpleName)
-                return@launch
-            } finally {
-                progress.cancel()
-            }
-            found = result.rows
-            searchJob = null
-            showFoundCount()
-            pendingFind?.let { (forward, inclusive) -> find(forward, inclusive) }
-            if (searchStale) searchAppended.start()
-        }
+        // Once found, go to the first from the current record on.
+        if (search != null) pendingFind = true to true
     }
 
-    /** Searches appended records soon; not at once, as a live log may grow every moment. */
-    private fun searchAppendedSoon() {
-        if (search == null) return
-        if (searchJob != null) searchStale = true else if (!searchAppended.isRunning) searchAppended.start()
+    /** Shows what the session's search found, or its progress, and goes to a record asked for meanwhile. */
+    private fun showFound() {
+        val searching = model?.shown?.isSearching == true
+        showSearchProgress(searching)
+        if (searching) return
+        val error = session.searchError
+        if (error != null) {
+            pendingFind = null
+            return findBar.showError(error)
+        }
+        showFoundCount()
+        pendingFind?.let { (forward, inclusive) -> find(forward, inclusive) }
+    }
+
+    /** Follows a slow search's progress on the find bar while [searching]. */
+    private fun showSearchProgress(searching: Boolean) {
+        if (searching == (searchTimer != null)) return
+        searchTimer?.stop()
+        searchTimer = null
+        if (!searching) return
+        findBar.showCount(0, null)
+        searchTimer = Timer(100) { findBar.showCount(0, null, session.searchProgress) }.apply {
+            initialDelay = SEARCH_PROGRESS_DELAY_MILLIS
+            start()
+        }
     }
 
     /**
@@ -687,47 +650,33 @@ class LogTab(
     private fun find(forward: Boolean, inclusive: Boolean = false) {
         if (search == null) return findBar.open()
         pendingFind = null
-        if (searchJob != null) {
+        val model = model
+        // Not loaded or not searched yet: go there once found.
+        if (model == null || model.shown.isSearching) {
             pendingFind = forward to inclusive
             return
         }
-        val model = model ?: return
         val table = table ?: return
         val scrollPane = scrollPane ?: return
-        if (found.isEmpty() || model.totalRowCount == 0) return
+        if (model.shown.foundCount == 0 || model.totalRowCount == 0) return
         val lead = table.selectionModel.leadSelectionIndex
         val selected = lead.takeIf { it in 0..<model.rowCount && table.selectionModel.isSelectedIndex(it) }
         val current = selected?.let(model::recordAt) ?: model.recordAtIndex(scrollPane.firstVisibleRow)
-        val include = inclusive || selected == null
-        // The first found record at or after the current one.
-        val at = found.binarySearch(current).let { if (it >= 0) it else -it - 1 }
-        val isCurrent = at < found.size && found[at] == current
-        var i = when {
-            forward -> if (isCurrent && !include) at + 1 else at
-            else -> if (isCurrent && include) at else at - 1
-        }
-        // A record found may not be shown yet, while the filter's result is still on its way.
-        repeat(found.size) {
-            i = Math.floorMod(i, found.size)
-            val record = found[i]
-            val index = model.indexOfRecord(record)
-            if (index >= 0 && model.recordAtIndex(index) == record) {
-                session.follow = false
-                scrollPane.selectRow(index, scroll = index !in scrollPane.firstVisibleRow..scrollPane.lastVisibleRow)
-                return
-            }
-            i += if (forward) 1 else -1
-        }
+        val record = model.shown.nextFound(current, forward, inclusive || selected == null)
+        val index = model.indexOfRecord(record)
+        if (index < 0 || model.recordAtIndex(index) != record) return
+        session.follow = false
+        scrollPane.selectRow(index, scroll = index !in scrollPane.firstVisibleRow..scrollPane.lastVisibleRow)
     }
 
     /** Shows how many records the search found, and which of them is selected. */
     private fun showFoundCount() {
-        if (searchJob != null) return
         val model = model
+        if (model?.shown?.isSearching == true) return
         val lead = table?.selectionModel?.leadSelectionIndex ?: -1
         val selected = if (model != null && lead in 0..<model.rowCount) model.recordAt(lead) else -1
-        val position = if (selected >= 0) found.binarySearch(selected) else -1
-        findBar.showCount(if (position >= 0) position + 1 else 0, found.size)
+        val shown = model?.shown
+        findBar.showCount(if (shown != null && selected >= 0) shown.foundPosition(selected) else 0, shown?.foundCount ?: 0)
     }
 
     /** Marks the times of the selected rows on the histogram, or of the top row in view if none is selected. */
@@ -787,7 +736,7 @@ class LogTab(
         stopProgress()
         patterns.reset()
         showFilterProgress(false)
-        searchAppended.stop()
+        showSearchProgress(false)
         session.dispose()
         scope.cancel()
         filterBar.release()
@@ -824,9 +773,7 @@ class LogTab(
 
         override fun shownEnded() {
             columnsButton.isEnabled = false
-            searchJob?.cancel()
-            searchJob = null
-            found = IntArray(0)
+            showSearchProgress(false)
             histogramBar = null
             patterns.reset()
             // The table may still be painted until indexing shows its progress: with no rows.
@@ -872,8 +819,9 @@ class LogTab(
             model?.rowsChangedFrom(firstChanged, oldSize)
             scrollPane?.rowsAppended()
             patterns.refreshSoon()
-            searchAppendedSoon()
         }
+
+        override fun foundChanged() = showFound()
 
         override fun levelMappingChanged() {
             model?.let { it.fireTableRowsUpdated(0, maxOf(0, it.rowCount - 1)) }
