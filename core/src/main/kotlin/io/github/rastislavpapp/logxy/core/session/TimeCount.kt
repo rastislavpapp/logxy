@@ -14,6 +14,20 @@ import kotlinx.coroutines.withContext
 /** Rows counted per parallel task. */
 private const val TASK_ROWS = 1 shl 20
 
+/** Counts the times of all records of [log], as a session does; for measuring it. Call on the thread that owns [log]. */
+suspend fun countTimes(log: LogData): TimeHistogram = countAll(log)
+
+/** Counts the times of all records of [log], as a session does; for measuring it. Call on the thread that owns [log]. */
+suspend fun countTimes(log: MergedLog): TimeHistogram = countAll(log)
+
+private suspend fun countAll(records: Records): TimeHistogram {
+    val count = records.recordCount
+    val from = if (count == 0) 0 else records.timestampNanos(0)
+    val to = if (count == 0) 0 else records.timestampNanos(count - 1)
+    val (before, after) = TimeCount(records, null, 0, count, count, from, maxOf(from, to)).run()
+    return before.apply { addAll(after) }
+}
+
 /**
  * Counts the times of the shown rows from [from] until [to] (`rows[i]`, or the records themselves if
  * [rows] is null) into [TimeHistogram]s expected to cover [expectedFrom] to [expectedTo]: one of the
