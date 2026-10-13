@@ -24,9 +24,11 @@ class CompressedSpoolTest {
         return file
     }
 
-    private fun zstd(name: String, content: String): Path = Files.write(dir.resolve(name), Zstd.compress(content.toByteArray()))
+    private fun zstd(name: String, content: String): Path =
+        Files.write(dir.resolve(name), Zstd.compress(content.toByteArray()))
 
-    private fun CompressedSpool.decompress(file: Path) = runBlocking { decompress(file, CompressedSpool.formatOf(file)!!) }
+    private fun CompressedSpool.decompress(file: Path) =
+        runBlocking { decompress(file, CompressedSpool.formatOf(file)!!) }
 
     @Test
     fun `decompresses gzip and zstd files`() {

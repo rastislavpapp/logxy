@@ -35,7 +35,8 @@ class JsonLogTest {
         List(recordCount) { rowValues(it, 1000)[field] }
     }
 
-    private fun ParsedLog.matching(condition: Filter) = runBlocking { FilterEngine(this@matching).prepare(condition).run() }.rows.toList()
+    private fun ParsedLog.matching(condition: Filter) =
+        runBlocking { FilterEngine(this@matching).prepare(condition).run() }.rows.toList()
 
     private val sample = """
         Starting the application
@@ -51,8 +52,16 @@ class JsonLogTest {
             parse(sample, options).use { log ->
                 assertEquals(4, log.recordCount)
                 val visible = log.schema.fields.filter { !it.hidden }.map { it.name }
-                assertEquals(listOf("Timestamp", "Level", "Thread", "Logger", "Message", "Exception", "context", "port", "tenant"), visible)
-                assertEquals(listOf("", "2026-10-01 08:00:00.001", "2026-10-01 08:00:00.002", "2026-10-01 08:00:01.000"), log.column("Timestamp"))
+                assertEquals(
+                    listOf(
+                        "Timestamp", "Level", "Thread", "Logger", "Message", "Exception", "context", "port", "tenant",
+                    ),
+                    visible,
+                )
+                assertEquals(
+                    listOf("", "2026-10-01 08:00:00.001", "2026-10-01 08:00:00.002", "2026-10-01 08:00:01.000"),
+                    log.column("Timestamp"),
+                )
                 assertEquals(listOf("", "main", "pool \"1\"", "main"), log.column("Thread"))
                 assertEquals(listOf("Starting the application", "Started", "Failed:", "Slow"), log.column("Message"))
                 assertEquals(listOf("", "", "java.lang.IllegalStateException: boom", ""), log.column("Exception"))
@@ -79,7 +88,8 @@ class JsonLogTest {
             assertEquals("Starting the application", log.recordText(0, 1000))
             val detail = log.recordText(2, 10_000)
             assertTrue(detail.startsWith("{\n  \"@timestamp\": \"2026-10-01T08:00:00.002Z\",\n"), detail)
-            assertTrue("\"stack_trace\": \"java.lang.IllegalStateException: boom\n\tat com.example.Db.query(Db.java:10)\"" in detail, detail)
+            val trace = "java.lang.IllegalStateException: boom\n\tat com.example.Db.query(Db.java:10)"
+            assertTrue("\"stack_trace\": \"$trace\"" in detail, detail)
         }
     }
 
@@ -91,7 +101,8 @@ class JsonLogTest {
             assertEquals(listOf(3), log.matching(TextCondition("tenant", TextOp.EQUALS, "globex")))
             assertEquals(listOf(1), log.matching(TextCondition("tenant", TextOp.EQUALS, "ac*")))
             assertEquals(listOf(2), log.matching(TextCondition("context", TextOp.EQUALS, "*orderId*")))
-            assertEquals(listOf(0), log.matching(TextCondition("Message", TextOp.EQUALS, "starting*", ignoreCase = true)))
+            val starting = TextCondition("Message", TextOp.EQUALS, "starting*", ignoreCase = true)
+            assertEquals(listOf(0), log.matching(starting))
             assertEquals(listOf(2), log.matching(PresenceCondition("Exception")))
             assertEquals(listOf(2, 3), log.matching(LevelCondition("Level", setOf(Level.WARN, Level.ERROR))))
         }
@@ -118,10 +129,12 @@ class JsonLogTest {
 
     @Test
     fun `tails appended lines`() {
-        val file = Files.writeString(dir.resolve("tail.json"), """{"level":"INFO","message":"one"}""" + "\n" + """{"level":"INFO","mess""")
+        val start = """{"level":"INFO","message":"one"}""" + "\n" + """{"level":"INFO","mess"""
+        val file = Files.writeString(dir.resolve("tail.json"), start)
         runBlocking { ParsedLog.build(file, parser) }.use { log ->
             assertEquals(2, log.recordCount)
-            Files.writeString(file, """age":"two"}""" + "\n" + """{"level":"WARN","message":"three"}""" + "\n", java.nio.file.StandardOpenOption.APPEND)
+            val rest = """age":"two"}""" + "\n" + """{"level":"WARN","message":"three"}""" + "\n"
+            Files.writeString(file, rest, java.nio.file.StandardOpenOption.APPEND)
             log.append(log.readAppended(Files.size(file)))
             assertEquals(listOf("one", "two", "three"), log.column("Message"))
         }

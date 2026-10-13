@@ -19,12 +19,16 @@ class TimeCountTest {
 
     private val parser = CompiledPattern("%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %-5p %c - %m%n", ZoneOffset.UTC)
 
-    private fun TimeHistogram.total() = (firstBin..lastBin).sumOf { bin -> (0..<TimeHistogram.CATEGORIES).sumOf { count(it, bin) } }
+    private fun TimeHistogram.total() =
+        (firstBin..lastBin).sumOf { bin -> (0..<TimeHistogram.CATEGORIES).sumOf { count(it, bin) } }
 
     @Test
     fun `fills up from the earliest times, reaching all expected ones`() {
         val content = buildString {
-            for (i in 0..<1000) append("2026-10-01 08:%02d:%02d.000 [t] ${if (i % 10 == 0) "ERROR" else "INFO "} a.B - m\n".format(i / 60, i % 60))
+            for (i in 0..<1000) {
+                val level = if (i % 10 == 0) "ERROR" else "INFO "
+                append("2026-10-01 08:%02d:%02d.000 [t] $level a.B - m\n".format(i / 60, i % 60))
+            }
         }
         val file = Files.writeString(dir.resolve("count.log"), content)
         runBlocking { ParsedLog.build(file, parser, IndexProgress()) }.use { log ->
@@ -37,7 +41,8 @@ class TimeCountTest {
             repeat(50) {
                 if (partials.isNotEmpty()) return@repeat
                 val result = runBlocking {
-                    TimeCount(SingleLoad(log), null, 0, 1000, 600, from, to, taskRows = 100).run { synchronized(partials) { partials += it } }
+                    val count = TimeCount(SingleLoad(log), null, 0, 1000, 600, from, to, taskRows = 100)
+                    count.run { synchronized(partials) { partials += it } }
                 }
                 before = result.first
                 after = result.second

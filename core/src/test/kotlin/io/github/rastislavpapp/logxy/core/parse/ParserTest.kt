@@ -25,7 +25,8 @@ class ParserTest {
 
     @Test
     fun `guesses a layout that no built-in parser reads`() {
-        val file = Files.writeString(dir.resolve("b.log"), "2026-10-01 08:00:00.001 INFO  [main] com.example.App - Started\n")
+        val file =
+            Files.writeString(dir.resolve("b.log"), "2026-10-01 08:00:00.001 INFO  [main] com.example.App - Started\n")
         assertEquals(
             Parser.Pattern("date LEVEL [thread] logger - message", "%d{yyyy-MM-dd HH:mm:ss.SSS} %p [%t] %c - %m%n"),
             Parser.detect(file),
@@ -34,16 +35,19 @@ class ParserTest {
 
     @Test
     fun `guessed JSON keys replace the built-in JSON parser`() {
-        val file = Files.writeString(dir.resolve("j.log"), "{\"when\":\"2026-10-01T08:00:00Z\",\"lvl\":\"info\",\"msg\":\"Started\"}\n")
+        val line = "{\"when\":\"2026-10-01T08:00:00Z\",\"lvl\":\"info\",\"msg\":\"Started\"}\n"
+        val file = Files.writeString(dir.resolve("j.log"), line)
         assertEquals("JSON lines: when, lvl", Parser.detect(file).name)
     }
 
     @Test
     fun `detects a file again once it changed`() {
-        val file = Files.writeString(dir.resolve("c.log"), "2026-10-01 08:00:00.001 [main] INFO  com.example.App - Started\n")
+        val file =
+            Files.writeString(dir.resolve("c.log"), "2026-10-01 08:00:00.001 [main] INFO  com.example.App - Started\n")
         assertEquals(Parser.BUILT_IN[0], Parser.detect(file))
         assertEquals(Parser.BUILT_IN[0], Parser.detect(file))
-        Files.writeString(file, "{\"@timestamp\":\"2026-10-01T08:00:00Z\",\"level\":\"INFO\",\"message\":\"Started\"}\n")
+        val json = "{\"@timestamp\":\"2026-10-01T08:00:00Z\",\"level\":\"INFO\",\"message\":\"Started\"}\n"
+        Files.writeString(file, json)
         assertEquals(Parser.Json("JSON lines"), Parser.detect(file))
     }
 
@@ -62,22 +66,31 @@ class ParserTest {
 
     @Test
     fun `the user's parser wins a tie with a built-in one`() {
-        val file = Files.writeString(dir.resolve("e.log"), "2026-10-01 08:00:00.001 [main] INFO  com.example.App - Started\n")
+        val file =
+            Files.writeString(dir.resolve("e.log"), "2026-10-01 08:00:00.001 [main] INFO  com.example.App - Started\n")
         val mine = Parser.Pattern("Mine", "%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %-5p %c - %m%n")
         assertEquals(mine, Parser.detect(file, preferred = listOf(mine)))
     }
 
     @Test
     fun `detects Spring Boot layouts`() {
-        val boot2 = Files.writeString(dir.resolve("boot2.log"),
-            "2026-10-08 12:00:00.123  INFO 12345 --- [           main] c.e.demo.DemoApplication                 : Started\n",)
+        // Spring Boot pads the logger to 40 characters.
+        val app = "c.e.demo.DemoApplication".padEnd(40)
+        val boot2 = Files.writeString(
+            dir.resolve("boot2.log"),
+            "2026-10-08 12:00:00.123  INFO 12345 --- [           main] $app : Started\n",
+        )
         assertEquals("date LEVEL pid --- [thread] logger : message", Parser.detect(boot2).name)
-        val boot3 = Files.writeString(dir.resolve("boot3.log"),
-            "2026-10-08T12:00:00.123+02:00  WARN 12345 --- [           main] c.e.demo.DemoApplication                 : Slow\n",)
+        val boot3 = Files.writeString(
+            dir.resolve("boot3.log"),
+            "2026-10-08T12:00:00.123+02:00  WARN 12345 --- [           main] $app : Slow\n",
+        )
         assertEquals("Spring Boot 3", Parser.detect(boot3).name)
-        val boot3named = Files.writeString(dir.resolve("boot3n.log"),
-            "2026-10-08T12:00:00.123+02:00  WARN 12345 --- [demo] [           main] c.e.demo.DemoApplication                 : Slow\n" +
-                "2026-10-08T12:00:00.124+02:00  INFO 12345 --- [demo] [  restartedMain] c.e.demo.DemoApplication                 : Up\n",)
+        val boot3named = Files.writeString(
+            dir.resolve("boot3n.log"),
+            "2026-10-08T12:00:00.123+02:00  WARN 12345 --- [demo] [           main] $app : Slow\n" +
+                "2026-10-08T12:00:00.124+02:00  INFO 12345 --- [demo] [  restartedMain] $app : Up\n",
+        )
         assertEquals("date LEVEL pid --- [field] [thread] logger : message", Parser.detect(boot3named).name)
     }
 
@@ -127,9 +140,11 @@ class ParserTest {
             2026-10-01 08:00:00.002 [main] WARN  com.example.App - user=bob action=login result=denied
         """.trimIndent())
         assertEquals(Parser.BUILT_IN[0], Parser.detect(file))
-        val lines = listOf("user=alice action=login", "a=1", "hello world a=1 b=2", " a=1 b=2", "a=\"open b=2", "\"a\"=1 b=2")
+        val lines =
+            listOf("user=alice action=login", "a=1", "hello world a=1 b=2", " a=1 b=2", "a=\"open b=2", "\"a\"=1 b=2")
         val matcher = Parser.Logfmt("logfmt").compile().newMatcher()
-        assertEquals(listOf(true, false, false, false, false, false), lines.map { it.toByteArray().let { b -> matcher.match(b, 0, b.size) } })
+        val matched = lines.map { it.toByteArray().let { b -> matcher.match(b, 0, b.size) } }
+        assertEquals(listOf(true, false, false, false, false, false), matched)
     }
 
     @Test
@@ -165,7 +180,8 @@ class ParserTest {
         assertTrue(Parser.Json("JSON").mismatch(file)!!.startsWith("No entry in the file matches the parser."))
         assertEquals("The pattern has no fields", Parser.Pattern("Broken", "just text").mismatch(file))
         // A start the first bytes cannot decide passes.
-        val dump = Files.writeString(dir.resolve("dump.log"), (1..400_000).joinToString("") { "    <item id=\"$it\"/>\n" })
+        val items = (1..400_000).joinToString("") { "    <item id=\"$it\"/>\n" }
+        val dump = Files.writeString(dir.resolve("dump.log"), items)
         assertEquals(null, Parser.Json("JSON").mismatch(dump))
     }
 }

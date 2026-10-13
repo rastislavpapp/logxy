@@ -21,10 +21,13 @@ import kotlin.test.assertFailsWith
 
 class QueryTest {
 
-    private val schema = CompiledPattern("%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %-5p %c %X{request id} - %m%n", ZoneOffset.UTC).schema
+    private val schema =
+        CompiledPattern("%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %-5p %c %X{request id} - %m%n", ZoneOffset.UTC).schema
     private val compiler = QueryCompiler(schema, ZoneOffset.UTC)
 
     private fun roundTrip(text: String) = QueryPrinter.print(QueryParser.parse(text))
+
+    private fun all(vararg filters: Filter) = Filter.And(filters.toList())
 
     @Test
     fun `AND binds tighter than OR`() {
@@ -56,7 +59,10 @@ class QueryTest {
 
     @Test
     fun `syntax errors point at the problem`() {
-        fun error(text: String) = assertFailsWith<QueryException> { QueryParser.parse(text) }.let { Triple(it.message, it.offset, it.length) }
+        fun error(text: String): Triple<String?, Int, Int> {
+            val e = assertFailsWith<QueryException> { QueryParser.parse(text) }
+            return Triple(e.message, e.offset, e.length)
+        }
         assertEquals(Triple("Use == to compare", 7, 1), error("thread = main"))
         assertEquals(Triple("Missing closing quote", 11, 4), error("message == \"abc"))
         assertEquals(Triple("Missing “)” for this “(”", 0, 1), error("(level >= WARN"))
@@ -68,61 +74,85 @@ class QueryTest {
     @Test
     fun `compiles to engine conditions`() {
         fun compile(text: String) = compiler.compile(QueryParser.parse(text))
+        val warnOrWorse = setOf(Level.WARN, Level.ERROR, Level.FATAL)
+        assertEquals(all(LevelCondition("Level", warnOrWorse)), compile("LEVEL >= warn"))
+        assertEquals(all(Filter.Not(LevelCondition("Level", setOf(Level.DEBUG)))), compile("level != DEBUG"))
         assertEquals(
-            Filter.And(listOf(LevelCondition("Level", setOf(Level.WARN, Level.ERROR, Level.FATAL)))),
-            compile("LEVEL >= warn"),
+            all(TextCondition("Level", TextOp.EQUALS, "WARN*", ignoreCase = true)),
+            compile("level == \"WARN*\""),
         )
-        assertEquals(Filter.And(listOf(Filter.Not(LevelCondition("Level", setOf(Level.DEBUG))))), compile("level != DEBUG"))
-        assertEquals(Filter.And(listOf(TextCondition("Level", TextOp.EQUALS, "WARN*", ignoreCase = true))), compile("level == \"WARN*\""))
-        assertEquals(Filter.And(listOf(TextCondition("Thread", TextOp.EQUALS, "Main", ignoreCase = false))), compile("thread === Main"))
-        assertEquals(Filter.And(listOf(TextCondition("request id", TextOp.NOT_MATCHES, "^\\d+$", ignoreCase = true))), compile("`Request ID` !~ \"^\\d+$\""))
         assertEquals(
-            Filter.And(listOf(TimeCondition("Timestamp", from = 1_791_533_400_000_000_000L + 1))),
+            all(TextCondition("Thread", TextOp.EQUALS, "Main", ignoreCase = false)),
+            compile("thread === Main"),
+        )
+        assertEquals(
+            all(TextCondition("request id", TextOp.NOT_MATCHES, "^\\d+$", ignoreCase = true)),
+            compile("`Request ID` !~ \"^\\d+$\""),
+        )
+        assertEquals(
+            all(TimeCondition("Timestamp", from = 1_791_533_400_000_000_000L + 1)),
             compile("timestamp > \"2026-10-09 08:10\""),
         )
-        assertEquals(Filter.And(listOf(NumberCondition("request id", from = 500.0))), compile("`request id` >= 500"))
-        assertEquals(Filter.And(listOf(NumberCondition("Thread", from = Math.nextUp(2.5)))), compile("thread > 2.5"))
-        assertEquals(Filter.And(listOf(NumberCondition("Message", to = Math.nextDown(-1.0)))), compile("message < \"-1\""))
-        assertEquals(Filter.And(emptyList()), compile(""))
-        assertEquals(Filter.And(emptyList()), compile("message == \"\""))
+        assertEquals(all(NumberCondition("request id", from = 500.0)), compile("`request id` >= 500"))
+        assertEquals(all(NumberCondition("Thread", from = Math.nextUp(2.5))), compile("thread > 2.5"))
+        assertEquals(all(NumberCondition("Message", to = Math.nextDown(-1.0))), compile("message < \"-1\""))
+        assertEquals(all(), compile(""))
+        assertEquals(all(), compile("message == \"\""))
         assertEquals(
-            Filter.And(listOf(TextCondition("Thread", TextOp.EQUALS, "main", ignoreCase = true))),
+            all(TextCondition("Thread", TextOp.EQUALS, "main", ignoreCase = true)),
             compile("thread == main AND (message == \"\" OR logger =~ \"\") AND NOT level >= \"\""),
         )
     }
 
     @Test
     fun `compile errors explain what is wrong`() {
-        fun error(text: String) = assertFailsWith<QueryException> { compiler.compile(QueryParser.parse(text)) }.message!!
-        assertEquals("Unknown field “thred”; this log has Timestamp, Thread, Level, Logger, request id, Message", error("thred == x"))
-        assertEquals("Unknown level “WARNING”; use one of TRACE, DEBUG, INFO, WARN, ERROR, FATAL, UNKNOWN", error("level >= WARNING"))
+        fun error(text: String) =
+            assertFailsWith<QueryException> { compiler.compile(QueryParser.parse(text)) }.message!!
+        assertEquals(
+            "Unknown field “thred”; this log has Timestamp, Thread, Level, Logger, request id, Message",
+            error("thred == x"),
+        )
+        assertEquals(
+            "Unknown level “WARNING”; use one of TRACE, DEBUG, INFO, WARN, ERROR, FATAL, UNKNOWN",
+            error("level >= WARNING"),
+        )
         assertEquals(">= on Thread compares numbers; “x” is no number", error("thread >= x"))
-        assertEquals("Invalid time “yesterday”; write e.g. 2026-10-09 08:30:00.000, 2026-10-09 or 08:30", error("timestamp >= yesterday"))
+        assertEquals(
+            "Invalid time “yesterday”; write e.g. 2026-10-09 08:30:00.000, 2026-10-09 or 08:30",
+            error("timestamp >= yesterday"),
+        )
         assertEquals("Invalid regex “(”: Unclosed group", error("message =~ \"(\""))
     }
 
     @Test
     fun `pattern compiles to a template condition on the message`() {
         fun compile(text: String, compiler: QueryCompiler = this.compiler) = compiler.compile(QueryParser.parse(text))
+        fun error(text: String, compiler: QueryCompiler = this.compiler) =
+            assertFailsWith<QueryException> { compile(text, compiler) }.message
         val template = "Request from {} took {} ms"
-        assertEquals(Filter.And(listOf(PatternCondition("Message", setOf(template)))), compile("pattern == \"$template\""))
-        assertEquals(Filter.And(listOf(Filter.Not(PatternCondition("Message", setOf(template))))), compile("Pattern !== \"$template\""))
-        assertEquals(Filter.And(emptyList()), compile("Pattern == \"\""))
-        assertEquals("Pattern works with == and !=, not =~", assertFailsWith<QueryException> { compile("Pattern =~ x") }.message)
+        val condition = PatternCondition("Message", setOf(template))
+        assertEquals(all(condition), compile("pattern == \"$template\""))
+        assertEquals(all(Filter.Not(condition)), compile("Pattern !== \"$template\""))
+        assertEquals(all(), compile("Pattern == \"\""))
+        assertEquals("Pattern works with == and !=, not =~", error("Pattern =~ x"))
 
         val noMessage = QueryCompiler(Schema(listOf(Field("Level", ColumnType.LEVEL, Role.LEVEL))))
-        assertEquals("Pattern needs a message, which this log does not have", assertFailsWith<QueryException> { compile("Pattern == x", noMessage) }.message)
+        assertEquals("Pattern needs a message, which this log does not have", error("Pattern == x", noMessage))
 
         // A field of the log with that name is used as it is.
-        val withField = QueryCompiler(CompiledPattern("%d{yyyy-MM-dd HH:mm:ss.SSS} %X{Pattern} - %m%n", ZoneOffset.UTC).schema)
-        assertEquals(Filter.And(listOf(TextCondition("Pattern", TextOp.EQUALS, "x", ignoreCase = true))), compile("pattern == x", withField))
+        val withField =
+            QueryCompiler(CompiledPattern("%d{yyyy-MM-dd HH:mm:ss.SSS} %X{Pattern} - %m%n", ZoneOffset.UTC).schema)
+        assertEquals(
+            all(TextCondition("Pattern", TextOp.EQUALS, "x", ignoreCase = true)),
+            compile("pattern == x", withField),
+        )
     }
 
     @Test
     fun `an empty value is a placeholder, except for not equals`() {
-        assertEquals(Filter.And(emptyList()), compiler.compile(QueryParser.parse("""thread == "" AND message =~ """"")))
+        assertEquals(all(), compiler.compile(QueryParser.parse("""thread == "" AND message =~ """"")))
         assertEquals(
-            Filter.And(listOf(Filter.And(listOf(PresenceCondition("Thread"), TextCondition("Thread", TextOp.NOT_EQUALS, "", ignoreCase = true))))),
+            all(all(PresenceCondition("Thread"), TextCondition("Thread", TextOp.NOT_EQUALS, "", ignoreCase = true))),
             compiler.compile(QueryParser.parse("""thread != """"")),
         )
     }

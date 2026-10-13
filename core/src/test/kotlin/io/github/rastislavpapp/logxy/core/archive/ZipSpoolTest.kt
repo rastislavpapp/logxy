@@ -32,7 +32,8 @@ class ZipSpoolTest {
         return bytes.toByteArray()
     }
 
-    private fun zip(name: String, vararg entries: Pair<String, ByteArray>): Path = Files.write(dir.resolve(name), zipBytes(*entries))
+    private fun zip(name: String, vararg entries: Pair<String, ByteArray>): Path =
+        Files.write(dir.resolve(name), zipBytes(*entries))
 
     private fun ZipSpool.names(files: List<Path>) = files.map { root.relativize(it).drop(1).joinToString("/") }
 
@@ -76,7 +77,8 @@ class ZipSpoolTest {
         Files.writeString(first.single(), "touched\n")
         assertEquals("touched\n", Files.readString(runBlocking { spool.extract(zip) }.single()))
         zip("logs.zip", "a.log" to "two\n".toByteArray(), "b.log" to "three\n".toByteArray())
-        Files.setLastModifiedTime(zip, Files.getLastModifiedTime(zip).let { java.nio.file.attribute.FileTime.fromMillis(it.toMillis() + 5000) })
+        val later = Files.getLastModifiedTime(zip).toMillis() + 5000
+        Files.setLastModifiedTime(zip, java.nio.file.attribute.FileTime.fromMillis(later))
         val second = runBlocking { spool.extract(zip) }
         assertEquals(listOf("two\n", "three\n"), second.map(Files::readString))
     }
@@ -109,8 +111,9 @@ class ZipSpoolTest {
             val job = async { spool.extract(zip) { if (it > 0.1) throw CancellationException("stop") } }
             runCatching { job.await() }
         }
-        val left = if (Files.exists(spool.root)) Files.walk(spool.root).use { it.filter(Files::isRegularFile).count() } else 0
-        assertEquals(0, left)
+        if (Files.exists(spool.root)) {
+            assertEquals(0, Files.walk(spool.root).use { it.filter(Files::isRegularFile).count() })
+        }
     }
 
     @Test

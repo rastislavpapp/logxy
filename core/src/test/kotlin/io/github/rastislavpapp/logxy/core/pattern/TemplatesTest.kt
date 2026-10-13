@@ -17,7 +17,10 @@ class TemplatesTest {
         assertEquals("user=bob id={} path={}", mask("user=bob id=42 path=/api/v1/users/7"))
         assertEquals("Order {} ({} items) done.", mask("Order #1234 (3 items) done."))
         assertEquals("[{}] {}, {}", mask("[pool-1-thread-3] 0x1F, v2.1"))
-        assertEquals("Payload: {\"orderId\":{},\"sku\":\"{}\"}", mask("Payload: {\"orderId\":709491,\"sku\":\"SKU-64198\"}"))
+        assertEquals(
+            "Payload: {\"orderId\":{},\"sku\":\"{}\"}",
+            mask("Payload: {\"orderId\":709491,\"sku\":\"SKU-64198\"}"),
+        )
     }
 
     @Test

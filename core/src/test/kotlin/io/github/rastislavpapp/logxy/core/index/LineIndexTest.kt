@@ -115,7 +115,8 @@ class LineIndexTest {
             val snapshot = it.filterSnapshot()
             assertEquals(it.lines(), List(snapshot.count) { line -> snapshot.fieldText(line, 0) })
             it.appendFrom(file, " and more\nfour\n")
-            assertEquals(listOf("one", "", "two", "three"), List(snapshot.count) { line -> snapshot.fieldText(line, 0) })
+            val lines = List(snapshot.count) { line -> snapshot.fieldText(line, 0) }
+            assertEquals(listOf("one", "", "two", "three"), lines)
         }
     }
 

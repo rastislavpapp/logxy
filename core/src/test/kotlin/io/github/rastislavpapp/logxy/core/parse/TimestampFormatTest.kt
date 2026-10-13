@@ -47,7 +47,10 @@ class TimestampFormatTest {
 
     @Test
     fun `micro and nano fractions keep full precision`() {
-        assertEquals(nanos("2026-10-01T08:00:00.123456"), parse("yyyy-MM-dd HH:mm:ss.SSSSSS", "2026-10-01 08:00:00.123456"))
+        assertEquals(
+            nanos("2026-10-01T08:00:00.123456"),
+            parse("yyyy-MM-dd HH:mm:ss.SSSSSS", "2026-10-01 08:00:00.123456"),
+        )
         assertEquals(nanos("2026-10-01T08:00:00.123456789"), parse("DEFAULT_NANOS", "2026-10-01 08:00:00,123456789"))
     }
 

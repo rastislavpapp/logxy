@@ -30,7 +30,8 @@ class PropertiesFilesTest {
         PropertiesFiles.store(file, properties, "state")
 
         assertEquals(properties, PropertiesFiles.load(file))
-        assertEquals(listOf("a", "b", "c"), Files.readAllLines(file).filterNot { it.startsWith("#") }.map { it.substringBefore('=') })
+        val keys = Files.readAllLines(file).filterNot { it.startsWith("#") }.map { it.substringBefore('=') }
+        assertEquals(listOf("a", "b", "c"), keys)
         assertEquals(listOf("state.properties"), Files.list(file.parent).map { it.fileName.toString() }.toList())
     }
 }

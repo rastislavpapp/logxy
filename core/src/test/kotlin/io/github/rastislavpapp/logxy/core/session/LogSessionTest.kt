@@ -157,20 +157,27 @@ class LogSessionTest {
      * Waits until the session has read all of [files] and shows what a fresh evaluation of [filter]
      * gives, with the status counting it.
      */
-    private suspend fun awaitShown(session: LogSession, file: Path, filter: Filter) = awaitShown(session, listOf(file), filter)
+    private suspend fun awaitShown(session: LogSession, file: Path, filter: Filter) =
+        awaitShown(session, listOf(file), filter)
 
-    private suspend fun awaitShown(session: LogSession, files: List<Path>, filter: Filter): List<Int> = withTimeout(10_000) {
+    private suspend fun awaitShown(
+        session: LogSession,
+        files: List<Path>,
+        filter: Filter,
+    ): List<Int> = withTimeout(10_000) {
         var done = false
         var expected = emptyList<Int>()
         while (!done) {
             delay(50)
             withContext(ui) {
                 val fresh = session.loaded!!.newFilter()
-                // run() frees the UI thread, so the session may read appended data meanwhile: only a result covering all of it counts.
+                // run() frees the UI thread, so the session may read appended data meanwhile: only a result
+                // covering all of it counts.
                 val result = fresh.prepare(filter).run()
                 expected = result.rows.toList()
                 val size = files.sumOf { Files.size(it) }
-                val shown = session.shown?.takeIf { it.isFiltered }?.let { rows -> List(rows.size) { rows.recordAt(it) } }
+                val rows = session.shown?.takeIf { it.isFiltered }
+                val shown = rows?.let { List(it.size) { row -> it.recordAt(row) } }
                 done = result.indexedSize == size && session.status.size == size && shown == expected &&
                     session.status.shown == expected.size && !session.status.filtering
             }
@@ -184,7 +191,9 @@ class LogSessionTest {
         val b = Files.writeString(dir.resolve("b.log"), lines(10))
         val pattern = Parser.Pattern("Mine", "%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %-5p %c - %m%n")
         val recorder = Recorder()
-        val session = withContext(ui) { LogSession(listOf(a, b), scope, NoSettings, recorder, chosen = listOf(null, pattern)).also { it.start() } }
+        val session = withContext(ui) {
+            LogSession(listOf(a, b), scope, NoSettings, recorder, chosen = listOf(null, pattern)).also { it.start() }
+        }
         val shown = withTimeout(10_000) { recorder.loads.receive() }
         withContext(ui) {
             assertEquals(listOf(null, pattern), session.chosenParsers)
@@ -269,14 +278,21 @@ class LogSessionTest {
     }
 
     /** Waits until the histogram counts [records] records, [warnings] warnings and [errors] errors. */
-    private suspend fun awaitHistogram(session: LogSession, records: Int, warnings: Int, errors: Int) = withTimeout(10_000) {
+    private suspend fun awaitHistogram(
+        session: LogSession,
+        records: Int,
+        warnings: Int,
+        errors: Int,
+    ) = withTimeout(10_000) {
         while (true) {
             val counts = withContext(ui) {
                 session.histogram?.let { h ->
                     IntArray(TimeHistogram.CATEGORIES) { c -> (h.firstBin..h.lastBin).sumOf { h.count(c, it) } }
                 }
             }
-            if (counts != null && counts.sum() == records && counts[TimeHistogram.WARN] == warnings && counts[TimeHistogram.ERROR] == errors) return@withTimeout
+            val reached = counts != null && counts.sum() == records &&
+                counts[TimeHistogram.WARN] == warnings && counts[TimeHistogram.ERROR] == errors
+            if (reached) return@withTimeout
             delay(50)
         }
     }
@@ -322,7 +338,12 @@ class LogSessionTest {
      * Waits until the session has read all of [files] and found what a fresh evaluation of [search] among
      * the records [filter] lets through gives; the found records are shown rows all the while.
      */
-    private suspend fun awaitFound(session: LogSession, files: List<Path>, filter: Filter?, search: TextSearch): List<Int> =
+    private suspend fun awaitFound(
+        session: LogSession,
+        files: List<Path>,
+        filter: Filter?,
+        search: TextSearch,
+    ): List<Int> =
         withTimeout(10_000) {
             var done = false
             var expected = emptyList<Int>()
@@ -336,7 +357,8 @@ class LogSessionTest {
                     val result = fresh.prepare(filter?.let { Filter.And(listOf(it, condition)) } ?: condition).run()
                     expected = result.rows.toList()
                     val size = files.sumOf { Files.size(it) }
-                    done = result.indexedSize == size && session.status.size == size && !shown.isSearching && found(shown) == expected
+                    done = result.indexedSize == size && session.status.size == size &&
+                        !shown.isSearching && found(shown) == expected
                 }
             }
             expected
@@ -390,7 +412,11 @@ class LogSessionTest {
         val search = TextSearch("message 1")
         for ((merged, filter) in listOf(false to null, false to warnOrWorse, true to null, true to warnOrWorse)) {
             val a = Files.writeString(dir.resolve("a-$merged-${filter != null}.log"), lines(200))
-            val files = if (merged) listOf(a, Files.writeString(dir.resolve("b-${filter != null}.log"), lines(100))) else listOf(a)
+            val files = if (merged) {
+                listOf(a, Files.writeString(dir.resolve("b-${filter != null}.log"), lines(100)))
+            } else {
+                listOf(a)
+            }
             val (session, _) = open(files, Recorder())
             withContext(ui) {
                 session.applyFilter(if (filter != null) Level.WARN else null, Query.EMPTY)
@@ -582,7 +608,9 @@ class LogSessionTest {
         assertEquals(500, withContext(ui) { shown.size })
         val query = Query.Group(all = true, items = listOf(Query.Rule("Source", QueryOp.EQUALS, "b.log")))
         withContext(ui) { session.applyFilter(Level.WARN, query) }
-        val bWarnOrWorse = Filter.And(listOf(LevelCondition.atLeast("Level", Level.WARN), TextCondition("Source", TextOp.EQUALS, "b.log")))
+        val bWarnOrWorse = Filter.And(
+            listOf(LevelCondition.atLeast("Level", Level.WARN), TextCondition("Source", TextOp.EQUALS, "b.log")),
+        )
         assertEquals(100, awaitShown(session, listOf(a, b), bWarnOrWorse).size)
         repeat(4) { round ->
             append(a, lines(50))
@@ -597,10 +625,15 @@ class LogSessionTest {
 
     @Test
     fun `a field that appended records are the first to have is shown, also in a merge`() = runBlocking {
-        fun json(n: Int, extra: String = "") = """{"timestamp":"2026-10-01T08:00:0$n.000Z","message":"m$n"$extra}""" + "\n"
+        fun json(n: Int, extra: String = "") =
+            """{"timestamp":"2026-10-01T08:00:0$n.000Z","message":"m$n"$extra}""" + "\n"
         for (merged in listOf(false, true)) {
             val events = Files.writeString(dir.resolve("events-$merged.json"), json(1) + json(2))
-            val files = if (merged) listOf(events, Files.writeString(dir.resolve("a.log"), lines(5))) else listOf(events)
+            val files = if (merged) {
+                listOf(events, Files.writeString(dir.resolve("a.log"), lines(5)))
+            } else {
+                listOf(events)
+            }
             val recorder = Recorder()
             val (session, shown) = open(files, recorder)
             fun exceptionHidden() = shown.schema.fields.single { it.name == "Exception" }.hidden
@@ -648,8 +681,15 @@ class LogSessionTest {
     // Without the logger, its name becomes part of the message.
     private val edited = Parser.Pattern("Mine", "%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %-5p %m%n")
 
-    private suspend fun openWith(settings: SettingsStore, file: Path, recorder: Recorder, chosen: Parser?): Pair<LogSession, ShownLog> {
-        val session = withContext(ui) { LogSession(listOf(file), scope, settings, recorder, chosen = listOf(chosen)).also { it.start() } }
+    private suspend fun openWith(
+        settings: SettingsStore,
+        file: Path,
+        recorder: Recorder,
+        chosen: Parser?,
+    ): Pair<LogSession, ShownLog> {
+        val session = withContext(ui) {
+            LogSession(listOf(file), scope, settings, recorder, chosen = listOf(chosen)).also { it.start() }
+        }
         return session to withTimeout(10_000) { recorder.loads.receive() }
     }
 
@@ -791,7 +831,8 @@ class LogSessionTest {
         val other = Files.writeString(dir.resolve("other.log"), "plain text\n".repeat(20))
         val recorder = Recorder()
         withContext(ui) {
-            LogSession(files + listOf(other), scope, NoSettings, recorder, chosen = List(4) { null } + Parser.BUILT_IN.first()).start()
+            val chosen = List(4) { null } + Parser.BUILT_IN.first()
+            LogSession(files + listOf(other), scope, NoSettings, recorder, chosen = chosen).start()
         }
         val title = withTimeout(10_000) { recorder.problem.await() }
         assertTrue(title.startsWith("other.log does not match"), title)

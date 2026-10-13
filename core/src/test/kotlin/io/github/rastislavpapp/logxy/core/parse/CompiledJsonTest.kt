@@ -42,7 +42,11 @@ class CompiledJsonTest {
 
     @Test
     fun `rejects what is no object`() {
-        for (text in listOf("", "plain text", "[1,2]", "{\"a\":1", "{\"a\" 1}", "{\"a\":1,}", "{a:1}", "{\"a\":1} trailing", "{\"a\":\"open}")) {
+        val texts = listOf(
+            "", "plain text", "[1,2]", "{\"a\":1", "{\"a\" 1}",
+            "{\"a\":1,}", "{a:1}", "{\"a\":1} trailing", "{\"a\":\"open}",
+        )
+        for (text in texts) {
             assertNull(entries(text), text)
         }
     }
@@ -100,7 +104,11 @@ class CompiledJsonTest {
         assertEquals(epochNanos("2026-10-01T06:00:05.5Z"), nanos("2026-10-01T08:00:05,5", ZoneId.of("Europe/Prague")))
         // The cached minute must not leak into the next timestamp's offset.
         assertEquals(epochNanos("2026-10-01T08:00:01Z"), nanos("2026-10-01T08:00:01Z"))
-        for (bad in listOf("2026-10-01", "2026-13-01T08:00:00Z", "2026-10-01T08:00:00X", "2026-10-01T08:00:00.Z", "2026-10-01T08:00:00+2")) {
+        val bads = listOf(
+            "2026-10-01", "2026-13-01T08:00:00Z", "2026-10-01T08:00:00X",
+            "2026-10-01T08:00:00.Z", "2026-10-01T08:00:00+2",
+        )
+        for (bad in bads) {
             assertNull(nanos(bad), bad)
         }
     }
@@ -121,7 +129,8 @@ class CompiledJsonTest {
     fun `reads roles from the first key of each list that a record has`() {
         val parser = CompiledJson(RoleKeys(message = listOf("message", "msg")), ZoneOffset.UTC)
         val lines = listOf(
-            """{"msg":"short","message":"long","level":"WARN","@timestamp":"2026-10-01T08:00:00.123Z","logger_name":"a.B"}""",
+            """{"msg":"short","message":"long","level":"WARN",""" +
+                """"@timestamp":"2026-10-01T08:00:00.123Z","logger_name":"a.B"}""",
             """not json""",
         ).map { it.toByteArray() }
         val preview = ParserPreview.preview(parser, lines)
@@ -145,14 +154,16 @@ class CompiledJsonTest {
         assertEquals("Started\n", read(docker, "Message"))
         assertEquals("2026-10-01 08:00:00.123", read(docker, "Timestamp"))
 
-        val serilog = """{"@t":"2026-10-01T08:00:00.123Z","@mt":"{User} logged in","@m":"\"alice\" logged in","@l":"Warning","@x":"System.Exception: boom","User":"alice"}"""
+        val serilog = """{"@t":"2026-10-01T08:00:00.123Z","@mt":"{User} logged in","@m":"\"alice\" logged in",""" +
+            """"@l":"Warning","@x":"System.Exception: boom","User":"alice"}"""
         assertEquals("\"alice\" logged in", read(serilog, "Message"))
         assertEquals("2026-10-01 08:00:00.123", read(serilog, "Timestamp"))
         assertEquals("Warning", read(serilog, "Level"))
         assertEquals("System.Exception: boom", read(serilog, "Exception"))
         assertEquals("{User} logged in", read("""{"@t":"2026-10-01T08:00:00Z","@mt":"{User} logged in"}""", "Message"))
 
-        val gelf = """{"version":"1.1","host":"web-1","short_message":"Failed","full_message":"Failed\nat x","timestamp":1790841600.1234,"level":3}"""
+        val gelf = """{"version":"1.1","host":"web-1","short_message":"Failed","full_message":"Failed\nat x",""" +
+            """"timestamp":1790841600.1234,"level":3}"""
         assertEquals("Failed", read(gelf, "Message"))
         assertEquals("Failed\nat x", read(gelf, "Exception"))
         assertEquals("2026-10-01 08:00:00.123", read(gelf, "Timestamp"))

@@ -30,7 +30,8 @@ class AccessLogTest {
         List(recordCount) { rowValues(it, 1000)[field] }
     }
 
-    private fun ParsedLog.matching(condition: Filter) = runBlocking { FilterEngine(this@matching).prepare(condition).run() }.rows.toList()
+    private fun ParsedLog.matching(condition: Filter) =
+        runBlocking { FilterEngine(this@matching).prepare(condition).run() }.rows.toList()
 
     private val sample = """
         203.0.113.7 - alice [13/Oct/2026:10:00:00 +0200] "GET /api/users?id=3 HTTP/1.1" 200 512 "https://example.com/" "Mozilla/5.0 (X11; \"Linux\")"
@@ -46,7 +47,9 @@ class AccessLogTest {
                 assertEquals(4, log.recordCount)
                 // No record has an ident.
                 assertEquals(
-                    listOf("Host", "User", "Timestamp", "Method", "Request", "Status", "Bytes", "Referer", "User agent"),
+                    listOf(
+                        "Host", "User", "Timestamp", "Method", "Request", "Status", "Bytes", "Referer", "User agent",
+                    ),
                     log.schema.fields.filter { !it.hidden }.map { it.name },
                 )
                 assertEquals(listOf("203.0.113.7", "198.51.100.2", "192.0.2.1", "192.0.2.9"), log.column("Host"))
@@ -85,7 +88,11 @@ class AccessLogTest {
     @Test
     fun `trailing spaces end a line`() {
         val matcher = CompiledAccessLog().newMatcher()
-        for (line in listOf("""192.0.2.1 - - [13/Oct/2026:08:00:00 +0000] "GET / HTTP/1.1" 200 5 """, """192.0.2.1 - - [13/Oct/2026:08:00:00 +0000] "GET / HTTP/1.1" 200 5 "-" "-"  """)) {
+        val lines = listOf(
+            """192.0.2.1 - - [13/Oct/2026:08:00:00 +0000] "GET / HTTP/1.1" 200 5 """,
+            """192.0.2.1 - - [13/Oct/2026:08:00:00 +0000] "GET / HTTP/1.1" 200 5 "-" "-"  """,
+        )
+        for (line in lines) {
             val bytes = line.toByteArray()
             assertEquals(true, matcher.match(bytes, 0, bytes.size), line)
         }
@@ -102,7 +109,8 @@ class AccessLogTest {
     @Test
     fun `many distinct clients and agents are stored as spans`() {
         val lines = (0..<40_000).joinToString("\n", postfix = "\n") { i ->
-            """10.${i / 65536}.${i / 256 % 256}.${i % 256} - - [13/Oct/2026:08:00:00 +0000] "GET /$i HTTP/1.1" 200 1 "https://example.com/$i" "agent/$i""""
+            val host = "10.${i / 65536}.${i / 256 % 256}.${i % 256}"
+            """$host - - [13/Oct/2026:08:00:00 +0000] "GET /$i HTTP/1.1" 200 1 "https://example.com/$i" "agent/$i""""
         }
         parse(lines).use { log ->
             assertEquals(40_000, log.recordCount)
