@@ -62,6 +62,7 @@ internal interface LoadedLog {
 internal suspend fun loadedLog(parts: List<LogData>, names: List<String>): LoadedLog =
     if (parts.size == 1) SingleLoad(parts.single()) else MergedLoad(MergedLog.build(parts, names))
 
+/** A load of one file: its records are the log's own, and a row's origin is the record itself. */
 internal class SingleLoad(private val log: LogData) : LoadedLog {
     private var schema: Schema = log.schema
 
@@ -93,6 +94,7 @@ internal class SingleLoad(private val log: LogData) : LoadedLog {
     }
 }
 
+/** A load of several files merged by time; [settle] merges appended records in, or asks to merge again when they no longer fit after the others. */
 internal class MergedLoad(private val log: MergedLog) : LoadedLog {
     private var schema: Schema = log.schema
 

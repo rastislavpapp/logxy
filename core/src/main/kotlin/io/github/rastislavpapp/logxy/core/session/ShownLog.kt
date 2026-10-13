@@ -11,11 +11,13 @@ import java.io.IOException
 
 /** What [ShownLog.copyColumn] got. */
 sealed interface CopyResult {
+    /** The column's values, one line per shown row. */
     data class Copied(val text: String) : CopyResult
 
     /** The session reloaded or closed the files while copying. */
     data object FileChanged : CopyResult
 
+    /** Reading the file failed, for the reason [message] gives. */
     data class Failed(val message: String) : CopyResult
 }
 
@@ -77,6 +79,7 @@ class ShownLog internal constructor(private val loaded: LoadedLog) {
         return rows.indexOf(record)
     }
 
+    /** The level of [record], as the current level mapping reads its level text; null if it has none or the shown log ended. */
     fun level(record: Int): Level? = if (ended) null else records.level(record)
 
     /** Epoch nanoseconds of [record]'s timestamp, or null if there is none. */
@@ -192,8 +195,10 @@ class ShownLog internal constructor(private val loaded: LoadedLog) {
         found.replaceFrom(from, records)
     }
 
+    /** Forgets the found records, e.g. when the search is cleared. */
     internal fun clearFound() = showFound(IntArray(0))
 
+    /** Ends the shown log before its load's files close: from now on it has no rows and its reads return nothing (ADR 0001). */
     internal fun end() {
         ended = true
     }

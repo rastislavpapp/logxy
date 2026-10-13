@@ -105,8 +105,10 @@ interface SessionListener {
     /** The records the search found, or whether it runs ([ShownLog.isSearching]), changed; see [LogSession.search]. */
     fun foundChanged()
 
+    /** [LogSession.follow], keeping the end of the files in view, was turned on or off. */
     fun followChanged(follow: Boolean)
 
+    /** [LogSession.status] changed: sizes, counts, filtering, or a problem to show. */
     fun statusChanged(status: SessionStatus)
 }
 
@@ -260,6 +262,7 @@ class LogSession internal constructor(
     var status = SessionStatus(message = "Indexing…")
         private set
 
+    /** Starts the first load and listens to settings changes; call once, after the listener is ready for events. */
     fun start() {
         settings.addListener(settingsListener)
         launchLoad()
