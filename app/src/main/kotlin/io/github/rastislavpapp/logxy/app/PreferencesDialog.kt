@@ -121,7 +121,7 @@ class PreferencesDialog(
         if (settings.maxMemory != before.maxMemory) {
             val options = arrayOf("Restart Now", "Later")
             restartAfterClose = JOptionPane.showOptionDialog(
-                this, "The new memory limit applies when logxy starts again. Restart now? Open tabs are reopened with their filters.", "Memory Limit",
+                this, "The new memory limit applies when logxy starts again. Restart now? Open tabs are reopened with their parsers and filters.", "Memory Limit",
                 JOptionPane.DEFAULT_OPTION, JOptionPane.QUESTION_MESSAGE, null, options, options[0],
             ) == 0
         }

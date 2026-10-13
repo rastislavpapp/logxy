@@ -85,18 +85,7 @@ data class Settings(
             if (!Files.exists(path)) return Settings()
             val properties = PropertiesFiles.load(path)
 
-            val formats = numbered(properties, "format").mapNotNull { n ->
-                val name = properties.getProperty("format.$n.name")?.trim().orEmpty()
-                if (name.isEmpty()) return@mapNotNull null
-                val type = properties.getProperty("format.$n.type", "pattern")
-                if (type == "json") return@mapNotNull LogFormat.Json(name, jsonKeys(properties, "format.$n.keys."))
-                val layout = properties.getProperty("format.$n.layout") ?: return@mapNotNull null
-                when (type) {
-                    "pattern" -> LogFormat.Pattern(name, layout)
-                    "regex" -> LogFormat.Regex(name, layout, properties.getProperty("format.$n.timestamp", DEFAULT_TIMESTAMP))
-                    else -> null
-                }
-            }
+            val formats = numbered(properties, "format").mapNotNull { n -> readFormat(properties, "format.$n.")?.takeIf { it != LogFormat.Raw } }
             val levels = properties.stringPropertyNames()
                 .filter { it.startsWith("level.") }
                 .mapNotNull { key ->
@@ -127,26 +116,7 @@ data class Settings(
         /** Writes [settings] to [path], replacing the file only once the new one is complete. */
         fun save(path: Path, settings: Settings) {
             val properties = Properties()
-            settings.formats.forEachIndexed { i, format ->
-                val n = i + 1
-                when (format) {
-                    is LogFormat.Pattern -> {
-                        properties["format.$n.type"] = "pattern"
-                        properties["format.$n.layout"] = format.pattern
-                    }
-                    is LogFormat.Regex -> {
-                        properties["format.$n.type"] = "regex"
-                        properties["format.$n.layout"] = format.regex
-                        properties["format.$n.timestamp"] = format.timestampPattern
-                    }
-                    is LogFormat.Json -> {
-                        properties["format.$n.type"] = "json"
-                        JSON_ROLES.forEach { (key, keys) -> properties["format.$n.keys.$key"] = keys(format.keys).joinToString(",") }
-                    }
-                    LogFormat.Raw -> return@forEachIndexed
-                }
-                properties["format.$n.name"] = format.name
-            }
+            settings.formats.filter { it != LogFormat.Raw }.forEachIndexed { i, format -> writeFormat(properties, "format.${i + 1}.", format) }
             settings.deletedBuiltIns.forEachIndexed { i, name -> properties["deleted-built-in.${i + 1}.name"] = name }
             settings.filters.forEachIndexed { i, filter ->
                 properties["filter.${i + 1}.name"] = filter.name
@@ -161,6 +131,41 @@ data class Settings(
                 settings.levels.names.forEach { (text, level) -> properties["level.$text"] = level.name }
             }
             PropertiesFiles.store(path, properties, "logxy settings")
+        }
+
+        /** Reads the format stored under [prefix] (e.g. `format.1.`); null if it is incomplete. */
+        internal fun readFormat(properties: Properties, prefix: String): LogFormat? {
+            val name = properties.getProperty("${prefix}name")?.trim().orEmpty()
+            if (name.isEmpty()) return null
+            val type = properties.getProperty("${prefix}type", "pattern")
+            if (type == "raw") return LogFormat.Raw
+            if (type == "json") return LogFormat.Json(name, jsonKeys(properties, "${prefix}keys."))
+            val layout = properties.getProperty("${prefix}layout") ?: return null
+            return when (type) {
+                "pattern" -> LogFormat.Pattern(name, layout)
+                "regex" -> LogFormat.Regex(name, layout, properties.getProperty("${prefix}timestamp", DEFAULT_TIMESTAMP))
+                else -> null
+            }
+        }
+
+        internal fun writeFormat(properties: Properties, prefix: String, format: LogFormat) {
+            when (format) {
+                is LogFormat.Pattern -> {
+                    properties["${prefix}type"] = "pattern"
+                    properties["${prefix}layout"] = format.pattern
+                }
+                is LogFormat.Regex -> {
+                    properties["${prefix}type"] = "regex"
+                    properties["${prefix}layout"] = format.regex
+                    properties["${prefix}timestamp"] = format.timestampPattern
+                }
+                is LogFormat.Json -> {
+                    properties["${prefix}type"] = "json"
+                    JSON_ROLES.forEach { (key, keys) -> properties["${prefix}keys.$key"] = keys(format.keys).joinToString(",") }
+                }
+                LogFormat.Raw -> properties["${prefix}type"] = "raw"
+            }
+            properties["${prefix}name"] = format.name
         }
 
         const val DEFAULT_TIMESTAMP = "yyyy-MM-dd HH:mm:ss.SSS"
