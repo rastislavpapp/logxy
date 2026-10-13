@@ -1,3 +1,6 @@
+// Collecting first keeps garbage out of the heap readings.
+@file:Suppress("ExplicitGarbageCollectionCall")
+
 package io.github.rastislavpapp.logxy.tools
 
 import io.github.rastislavpapp.logxy.core.filter.LevelCondition

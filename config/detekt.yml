@@ -2,19 +2,43 @@
 
 complexity:
   # Hot loops over bytes are long and branchy on purpose: splitting them costs speed.
+  # Dense conditions are caught by MaxLineLength.
+  ComplexCondition:
+    active: false
   CyclomaticComplexMethod:
     active: false
+  LargeClass:
+    active: false
   LongMethod:
+    active: false
+  NestedBlockDepth:
     active: false
   TooManyFunctions:
     active: false
 
+empty-blocks:
+  EmptyFunctionBlock:
+    # Test fakes implement listeners with empty bodies.
+    ignoreOverridden: true
+
+exceptions:
+  # Catch-alls guard resources and background jobs; a parse error caught to return null is not lost.
+  SwallowedException:
+    active: false
+  TooGenericExceptionCaught:
+    active: false
+
 style:
+  # Parsers scan with `continue` and `break` on purpose.
+  LoopWithTooManyJumpStatements:
+    active: false
   # Mostly Swing pixel sizes and byte constants, which read best where they are used.
   MagicNumber:
     active: false
   # Early returns and guard clauses are the house style.
   ReturnCount:
+    active: false
+  ThrowsCount:
     active: false
 
 ktlint:

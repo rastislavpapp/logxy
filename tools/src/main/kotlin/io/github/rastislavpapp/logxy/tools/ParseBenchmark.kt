@@ -1,3 +1,6 @@
+// Collecting first keeps garbage from earlier runs out of the timings and heap readings.
+@file:Suppress("ExplicitGarbageCollectionCall")
+
 package io.github.rastislavpapp.logxy.tools
 
 import io.github.rastislavpapp.logxy.core.formatByteSize
