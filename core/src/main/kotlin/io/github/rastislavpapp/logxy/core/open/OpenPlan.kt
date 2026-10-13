@@ -32,15 +32,16 @@ object OpenPlan {
 
     /**
      * The files of [paths]: folders as the log files in them. Of the paths to one file, through links,
-     * keeps only the first, as a merge of a file with itself would show each record twice.
+     * keeps only the first, as a merge of a file with itself would show each record twice. Tells [onFound]
+     * how many files it found so far in the folder it walks; stops soon once cancelled.
      */
-    fun find(paths: List<Path>): Found {
+    suspend fun find(paths: List<Path>, onFound: (folder: Path, count: Int) -> Unit = { _, _ -> }): Found {
         val empty = ArrayList<Path>()
         val problems = ArrayList<Pair<Path, String>>()
         val files = paths.map { it.toAbsolutePath().normalize() }.distinct().flatMap { path ->
             problem(path)?.let { problems += path to it; return@flatMap emptyList() }
             if (!Files.isDirectory(path)) return@flatMap listOf(FoundFile(path))
-            LogFolders.files(path).map { FoundFile(it, it.parent != path) }.also { if (it.isEmpty()) empty.add(path) }
+            LogFolders.files(path) { onFound(path, it) }.map { FoundFile(it, it.parent != path) }.also { if (it.isEmpty()) empty.add(path) }
         }
         return Found(files.distinctBy { identity(it.path) }, empty, problems)
     }

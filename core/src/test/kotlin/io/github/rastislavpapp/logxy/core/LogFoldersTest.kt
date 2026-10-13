@@ -1,11 +1,17 @@
 package io.github.rastislavpapp.logxy.core
 
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.job
+import kotlinx.coroutines.runBlocking
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.io.TempDir
 
@@ -18,7 +24,7 @@ class LogFoldersTest {
         dir.resolve(name).also { Files.createDirectories(it.parent) }.also { Files.write(it, content) }
 
     @Test
-    fun `finds log files, in subfolders too, leaving out what cannot be a log`() {
+    fun `finds log files, in subfolders too, leaving out what cannot be a log`() = runBlocking {
         write("b.log", "two\n".toByteArray())
         write("a.log", "one\n".toByteArray())
         write("sub/deep/c.txt", "three\n".toByteArray())
@@ -29,13 +35,13 @@ class LogFoldersTest {
         val zip = dir.resolve("old.zip")
         ZipOutputStream(Files.newOutputStream(zip)).use { it.putNextEntry(ZipEntry("x.log")); it.write(0); it.closeEntry() }
 
-        fun names(recursive: Boolean) = LogFolders.files(dir, recursive).map { dir.relativize(it).joinToString("/") }
+        suspend fun names(recursive: Boolean) = LogFolders.files(dir, recursive).map { dir.relativize(it).joinToString("/") }
         assertEquals(listOf("a.log", "b.log", "old.zip", "sub/deep/c.txt"), names(recursive = true))
         assertEquals(listOf("a.log", "b.log", "old.zip"), names(recursive = false))
     }
 
     @Test
-    fun `finds linked log files and stops at link loops`() {
+    fun `finds linked log files and stops at link loops`() = runBlocking {
         val target = write("pods/app/0.log", "one\n".toByteArray())
         val containers = Files.createDirectories(dir.resolve("containers"))
         // Windows creates links only with a privilege.
@@ -45,5 +51,20 @@ class LogFoldersTest {
         assertEquals(listOf(containers.resolve("app.log")), LogFolders.files(containers))
         // The link and its target are found once.
         assertEquals(listOf(containers.resolve("app.log")), LogFolders.files(dir))
+    }
+
+    @Test
+    fun `a cancelled walk stops at the next file`() = runBlocking {
+        repeat(300) { write("sub$it/$it.log", "line\n".toByteArray()) }
+        var counted = 0
+        val walk = async(Dispatchers.IO) {
+            val self = coroutineContext.job
+            LogFolders.files(dir) { found ->
+                counted = found
+                if (found == 1) self.cancel()
+            }
+        }
+        assertFailsWith<CancellationException> { walk.await() }
+        assertEquals(1, counted)
     }
 }
