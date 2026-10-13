@@ -1,6 +1,7 @@
 package io.github.rastislavpapp.logxy.core.session
 
 import io.github.rastislavpapp.logxy.core.index.IndexProgress
+import io.github.rastislavpapp.logxy.core.log.AppendedData
 import io.github.rastislavpapp.logxy.core.log.Level
 import io.github.rastislavpapp.logxy.core.log.ParsedLog
 import io.github.rastislavpapp.logxy.core.log.Records
@@ -38,9 +39,21 @@ class ShownLogTest {
         override fun sourceText(record: Int) = "r$record\n"
     }
 
+    /** Loaded [records] that only time lookups and reads use. */
+    private class Timed(override val records: Records) : LoadedLog {
+        override val parts get() = throw UnsupportedOperationException()
+        override val origin get() = throw UnsupportedOperationException()
+        override fun newFilter() = throw UnsupportedOperationException()
+        override fun firstRecordFrom(part: Int, record: Int) = throw UnsupportedOperationException()
+        override fun templateOf(record: Int) = throw UnsupportedOperationException()
+        override fun fieldReader(field: Int, records: IntArray?, count: Int) = throw UnsupportedOperationException()
+        override fun append(part: Int, data: AppendedData) = throw UnsupportedOperationException()
+        override suspend fun settle() = throw UnsupportedOperationException()
+    }
+
     private val none = Records.NO_TIMESTAMP
 
-    private fun shown(vararg times: Long) = ShownLog(TimedRecords(times))
+    private fun shown(vararg times: Long) = ShownLog(Timed(TimedRecords(times)))
 
     private fun ShownLog.records() = List(size) { recordAt(it) }
 
@@ -125,7 +138,7 @@ class ShownLogTest {
     @Test
     fun `copies a column of the rows shown or of given records`() {
         parse("a.log", "2026-10-01 10:00:01.000 INFO  a.A - one\n2026-10-01 10:00:02.000 WARN  a.B - two\nat x.y\n2026-10-01 10:00:03.000 INFO  a.A - three\n").use { log ->
-            val shown = ShownLog(log)
+            val shown = ShownLog(SingleLoad(log))
             val message = log.field("Message")
             assertEquals(CopyResult.Copied("one\ntwo\nat x.y\nthree\n"), runBlocking { shown.copyColumn(message) })
             shown.showRows(intArrayOf(0, 2))
@@ -138,7 +151,7 @@ class ShownLogTest {
     fun `copies the records there were while more are appended`() {
         val file = Files.writeString(dir.resolve("live.log"), (1..1000).joinToString("") { "2026-10-01 10:00:01.000 INFO  a.A - m$it\n" })
         runBlocking { ParsedLog.build(file, format, IndexProgress()) }.use { log ->
-            val shown = ShownLog(log)
+            val shown = ShownLog(SingleLoad(log))
             val result = runBlocking {
                 // Runs up to reading on another thread, as from the UI thread.
                 val copy = async(start = CoroutineStart.UNDISPATCHED) { shown.copyColumn(log.field("Message")) }
@@ -156,7 +169,7 @@ class ShownLogTest {
         val b = parse("b.log", "2026-10-01 10:00:02.000 WARN  b.B - B1\n")
         val merged = runBlocking { MergedLog.build(listOf(a, b)) }
         a.use { b.use {
-            val shown = ShownLog(merged)
+            val shown = ShownLog(MergedLoad(merged))
             assertEquals(CopyResult.Copied("A1\nB1\nA2\n"), runBlocking { shown.copyColumn(merged.field("Message")) })
             assertEquals(CopyResult.Copied("b.log\na.log\n"), runBlocking { shown.copyColumn(merged.field("Source"), intArrayOf(1, 2)) })
         } }

@@ -2,7 +2,6 @@ package io.github.rastislavpapp.logxy.core.session
 
 import io.github.rastislavpapp.logxy.core.config.Settings
 import io.github.rastislavpapp.logxy.core.filter.Filter
-import io.github.rastislavpapp.logxy.core.filter.FilterEngine
 import io.github.rastislavpapp.logxy.core.filter.FilterResult
 import io.github.rastislavpapp.logxy.core.filter.LevelCondition
 import io.github.rastislavpapp.logxy.core.filter.PreparedFilter
@@ -10,10 +9,6 @@ import io.github.rastislavpapp.logxy.core.filter.RecordFilter
 import io.github.rastislavpapp.logxy.core.filter.TextCondition
 import io.github.rastislavpapp.logxy.core.filter.TextOp
 import io.github.rastislavpapp.logxy.core.log.Level
-import io.github.rastislavpapp.logxy.core.log.LogData
-import io.github.rastislavpapp.logxy.core.log.Records
-import io.github.rastislavpapp.logxy.core.merge.MergedFilter
-import io.github.rastislavpapp.logxy.core.merge.MergedLog
 import io.github.rastislavpapp.logxy.core.parse.LogFormat
 import io.github.rastislavpapp.logxy.core.query.Query
 import io.github.rastislavpapp.logxy.core.query.QueryException
@@ -119,8 +114,7 @@ class LogSessionTest {
         while (!done) {
             delay(50)
             withContext(ui) {
-                val records = session.records!!
-                val fresh = if (records is MergedLog) MergedFilter(records) else FilterEngine(records as LogData)
+                val fresh = session.loaded!!.newFilter()
                 // run() frees the UI thread, so the session may read appended data meanwhile: only a result covering all of it counts.
                 val result = fresh.prepare(filter).run()
                 expected = result.rows.toList()
@@ -258,8 +252,7 @@ class LogSessionTest {
                 withContext(ui) {
                     val shown = session.shown!!
                     assertFoundShown(shown)
-                    val records = session.records!!
-                    val fresh = if (records is MergedLog) MergedFilter(records) else FilterEngine(records as LogData)
+                    val fresh = session.loaded!!.newFilter()
                     val condition = search.condition()
                     val result = fresh.prepare(filter?.let { Filter.And(listOf(it, condition)) } ?: condition).run()
                     expected = result.rows.toList()
@@ -367,8 +360,8 @@ class LogSessionTest {
         var recording: Recording? = null
         val recorder = Recorder()
         val session = withContext(ui) {
-            LogSession(listOf(file), scope, NoSettings, recorder, { null }, emptyList()) { records ->
-                Recording(FilterEngine(records as LogData), search.condition()).also { recording = it }
+            LogSession(listOf(file), scope, NoSettings, recorder, { null }, emptyList()) { loaded ->
+                Recording(loaded.newFilter(), search.condition()).also { recording = it }
             }.also { it.start() }
         }
         val shown = withTimeout(10_000) { recorder.loads.receive() }

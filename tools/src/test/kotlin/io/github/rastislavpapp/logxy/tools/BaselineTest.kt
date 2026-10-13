@@ -13,6 +13,7 @@ import io.github.rastislavpapp.logxy.core.log.ParsedLog
 import io.github.rastislavpapp.logxy.core.merge.MergedFilter
 import io.github.rastislavpapp.logxy.core.merge.MergedLog
 import io.github.rastislavpapp.logxy.core.parse.LogFormat
+import io.github.rastislavpapp.logxy.core.session.countTimes
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
@@ -88,6 +89,7 @@ private fun measureAll(): Map<String, Double> {
         record("patterns: count all again", best { runBlocking { engine.countPatterns(null, parsed.recordCount) } })
         val hide = Filter.Not(PatternCondition("Message", setOf(top)))
         record("filter hide most common pattern", best { runBlocking { FilterEngine(parsed).prepare(hide).run() } })
+        record("count times", best { runBlocking { countTimes(parsed) } })
     }
 
     // A followed log: a filter and a search catch up on records appended to a copy of the main file.
@@ -147,6 +149,10 @@ private fun measureAll(): Map<String, Double> {
         val timeout = TextCondition("Message", TextOp.EQUALS, "*timeout*")
         record("merge: filter message contains 'timeout'", best { runBlocking { MergedFilter(merged).prepare(timeout, 0).run() } })
         record("merge: count patterns", best { runBlocking { MergedFilter(merged).countPatterns(null, merged.recordCount) } })
+        record("merge: count times", best { runBlocking { countTimes(merged) } })
+        // As for a filter's result: positions to look up.
+        val everyOther = IntArray(merged.recordCount / 2) { it * 2 }
+        record("merge: count times of every other row", best { runBlocking { countTimes(merged, everyOther) } })
     } finally {
         parts.forEach { it.close() }
     }
