@@ -35,7 +35,7 @@ internal interface RecordGenerator {
 /**
  * Writes log4j-style lines (`%d [%t] %-5p %c - %m%n`, or `%d [%t] %-5p %c %X - %m%n` with [mdc])
  * with occasional stack traces until [size] bytes; with [json], JSON lines as logstash-logback-encoder
- * writes them; with [rabbitmq], a RabbitMQ broker's JSON log; with [logfmt], logfmt lines. With [errors] or [warnings], exactly that
+ * writes them; with [rabbitmq], a RabbitMQ broker's JSON log; with [logfmt], logfmt lines; with [access], a web server's access log. With [errors] or [warnings], exactly that
  * many records of the level are written, at random places.
  */
 fun generateLog(
@@ -48,6 +48,7 @@ fun generateLog(
     json: Boolean = false,
     rabbitmq: Boolean = false,
     logfmt: Boolean = false,
+    access: Boolean = false,
 ) {
     val random = SplittableRandom(seed)
     val placed = listOfNotNull(errors?.let { "ERROR" to it }, warnings?.let { "WARN" to it })
@@ -55,7 +56,11 @@ fun generateLog(
     val places = placed.flatMap { (level, count) -> List(count) { random.nextLong(size) to level } }.sortedBy { it.first }
     var nextPlace = 0
     val excluded = placed.map { it.first }.toSet()
-    val generator = if (rabbitmq) RabbitMqGenerator(random, excluded) else LogGenerator(random, mdc, excluded, json, logfmt)
+    val generator = when {
+        rabbitmq -> RabbitMqGenerator(random, excluded)
+        access -> AccessLogGenerator(random)
+        else -> LogGenerator(random, mdc, excluded, json, logfmt)
+    }
     val started = System.nanoTime()
     var written = 0L
     var lines = 0L

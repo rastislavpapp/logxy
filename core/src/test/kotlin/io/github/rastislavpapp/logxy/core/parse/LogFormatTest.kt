@@ -107,6 +107,20 @@ class LogFormatTest {
     }
 
     @Test
+    fun `detects access logs, common and combined`() {
+        val common = Files.writeString(dir.resolve("access.log"), """
+            203.0.113.7 - - [13/Oct/2026:10:00:00 +0200] "GET / HTTP/1.1" 200 512
+            203.0.113.8 - bob [13/Oct/2026:10:00:01 +0200] "POST /login HTTP/1.1" 302 -
+        """.trimIndent())
+        assertEquals(LogFormat.AccessLog("Access log"), LogFormat.detect(common))
+        val combined = Files.writeString(dir.resolve("access-combined.log"), """
+            203.0.113.7 - - [13/Oct/2026:10:00:00 +0200] "GET / HTTP/1.1" 200 512 "-" "curl/8.0"
+            203.0.113.8 - - [13/Oct/2026:10:00:01 +0200] "GET /a HTTP/2.0" 404 0 "https://example.com/" "Mozilla/5.0"
+        """.trimIndent())
+        assertEquals(LogFormat.AccessLog("Access log"), LogFormat.detect(combined))
+    }
+
+    @Test
     fun `a pattern log whose messages hold key=value pairs is not logfmt`() {
         val file = Files.writeString(dir.resolve("kv.log"), """
             2026-10-01 08:00:00.001 [main] INFO  com.example.App - user=alice action=login result=ok

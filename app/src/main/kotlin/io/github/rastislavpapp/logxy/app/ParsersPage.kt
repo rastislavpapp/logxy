@@ -324,6 +324,7 @@ class ParsersPage(
             ),
             KindChoice("JSON lines", LogFormat.Json, roleKeys(RoleKeys())),
             KindChoice("logfmt (key=value)", LogFormat.Logfmt, roleKeys(RoleKeys.LOGFMT)),
+            KindChoice("Web server access log", LogFormat.AccessLog, emptyList()),
         )
 
         /** One setting per role, listing the keys that fill it. */
