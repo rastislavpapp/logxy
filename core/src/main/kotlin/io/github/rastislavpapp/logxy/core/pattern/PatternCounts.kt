@@ -13,7 +13,10 @@ import kotlinx.coroutines.withContext
 
 /** Where a view's row comes from: which log of [PatternCounts.count]'s, and which record there. */
 internal interface RowOrigin {
+    /** The index, among the counted logs, of the log [row] comes from. */
     fun part(row: Int): Int
+
+    /** The record number in that log. */
     fun record(row: Int): Int
 }
 
@@ -30,8 +33,10 @@ class PatternCounts internal constructor(
 
     val size get() = templates.size
 
+    /** Rows with the template at [index] of [templates], of any level or none. */
     fun total(index: Int): Int = totals[index]
 
+    /** Rows with the template at [index] of [templates] and of [level]. */
     fun count(index: Int, level: Level): Int = counts[index * SLOTS + level.ordinal]
 
     /** Levels at least one counted row has, from least to most severe. */

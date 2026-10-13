@@ -13,6 +13,7 @@ object QueryParser {
 
     private class Token(val kind: Kind, val text: String, val offset: Int, val length: Int)
 
+    /** The query [text] says; [Query.EMPTY] for blank text. Throws [QueryException] with the position of the first error. */
     fun parse(text: String): Query.Group {
         val parser = Parser(tokenize(text))
         if (parser.peek().kind == Kind.END) return Query.EMPTY
@@ -139,6 +140,7 @@ object QueryParser {
         return tokens
     }
 
+    /** Whether [text] reads back as one word without quotes or backticks: no spaces, quotes, parentheses or operators, and no keyword. */
     fun isBareWord(text: String) = text.isNotEmpty() &&
         text.none { it.isWhitespace() || it in "()\"`" || it in OPERATOR_CHARS } && text.uppercase() !in KEYWORDS
 }
@@ -146,6 +148,7 @@ object QueryParser {
 /** Writes a [Query] as text that [QueryParser] reads back to the same query. */
 object QueryPrinter {
 
+    /** [query] as text, quoting fields and values only where needed. */
     fun print(query: Query): String = when (query) {
         is Query.Group -> if (query.negated) "NOT (${items(query)})" else items(query)
         is Query.Rule -> (if (query.negated) "NOT " else "") + rule(query)

@@ -30,6 +30,7 @@ sealed interface Query {
     }
 }
 
+/** A comparison in a query rule, written as [symbol]; each `NOT_` op is the negation of the one before it. */
 enum class QueryOp(val symbol: String) {
     /** Wildcard match ignoring case. */
     EQUALS("=="),

@@ -9,5 +9,6 @@ interface SettingsStore {
     /** [listener] runs after the settings changed, on the thread that changed them. */
     fun addListener(listener: () -> Unit)
 
+    /** Stops calling [listener], e.g. when a session is disposed. */
     fun removeListener(listener: () -> Unit)
 }
