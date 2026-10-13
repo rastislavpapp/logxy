@@ -2,7 +2,7 @@
 # Runs the app on a virtual X display inside a container so it never touches the host desktop.
 # Usage: gui.sh COMMAND
 #   start [path...]    (re)start the app on files or folders anywhere on the host; builds the image on first use
-#   shot [name]        screenshot to out/NAME.png (default: shot) and print its path
+#   shot [name [X Y W H]]  screenshot to out/NAME.png (default: shot), cropped to the W×H region at X,Y
 #   click X Y          left click at screen coordinates read off a screenshot; also dclick, rclick, move
 #   type TEXT          type into the focused component
 #   key KEYS...        xdotool key names, one press each: ctrl+f Return Escape Page_Down shift+Tab
@@ -69,7 +69,11 @@ case "${1:-}" in
     ;;
   shot)
     f="${2:-shot}.png"
-    in_box import -window root "/out/$f"
+    if [[ $# -ge 6 ]]; then
+      in_box import -window root -crop "${5}x${6}+${3}+${4}" +repage "/out/$f"
+    else
+      in_box import -window root "/out/$f"
+    fi
     echo "$out/$f"
     ;;
   click)  in_box xdotool mousemove "$2" "$3" click 1 ;;
