@@ -1,7 +1,7 @@
 package io.github.rastislavpapp.logxy.app
 
 import io.github.rastislavpapp.logxy.core.config.OpenMode
-import io.github.rastislavpapp.logxy.core.merge.MergedLog
+import io.github.rastislavpapp.logxy.core.open.OpenPlan
 import io.github.rastislavpapp.logxy.core.parse.LogFormat
 import net.miginfocom.swing.MigLayout
 import java.awt.Window
@@ -105,7 +105,7 @@ class OpenFilesDialog(
             1 -> "Open ${names[this.files.indexOf(files.single())]}"
             else -> "Open ${files.size} files"
         }
-        val possible = modesFor(files.size, current?.size)
+        val possible = OpenPlan.modesFor(files.size, current?.size)
         radios.forEachIndexed { i, radio ->
             radio.text = label(choices[i], files.size, current != null)
             radio.isEnabled = choices[i] in possible
@@ -128,17 +128,6 @@ class OpenFilesDialog(
     }
 
     companion object {
-        /** What [count] files can do: merge with a current tab of [currentCount] files, merge on their own, or open in tabs. */
-        fun modesFor(count: Int, currentCount: Int?): List<OpenMode> = buildList {
-            if (count == 0) return@buildList
-            if (currentCount != null && currentCount + count <= MergedLog.MAX_PARTS) {
-                add(OpenMode.MERGE_INTO_CURRENT)
-                add(OpenMode.MERGE_WITH_CURRENT_IN_NEW)
-            }
-            if (count in 2..MergedLog.MAX_PARTS) add(OpenMode.MERGE)
-            add(OpenMode.TABS)
-        }
-
         fun label(mode: OpenMode, count: Int, hasCurrent: Boolean): String = when (mode) {
             OpenMode.MERGE_INTO_CURRENT -> "Merge into the current tab"
             OpenMode.MERGE_WITH_CURRENT_IN_NEW -> "Merge with the current tab into a new tab"

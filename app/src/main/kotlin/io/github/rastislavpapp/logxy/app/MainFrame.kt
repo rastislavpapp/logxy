@@ -2,15 +2,18 @@ package io.github.rastislavpapp.logxy.app
 
 import com.formdev.flatlaf.FlatClientProperties
 import com.formdev.flatlaf.extras.FlatSVGUtils
-import io.github.rastislavpapp.logxy.core.LogFolders
 import io.github.rastislavpapp.logxy.core.archive.ArchiveOrigin
 import io.github.rastislavpapp.logxy.core.archive.CompressedSpool
 import io.github.rastislavpapp.logxy.core.archive.ZipSpool
 import io.github.rastislavpapp.logxy.core.config.OpenMode
-import io.github.rastislavpapp.logxy.core.config.SavedFilter
 import io.github.rastislavpapp.logxy.core.config.Settings
-import io.github.rastislavpapp.logxy.core.log.Level
 import io.github.rastislavpapp.logxy.core.merge.MergedLog
+import io.github.rastislavpapp.logxy.core.open.Decision
+import io.github.rastislavpapp.logxy.core.open.FoundFile
+import io.github.rastislavpapp.logxy.core.open.OpenPlan
+import io.github.rastislavpapp.logxy.core.open.OpenSession
+import io.github.rastislavpapp.logxy.core.open.Reopen
+import io.github.rastislavpapp.logxy.core.open.SessionArgs
 import io.github.rastislavpapp.logxy.core.parse.LogFormat
 import net.miginfocom.swing.MigLayout
 import java.awt.BasicStroke
@@ -28,10 +31,8 @@ import java.awt.event.KeyEvent
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import java.io.File
-import java.nio.file.Files
 import java.nio.file.Path
 import java.text.NumberFormat
-import java.util.Base64
 import java.util.function.IntConsumer
 import javax.swing.Box
 import javax.swing.ButtonGroup
@@ -66,10 +67,6 @@ import kotlinx.coroutines.swing.Swing
 
 private const val CARD_PLACEHOLDER = "placeholder"
 private const val CARD_TABS = "tabs"
-private const val TAB_ARG = "--tab"
-private const val SELECT_ARG = "--select"
-private const val LEVEL_ARG = "--level"
-private const val QUERY_ARG = "--query"
 private const val LIVE_COLOR = "Actions.Green"
 private const val FOLLOW_COLOR = "Component.accentColor"
 private const val EXTRACT_DIALOG_DELAY_MILLIS = 300
@@ -230,9 +227,6 @@ class MainFrame : JFrame("logxy") {
         openFiles(chooser.selectedFiles.map { it.toPath() })
     }
 
-    /** A file to open; [inSubfolder] if it was found in a subfolder of an opened folder. */
-    private class Found(val path: Path, val inSubfolder: Boolean = false)
-
     /**
      * Opens [paths], folders as the log files in them, zip files as the files in them, and compressed
      * files (.gz, .zst) as their decompressed content: a single file into a tab if none is open;
@@ -240,21 +234,17 @@ class MainFrame : JFrame("logxy") {
      * and tabs of their own.
      */
     fun openFiles(paths: List<Path>) {
-        val existing = paths.map { it.toAbsolutePath().normalize() }.distinct().filter(::checkOpenable)
-        val empty = ArrayList<Path>()
-        val found = existing.flatMap { path ->
-            if (!Files.isDirectory(path)) return@flatMap listOf(Found(path))
-            LogFolders.files(path).map { Found(it, it.parent != path) }.also { if (it.isEmpty()) empty.add(path) }
-        }
-        val archives = found.map { it.path }.filter(::isArchive)
+        val found = OpenPlan.find(paths)
+        found.problems.forEach { (path, problem) -> tellCannotOpen(path, problem) }
+        val archives = found.files.map { it.path }.filter(::isArchive)
         if (archives.isEmpty()) {
-            tellNothingIn(empty)
-            return openFound(found)
+            tellNothingIn(found.empty)
+            return openFound(found.files)
         }
         extractThen(archives) { files ->
             tellLeftOut(archives)
-            tellNothingIn(empty + archives.filter { files[it].isNullOrEmpty() })
-            openFound(found.flatMap { item -> files[item.path]?.map { Found(it, item.inSubfolder) } ?: listOf(item) })
+            tellNothingIn(found.empty + archives.filter { files[it].isNullOrEmpty() })
+            openFound(found.files.flatMap { item -> files[item.path]?.map { FoundFile(it, item.inSubfolder) } ?: listOf(item) })
         }
     }
 
@@ -286,42 +276,21 @@ class MainFrame : JFrame("logxy") {
      * Opens [found] as the settings say, or as the user answers in the Open Files dialog: how to open
      * them, with which parsers, and whether with the files in subfolders.
      */
-    private fun openFound(found: List<Found>) {
+    private fun openFound(found: List<FoundFile>) {
         val current = selectedTab()
-        // Files the current tab already shows have nothing to add.
-        val candidates = found.distinctBy { it.path }.filter { current == null || it.path !in current.paths }
-        if (candidates.isEmpty()) return
-        val all = candidates.map { it.path }
-        val inSubfolders = candidates.filter { it.inSubfolder }.map { it.path }.toSet()
-        // With nothing open yet, a single file has only one way to open.
-        if (current == null && all.size == 1 && inSubfolders.isEmpty()) return openFile(all.single())
         val settings = AppSettings.current
-        val answer = settings.openMode?.let { remembered ->
-            val files = if (settings.includeSubfolders) all else all - inSubfolders
-            if (files.isEmpty()) return
-            val mode = rememberedMode(remembered, files.size, current?.paths?.size) ?: return@let null
-            OpenAnswer(mode, files, files.map { null }, settings.includeSubfolders, remember = false)
-        } ?: askHowToOpen(all, inSubfolders, current) ?: return
+        val answer = when (val decision = OpenPlan.decide(found, current?.paths, settings.openMode, settings.includeSubfolders)) {
+            Decision.Nothing -> return
+            is Decision.OpenOne -> return openFile(decision.path)
+            is Decision.Open -> OpenAnswer(decision.mode, decision.files, decision.files.map { null }, settings.includeSubfolders, remember = false)
+            is Decision.Ask -> askHowToOpen(decision.files, decision.inSubfolders, current) ?: return
+        }
         if (answer.remember) AppSettings.updateOrShowError(this, AppSettings.current.copy(openMode = answer.mode, includeSubfolders = answer.includeSubfolders))
         when (answer.mode) {
             OpenMode.MERGE_INTO_CURRENT -> mergeWithCurrent(current!!, answer.files, answer.formats, keepCurrent = false)
             OpenMode.MERGE_WITH_CURRENT_IN_NEW -> mergeWithCurrent(current!!, answer.files, answer.formats, keepCurrent = true)
             OpenMode.MERGE -> openMerged(answer.files, answer.formats)
             OpenMode.TABS -> answer.files.zip(answer.formats).forEach { (file, format) -> openFile(file, format) }
-        }
-    }
-
-    /**
-     * The closest of the modes [count] files can be opened in to the [remembered] one, with a current tab of
-     * [currentCount] files; null if merging is not possible as remembered (too many files), so the user decides.
-     */
-    private fun rememberedMode(remembered: OpenMode, count: Int, currentCount: Int?): OpenMode? {
-        val possible = OpenFilesDialog.modesFor(count, currentCount)
-        return when {
-            remembered in possible -> remembered
-            remembered != OpenMode.TABS && OpenMode.MERGE in possible -> OpenMode.MERGE
-            count == 1 -> OpenMode.TABS
-            else -> null
         }
     }
 
@@ -333,66 +302,42 @@ class MainFrame : JFrame("logxy") {
         return dialog.answer
     }
 
-    /** Arguments for [openArgs] that reopen the open tabs with their filters, e.g. after a restart. */
-    fun tabArgs(): List<String> = buildList {
-        for (i in 0..<tabs.tabCount) {
+    /** Arguments for [openArgs] that reopen the open tabs with their parsers and filters, e.g. after a restart. */
+    fun tabArgs(): List<String> = SessionArgs.write(
+        (0..<tabs.tabCount).map { i ->
             val tab = tabs.getComponentAt(i) as LogTab
-            add(TAB_ARG)
             // Extracted files by their zip or compressed file, as the next app extracts them anew.
-            tab.paths.forEach { add((originOf(it) ?: it).toString()) }
-            tab.filter.minimumLevel?.let { add(LEVEL_ARG); add(it.name) }
-            // Encoded, as Windows command lines do not reliably keep the quotes queries are full of.
-            if (tab.filter.query.isNotBlank()) {
-                add(QUERY_ARG)
-                add(Base64.getUrlEncoder().encodeToString(tab.filter.query.toByteArray()))
-            }
-        }
-        if (tabs.selectedIndex >= 0) add(SELECT_ARG).also { add(tabs.selectedIndex.toString()) }
-    }
+            OpenSession(tab.paths.map { (originOf(it) ?: it).toString() }, tab.chosenFormats, tab.filter)
+        },
+        tabs.selectedIndex,
+    )
 
     /** Opens files given on the command line, or the tabs from [tabArgs]: each file group in a tab, merged if several. */
     fun openArgs(args: List<String>) {
-        if (args.firstOrNull() != TAB_ARG) return openFiles(args.map { Path.of(it) })
-        class Group(val paths: MutableList<String> = ArrayList(), var level: Level? = null, var query: String = "") {
-            fun filter() = SavedFilter("", level, query).takeIf { it.minimumLevel != null || it.query.isNotBlank() }
-        }
-        val groups = ArrayList<Group>()
-        var selected = 0
-        val iterator = args.iterator()
-        fun value() = if (iterator.hasNext()) iterator.next() else ""
-        while (iterator.hasNext()) when (val arg = iterator.next()) {
-            TAB_ARG -> groups += Group()
-            LEVEL_ARG -> value().let { level -> groups.last().level = Level.entries.firstOrNull { it.name == level } }
-            QUERY_ARG -> groups.last().query = try {
-                String(Base64.getUrlDecoder().decode(value()))
-            } catch (_: IllegalArgumentException) {
-                ""
-            }
-            SELECT_ARG -> selected = value().toIntOrNull() ?: 0
-            else -> groups.last().paths.add(arg)
-        }
-        val args = groups.flatMap { it.paths }
+        val reopen = SessionArgs.read(args) ?: return openFiles(args.map { Path.of(it) })
+        val args = reopen.sessions.flatMap { it.paths }
         val zips = args.mapNotNull(ZipSpool::parseOrigin).map { it.zip }
         // Decompressed files are saved as their .gz or .zst, and decompressed again.
         val compressed = args.filter { ZipSpool.parseOrigin(it) == null }.map { Path.of(it).toAbsolutePath().normalize() }
             .filter { CompressedSpool.formatOf(it) != null }
         val archives = (zips + compressed).distinct()
-        if (archives.isEmpty()) return openGroups(groups.map { it.paths.map(Path::of) to it.filter() }, selected)
+        if (archives.isEmpty()) return openGroups(reopen) { Path.of(it) }
         extractThen(archives) { files ->
-            fun path(arg: String) = ZipSpool.parseOrigin(arg)?.let(spool::extractedFile)
-                ?: Path.of(arg).let { files[it.toAbsolutePath().normalize()]?.singleOrNull() ?: it }
-            openGroups(groups.map { group -> group.paths.map(::path) to group.filter() }, selected)
+            openGroups(reopen) { arg ->
+                ZipSpool.parseOrigin(arg)?.let(spool::extractedFile) ?: Path.of(arg).let { files[it.toAbsolutePath().normalize()]?.singleOrNull() ?: it }
+            }
         }
     }
 
-    /** Opens a tab for each group of files with its filter, then selects the tab at [selected]. */
-    private fun openGroups(groups: List<Pair<List<Path>, SavedFilter?>>, selected: Int) {
-        for ((paths, filter) in groups) {
-            val openable = paths.filter(::checkOpenable)
-            if (openable.isEmpty() || selectTab(openable)) continue
-            addTab(LogTab(openable, ::openFiles, ::openEach, filter, ::originOf) { updateStatus() })
+    /** Opens a tab for each of [reopen]'s sessions with its parsers and filter, its paths read with [path], then selects one. */
+    private fun openGroups(reopen: Reopen, path: (String) -> Path) {
+        for (session in reopen.sessions) {
+            val openable = session.paths.map(path).zip(session.formats).filter { (file, _) -> checkOpenable(file) }
+            if (openable.isEmpty() || selectTab(openable.map { it.first })) continue
+            val tab = LogTab(openable.map { it.first }, ::openFiles, ::openEach, session.filter, ::originOf, openable.map { it.second }) { updateStatus() }
+            addTab(tab)
         }
-        if (tabs.tabCount > 0) tabs.selectedIndex = selected.coerceIn(0, tabs.tabCount - 1)
+        if (tabs.tabCount > 0) tabs.selectedIndex = reopen.selected.coerceIn(0, tabs.tabCount - 1)
     }
 
     /**
@@ -487,15 +432,13 @@ class MainFrame : JFrame("logxy") {
 
     /** Tells the user why [path] cannot be opened, if it cannot. */
     private fun checkOpenable(path: Path): Boolean {
-        val problem = when {
-            !Files.exists(path) -> "File not found"
-            !Files.isRegularFile(path) && !Files.isDirectory(path) -> "Not a regular file"
-            !Files.isReadable(path) -> "No permission to read the file"
-            else -> null
-        }
-        if (problem != null) JOptionPane.showMessageDialog(this, "$problem:\n$path", "Cannot Open File", JOptionPane.ERROR_MESSAGE)
-        return problem == null
+        val problem = OpenPlan.problem(path) ?: return true
+        tellCannotOpen(path, problem)
+        return false
     }
+
+    private fun tellCannotOpen(path: Path, problem: String) =
+        JOptionPane.showMessageDialog(this, "$problem:\n$path", "Cannot Open File", JOptionPane.ERROR_MESSAGE)
 
     private fun closeTab(index: Int) {
         val tab = tabs.getComponentAt(index) as LogTab
