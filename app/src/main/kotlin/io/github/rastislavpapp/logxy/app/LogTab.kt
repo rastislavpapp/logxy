@@ -196,13 +196,11 @@ class LogTab(
     private fun showParsers() {
         if (isMerged) return showMergedParsers()
         val chosen = session.chosenFormat
-        val custom = AppSettings.current.formats
-        val known = listOf(LogFormat.Raw) + custom + AppSettings.current.builtInFormats
+        val known = AppSettings.current.knownFormats
         val items = buildList {
             add(PopupItem(autoLabel(), selected = chosen == null) { session.useFormat(null) })
             (if (chosen == null || chosen in known) known else known + chosen).forEachIndexed { i, format ->
-                val tools = if (format in custom) listOf(PopupTool(Icons.advanced, "Edit this parser") { editParsers(format) }) else emptyList()
-                add(PopupItem(format.name, selected = format == chosen, separatorBefore = i == 0, tools = tools) { session.useFormat(format) })
+                add(parserItem(format, selected = format == chosen, first = i == 0) { session.useFormat(format) })
             }
             add(PopupItem("Edit Parsers", Icons.settings, separatorBefore = true) { editParsers(chosen ?: session.format) })
             // A guessed format is none of the known ones; saving it makes it one the user can correct.
@@ -221,21 +219,22 @@ class LogTab(
         val mixed = chosen.distinct().size > 1
         // The parser of all files when not mixed; null is Auto-detect.
         val same = chosen.first()
-        val custom = AppSettings.current.formats
-        val known = listOf(LogFormat.Raw) + custom + AppSettings.current.builtInFormats
         val items = buildList {
             val auto = if (session.formatDetected) "Auto: per file" else "Auto-detect"
             add(PopupItem(auto, selected = !mixed && same == null) { session.useFormats(chosen.map { null }) })
-            known.forEachIndexed { i, format ->
-                val tools = if (format in custom) listOf(PopupTool(Icons.advanced, "Edit this parser") { editParsers(format) }) else emptyList()
-                add(PopupItem(format.name, selected = !mixed && same == format, separatorBefore = i == 0, tools = tools) {
-                    session.useFormats(chosen.map { format })
-                })
+            AppSettings.current.knownFormats.forEachIndexed { i, format ->
+                add(parserItem(format, selected = !mixed && same == format, first = i == 0) { session.useFormats(chosen.map { format }) })
             }
             add(PopupItem("Choose Parser per File", selected = mixed, separatorBefore = true) { chooseParserPerFile() })
             add(PopupItem("Edit Parsers", Icons.settings) { editParsers(session.format) })
         }
         showPopupList(parserButton, items)
+    }
+
+    /** A parser menu entry; the user's own parsers can be edited from it. */
+    private fun parserItem(format: LogFormat, selected: Boolean, first: Boolean, onPick: () -> Unit): PopupItem {
+        val tools = if (format in AppSettings.current.formats) listOf(PopupTool(Icons.advanced, "Edit this parser") { editParsers(format) }) else emptyList()
+        return PopupItem(format.name, selected = selected, separatorBefore = first, tools = tools, action = onPick)
     }
 
     private fun chooseParserPerFile() {
