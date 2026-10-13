@@ -20,8 +20,10 @@ internal object Json {
     /** Nesting deeper than this is shown as written instead of pretty-printed. */
     private const val MAX_PRETTY_DEPTH = 64
 
+    /** Whether [b] is JSON whitespace: space, tab, line feed or carriage return. */
     fun isSpace(b: Byte) = b == ' '.code.toByte() || b == '\t'.code.toByte() || b == '\n'.code.toByte() || b == '\r'.code.toByte()
 
+    /** The first index from [from] on that is not [isSpace], or [to]. */
     fun skipSpace(bytes: ByteArray, from: Int, to: Int): Int {
         var i = from
         while (i < to && isSpace(bytes[i])) i++
@@ -121,6 +123,7 @@ internal object Json {
         }
     }
 
+    /** Whether the value `bytes[from, to)` is a string, i.e. quoted at both ends. */
     fun isString(bytes: ByteArray, from: Int, to: Int) = to - from >= 2 && bytes[from] == QUOTE && bytes[to - 1] == QUOTE
 
     /** Whether the string content `bytes[from, to)` reads as it is written, without escapes. */
@@ -141,6 +144,7 @@ internal object Json {
         return if (length == out.size) out else out.copyOf(length)
     }
 
+    /** [decode]d as a String. */
     fun text(bytes: ByteArray, from: Int, to: Int): String = String(decode(bytes, from, to), Charsets.UTF_8)
 
     /**

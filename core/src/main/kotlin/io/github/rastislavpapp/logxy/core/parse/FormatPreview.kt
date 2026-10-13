@@ -14,6 +14,7 @@ class PreviewLine(
     val continuation: Boolean,
 )
 
+/** Reads a file's first lines the way a parser would, for detection and for the Parsers page's preview. */
 object FormatPreview {
 
     private const val SAMPLE_BYTES = 256 * 1024
@@ -30,6 +31,10 @@ object FormatPreview {
             }
         }
 
+    /**
+     * Each of [lines] as [format] reads it on its own: the field values of a line that starts a record, or
+     * whether a line that does not looks like a continuation. Continuation lines are not joined to a record.
+     */
     fun preview(format: RecordFormat, lines: List<ByteArray>): List<PreviewLine> {
         val parser = format.newParser()
         val fields = format.schema.fields

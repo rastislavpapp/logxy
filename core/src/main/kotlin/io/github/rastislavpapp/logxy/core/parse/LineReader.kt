@@ -46,6 +46,7 @@ internal class LineReader(
     var truncated = false
         private set
 
+    /** Moves to the next line; false once there is none, or the file turned out [truncated]. */
     fun next(): Boolean {
         if (nextLineStart >= end || truncated && position >= filled) return false
         if (bufferStart + position != nextLineStart) {

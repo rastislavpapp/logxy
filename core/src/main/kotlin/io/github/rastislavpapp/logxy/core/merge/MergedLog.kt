@@ -53,8 +53,10 @@ class MergedLog private constructor(
     /** Bytes of all parts covered. */
     val indexedSize: Long get() = parts.sumOf { it.indexedSize }
 
+    /** The part (index into the merged files) whose record is shown at [position]. */
     fun part(position: Int): Int = partOf[position].toInt() and 0xFF
 
+    /** The record number, within its [part], of the record shown at [position]. */
     fun record(position: Int): Int = recordOf[position]
 
     /** Where [record] of [part] is shown; it must have been merged. */
@@ -75,6 +77,7 @@ class MergedLog private constructor(
         return low
     }
 
+    /** The field of [part] shown in merged [field], or -1 if the part has none there. */
     internal fun partField(part: Int, field: Int) = merged.partField(part, field)
 
     override fun level(record: Int): Level? = parts[part(record)].level(record(record))
