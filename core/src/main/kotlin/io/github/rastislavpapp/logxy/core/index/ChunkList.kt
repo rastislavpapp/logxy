@@ -15,6 +15,7 @@ abstract class ChunkList<A : Any> internal constructor(empty: A) {
     var size = 0
         protected set
 
+    /** A new chunk of [CHUNK_SIZE] elements. */
     protected abstract fun newChunk(): A
 
     /** The chunk the next added element goes into, at offset `size and MASK`. */
@@ -30,6 +31,7 @@ abstract class ChunkList<A : Any> internal constructor(empty: A) {
         return chunks[index ushr SHIFT] as A
     }
 
+    /** Drops the last element, e.g. a line or record that turned out incomplete; its chunk stays allocated for the next add. Throws if empty. */
     @Suppress("UNCHECKED_CAST")
     fun removeLast() {
         if (size == 0) throw NoSuchElementException("List is empty")
@@ -37,6 +39,7 @@ abstract class ChunkList<A : Any> internal constructor(empty: A) {
         if ((size and MASK) != 0) current = chunks[size ushr SHIFT] as A
     }
 
+    /** Appends all of [other] by copying whole runs of its chunks, e.g. to join ranges indexed in parallel. */
     fun addAll(other: ChunkList<A>) {
         require(other !== this) { "Cannot add a list to itself" }
         var copied = 0

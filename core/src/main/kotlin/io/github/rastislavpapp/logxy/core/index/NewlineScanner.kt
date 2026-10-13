@@ -3,6 +3,7 @@ package io.github.rastislavpapp.logxy.core.index
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
+/** Finds line starts in a buffer eight bytes at a time; the hot loop of indexing. */
 object NewlineScanner {
 
     private const val NEWLINES = 0x0A0A0A0A0A0A0A0AL
