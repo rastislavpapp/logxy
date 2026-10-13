@@ -13,22 +13,6 @@ import java.time.ZoneId
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 
-/** Which top-level keys of a JSON log fill which role; of each list, the first key a record has wins. */
-data class JsonKeys(
-    val timestamp: List<String> = listOf("@timestamp", "timestamp", "time", "ts"),
-    val level: List<String> = listOf("level", "severity", "log.level", "levelname"),
-    val message: List<String> = listOf("message", "msg"),
-    val logger: List<String> = listOf("logger", "logger_name", "log.logger"),
-    val thread: List<String> = listOf("thread", "thread_name", "process.thread.name"),
-    val exception: List<String> = listOf("stack_trace", "exception", "error.stack_trace"),
-) {
-    internal val byRole: List<Pair<Role, List<String>>>
-        get() = listOf(
-            Role.TIMESTAMP to timestamp, Role.LEVEL to level, Role.THREAD to thread,
-            Role.LOGGER to logger, Role.MESSAGE to message, Role.EXCEPTION to exception,
-        )
-}
-
 /**
  * JSON lines: one object per line. The keys in [keys] fill the usual fields; every other top-level
  * key becomes a field read from the line on demand, so it costs no memory per record. Timestamps are
@@ -36,7 +20,7 @@ data class JsonKeys(
  * by their size). Nested objects and arrays are shown as written. Lines that are no JSON object become
  * records with only a message.
  */
-class JsonFormat(val keys: JsonKeys = JsonKeys(), private val zone: ZoneId = ZoneId.systemDefault()) : RecordFormat() {
+class JsonFormat(val keys: RoleKeys = RoleKeys(),private val zone: ZoneId = ZoneId.systemDefault()) : RecordFormat() {
 
     override val schema: Schema
 

@@ -2,7 +2,7 @@ package io.github.rastislavpapp.logxy.core.open
 
 import io.github.rastislavpapp.logxy.core.config.SavedFilter
 import io.github.rastislavpapp.logxy.core.log.Level
-import io.github.rastislavpapp.logxy.core.parse.JsonKeys
+import io.github.rastislavpapp.logxy.core.parse.RoleKeys
 import io.github.rastislavpapp.logxy.core.parse.LogFormat
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -15,7 +15,7 @@ class SessionArgsTest {
             OpenSession(listOf("/logs/a.log"), listOf(LogFormat.Raw), SavedFilter("", Level.WARN, """message ~ "time out" AND logger = "x.y"""")),
             OpenSession(
                 listOf("/logs/b.log", "/logs/old.zip!c.log", "/logs/d.log"),
-                listOf(LogFormat.Pattern("Mine", "%d [%t] %p %m%n"), null, LogFormat.Json("Json", JsonKeys(level = listOf("lvl")))),
+                listOf(LogFormat.Pattern("Mine", "%d [%t] %p %m%n"), null, LogFormat.Json("Json", RoleKeys(level = listOf("lvl")))),
                 null,
             ),
             OpenSession(listOf("/logs/e.log"), listOf(LogFormat.Regex("Re", """(?<level>\w+) (?<message>.*)""", "HH:mm")), null),

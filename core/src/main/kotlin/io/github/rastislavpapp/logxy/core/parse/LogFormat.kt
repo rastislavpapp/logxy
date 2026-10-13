@@ -15,27 +15,76 @@ import java.nio.file.StandardOpenOption
 sealed interface LogFormat {
     val name: String
 
+    val kind: Kind
+
     /** Compiled form, or null for [Raw]. Throws IllegalArgumentException for an invalid layout. */
     fun compile(): RecordFormat?
 
+    /** This parser under another name; [Raw] keeps its own. */
+    fun withName(name: String): LogFormat
+
+    /** Whether [other] reads files the same way, whatever its name. */
+    fun sameDefinition(other: LogFormat): Boolean = other.withName(name) == this
+
+    /** The definition as settings properties, without the name and the kind. */
+    fun properties(): Map<String, String> = emptyMap()
+
+    /** A kind of parser: what its settings store as the type, and how to read one back. */
+    abstract class Kind(val type: String) {
+        /** The parser named [name] whose other [properties] are given; null if they are incomplete. */
+        abstract fun read(name: String, properties: (String) -> String?): LogFormat?
+    }
+
     data object Raw : LogFormat {
         override val name = "Raw text"
+        override val kind = object : Kind("raw") {
+            override fun read(name: String, properties: (String) -> String?) = Raw
+        }
+
         override fun compile(): RecordFormat? = null
+        override fun withName(name: String) = this
     }
 
     data class Pattern(override val name: String, val pattern: String) : LogFormat {
+        override val kind get() = Companion
         override fun compile() = PatternFormat(pattern)
+        override fun withName(name: String) = copy(name = name)
+        override fun properties() = mapOf("layout" to pattern)
+
+        companion object : Kind("pattern") {
+            override fun read(name: String, properties: (String) -> String?) = properties("layout")?.let { Pattern(name, it) }
+        }
     }
 
     data class Regex(override val name: String, val regex: String, val timestampPattern: String) : LogFormat {
+        override val kind get() = Companion
         override fun compile() = RegexFormat(regex, timestampPattern)
+        override fun withName(name: String) = copy(name = name)
+        override fun properties() = mapOf("layout" to regex, "timestamp" to timestampPattern)
+
+        companion object : Kind("regex") {
+            const val DEFAULT_TIMESTAMP = "yyyy-MM-dd HH:mm:ss.SSS"
+
+            override fun read(name: String, properties: (String) -> String?) =
+                properties("layout")?.let { Regex(name, it, properties("timestamp") ?: DEFAULT_TIMESTAMP) }
+        }
     }
 
-    data class Json(override val name: String, val keys: JsonKeys = JsonKeys()) : LogFormat {
+    data class Json(override val name: String, val keys: RoleKeys = RoleKeys()) : LogFormat {
+        override val kind get() = Companion
         override fun compile() = JsonFormat(keys)
+        override fun withName(name: String) = copy(name = name)
+        override fun properties() = keys.properties("keys.")
+
+        companion object : Kind("json") {
+            override fun read(name: String, properties: (String) -> String?) = Json(name, RoleKeys.read(properties, "keys.", RoleKeys()))
+        }
     }
 
     companion object {
+        /** Every kind of parser, as settings store them. Lazy, as [Raw] may be what is initializing this companion. */
+        val KINDS: List<Kind> by lazy { listOf(Raw.kind, Pattern, Regex, Json) }
+
         /** The most common layouts; others are guessed from the file. */
         val BUILT_IN: List<LogFormat> = listOf(
             Pattern("date [thread] LEVEL logger - message", "%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %-5p %c - %m%n"),

@@ -117,7 +117,7 @@ class JsonFormatTest {
 
     @Test
     fun `reads roles from the first key of each list that a record has`() {
-        val format = JsonFormat(JsonKeys(message = listOf("message", "msg")), ZoneOffset.UTC)
+        val format = JsonFormat(RoleKeys(message = listOf("message", "msg")), ZoneOffset.UTC)
         val lines = listOf(
             """{"msg":"short","message":"long","level":"WARN","@timestamp":"2026-10-01T08:00:00.123Z","logger_name":"a.B"}""",
             """not json""",
