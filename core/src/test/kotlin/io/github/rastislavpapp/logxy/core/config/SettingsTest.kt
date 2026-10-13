@@ -23,6 +23,7 @@ class SettingsTest {
             formats = (1..12).map { LogFormat.Pattern("Format $it", "%d [%t] %-5p %c - %m%n") } + listOf(
                 LogFormat.Regex("Tricky: = and \\ ž", """^(?<timestamp>\S+) \\d+ = (?<message>.*)$""", "HH:mm:ss"),
                 LogFormat.Json("JSON", RoleKeys(level = listOf("lvl", "log.level"), exception = emptyList())),
+                LogFormat.Logfmt("logfmt", RoleKeys.LOGFMT.copy(message = listOf("m"))),
             ),
             levels = LevelMapping(Level.BUILT_IN_NAMES - "CONFIG" + mapOf("note" to Level.INFO, "40" to Level.ERROR)),
             filters = listOf(
@@ -129,7 +130,7 @@ class SettingsTest {
         val mine = LogFormat.Pattern("Mine", "%d [%t] %-5p %c - %m%n")
         val settings = Settings(formats = listOf(mine), deletedBuiltIns = setOf("Spring Boot 3", "JSON lines"))
         assertEquals(
-            listOf("Raw text", "Mine", "date [thread] LEVEL logger - message", "time [thread] LEVEL logger - message", "Python logging"),
+            listOf("Raw text", "Mine", "date [thread] LEVEL logger - message", "time [thread] LEVEL logger - message", "Python logging", "logfmt"),
             settings.knownFormats.map { it.name },
         )
     }

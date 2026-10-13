@@ -4,11 +4,12 @@ import java.nio.file.Path
 import kotlin.system.exitProcess
 
 private const val USAGE = """Usage:
-  generate <file> <size> [--seed N] [--mdc] [--json] [--rabbitmq] [--errors N] [--warnings N]
+  generate <file> <size> [--seed N] [--mdc] [--json] [--rabbitmq] [--logfmt] [--errors N] [--warnings N]
                                         write a log4j-style test log, size like 500m or 2g;
                                         --mdc adds a log4j2 %X map such as {breadcrumbId=..., tenant=...};
                                         --json writes JSON lines like logstash-logback-encoder, MDC keys included;
                                         --rabbitmq writes a RabbitMQ broker's JSON log (log.file.formatter = json);
+                                        --logfmt writes logfmt lines, MDC keys included;
                                         --errors and --warnings write exactly N such records, at random places
   scenario <file> <size> [--seed N] [--mdc] [--json] [--rabbitmq]
                                         write a day of a service's log with things worth finding: daily traffic,
@@ -27,7 +28,7 @@ private const val USAGE = """Usage:
                                         run from the project root after changing the logo"""
 
 fun main(args: Array<String>) {
-    val flags = setOf("--mdc", "--json", "--rabbitmq")
+    val flags = setOf("--mdc", "--json", "--rabbitmq", "--logfmt")
     val positional = args.filterIndexed { i, arg ->
         !arg.startsWith("--") && (i == 0 || !args[i - 1].startsWith("--") || args[i - 1] in flags)
     }
@@ -38,7 +39,7 @@ fun main(args: Array<String>) {
         "generate" if positional.size == 3 ->
             generateLog(
                 Path.of(positional[1]), parseSize(positional[2]), option("seed")?.toLong() ?: 1L, flag("mdc"),
-                option("errors")?.toInt(), option("warnings")?.toInt(), flag("json"), flag("rabbitmq"),
+                option("errors")?.toInt(), option("warnings")?.toInt(), flag("json"), flag("rabbitmq"), flag("logfmt"),
             )
         "scenario" if positional.size == 3 ->
             generateScenarioLog(

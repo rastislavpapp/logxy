@@ -20,38 +20,15 @@ import java.time.format.DateTimeFormatter
  * by their size). Nested objects and arrays are shown as written. Lines that are no JSON object become
  * records with only a message.
  */
-class JsonFormat(val keys: RoleKeys = RoleKeys(),private val zone: ZoneId = ZoneId.systemDefault()) : RecordFormat() {
+class JsonFormat(val keys: RoleKeys = RoleKeys(), private val zone: ZoneId = ZoneId.systemDefault()) : RecordFormat() {
 
-    override val schema: Schema
+    private val roles = RoleFields(keys)
 
-    private val mapField: Int
+    private val mapField = roles.fields.size
 
-    /** Candidate keys of all roles, the role's field for each, and the key's rank among its role's keys. */
-    private val candidates: Array<ByteArray>
-    private val candidateFields: IntArray
-    private val candidateRanks: IntArray
+    override val schema = Schema(roles.fields + Field("JSON", ColumnType.SPAN, map = JsonMap(roles.excluded), json = true))
 
     private val displayFormat = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS").withZone(zone)
-
-    init {
-        val fields = keys.byRole.map { (role, _) ->
-            when (role) {
-                Role.TIMESTAMP -> Field("Timestamp", ColumnType.TIMESTAMP, role, optional = true)
-                Role.LEVEL -> Field("Level", ColumnType.LEVEL, role, optional = true)
-                Role.THREAD -> Field("Thread", ColumnType.DICT, role, json = true, optional = true)
-                Role.LOGGER -> Field("Logger", ColumnType.DICT, role, json = true, optional = true)
-                Role.MESSAGE -> Field("Message", ColumnType.SPAN, role, json = true)
-                else -> Field("Exception", ColumnType.SPAN, role, json = true, optional = true)
-            }
-        }
-        val excluded = keys.byRole.flatMap { it.second }.toSet()
-        mapField = fields.size
-        schema = Schema(fields + Field("JSON", ColumnType.SPAN, map = JsonMap(excluded), json = true))
-        val flat = keys.byRole.withIndex().flatMap { (field, role) -> role.second.mapIndexed { rank, key -> Triple(key, field, rank) } }
-        candidates = Array(flat.size) { flat[it].first.toByteArray() }
-        candidateFields = IntArray(flat.size) { flat[it].second }
-        candidateRanks = IntArray(flat.size) { flat[it].third }
-    }
 
     override val multiLine get() = false
 
@@ -68,10 +45,7 @@ class JsonFormat(val keys: RoleKeys = RoleKeys(),private val zone: ZoneId = Zone
         private var keyTo = IntArray(16)
         private var valueFrom = IntArray(16)
         private var valueTo = IntArray(16)
-        private val chosen = IntArray(schema.fields.size)
-        private val chosenRank = IntArray(schema.fields.size)
-        private val timestamps = JsonTimestampParser(zone)
-        private var scratch = ByteArray(256)
+        private val writer = roles.Writer(zone)
         private var bytes = ByteArray(0)
         private var lineFrom = 0
         private var lineTo = 0
@@ -101,48 +75,16 @@ class JsonFormat(val keys: RoleKeys = RoleKeys(),private val zone: ZoneId = Zone
         }
 
         override fun write(out: Columns) {
-            chosen.fill(-1)
+            writer.begin()
             for (e in 0..<count) {
-                val length = keyTo[e] - keyFrom[e]
-                for (c in candidates.indices) {
-                    val candidate = candidates[c]
-                    if (candidate.size != length || length == 0 || candidate[0] != bytes[keyFrom[e]]) continue
-                    if (!java.util.Arrays.equals(bytes, keyFrom[e], keyTo[e], candidate, 0, length)) continue
-                    val field = candidateFields[c]
-                    if (chosen[field] < 0 || candidateRanks[c] < chosenRank[field]) {
-                        chosen[field] = e
-                        chosenRank[field] = candidateRanks[c]
-                    }
-                }
+                writer.key(bytes, keyFrom[e], keyTo[e], e)
                 out.addMapKey(mapField, bytes, keyFrom[e], keyTo[e])
             }
-            for (field in 0..<mapField) {
-                val e = chosen[field]
-                if (e >= 0) writeValue(out, field, valueFrom[e], valueTo[e])
-            }
+            writer.write(out, bytes, lineFrom, valueFrom, valueTo)
             val start = Json.skipSpace(bytes, lineFrom, lineTo)
             var end = lineTo
             while (end > start && Json.isSpace(bytes[end - 1])) end--
             out.setSpan(mapField, start - lineFrom, end - start)
-        }
-
-        private fun writeValue(out: Columns, field: Int, from: Int, to: Int) {
-            val isString = Json.isString(bytes, from, to)
-            val contentFrom = if (isString) from + 1 else from
-            val contentTo = if (isString) to - 1 else to
-            when (out.schema.fields[field].type) {
-                ColumnType.TIMESTAMP -> if (timestamps.parse(bytes, contentFrom, contentTo)) out.setTimestamp(field, timestamps.nanos)
-                ColumnType.LEVEL -> out.setLevel(field, bytes, contentFrom, contentTo)
-                ColumnType.DICT -> {
-                    if (!isString || Json.isPlain(bytes, contentFrom, contentTo)) {
-                        out.setDict(field, bytes, contentFrom, contentTo)
-                    } else {
-                        if (scratch.size < contentTo - contentFrom) scratch = ByteArray(contentTo - contentFrom)
-                        out.setDict(field, scratch, 0, Json.unescape(bytes, contentFrom, contentTo, scratch, 0))
-                    }
-                }
-                ColumnType.SPAN -> out.setSpan(field, from - lineFrom, to - from)
-            }
         }
     }
 

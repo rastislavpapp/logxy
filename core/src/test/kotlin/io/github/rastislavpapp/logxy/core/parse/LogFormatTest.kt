@@ -98,6 +98,27 @@ class LogFormatTest {
     }
 
     @Test
+    fun `detects logfmt`() {
+        val file = Files.writeString(dir.resolve("go.log"), """
+            time=2026-10-13T10:00:00Z level=info msg="listening" addr=:8080
+            time=2026-10-13T10:00:01Z level=warn msg="slow request" path=/api duration=2.1s
+        """.trimIndent())
+        assertEquals(LogFormat.Logfmt("logfmt"), LogFormat.detect(file))
+    }
+
+    @Test
+    fun `a pattern log whose messages hold key=value pairs is not logfmt`() {
+        val file = Files.writeString(dir.resolve("kv.log"), """
+            2026-10-01 08:00:00.001 [main] INFO  com.example.App - user=alice action=login result=ok
+            2026-10-01 08:00:00.002 [main] WARN  com.example.App - user=bob action=login result=denied
+        """.trimIndent())
+        assertEquals(LogFormat.BUILT_IN[0], LogFormat.detect(file))
+        val lines = listOf("user=alice action=login", "a=1", "hello world a=1 b=2", " a=1 b=2", "a=\"open b=2", "\"a\"=1 b=2")
+        val parser = LogFormat.Logfmt("logfmt").compile().newParser()
+        assertEquals(listOf(true, false, false, false, false, false), lines.map { it.toByteArray().let { b -> parser.match(b, 0, b.size) } })
+    }
+
+    @Test
     fun `preview shows fields of matching lines`() {
         val lines = listOf("2026-10-01 08:00:00.001 [main] INFO  a.B - hello", "\tat x.Y(Y.java:1)", "nonsense")
             .map { it.toByteArray() }

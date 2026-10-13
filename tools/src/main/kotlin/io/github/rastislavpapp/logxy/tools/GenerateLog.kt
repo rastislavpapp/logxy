@@ -35,7 +35,7 @@ internal interface RecordGenerator {
 /**
  * Writes log4j-style lines (`%d [%t] %-5p %c - %m%n`, or `%d [%t] %-5p %c %X - %m%n` with [mdc])
  * with occasional stack traces until [size] bytes; with [json], JSON lines as logstash-logback-encoder
- * writes them; with [rabbitmq], a RabbitMQ broker's JSON log. With [errors] or [warnings], exactly that
+ * writes them; with [rabbitmq], a RabbitMQ broker's JSON log; with [logfmt], logfmt lines. With [errors] or [warnings], exactly that
  * many records of the level are written, at random places.
  */
 fun generateLog(
@@ -47,6 +47,7 @@ fun generateLog(
     warnings: Int? = null,
     json: Boolean = false,
     rabbitmq: Boolean = false,
+    logfmt: Boolean = false,
 ) {
     val random = SplittableRandom(seed)
     val placed = listOfNotNull(errors?.let { "ERROR" to it }, warnings?.let { "WARN" to it })
@@ -54,7 +55,7 @@ fun generateLog(
     val places = placed.flatMap { (level, count) -> List(count) { random.nextLong(size) to level } }.sortedBy { it.first }
     var nextPlace = 0
     val excluded = placed.map { it.first }.toSet()
-    val generator = if (rabbitmq) RabbitMqGenerator(random, excluded) else LogGenerator(random, mdc, excluded, json)
+    val generator = if (rabbitmq) RabbitMqGenerator(random, excluded) else LogGenerator(random, mdc, excluded, json, logfmt)
     val started = System.nanoTime()
     var written = 0L
     var lines = 0L
@@ -80,6 +81,8 @@ internal class LogGenerator(
     private val excluded: Set<String> = emptySet(),
     /** JSON lines with the MDC as top-level keys (always, as an encoder writes it) instead of text. */
     private val json: Boolean = false,
+    /** logfmt lines like Go loggers write, the MDC as pairs and a stack trace quoted under `stacktrace`. */
+    private val logfmt: Boolean = false,
 ) : RecordGenerator {
 
     private val threads = List(40) { i ->
@@ -119,11 +122,12 @@ internal class LogGenerator(
         val level = forcedLevel ?: pickLevel()
         val thread = random.nextInt(threads.size)
         val logger = loggers[random.nextInt(loggers.size)]
-        val context = if (mdc || json) context(thread) else null
+        val context = if (mdc || json || logfmt) context(thread) else null
         val message = message(level)
         val withTrace = (level == "ERROR" && random.nextInt(10) < 3) || (level == "WARN" && random.nextInt(20) == 0)
         val trace = if (withTrace) StringBuilder().also(::appendStackTrace) else null
         if (json) return jsonRecord(level, threads[thread], logger, context!!, message, trace)
+        if (logfmt) return logfmtRecord(level, threads[thread], logger, context!!, message, trace)
 
         val sb = StringBuilder(200)
         sb.append(timestamp()).append(" [").append(threads[thread]).append("] ")
@@ -157,6 +161,26 @@ internal class LogGenerator(
             appendJsonString(sb, value)
         }
         return sb.append("}\n").toString()
+    }
+
+    private fun logfmtRecord(
+        level: String,
+        thread: String,
+        logger: String,
+        context: List<Pair<String, String>>,
+        message: String,
+        trace: CharSequence?,
+    ): String {
+        val sb = StringBuilder(250)
+        sb.append("time=").append(isoTimestamp()).append(" level=").append(level.lowercase())
+        sb.append(" logger=").append(logger).append(" thread=").append(thread).append(" msg=")
+        appendJsonString(sb, message)
+        for ((key, value) in context) sb.append(' ').append(key).append('=').append(value)
+        if (trace != null) {
+            sb.append(" stacktrace=")
+            appendJsonString(sb, trace)
+        }
+        return sb.append('\n').toString()
     }
 
     private fun pickLevel(): String {
