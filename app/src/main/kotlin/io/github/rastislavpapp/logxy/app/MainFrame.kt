@@ -246,8 +246,8 @@ class MainFrame : JFrame("logxy") {
      */
     fun openFiles(paths: List<Path>) {
         val previous = opening
-        // Undispatched, so plain files open at once. An open that comes while folders are walked waits for it,
-        // so tabs open in the order asked.
+        // Undispatched, so plain files open at once. An open that comes while an earlier one walks folders or
+        // extracts archives waits for it, so tabs open in the order asked.
         opening = scope.launch(start = CoroutineStart.UNDISPATCHED) {
             previous?.join()
             val found = find(paths) ?: return@launch
@@ -261,7 +261,7 @@ class MainFrame : JFrame("logxy") {
                 tellLeftOut(archives)
                 tellNothingIn(found.empty + archives.filter { files[it].isNullOrEmpty() })
                 openFound(found.files.flatMap { item -> files[item.path]?.map { FoundFile(it, item.inSubfolder) } ?: listOf(item) })
-            }
+            }.join()
         }
     }
 
@@ -274,9 +274,9 @@ class MainFrame : JFrame("logxy") {
         lateinit var walk: Deferred<Found>
         var finished = false
         val dialog = ExtractDialog(this@MainFrame, indeterminate = true) { walk.cancel() }
-        walk = async(Dispatchers.IO) {
-            OpenPlan.find(paths) { folder, count -> dialog.text = "Looking for logs in $folder… ($count found)" }
-        }
+        fun tell(folder: Path, count: Int) { dialog.text = "Looking for logs in $folder… ($count found)" }
+        tell(paths.first { Files.isDirectory(it) }, 0)
+        walk = async(Dispatchers.IO) { OpenPlan.find(paths, ::tell) }
         Timer(EXTRACT_DIALOG_DELAY_MILLIS) { if (!finished) dialog.isVisible = true }.apply { isRepeats = false }.start()
         return try {
             walk.await()
@@ -387,8 +387,9 @@ class MainFrame : JFrame("logxy") {
     /**
      * Unzips the zips among [archives] and decompresses the .gz and .zst files while showing how far it got,
      * then calls [then] with the files of each; nothing more if the user cancels or one cannot be read.
+     * Returns the job that does it all.
      */
-    private fun extractThen(archives: List<Path>, then: (Map<Path, List<Path>>) -> Unit) {
+    private fun extractThen(archives: List<Path>, then: (Map<Path, List<Path>>) -> Unit): Job {
         lateinit var job: Job
         var finished = false
         val dialog = ExtractDialog(this) { job.cancel() }
@@ -429,6 +430,7 @@ class MainFrame : JFrame("logxy") {
         // Quick ones finish before the dialog would only flash.
         // Not job.isActive: the job is still running while [then] asks how to open the files.
         Timer(EXTRACT_DIALOG_DELAY_MILLIS) { if (!finished) dialog.isVisible = true }.apply { isRepeats = false }.start()
+        return job
     }
 
     /** Opens each of [paths] in a tab of its own. */
