@@ -50,7 +50,8 @@ internal class FilteredRows(rows: IntArray) {
     fun positionOf(record: Int): Int = rows.binarySearch(record, 0, size).let { if (it >= 0) it + 1 else 0 }
 
     /** The record after [current], or before it unless [forward], wrapping around; see [nextRecord]. */
-    fun next(current: Int, forward: Boolean, inclusive: Boolean): Int = nextRecord(rows, size, current, forward, inclusive)
+    fun next(current: Int, forward: Boolean, inclusive: Boolean): Int =
+        nextRecord(rows, size, current, forward, inclusive)
 
     /**
      * Replaces the records from [from] on with [rows] (sorted, all `>= from`), e.g. a filter result

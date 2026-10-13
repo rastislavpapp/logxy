@@ -46,7 +46,9 @@ object SessionArgs {
             }
             if (session.parsers.any { it != null }) {
                 val properties = Properties()
-                session.parsers.forEachIndexed { i, parser -> if (parser != null) Settings.writeParser(properties, "${i + 1}.", parser) }
+                session.parsers.forEachIndexed { i, parser ->
+                    if (parser != null) Settings.writeParser(properties, "${i + 1}.", parser)
+                }
                 add(PARSERS_ARG)
                 add(encode(StringWriter().also { properties.store(it, null) }.toString()))
             }
@@ -57,10 +59,16 @@ object SessionArgs {
     /** The sessions in [args] written by [write]; null if they are not, e.g. paths given on the command line. */
     fun read(args: List<String>): Reopen? {
         if (args.firstOrNull() != SESSION_ARG) return null
-        class Group(val paths: MutableList<String> = ArrayList(), var level: Level? = null, var query: String = "", var parsers: List<Parser?>? = null) {
-            fun session() = OpenSession(
-                paths, parsers ?: paths.map { null }, SavedFilter("", level, query).takeIf { it.minimumLevel != null || it.query.isNotBlank() },
-            )
+        class Group(
+            val paths: MutableList<String> = ArrayList(),
+            var level: Level? = null,
+            var query: String = "",
+            var parsers: List<Parser?>? = null,
+        ) {
+            fun session(): OpenSession {
+                val filter = SavedFilter("", level, query).takeIf { it.minimumLevel != null || it.query.isNotBlank() }
+                return OpenSession(paths, parsers ?: paths.map { null }, filter)
+            }
         }
         val groups = ArrayList<Group>()
         var selected = 0
@@ -69,7 +77,10 @@ object SessionArgs {
         while (iterator.hasNext()) {
             when (val arg = iterator.next()) {
                 SESSION_ARG -> groups += Group()
-                LEVEL_ARG -> value().let { level -> groups.last().level = Level.entries.firstOrNull { it.name == level } }
+                LEVEL_ARG -> {
+                    val level = value()
+                    groups.last().level = Level.entries.firstOrNull { it.name == level }
+                }
                 QUERY_ARG -> groups.last().query = decode(value()).orEmpty()
                 PARSERS_ARG -> groups.last().let { group ->
                     val properties = Properties().apply { load(StringReader(decode(value()).orEmpty())) }

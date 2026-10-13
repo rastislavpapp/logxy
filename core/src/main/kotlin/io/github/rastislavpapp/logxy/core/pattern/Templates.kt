@@ -14,7 +14,10 @@ object Templates {
     /** Space [mask] needs for its output: every byte may become a two-byte placeholder. */
     const val OUT_SIZE = MAX_BYTES * 2
 
-    /** Writes the template of the text `bytes[from, to)` (UTF-8) into [out] (at least [OUT_SIZE] long); returns its length. */
+    /**
+     * Writes the template of the text `bytes[from, to)` (UTF-8) into [out] (at least [OUT_SIZE] long); returns
+     * its length.
+     */
     fun mask(bytes: ByteArray, from: Int, to: Int, out: ByteArray): Int {
         var limit = to
         if (to - from > MAX_BYTES) {
@@ -85,7 +88,9 @@ object Templates {
     private const val HEX = 8
 
     private val CLASSES = ByteArray(256).also { classes ->
-        fun mark(chars: String, kind: Int) = chars.forEach { classes[it.code] = (classes[it.code].toInt() or kind).toByte() }
+        fun mark(chars: String, kind: Int) = chars.forEach {
+            classes[it.code] = (classes[it.code].toInt() or kind).toByte()
+        }
         mark(" \t,;()[]{}<>\"'=|", DELIMITER)
         mark("\n\r", LINE_END)
         mark("0123456789", DIGIT or HEX)

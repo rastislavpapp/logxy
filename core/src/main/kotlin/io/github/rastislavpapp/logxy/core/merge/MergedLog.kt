@@ -88,11 +88,14 @@ class MergedLog private constructor(
         val part = part(record)
         val values = parts[part].rowValues(record(record), maxBytes)
         return Array(schema.fields.size) { field ->
-            if (field == MergedSchema.SOURCE) names[part] else merged.partField(part, field).let { if (it < 0) "" else values[it] }
+            if (field == MergedSchema.SOURCE) return@Array names[part]
+            val partField = merged.partField(part, field)
+            if (partField < 0) "" else values[partField]
         }
     }
 
-    override fun recordText(record: Int, maxBytes: Int): String = parts[part(record)].recordText(record(record), maxBytes)
+    override fun recordText(record: Int, maxBytes: Int): String =
+        parts[part(record)].recordText(record(record), maxBytes)
 
     override fun fieldText(record: Int, field: Int): String {
         val part = part(record)

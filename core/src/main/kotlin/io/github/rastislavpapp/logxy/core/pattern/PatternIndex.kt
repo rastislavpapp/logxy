@@ -107,7 +107,13 @@ internal class PatternIndex(private val maxTemplates: Int = MAX_TEMPLATES, priva
     }
 
     /** Templates of the records `[from, to)`: a dictionary of them and the id there of each record. */
-    private fun scan(snapshot: RecordSnapshot, field: Int, task: Int, from: Int, to: Int): Pair<ByteDictionary, IntArray> {
+    private fun scan(
+        snapshot: RecordSnapshot,
+        field: Int,
+        task: Int,
+        from: Int,
+        to: Int,
+    ): Pair<ByteDictionary, IntArray> {
         val dictionary = ByteDictionary()
         val reader = MessageReader(snapshot, field, snapshot.channels.forTask(task))
         val out = ByteArray(Templates.OUT_SIZE)
@@ -116,7 +122,10 @@ internal class PatternIndex(private val maxTemplates: Int = MAX_TEMPLATES, priva
     }
 
     companion object {
-        /** Records over this many distinct templates share [OTHER]; messages without variable parts can make no end of them. */
+        /**
+         * Records over this many distinct templates share [OTHER]; messages without variable parts can make no end
+         * of them.
+         */
         const val MAX_TEMPLATES = 100_000
 
         /** The id of records whose template did not fit under [MAX_TEMPLATES]. */
@@ -127,7 +136,8 @@ internal class PatternIndex(private val maxTemplates: Int = MAX_TEMPLATES, priva
         /** The template of [record]'s message, read on the calling thread. */
         fun templateOf(snapshot: RecordSnapshot, record: Int): String {
             val out = ByteArray(Templates.OUT_SIZE)
-            val length = MessageReader(snapshot, snapshot.schema.indexOf(Role.MESSAGE), snapshot.channels.main).template(record, out)
+            val reader = MessageReader(snapshot, snapshot.schema.indexOf(Role.MESSAGE), snapshot.channels.main)
+            val length = reader.template(record, out)
             return String(out, 0, length, Charsets.UTF_8)
         }
     }

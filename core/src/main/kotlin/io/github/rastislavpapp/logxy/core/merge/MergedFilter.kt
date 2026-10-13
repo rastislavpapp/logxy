@@ -50,7 +50,9 @@ class MergedFilter(private val log: MergedLog) : RecordFilter {
         return object : PreparedFilter {
             override suspend fun run(): FilterResult {
                 val results = coroutineScope { evaluations.map { async { it.run() } }.awaitAll() }
-                val rows = withContext(Dispatchers.Default) { toPositions(results.map { it.rows }, merged, start, count) }
+                val rows = withContext(Dispatchers.Default) {
+                    toPositions(results.map { it.rows }, merged, start, count)
+                }
                 return FilterResult(rows, start, count, indexedSize)
             }
 

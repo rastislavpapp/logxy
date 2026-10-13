@@ -84,7 +84,10 @@ interface SessionListener {
      */
     fun recordsGrew(changed: IntArray)
 
-    /** Appended records have a field no record had before, so the records' schema shows it now; [recordsGrew] follows. */
+    /**
+     * Appended records have a field no record had before, so the records' schema shows it now; [recordsGrew]
+     * follows.
+     */
     fun fieldsShown()
 
     /**
@@ -206,7 +209,8 @@ class LogSession internal constructor(
     /** Whether the rows shown are [activeFilter]'s result (all records without one). */
     private var filterShown = false
 
-    // How much of the records the shown filter result covers: records, and bytes (the last record may grow without new ones).
+    // How much of the records the shown filter result covers: records, and bytes (the last record may grow without
+    // new ones).
     private var filteredRecords = 0
     private var filteredBytes = 0L
     private var filtering = false
@@ -335,8 +339,9 @@ class LogSession internal constructor(
     val patternProgress: Double get() = engine?.patternProgress ?: 1.0
 
     /**
-     * Counts the shown rows by the template of their message (see [io.github.rastislavpapp.logxy.core.pattern.Templates]);
-     * null if there is nothing loaded or the records have no message. Cancelling the caller stops it.
+     * Counts the shown rows by the template of their message (see
+     * [io.github.rastislavpapp.logxy.core.pattern.Templates]); null if there is nothing loaded or the records have
+     * no message. Cancelling the caller stops it.
      */
     suspend fun patternCounts(): PatternCounts? {
         // Counting the times takes a fraction of finding the templates: let it have the threads first.
@@ -384,9 +389,12 @@ class LogSession internal constructor(
             val preferred = settings.current.parsers
             val builtIn = settings.current.builtInParsers
             val levels = settings.current.levels
-            // A merge filters its files in parallel, so each needs only its share of channels; this bounds file handles.
-            // At least a few each, as a small file is parsed by one thread and that slows down a lot with fewer.
-            val options = IndexOptions().let { it.copy(readChannels = maxOf(minOf(4, it.parallelism), it.parallelism / sources.size)) }
+            // A merge filters its files in parallel, so each needs only its share of channels; this bounds file
+            // handles. At least a few each, as a small file is parsed by one thread and that slows down a lot with
+            // fewer.
+            val defaults = IndexOptions()
+            val readChannels = maxOf(minOf(4, defaults.parallelism), defaults.parallelism / sources.size)
+            val options = defaults.copy(readChannels = readChannels)
             // Files under the split size are parsed by one thread each, so a folder of them needs several at once.
             val permits = Semaphore(options.parallelism)
             coroutineScope {
@@ -394,11 +402,14 @@ class LogSession internal constructor(
                     async(Dispatchers.IO) {
                         permits.withPermit {
                             try {
-                                // Taken before indexing, so a file replaced meanwhile shows up as a change on the first poll.
+                                // Taken before indexing, so a file replaced meanwhile shows up as a change on the
+                                // first poll.
                                 source.known = FileSnapshot.take(source.path)
                                     ?: throw IOException("${source.path.fileName}: file not found")
                                 source.parser = source.chosen ?: Parser.detect(source.path, preferred, builtIn)
-                                source.log = source.parser.open(source.path, progresses[i], levels, options).also { opened += it }
+                                val log = source.parser.open(source.path, progresses[i], levels, options)
+                                opened += log
+                                source.log = log
                             } catch (e: Throwable) {
                                 if (e !is CancellationException) failed.compareAndSet(null, source)
                                 throw e
@@ -428,7 +439,11 @@ class LogSession internal constructor(
                 }
             }
             if (nothingToMerge) {
-                listener.problem("None of these files has timestamps to merge by.", "They are opened in their own tabs.", null)
+                listener.problem(
+                    "None of these files has timestamps to merge by.",
+                    "They are opened in their own tabs.",
+                    null,
+                )
                 setStatus(SessionStatus(message = "Nothing to merge"))
                 return false
             }
@@ -481,7 +496,11 @@ class LogSession internal constructor(
                 "Not enough memory to open $what.",
                 "Logxy can use up to ${formatByteSize(Runtime.getRuntime().maxMemory())} of memory. " +
                     "To allow more, raise the limit in File > Preferences > Memory.",
-                if (isMerged) "Merge fewer files, or close other tabs." else "Close other tabs, or choose a parser that fits the file.",
+                if (isMerged) {
+                    "Merge fewer files, or close other tabs."
+                } else {
+                    "Close other tabs, or choose a parser that fits the file."
+                },
             )
             setStatus(SessionStatus(message = "Out of memory"))
             return false
@@ -521,8 +540,10 @@ class LogSession internal constructor(
                                     promoted = true
                                 }
                             }
-                            FileChange.UNCHANGED ->
-                                source.activity = FileActivity.classify(current!!.lastModified, current.size, current.size)
+                            FileChange.UNCHANGED -> {
+                                val size = current!!.size
+                                source.activity = FileActivity.classify(current.lastModified, size, size)
+                            }
                         }
                         source.known = current!!
                     } catch (e: IOException) {
@@ -546,7 +567,9 @@ class LogSession internal constructor(
                     if (activeFilter != null) {
                         catchUpFilter()
                     } else {
-                        if (loaded.records.recordCount > oldRecordCount) notifyRows { rowsChanged(oldRecordCount, oldRecordCount) }
+                        if (loaded.records.recordCount > oldRecordCount) {
+                            notifyRows { rowsChanged(oldRecordCount, oldRecordCount) }
+                        }
                         countTimes(anew = false)
                         searchShown(anew = false)
                     }
@@ -636,7 +659,10 @@ class LogSession internal constructor(
                 filtering = false
                 running = null
                 filterJob = null
-                problem = if (e is OutOfMemoryError) "Not enough memory to filter" else e.message ?: e.javaClass.simpleName
+                problem = when (e) {
+                    is OutOfMemoryError -> "Not enough memory to filter"
+                    else -> e.message ?: e.javaClass.simpleName
+                }
                 updateStatus()
                 return@launch
             }
@@ -727,7 +753,10 @@ class LogSession internal constructor(
             } catch (e: Throwable) {
                 if (e is CancellationException || (e !is Exception && e !is OutOfMemoryError)) throw e
                 // A failed catch-up keeps what was found before.
-                searchError = if (e is OutOfMemoryError) "Not enough memory to search" else e.message ?: e.javaClass.simpleName
+                searchError = when (e) {
+                    is OutOfMemoryError -> "Not enough memory to search"
+                    else -> e.message ?: e.javaClass.simpleName
+                }
                 searching = null
                 searchJob = null
                 if (anew) shown.clearFound()
@@ -798,7 +827,8 @@ class LogSession internal constructor(
         val (expectedFrom, expectedTo) = expectedTimes(shown)
         val count = TimeCount(loaded, shown.rowArray, from, size, settle, expectedFrom, expectedTo)
         counting = count
-        // Counted anew, the histogram is shown as it fills up; a stale part may still arrive after another count started.
+        // Counted anew, the histogram is shown as it fills up; a stale part may still arrive after another count
+        // started.
         val onCounted: ((TimeHistogram) -> Unit)? = if (base != null) {
             null
         } else {

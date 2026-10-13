@@ -64,7 +64,10 @@ internal class TimeCount(
     }
 
     /** Where the tasks start, in row order, which is about time order; the last is [to]. */
-    private val bounds = ((from..<to step taskRows).toList() + split.coerceIn(from, to) + to).distinct().sorted().toIntArray()
+    private val bounds = ((from..<to step taskRows).toList() + split.coerceIn(from, to) + to)
+        .distinct()
+        .sorted()
+        .toIntArray()
 
     // All rows are each part's records in a range: read straight through, with no positions to look up.
     private val partBounds = if (rows == null) {
@@ -78,7 +81,9 @@ internal class TimeCount(
      * so far from the first on, reaching all expected times, to show them filling up; on any thread.
      * Cancelling the calling coroutine stops it.
      */
-    suspend fun run(onCounted: ((TimeHistogram) -> Unit)? = null): Pair<TimeHistogram, TimeHistogram> = withContext(Dispatchers.Default) {
+    suspend fun run(
+        onCounted: ((TimeHistogram) -> Unit)? = null,
+    ): Pair<TimeHistogram, TimeHistogram> = withContext(Dispatchers.Default) {
         val tasks = bounds.size - 1
         val counted = arrayOfNulls<TimeHistogram>(tasks)
         val before = newHistogram()

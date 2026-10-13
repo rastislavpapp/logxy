@@ -78,7 +78,8 @@ internal class SingleLoad(private val log: LogData) : LoadedLog {
 
     override fun fieldReader(field: Int, records: IntArray?, count: Int): (Int) -> String {
         val snapshot = log.filterSnapshot()
-        return if (records == null) { i -> snapshot.fieldText(i, field) } else { i -> snapshot.fieldText(records[i], field) }
+        if (records == null) return { i -> snapshot.fieldText(i, field) }
+        return { i -> snapshot.fieldText(records[i], field) }
     }
 
     override fun append(part: Int, data: AppendedData): Int {
@@ -94,7 +95,10 @@ internal class SingleLoad(private val log: LogData) : LoadedLog {
     }
 }
 
-/** A load of several files merged by time; [settle] merges appended records in, or asks to merge again when they no longer fit after the others. */
+/**
+ * A load of several files merged by time; [settle] merges appended records in, or asks to merge again when they
+ * no longer fit after the others.
+ */
 internal class MergedLoad(private val log: MergedLog) : LoadedLog {
     private var schema: Schema = log.schema
 

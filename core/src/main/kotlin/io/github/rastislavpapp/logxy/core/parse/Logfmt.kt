@@ -71,7 +71,7 @@ internal class LogfmtMap(private val excluded: Set<String>) : MapSyntax {
     override fun value(bytes: ByteArray, from: Int, to: Int, key: MapKey): Long {
         val expected = key.bytes
         Logfmt.forEachPair(bytes, from, to) { keyFrom, keyTo, valueFrom, valueTo ->
-            if (keyTo - keyFrom == expected.size && java.util.Arrays.equals(bytes, keyFrom, keyTo, expected, 0, expected.size)) {
+            if (java.util.Arrays.equals(bytes, keyFrom, keyTo, expected, 0, expected.size)) {
                 return MdcMap.pack(valueFrom, valueTo)
             }
         }

@@ -32,7 +32,9 @@ internal class RoleFields(keys: RoleKeys) {
     private val candidateRanks: IntArray
 
     init {
-        val flat = keys.byRole.withIndex().flatMap { (field, role) -> role.second.mapIndexed { rank, key -> Triple(key, field, rank) } }
+        val flat = keys.byRole.withIndex().flatMap { (field, role) ->
+            role.second.mapIndexed { rank, key -> Triple(key, field, rank) }
+        }
         candidates = Array(flat.size) { flat[it].first.toByteArray() }
         candidateFields = IntArray(flat.size) { flat[it].second }
         candidateRanks = IntArray(flat.size) { flat[it].third }
@@ -79,7 +81,9 @@ internal class RoleFields(keys: RoleKeys) {
             val contentFrom = if (isString) from + 1 else from
             val contentTo = if (isString) to - 1 else to
             when (out.schema.fields[field].type) {
-                ColumnType.TIMESTAMP -> if (timestamps.parse(bytes, contentFrom, contentTo)) out.setTimestamp(field, timestamps.nanos)
+                ColumnType.TIMESTAMP -> {
+                    if (timestamps.parse(bytes, contentFrom, contentTo)) out.setTimestamp(field, timestamps.nanos)
+                }
                 ColumnType.LEVEL -> out.setLevel(field, bytes, contentFrom, contentTo)
                 ColumnType.DICT -> {
                     if (!isString || Json.isPlain(bytes, contentFrom, contentTo)) {

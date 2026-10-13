@@ -19,7 +19,10 @@ sealed interface Condition : Filter {
     val field: String
 }
 
-/** [EQUALS] and [NOT_EQUALS] take wildcard patterns (see [Glob]), [MATCHES] and [NOT_MATCHES] regexes (found anywhere). */
+/**
+ * [EQUALS] and [NOT_EQUALS] take wildcard patterns (see [Glob]), [MATCHES] and [NOT_MATCHES] regexes
+ * (found anywhere).
+ */
 enum class TextOp { EQUALS, NOT_EQUALS, MATCHES, NOT_MATCHES }
 
 /** Compares the field's text, as shown in the table. Absent values match only the negated ops. */
@@ -59,7 +62,10 @@ data class LevelCondition(override val field: String, val levels: Set<Level>) : 
     }
 }
 
-/** The template of the message [field] (see [io.github.rastislavpapp.logxy.core.pattern.Templates]) is one of [templates]. */
+/**
+ * The template of the message [field] (see [io.github.rastislavpapp.logxy.core.pattern.Templates]) is one of
+ * [templates].
+ */
 data class PatternCondition(override val field: String, val templates: Set<String>) : Condition
 
 /** The timestamp, in epoch nanoseconds, lies in `[from, to]`; a null bound is open. */
@@ -71,5 +77,6 @@ data class TimeCondition(override val field: String, val from: Long? = null, val
  */
 data class NumberCondition(override val field: String, val from: Double? = null, val to: Double? = null) : Condition {
     /** Whether [number] lies in the range; false for NaN, which stands for a value that is no number. */
-    internal fun matches(number: Double) = number >= (from ?: Double.NEGATIVE_INFINITY) && number <= (to ?: Double.POSITIVE_INFINITY)
+    internal fun matches(number: Double) =
+        number >= (from ?: Double.NEGATIVE_INFINITY) && number <= (to ?: Double.POSITIVE_INFINITY)
 }

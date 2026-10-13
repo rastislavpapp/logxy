@@ -47,7 +47,10 @@ class QueryCompiler(private val schema: Schema, private val zone: ZoneId = ZoneI
         val field = schema.fields.firstOrNull { it.name.equals(rule.field, ignoreCase = true) }
         // A field of the log named so wins over the template.
         if (field == null && rule.field.equals(Query.PATTERN_FIELD, ignoreCase = true)) return pattern(rule)
-        field ?: throw QueryException("Unknown field “${rule.field}”; this log has ${schema.fields.joinToString { it.name }}")
+        if (field == null) {
+            val names = schema.fields.joinToString { it.name }
+            throw QueryException("Unknown field “${rule.field}”; this log has $names")
+        }
         val name = field.name
         if (rule.op.comparison) {
             return when (field.type) {
@@ -56,7 +59,8 @@ class QueryCompiler(private val schema: Schema, private val zone: ZoneId = ZoneI
                 else -> numberComparison(name, rule)
             }
         }
-        if (field.type == ColumnType.LEVEL && rule.bare && (rule.op == QueryOp.EQUALS || rule.op == QueryOp.NOT_EQUALS)) {
+        val equality = rule.op == QueryOp.EQUALS || rule.op == QueryOp.NOT_EQUALS
+        if (field.type == ColumnType.LEVEL && rule.bare && equality) {
             val condition = LevelCondition(name, setOf(level(rule.value)))
             return if (rule.op == QueryOp.EQUALS) condition else Filter.Not(condition)
         }
@@ -70,7 +74,9 @@ class QueryCompiler(private val schema: Schema, private val zone: ZoneId = ZoneI
             else -> error("comparison handled above")
         }
         // Absent values match negated conditions, so they need ruling out too.
-        if (rule.value.isEmpty()) return Filter.And(listOf(PresenceCondition(name), TextCondition(name, op, "", ignoreCase)))
+        if (rule.value.isEmpty()) {
+            return Filter.And(listOf(PresenceCondition(name), TextCondition(name, op, "", ignoreCase)))
+        }
         if (op == TextOp.MATCHES || op == TextOp.NOT_MATCHES) {
             try {
                 Pattern.compile(rule.value)
@@ -111,7 +117,9 @@ class QueryCompiler(private val schema: Schema, private val zone: ZoneId = ZoneI
 
     private fun numberComparison(field: String, rule: Query.Rule): Filter {
         val number = Bytes.parseNumber(rule.value)
-        if (number.isNaN()) throw QueryException("${rule.op.symbol} on $field compares numbers; “${rule.value}” is no number")
+        if (number.isNaN()) {
+            throw QueryException("${rule.op.symbol} on $field compares numbers; “${rule.value}” is no number")
+        }
         return when (rule.op) {
             QueryOp.AT_LEAST -> NumberCondition(field, from = number)
             QueryOp.ABOVE -> NumberCondition(field, from = Math.nextUp(number))
@@ -158,15 +166,24 @@ object TimeLiteral {
 
     /** [nanos] as [parse] reads it back: date, time and as many fraction digits as needed, at least milliseconds. */
     fun format(nanos: Long, zone: ZoneId): String {
-        val time = Instant.ofEpochSecond(Math.floorDiv(nanos, 1_000_000_000L), Math.floorMod(nanos, 1_000_000_000L)).atZone(zone)
+        val instant = Instant.ofEpochSecond(Math.floorDiv(nanos, 1_000_000_000L), Math.floorMod(nanos, 1_000_000_000L))
+        val time = instant.atZone(zone)
         val fraction = "%09d".format(time.nano).trimEnd('0').padEnd(3, '0')
         return "%04d-%02d-%02d %02d:%02d:%02d.%s".format(
             time.year, time.monthValue, time.dayOfMonth, time.hour, time.minute, time.second, fraction,
         )
     }
 
-    private fun toNanos(date: LocalDate, hour: String, minute: String, second: String, fraction: String, zone: ZoneId): Long {
-        val time = LocalTime.of(hour.ifEmpty { "0" }.toInt(), minute.ifEmpty { "0" }.toInt(), second.ifEmpty { "0" }.toInt())
+    private fun toNanos(
+        date: LocalDate,
+        hour: String,
+        minute: String,
+        second: String,
+        fraction: String,
+        zone: ZoneId,
+    ): Long {
+        fun number(digits: String) = digits.ifEmpty { "0" }.toInt()
+        val time = LocalTime.of(number(hour), number(minute), number(second))
         val instant = LocalDateTime.of(date, time).atZone(zone).toInstant()
         return instant.epochSecond * 1_000_000_000 + fraction.padEnd(9, '0').ifEmpty { "0" }.toLong()
     }

@@ -53,7 +53,8 @@ object LogFolders {
         }
     }
 
-    private fun isHidden(path: Path) = path.fileName.toString().startsWith(".") || runCatching { Files.isHidden(path) }.getOrDefault(false)
+    private fun isHidden(path: Path) =
+        path.fileName.toString().startsWith(".") || runCatching { Files.isHidden(path) }.getOrDefault(false)
 
     /** A zip or compressed file, or text. */
     private fun isOpenable(file: Path): Boolean {

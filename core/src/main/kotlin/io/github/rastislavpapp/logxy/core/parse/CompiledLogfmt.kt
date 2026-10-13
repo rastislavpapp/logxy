@@ -13,13 +13,17 @@ import java.time.format.DateTimeFormatter
  * from the line on demand. Timestamps as in [CompiledJson]. Lines that are no logfmt (a panic, a stack trace)
  * continue the record before them.
  */
-class CompiledLogfmt(val keys: RoleKeys = RoleKeys.LOGFMT, private val zone: ZoneId = ZoneId.systemDefault()) : CompiledParser() {
+class CompiledLogfmt(
+    val keys: RoleKeys = RoleKeys.LOGFMT,
+    private val zone: ZoneId = ZoneId.systemDefault(),
+) : CompiledParser() {
 
     private val roles = RoleFields(keys)
 
     private val mapField = roles.fields.size
 
-    override val schema = Schema(roles.fields + Field("logfmt", ColumnType.SPAN, map = LogfmtMap(roles.excluded), json = true))
+    override val schema =
+        Schema(roles.fields + Field("logfmt", ColumnType.SPAN, map = LogfmtMap(roles.excluded), json = true))
 
     private val displayFormat = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS").withZone(zone)
 
@@ -39,7 +43,10 @@ class CompiledLogfmt(val keys: RoleKeys = RoleKeys.LOGFMT, private val zone: Zon
         private var lineFrom = 0
         private var lineTo = 0
 
-        /** A record starts with `key=` and holds at least two pairs with a value, so that prose is not taken for one. */
+        /**
+         * A record starts with `key=` and holds at least two pairs with a value, so that prose is not taken for
+         * one.
+         */
         override fun match(bytes: ByteArray, from: Int, to: Int): Boolean {
             if (from == to || bytes[from] == Logfmt.SPACE || bytes[from] == Logfmt.TAB) return false
             count = 0

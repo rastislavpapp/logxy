@@ -22,7 +22,10 @@ internal interface RowOrigin {
 
 /** How many of the counted rows have each message template, in total and per level. */
 class PatternCounts internal constructor(
-    /** Templates, most frequent first; null stands for the records beyond [PatternIndex.MAX_TEMPLATES] distinct templates. */
+    /**
+     * Templates, most frequent first; null stands for the records beyond [PatternIndex.MAX_TEMPLATES] distinct
+     * templates.
+     */
     val templates: List<String?>,
     /** Per template, a count per [Level] by ordinal, then one for records without a level. */
     private val counts: IntArray,
@@ -62,9 +65,13 @@ class PatternCounts internal constructor(
         ): PatternCounts = withContext(Dispatchers.Default) {
             coroutineScope { indexes.indices.map { async { indexes[it].update(snapshots[it]) } }.awaitAll() }
             val texts = indexes.map { it.texts() }
-            val levelFields = snapshots.map { s -> s.schema.indexOf(Role.LEVEL).takeIf { it >= 0 && s.schema.fields[it].type == ColumnType.LEVEL } ?: -1 }
+            val levelFields = snapshots.map { s ->
+                val field = s.schema.indexOf(Role.LEVEL)
+                if (field >= 0 && s.schema.fields[field].type == ColumnType.LEVEL) field else -1
+            }
             val levelOrdinals = snapshots.mapIndexed { p, s ->
-                if (levelFields[p] < 0) IntArray(0) else s.dictionaryTexts(levelFields[p]).map { s.levels.of(it).ordinal }.toIntArray()
+                if (levelFields[p] < 0) return@mapIndexed IntArray(0)
+                s.dictionaryTexts(levelFields[p]).map { s.levels.of(it).ordinal }.toIntArray()
             }
             val tasks = maxOf(1, minOf(Runtime.getRuntime().availableProcessors(), rowCount / MIN_TASK_ROWS))
             val perTask = coroutineScope {

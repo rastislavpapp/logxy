@@ -63,7 +63,8 @@ class ZipSpool(val root: Path) {
             val attributes = Files.readAttributes(absolute, BasicFileAttributes::class.java)
             val key = "$absolute|${attributes.size()}|${attributes.lastModifiedTime().toMillis()}"
             extracted[key]?.let { return@withContext it }
-            // A folder per zip version, holding a folder named like the zip, so merged views name files "app.zip/app.log".
+            // A folder per zip version, holding a folder named like the zip, so merged views name files
+            // "app.zip/app.log".
             val base = root.resolve(SpoolCache.hash(key))
             val dir = base.resolve(absolute.fileName.toString())
             SpoolCache.deleteRecursively(base)
@@ -164,16 +165,20 @@ class ZipSpool(val root: Path) {
         }
 
         /** Whether a file starting with [header] is a zip. */
-        fun isZip(header: ByteArray): Boolean =
-            header.size >= 4 && header[0] == 'P'.code.toByte() && header[1] == 'K'.code.toByte() &&
-                ((header[2].toInt() == 3 && header[3].toInt() == 4) || (header[2].toInt() == 5 && header[3].toInt() == 6))
+        fun isZip(header: ByteArray): Boolean {
+            if (header.size < 4 || header[0] != 'P'.code.toByte() || header[1] != 'K'.code.toByte()) return false
+            val third = header[2].toInt()
+            val fourth = header[3].toInt()
+            return (third == 3 && fourth == 4) || (third == 5 && fourth == 6)
+        }
 
         /** The origin [text] names, as [Origin.toString] writes it, if its zip exists. */
         fun parseOrigin(text: String): Origin? {
             val at = text.indexOf(SEPARATOR)
             if (at <= 0) return null
             val zip = Path.of(text.substring(0, at))
-            return if (Files.isRegularFile(zip)) Origin(zip.toAbsolutePath().normalize(), text.substring(at + SEPARATOR.length)) else null
+            if (!Files.isRegularFile(zip)) return null
+            return Origin(zip.toAbsolutePath().normalize(), text.substring(at + SEPARATOR.length))
         }
 
         /**

@@ -33,5 +33,7 @@ fun formatTimeSpan(nanos: Long): String {
 }
 
 /** [nanos] in [unit]s, with at most three decimals and no trailing zeros. */
-private fun decimal(nanos: Long, unit: Long): String =
-    BigDecimal.valueOf(nanos).divide(BigDecimal.valueOf(unit), 3, RoundingMode.DOWN).stripTrailingZeros().toPlainString()
+private fun decimal(nanos: Long, unit: Long): String {
+    val value = BigDecimal.valueOf(nanos).divide(BigDecimal.valueOf(unit), 3, RoundingMode.DOWN)
+    return value.stripTrailingZeros().toPlainString()
+}

@@ -25,7 +25,10 @@ sealed interface Query {
     companion object {
         val EMPTY = Group(all = true, items = emptyList())
 
-        /** Not a field of the log: the template of the message, see [io.github.rastislavpapp.logxy.core.pattern.Templates]. */
+        /**
+         * Not a field of the log: the template of the message, see
+         * [io.github.rastislavpapp.logxy.core.pattern.Templates].
+         */
         const val PATTERN_FIELD = "Pattern"
     }
 }

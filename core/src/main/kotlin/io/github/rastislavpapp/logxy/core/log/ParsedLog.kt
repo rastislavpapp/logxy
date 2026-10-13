@@ -136,7 +136,9 @@ class ParsedLog private constructor(
         schema, recordCount, indexedSize, channels,
         segments = segments.toList(),
         first = segmentFirst.copyOf(),
-        texts = Array(schema.fields.size) { field -> dictionaries.getOrNull(field)?.let { d -> List(d.size) { d.text(it) } } },
+        texts = Array(schema.fields.size) { field ->
+            dictionaries.getOrNull(field)?.let { d -> List(d.size) { d.text(it) } }
+        },
         levels = levelMapping,
         parser = parser,
     )
@@ -158,7 +160,8 @@ class ParsedLog private constructor(
             val relative = columns.ints[field]!![local]
             val spanLength = if (length == Columns.TO_RECORD_END) recordLength - relative else length
             // Values of map keys may be anywhere in the map.
-            needed = maxOf(needed, relative + if (storage.fields[field].isMap) spanLength else minOf(spanLength, maxBytes + 2))
+            val shown = if (storage.fields[field].isMap) spanLength else minOf(spanLength, maxBytes + 2)
+            needed = maxOf(needed, relative + shown)
         }
         val bytes = if (needed > 0) read(start, minOf(needed, recordLength)) else EMPTY
 
@@ -247,9 +250,11 @@ class ParsedLog private constructor(
         // A map split into its keys stays hidden: it is shown through them.
         val split = fields.mapNotNull { it.mapKey?.field }.toSet()
         val present = fields.indices.filter { field ->
-            fields[field].hidden && fields[field].optional && field !in split && field < source.present.size && source.present[field]
+            val inSource = field < source.present.size && source.present[field]
+            fields[field].hidden && fields[field].optional && field !in split && inSource
         }
-        if (present.isNotEmpty()) schema = Schema(fields.mapIndexed { i, field -> if (i in present) field.copy(hidden = false) else field })
+        if (present.isEmpty()) return
+        schema = Schema(fields.mapIndexed { i, field -> if (i in present) field.copy(hidden = false) else field })
     }
 
     private fun copyRecord(source: Columns, i: Int, target: Columns, remaps: Array<IntArray?>) {
@@ -451,7 +456,9 @@ class ParsedLog private constructor(
                 schema.fields[field].optional && segments.none { field < it.present.size && it.present[field] }
             }
             if (absent.isEmpty()) return schema
-            return Schema(schema.fields.mapIndexed { i, field -> if (i in absent) field.copy(hidden = true) else field })
+            return Schema(
+                schema.fields.mapIndexed { i, field -> if (i in absent) field.copy(hidden = true) else field },
+            )
         }
 
         private fun Schema.asSpan(field: Int) = Schema(
@@ -496,7 +503,8 @@ class ParsedLog private constructor(
                 if (++lines and 1023 == 0) check()
                 val matched = matcher.match(reader.buffer, reader.lineFrom, reader.lineTo)
                 // Without multi-line records, only blank lines continue one.
-                val startsRecord = matched || !inRecord || (!multiLine && !isBlank(reader.buffer, reader.lineFrom, reader.lineTo))
+                val startsRecord =
+                    matched || !inRecord || (!multiLine && !isBlank(reader.buffer, reader.lineFrom, reader.lineTo))
                 if (matched) {
                     out.beginRecord(reader.lineStart)
                     matcher.write(out)
@@ -532,7 +540,9 @@ class ParsedLog private constructor(
                             segment.bytes[field]?.let { ids ->
                                 for (i in 0..<ids.size) {
                                     val id = ids[i].toInt() and 0xFF
-                                    if (id <= Columns.MAX_LEVEL_ID) ids[i] = minOf(remap[id], Columns.MAX_LEVEL_ID).toByte()
+                                    if (id <= Columns.MAX_LEVEL_ID) {
+                                        ids[i] = minOf(remap[id], Columns.MAX_LEVEL_ID).toByte()
+                                    }
                                 }
                             }
                             if (schema.fields[field].type == ColumnType.DICT) {
@@ -574,7 +584,10 @@ class ParsedLog private constructor(
             val length = columns.spanLength(field, local)
             if (length == Columns.ABSENT_LENGTH) return ""
             val relative = minOf(columns.ints[field]!![local], bytes.size)
-            if (length == Columns.TO_RECORD_END) return String(bytes, relative, Bytes.trimLineEnd(bytes, relative, bytes.size) - relative, Charsets.UTF_8)
+            if (length == Columns.TO_RECORD_END) {
+                val end = Bytes.trimLineEnd(bytes, relative, bytes.size)
+                return String(bytes, relative, end - relative, Charsets.UTF_8)
+            }
             val end = minOf(relative + length, bytes.size)
             if (schema.fields[field].json) return String(Json.decode(bytes, relative, end), Charsets.UTF_8)
             return String(bytes, relative, end - relative, Charsets.UTF_8)
