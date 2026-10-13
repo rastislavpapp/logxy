@@ -6,7 +6,10 @@ import io.github.rastislavpapp.logxy.core.fileKey
 import io.github.rastislavpapp.logxy.core.parse.Parser
 import java.nio.file.Path
 
-/** The files of a session open in a tab, or to open in one, with the parser for each ([parsers], null to detect it) and its [filter]. */
+/**
+ * The files of a session open in a tab, or to open in one, with the parser for each ([parsers], null to detect
+ * it) and its [filter].
+ */
 data class SessionFiles(val paths: List<Path>, val parsers: List<Parser?>, val filter: SavedFilter? = null)
 
 /** A change to the tabs, applied in order; [index]es are of the tabs as they are when it applies. */
@@ -24,24 +27,42 @@ sealed interface TabAction {
     data class InsertAfter(val index: Int, val session: SessionFiles) : TabAction
 }
 
-/** Decides which tabs show the sessions to open, and selects a tab rather than open a second one with the same files. */
+/**
+ * Decides which tabs show the sessions to open, and selects a tab rather than open a second one with the same
+ * files.
+ */
 object TabPlan {
 
     /** Opens [files] (read with [parsers]) in [mode] next to the open [tabs], of which [current] is selected. */
-    fun open(mode: OpenMode, files: List<Path>, parsers: List<Parser?>, tabs: List<SessionFiles>, current: Int?): List<TabAction> {
+    fun open(
+        mode: OpenMode,
+        files: List<Path>,
+        parsers: List<Parser?>,
+        tabs: List<SessionFiles>,
+        current: Int?,
+    ): List<TabAction> {
         val open = OpenTabs(tabs)
-        fun place(session: SessionFiles, action: TabAction) =
-            open.indexOf(session.paths)?.let(TabAction::Select) ?: action.also { if (it is TabAction.Add) open.add(session.paths) }
+        fun place(session: SessionFiles, action: TabAction): TabAction {
+            open.indexOf(session.paths)?.let { return TabAction.Select(it) }
+            if (action is TabAction.Add) open.add(session.paths)
+            return action
+        }
         return when (mode) {
             OpenMode.MERGE_INTO_CURRENT, OpenMode.MERGE_WITH_CURRENT_IN_NEW -> {
                 val index = requireNotNull(current) { "$mode needs a current tab" }
                 val tab = tabs[index]
                 val merged = SessionFiles(tab.paths + files, tab.parsers + parsers, tab.filter)
-                val action = if (mode == OpenMode.MERGE_INTO_CURRENT) TabAction.Replace(index, merged) else TabAction.InsertAfter(index, merged)
+                val action = if (mode == OpenMode.MERGE_INTO_CURRENT) {
+                    TabAction.Replace(index, merged)
+                } else {
+                    TabAction.InsertAfter(index, merged)
+                }
                 listOf(place(merged, action))
             }
             OpenMode.MERGE -> SessionFiles(files, parsers).let { listOf(place(it, TabAction.Add(it))) }
-            OpenMode.TABS -> files.zip(parsers) { file, parser -> SessionFiles(listOf(file), listOf(parser)) }.map { place(it, TabAction.Add(it)) }
+            OpenMode.TABS -> files
+                .zip(parsers) { file, parser -> SessionFiles(listOf(file), listOf(parser)) }
+                .map { place(it, TabAction.Add(it)) }
         }
     }
 

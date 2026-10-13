@@ -13,13 +13,17 @@ object QueryParser {
 
     private class Token(val kind: Kind, val text: String, val offset: Int, val length: Int)
 
-    /** The query [text] says; [Query.EMPTY] for blank text. Throws [QueryException] with the position of the first error. */
+    /**
+     * The query [text] says; [Query.EMPTY] for blank text. Throws [QueryException] with the position of the first
+     * error.
+     */
     fun parse(text: String): Query.Group {
         val parser = Parser(tokenize(text))
         if (parser.peek().kind == Kind.END) return Query.EMPTY
         val query = parser.or()
         val rest = parser.peek()
-        if (rest.kind != Kind.END) throw unexpected(rest, if (rest.kind == Kind.CLOSE) "No “(” matches this “)”" else "Expected AND or OR")
+        if (rest.kind == Kind.CLOSE) throw unexpected(rest, "No “(” matches this “)”")
+        if (rest.kind != Kind.END) throw unexpected(rest, "Expected AND or OR")
         return query as? Query.Group ?: Query.Group(all = true, items = listOf(query))
     }
 
@@ -71,17 +75,23 @@ object QueryParser {
         private fun rule(): Query.Rule {
             val field = next()
             if (field.kind != Kind.WORD && field.kind != Kind.FIELD) throw unexpected(field, "Expected a field name")
-            if (field.kind == Kind.WORD && field.text.uppercase() in KEYWORDS) throw unexpected(field, "Expected a field name, not ${field.text}")
+            if (field.kind == Kind.WORD && field.text.uppercase() in KEYWORDS) {
+                throw unexpected(field, "Expected a field name, not ${field.text}")
+            }
             val op = next()
             if (op.kind != Kind.OP) throw unexpected(op, "Expected an operator after ${field.text}, e.g. == or >=")
             val value = next()
-            if (value.kind != Kind.WORD && value.kind != Kind.STRING) throw unexpected(value, "Expected a value after ${op.text}")
+            if (value.kind != Kind.WORD && value.kind != Kind.STRING) {
+                throw unexpected(value, "Expected a value after ${op.text}")
+            }
             return Query.Rule(field.text, OPS.getValue(op.text), value.text, bare = value.kind == Kind.WORD)
         }
     }
 
-    private fun unexpected(token: Token, message: String) =
-        QueryException(if (token.kind == Kind.END) "$message, but the text ends" else message, token.offset, maxOf(token.length, 1))
+    private fun unexpected(token: Token, message: String): QueryException {
+        val text = if (token.kind == Kind.END) "$message, but the text ends" else message
+        return QueryException(text, token.offset, maxOf(token.length, 1))
+    }
 
     private val OPS = QueryOp.entries.associateBy { it.symbol }
 
@@ -130,7 +140,7 @@ object QueryParser {
                 }
                 else -> {
                     var j = i
-                    while (j < text.length && !text[j].isWhitespace() && text[j] !in "()\"`" && text[j] !in OPERATOR_CHARS) j++
+                    while (j < text.length && !endsWord(text[j])) j++
                     tokens += Token(Kind.WORD, text.substring(i, j), i, j - i)
                     i = j
                 }
@@ -140,9 +150,13 @@ object QueryParser {
         return tokens
     }
 
-    /** Whether [text] reads back as one word without quotes or backticks: no spaces, quotes, parentheses or operators, and no keyword. */
-    fun isBareWord(text: String) = text.isNotEmpty() &&
-        text.none { it.isWhitespace() || it in "()\"`" || it in OPERATOR_CHARS } && text.uppercase() !in KEYWORDS
+    private fun endsWord(c: Char) = c.isWhitespace() || c in "()\"`" || c in OPERATOR_CHARS
+
+    /**
+     * Whether [text] reads back as one word without quotes or backticks: no spaces, quotes, parentheses or
+     * operators, and no keyword.
+     */
+    fun isBareWord(text: String) = text.isNotEmpty() && text.none(::endsWord) && text.uppercase() !in KEYWORDS
 }
 
 /** Writes a [Query] as text that [QueryParser] reads back to the same query. */
@@ -154,16 +168,20 @@ object QueryPrinter {
         is Query.Rule -> (if (query.negated) "NOT " else "") + rule(query)
     }
 
-    private fun items(group: Query.Group): String = group.items.joinToString(if (group.all) " AND " else " OR ") { item ->
-        when {
-            item is Query.Group && !item.negated -> "(${items(item)})"
-            else -> print(item)
+    private fun items(group: Query.Group): String {
+        val separator = if (group.all) " AND " else " OR "
+        return group.items.joinToString(separator) { item ->
+            when {
+                item is Query.Group && !item.negated -> "(${items(item)})"
+                else -> print(item)
+            }
         }
     }
 
     private fun rule(rule: Query.Rule): String {
         val field = if (QueryParser.isBareWord(rule.field)) rule.field else "`${rule.field}`"
-        val value = if (rule.bare && QueryParser.isBareWord(rule.value)) rule.value else "\"" + rule.value.replace("\"", "\\\"") + "\""
+        val bare = rule.bare && QueryParser.isBareWord(rule.value)
+        val value = if (bare) rule.value else "\"" + rule.value.replace("\"", "\\\"") + "\""
         return "$field ${rule.op.symbol} $value"
     }
 }

@@ -61,7 +61,10 @@ internal object MdcMap : MapSyntax {
 
     override fun fieldName(map: String, key: String) = "$map[$key]"
 
-    /** The range `[from, to)` in one long, so map lookups return a range without allocating; read back with [from] and [to]. */
+    /**
+     * The range `[from, to)` in one long, so map lookups return a range without allocating; read back with [from]
+     * and [to].
+     */
     fun pack(from: Int, to: Int): Long = (from.toLong() shl 32) or to.toLong()
     fun from(packed: Long): Int = (packed ushr 32).toInt()
     fun to(packed: Long): Int = packed.toInt()

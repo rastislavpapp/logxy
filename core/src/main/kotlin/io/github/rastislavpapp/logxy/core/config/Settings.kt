@@ -52,11 +52,15 @@ data class Settings(
         /** The user's settings file: `logxy.properties` in [directory]. */
         fun defaultPath(): Path = directory().resolve("logxy.properties")
 
-        /** For files that can be made again: `%LOCALAPPDATA%\logxy\cache` on Windows, `$XDG_CACHE_HOME/logxy` or `~/.cache/logxy` elsewhere. */
+        /**
+         * For files that can be made again: `%LOCALAPPDATA%\logxy\cache` on Windows, `$XDG_CACHE_HOME/logxy` or
+         * `~/.cache/logxy` elsewhere.
+         */
         fun cacheDirectory(): Path {
             val localAppData = System.getenv("LOCALAPPDATA")
+            val windows = System.getProperty("os.name").startsWith("Windows")
             return when {
-                System.getProperty("os.name").startsWith("Windows") && localAppData != null -> Path.of(localAppData, "logxy", "cache")
+                windows && localAppData != null -> Path.of(localAppData, "logxy", "cache")
                 else -> (System.getenv("XDG_CACHE_HOME")?.let { Path.of(it) }
                     ?: Path.of(System.getProperty("user.home"), ".cache")).resolve("logxy")
             }
@@ -88,7 +92,9 @@ data class Settings(
             if (!Files.exists(path)) return Settings()
             val properties = PropertiesFiles.load(path)
 
-            val parsers = numbered(properties, "parser").mapNotNull { n -> readParser(properties, "parser.$n.")?.takeIf { it != Parser.Raw } }
+            val parsers = numbered(properties, "parser")
+                .mapNotNull { n -> readParser(properties, "parser.$n.") }
+                .filter { it != Parser.Raw }
             val levels = properties.stringPropertyNames()
                 .filter { it.startsWith("level.") }
                 .mapNotNull { key ->
@@ -100,26 +106,29 @@ data class Settings(
             val filters = numbered(properties, "filter").mapNotNull { n ->
                 val name = properties.getProperty("filter.$n.name")?.trim().orEmpty()
                 if (name.isEmpty()) return@mapNotNull null
-                val level = properties.getProperty("filter.$n.level")?.trim()?.uppercase()
-                SavedFilter(name, Level.entries.firstOrNull { it.name == level }, properties.getProperty("filter.$n.query").orEmpty())
+                val levelName = properties.getProperty("filter.$n.level")?.trim()?.uppercase()
+                val level = Level.entries.firstOrNull { it.name == levelName }
+                SavedFilter(name, level, properties.getProperty("filter.$n.query").orEmpty())
             }
             val maxMemory = properties.getProperty("max-memory")?.let(::parseMemory)
             // Without the marker, level entries only add to the built-in names (as first released).
-            val openMode = properties.getProperty("open.mode")?.let { mode -> OpenMode.entries.firstOrNull { it.key == mode } }
+            val openModeKey = properties.getProperty("open.mode")
+            val openMode = OpenMode.entries.firstOrNull { it.key == openModeKey }
             val includeSubfolders = properties.getProperty("open.subfolders") != "false"
             val deletedBuiltIns = numbered(properties, "deleted-built-in")
-                .mapNotNull { n -> properties.getProperty("deleted-built-in.$n.name")?.trim()?.takeIf { it.isNotEmpty() } }
+                .mapNotNull { n -> properties.getProperty("deleted-built-in.$n.name")?.trim() }
+                .filter { it.isNotEmpty() }
                 .toSet()
-            return Settings(
-                parsers, LevelMapping(if (custom) levels else Level.BUILT_IN_NAMES + levels), filters, maxMemory, openMode, includeSubfolders,
-                deletedBuiltIns,
-            )
+            val levelMapping = LevelMapping(if (custom) levels else Level.BUILT_IN_NAMES + levels)
+            return Settings(parsers, levelMapping, filters, maxMemory, openMode, includeSubfolders, deletedBuiltIns)
         }
 
         /** Writes [settings] to [path], replacing the file only once the new one is complete. */
         fun save(path: Path, settings: Settings) {
             val properties = Properties()
-            settings.parsers.filter { it != Parser.Raw }.forEachIndexed { i, parser -> writeParser(properties, "parser.${i + 1}.", parser) }
+            settings.parsers.filter { it != Parser.Raw }.forEachIndexed { i, parser ->
+                writeParser(properties, "parser.${i + 1}.", parser)
+            }
             settings.deletedBuiltIns.forEachIndexed { i, name -> properties["deleted-built-in.${i + 1}.name"] = name }
             settings.filters.forEachIndexed { i, filter ->
                 properties["filter.${i + 1}.name"] = filter.name
@@ -145,7 +154,10 @@ data class Settings(
             return kind.read(name) { properties.getProperty(prefix + it) }
         }
 
-        /** Stores [parser] under [prefix] (e.g. `parser.1.`) as [readParser] reads it back; also used for the arguments a restart passes on. */
+        /**
+         * Stores [parser] under [prefix] (e.g. `parser.1.`) as [readParser] reads it back; also used for the
+         * arguments a restart passes on.
+         */
         internal fun writeParser(properties: Properties, prefix: String, parser: Parser) {
             properties["${prefix}type"] = parser.kind.type
             parser.properties().forEach { (key, value) -> properties[prefix + key] = value }
@@ -164,8 +176,11 @@ data class Settings(
         }
 
         /** The N of all `prefix.N.name` keys, in order. */
-        private fun numbered(properties: Properties, prefix: String): List<Int> = properties.stringPropertyNames()
-            .mapNotNull { Regex("""${Regex.escape(prefix)}\.(\d+)\.name""").matchEntire(it)?.groupValues?.get(1)?.toInt() }
-            .sorted()
+        private fun numbered(properties: Properties, prefix: String): List<Int> {
+            val key = Regex("""${Regex.escape(prefix)}\.(\d+)\.name""")
+            return properties.stringPropertyNames()
+                .mapNotNull { key.matchEntire(it)?.groupValues?.get(1)?.toInt() }
+                .sorted()
+        }
     }
 }

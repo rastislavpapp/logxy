@@ -16,7 +16,10 @@ internal object ParserInference {
     /** Tokens of a line looked at for its columns; the message comes before this many. */
     private const val MAX_TOKENS = 32
 
-    /** A parser guessed from the [sample] lines: JSON lines with the keys they use, else a pattern layout; null if neither fits. */
+    /**
+     * A parser guessed from the [sample] lines: JSON lines with the keys they use, else a pattern layout; null if
+     * neither fits.
+     */
     fun infer(sample: List<ByteArray>): Parser? {
         val lines = sample.filter { !ParserCheck.looksLikeContinuation(it, 0, it.size) }
         if (lines.isEmpty()) return null
@@ -50,7 +53,7 @@ internal object ParserInference {
                 // Numbers count as epoch times only from 2001 on in seconds, so counts and ids do not.
                 val timeLike = if (isString) to - from >= 16 && line[from + 4] == '-'.code.toByte() else to - from >= 10
                 if (timeLike && timestamps.parse(line, from, to)) stats.timestamps++
-                if (to - from in 1..12 && Level.BUILT_IN_NAMES.containsKey(text(line, from, to).uppercase())) stats.levels++
+                if (to - from in 1..12 && text(line, from, to).uppercase() in Level.BUILT_IN_NAMES) stats.levels++
                 if (isString) {
                     stats.strings++
                     stats.stringLength += to - from
@@ -79,7 +82,8 @@ internal object ParserInference {
         val logger = pick(defaults.logger, half) { _, s -> s.dotted >= s.count * AGREEMENT }
         val thread = pick(defaults.thread, half) { key, _ -> key.contains("thread", ignoreCase = true) }
         val message = keys.entries
-            .filter { (key, stats) -> key !in used && key !in known && stats.count >= half && stats.strings >= stats.count * AGREEMENT }
+            .filter { (key, stats) -> key !in used && key !in known }
+            .filter { (_, stats) -> stats.count >= half && stats.strings >= stats.count * AGREEMENT }
             .takeIf { defaults.message.none { (keys[it]?.count ?: 0) >= half } }
             ?.maxByOrNull { it.value.stringLength / it.value.strings }?.key
         val found = listOfNotNull(timestamp, level, message, logger, thread, exception)
@@ -115,8 +119,9 @@ internal object ParserInference {
             return if (end < line.size && line[end] == ']'.code.toByte()) end + 1 else -1
         }
 
-        val conversion get() = "$prefix%d{$layout}" + if (prefix.isEmpty()) "" else "]"
-        val label get() = prefix + (if ('y' in layout || 'd' in layout) "date" else "time") + if (prefix.isEmpty()) "" else "]"
+        private val suffix get() = if (prefix.isEmpty()) "" else "]"
+        val conversion get() = "$prefix%d{$layout}$suffix"
+        val label get() = prefix + (if ('y' in layout || 'd' in layout) "date" else "time") + suffix
     }
 
     private fun inferText(lines: List<ByteArray>): Parser? {
@@ -136,7 +141,8 @@ internal object ParserInference {
             length++
         }
         val shape = signatures[agreeing.first()].take(length)
-        val columns = (0..<length).map { k -> Column(shape[k], agreeing.map { tokens[it][k] }, agreeing.map { records[it] }) }
+        val agreeingRecords = agreeing.map { records[it] }
+        val columns = (0..<length).map { k -> Column(shape[k], agreeing.map { tokens[it][k] }, agreeingRecords) }
         val levelColumn = columns.indexOfFirst { it.isValue && it.share(::isLevel) >= AGREEMENT }.takeIf { it >= 0 }
         // Without a timestamp only a leading level shows that lines start records, as in `[INFO] message`.
         if (stamp == null && (levelColumn == null || columns.take(levelColumn).any { it.isValue })) return null
@@ -152,7 +158,8 @@ internal object ParserInference {
                 continue
             }
             val matcher = compiled.newMatcher()
-            if (records.count { matcher.match(it, 0, it.size) } >= records.size * AGREEMENT) return Parser.Pattern(name, pattern)
+            val matched = records.count { matcher.match(it, 0, it.size) }
+            if (matched >= records.size * AGREEMENT) return Parser.Pattern(name, pattern)
         }
         return null
     }
@@ -200,15 +207,16 @@ internal object ParserInference {
     private fun withZone(stamp: Stamp, lines: List<ByteArray>): Stamp? {
         if (stamp.layout.startsWith("UNIX") || stamp.prefix.isNotEmpty()) return null
         val matching = lines.filter { stamp.end(it) >= 0 }
-        val zoned = Stamp(stamp.prefix, stamp.layout + "XXX")
-        return zoned.takeIf { matching.count { zoned.end(it) >= 0 } >= matching.size * AGREEMENT }
-            ?: Stamp(stamp.prefix, stamp.layout + "XX").takeIf { candidate -> matching.count { candidate.end(it) >= 0 } >= matching.size * AGREEMENT }
+        return listOf("XXX", "XX")
+            .map { Stamp(stamp.prefix, stamp.layout + it) }
+            .firstOrNull { zoned -> matching.count { zoned.end(it) >= 0 } >= matching.size * AGREEMENT }
     }
 
     /** Tokens that end the header so the message follows: separators such as ` - `, ` : ` or ` | `. */
     private fun headerLength(columns: List<Column>, levelColumn: Int?): Int {
         val after = (levelColumn ?: -1) + 1
-        val separators = (after..<columns.size).filter { columns[it].kind == Kind.SEPARATOR && columns[it].signature != "---" }
+        val separators = (after..<columns.size)
+            .filter { columns[it].kind == Kind.SEPARATOR && columns[it].signature != "---" }
         if (separators.isNotEmpty()) {
             // A separator that repeats, as in `a | b | message`, ends the header at its last one.
             val first = columns[separators.first()].signature
@@ -222,7 +230,8 @@ internal object ParserInference {
             when {
                 column.kind == Kind.SPACE -> {}
                 column.kind == Kind.BRACKET -> end = k + 1
-                column.kind == Kind.WORD && (column.share(::isDotted) >= AGREEMENT || column.key() != null) -> end = k + 1
+                column.kind == Kind.WORD && (column.share(::isDotted) >= AGREEMENT || column.key() != null) ->
+                    end = k + 1
                 else -> break
             }
             k++
@@ -230,7 +239,10 @@ internal object ParserInference {
         return end
     }
 
-    /** The pattern layout and name of the timestamp, the first [end] columns as fields and literals, then the message. */
+    /**
+     * The pattern layout and name of the timestamp, the first [end] columns as fields and literals, then the
+     * message.
+     */
     private fun layout(stamp: Stamp?, columns: List<Column>, levelColumn: Int?, end: Int): Pair<String, String>? {
         val pattern = StringBuilder()
         val name = StringBuilder()
@@ -391,7 +403,7 @@ internal object ParserInference {
                     tokens += Token(Kind.SEPARATOR, start, i, "|")
                 }
                 else -> {
-                    while (i < to && line[i] != SPACE && line[i] != TAB && line[i] != PIPE && line[i].toInt().toChar() !in OPENING) i++
+                    while (i < to && !endsWord(line[i])) i++
                     val word = text(line, start, i)
                     when {
                         word.all { it in PUNCTUATION } -> tokens += Token(Kind.SEPARATOR, start, i, word)
@@ -419,7 +431,10 @@ internal object ParserInference {
         return -1
     }
 
-    private fun isLevel(value: String) = value.length in 1..12 && value.all(Char::isLetter) && Level.BUILT_IN_NAMES.containsKey(value.uppercase())
+    private fun endsWord(b: Byte) = b == SPACE || b == TAB || b == PIPE || b.toInt().toChar() in OPENING
+
+    private fun isLevel(value: String) =
+        value.length in 1..12 && value.all(Char::isLetter) && Level.BUILT_IN_NAMES.containsKey(value.uppercase())
 
     /** A trace id, or trace and span ids joined by `-` or `, `: long hex numbers. */
     private fun isTraceId(value: String) = TRACE_ID.matches(value)

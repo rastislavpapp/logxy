@@ -21,7 +21,11 @@ internal object Json {
     private const val MAX_PRETTY_DEPTH = 64
 
     /** Whether [b] is JSON whitespace: space, tab, line feed or carriage return. */
-    fun isSpace(b: Byte) = b == ' '.code.toByte() || b == '\t'.code.toByte() || b == '\n'.code.toByte() || b == '\r'.code.toByte()
+    fun isSpace(b: Byte) =
+        b == ' '.code.toByte() || b == '\t'.code.toByte() || b == '\n'.code.toByte() || b == '\r'.code.toByte()
+
+    /** Whether [b] ends a number or literal: whitespace or the punctuation that may follow a value. */
+    private fun endsValue(b: Byte) = isSpace(b) || b == COMMA || b == CLOSE_OBJECT || b == CLOSE_ARRAY
 
     /** The first index from [from] on that is not [isSpace], or [to]. */
     fun skipSpace(bytes: ByteArray, from: Int, to: Int): Int {
@@ -53,7 +57,7 @@ internal object Json {
                 val first = bytes[from].toInt().toChar()
                 if (first != '-' && first !in '0'..'9' && first != 't' && first != 'f' && first != 'n') return -1
                 var i = from + 1
-                while (i < to && !isSpace(bytes[i]) && bytes[i] != COMMA && bytes[i] != CLOSE_OBJECT && bytes[i] != CLOSE_ARRAY) i++
+                while (i < to && !endsValue(bytes[i])) i++
                 i
             }
         }
@@ -124,7 +128,8 @@ internal object Json {
     }
 
     /** Whether the value `bytes[from, to)` is a string, i.e. quoted at both ends. */
-    fun isString(bytes: ByteArray, from: Int, to: Int) = to - from >= 2 && bytes[from] == QUOTE && bytes[to - 1] == QUOTE
+    fun isString(bytes: ByteArray, from: Int, to: Int) =
+        to - from >= 2 && bytes[from] == QUOTE && bytes[to - 1] == QUOTE
 
     /** Whether the string content `bytes[from, to)` reads as it is written, without escapes. */
     fun isPlain(bytes: ByteArray, from: Int, to: Int): Boolean {
@@ -185,7 +190,8 @@ internal object Json {
             i += 6
             var codePoint = unit
             if (Character.isHighSurrogate(unit.toChar())) {
-                val low = if (i + 1 < to && bytes[i] == BACKSLASH && bytes[i + 1] == 'u'.code.toByte()) hex4(bytes, i + 2, to) else -1
+                val escaped = i + 1 < to && bytes[i] == BACKSLASH && bytes[i + 1] == 'u'.code.toByte()
+                val low = if (escaped) hex4(bytes, i + 2, to) else -1
                 if (low >= 0 && Character.isLowSurrogate(low.toChar())) {
                     codePoint = Character.toCodePoint(unit.toChar(), low.toChar())
                     i += 6
@@ -322,7 +328,7 @@ internal class JsonMap(private val excluded: Set<String>) : MapSyntax {
     override fun value(bytes: ByteArray, from: Int, to: Int, key: MapKey): Long {
         val expected = key.bytes
         Json.forEachEntry(bytes, from, to) { keyFrom, keyTo, valueFrom, valueTo ->
-            if (keyTo - keyFrom == expected.size && java.util.Arrays.equals(bytes, keyFrom, keyTo, expected, 0, expected.size)) {
+            if (java.util.Arrays.equals(bytes, keyFrom, keyTo, expected, 0, expected.size)) {
                 return MdcMap.pack(valueFrom, valueTo)
             }
         }

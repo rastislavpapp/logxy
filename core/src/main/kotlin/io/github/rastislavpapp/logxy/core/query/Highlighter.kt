@@ -121,19 +121,21 @@ class Highlighter private constructor(private val terms: List<Term>) {
         }
 
         private fun pattern(rule: Query.Rule): Pattern? {
-            val flags = if (rule.op == QueryOp.EQUALS || rule.op == QueryOp.MATCHES) Pattern.CASE_INSENSITIVE or Pattern.UNICODE_CASE else 0
+            val ignoreCase = rule.op == QueryOp.EQUALS || rule.op == QueryOp.MATCHES
+            val flags = if (ignoreCase) Pattern.CASE_INSENSITIVE or Pattern.UNICODE_CASE else 0
             return try {
                 when (rule.op) {
                     QueryOp.EQUALS, QueryOp.EQUALS_CASE -> {
                         val glob = Glob.parse(rule.value)
                         val parts = glob.segments.mapIndexedNotNull { i, segment ->
                             if (segment.all { it == Glob.ANY_ONE }) return@mapIndexedNotNull null
-                            val body = segment.split(Glob.ANY_ONE).joinToString(".") { if (it.isEmpty()) "" else Pattern.quote(it) }
+                            val body = segment.split(Glob.ANY_ONE)
+                                .joinToString(".") { if (it.isEmpty()) "" else Pattern.quote(it) }
                             // Without a `*` there, the value meets the field's edge; in the detail pane's whole record
                             // that is at least a word's, so `thread == main` does not mark "domain".
-                            val start = if (i == 0 && !glob.leadingStar && isWordChar(segment.first())) NOT_AFTER_WORD else ""
-                            val end = if (i == glob.segments.lastIndex && !glob.trailingStar && isWordChar(segment.last())) NOT_BEFORE_WORD else ""
-                            start + body + end
+                            val atStart = i == 0 && !glob.leadingStar && isWordChar(segment.first())
+                            val atEnd = i == glob.segments.lastIndex && !glob.trailingStar && isWordChar(segment.last())
+                            (if (atStart) NOT_AFTER_WORD else "") + body + (if (atEnd) NOT_BEFORE_WORD else "")
                         }
                         if (parts.isEmpty()) null else Pattern.compile(parts.joinToString("|"), flags or Pattern.DOTALL)
                     }

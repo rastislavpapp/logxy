@@ -139,7 +139,8 @@ class FilterEngine(private val log: LogData, private val maxCacheBytes: Long = D
         private val words = (snapshot.count + 63) / 64
 
         // Small logs, like the parts of a merge, get smaller tasks so that every core gets some.
-        private val chunkWords = (words / Runtime.getRuntime().availableProcessors()).coerceIn(MIN_CHUNK_WORDS, CHUNK_WORDS)
+        private val chunkWords =
+            (words / Runtime.getRuntime().availableProcessors()).coerceIn(MIN_CHUNK_WORDS, CHUNK_WORDS)
         private val chunkCount = (words + chunkWords - 1) / chunkWords
 
         // Progress counts chunks of the conditions that read the file, as the others take next to no time.
@@ -325,12 +326,17 @@ private class Leaf(
                         (condition is PresenceCondition && !condition.present),
                 )
             }
-            snapshot.schema.fields[field].mapKey?.let { key -> return mapKeyLeaf(condition, key, snapshot.schema.fields[key.field].map!!) }
+            val key = snapshot.schema.fields[field].mapKey
+            if (key != null) return mapKeyLeaf(condition, key, snapshot.schema.fields[key.field].map!!)
             return when (condition) {
-                is PresenceCondition -> Leaf(condition, 0, false) { c, _ -> present(c, field, type) == condition.present }
+                is PresenceCondition -> Leaf(condition, 0, false) { c, _ ->
+                    present(c, field, type) == condition.present
+                }
                 is LevelCondition -> {
                     if (type != ColumnType.LEVEL) return constant(false)
-                    val matching = snapshot.dictionaryTexts(field).map { snapshot.levels.of(it) in condition.levels }.toBooleanArray()
+                    val matching = snapshot.dictionaryTexts(field)
+                        .map { snapshot.levels.of(it) in condition.levels }
+                        .toBooleanArray()
                     Leaf(condition, 0, false) { c, _ -> matching.getOrElse(c.levelId(field)) { false } }
                 }
                 is TimeCondition -> {
@@ -367,7 +373,11 @@ private class Leaf(
                 }
                 ColumnType.TIMESTAMP -> Leaf(condition, 1, false) { c, _ ->
                     val nanos = c.timestamp(field)
-                    if (nanos == Columns.ABSENT_TIMESTAMP) absent else matcher.matches(snapshot.formatTimestamp(field, nanos))
+                    if (nanos == Columns.ABSENT_TIMESTAMP) {
+                        absent
+                    } else {
+                        matcher.matches(snapshot.formatTimestamp(field, nanos))
+                    }
                 }
                 ColumnType.SPAN -> spanLeaf(condition, snapshot, field, absent, matcher::matches)
             }
@@ -382,9 +392,16 @@ private class Leaf(
             }
         }
 
-        private fun numberLeaf(condition: NumberCondition, snapshot: RecordSnapshot, field: Int, type: ColumnType): Leaf = when (type) {
+        private fun numberLeaf(
+            condition: NumberCondition,
+            snapshot: RecordSnapshot,
+            field: Int,
+            type: ColumnType,
+        ): Leaf = when (type) {
             ColumnType.DICT, ColumnType.LEVEL -> {
-                val matching = snapshot.dictionaryTexts(field).map { condition.matches(Bytes.parseNumber(it)) }.toBooleanArray()
+                val matching = snapshot.dictionaryTexts(field)
+                    .map { condition.matches(Bytes.parseNumber(it)) }
+                    .toBooleanArray()
                 if (type == ColumnType.DICT) {
                     Leaf(condition, 0, false) { c, _ -> matching.getOrElse(c.dictId(field)) { false } }
                 } else {
@@ -392,11 +409,22 @@ private class Leaf(
                 }
             }
             ColumnType.TIMESTAMP -> Leaf(condition, 0, false) { _, _ -> false }
-            ColumnType.SPAN -> spanLeaf(condition, snapshot, field, false) { bytes, from, to -> condition.matches(Bytes.parseNumber(bytes, from, to)) }
+            ColumnType.SPAN -> spanLeaf(condition, snapshot, field, false) { bytes, from, to ->
+                condition.matches(Bytes.parseNumber(bytes, from, to))
+            }
         }
 
-        /** Tests the text of a SPAN field as shown, see [ValueTest]; [absent] is the result for records without a value. */
-        private fun spanLeaf(condition: Condition, snapshot: RecordSnapshot, field: Int, absent: Boolean, test: ValueTest): Leaf {
+        /**
+         * Tests the text of a SPAN field as shown, see [ValueTest]; [absent] is the result for records without a
+         * value.
+         */
+        private fun spanLeaf(
+            condition: Condition,
+            snapshot: RecordSnapshot,
+            field: Int,
+            absent: Boolean,
+            test: ValueTest,
+        ): Leaf {
             val json = snapshot.schema.fields[field].json
             return Leaf(condition, 2, true) { c, reader ->
                 val length = c.spanLength(field)
@@ -420,14 +448,18 @@ private class Leaf(
 
         /** Tests the JSON value `bytes[from, to)` as shown; strings without escapes straight on their bytes. */
         private fun testJson(test: ValueTest, bytes: ByteArray, from: Int, to: Int): Boolean {
-            if (Json.isString(bytes, from, to) && Json.isPlain(bytes, from + 1, to - 1)) return test.test(bytes, from + 1, to - 1)
+            if (Json.isString(bytes, from, to) && Json.isPlain(bytes, from + 1, to - 1)) {
+                return test.test(bytes, from + 1, to - 1)
+            }
             val decoded = Json.decode(bytes, from, to)
             return test.test(decoded, 0, decoded.size)
         }
 
         /** A field read from a map: like a span, but the value is found in the map's text. */
         private fun mapKeyLeaf(condition: Condition, key: MapKey, map: MapSyntax): Leaf = when (condition) {
-            is PresenceCondition -> Leaf(condition, 2, true) { c, reader -> (mapValue(c, reader!!, key, map) >= 0) == condition.present }
+            is PresenceCondition -> Leaf(condition, 2, true) { c, reader ->
+                (mapValue(c, reader!!, key, map) >= 0) == condition.present
+            }
             is TextCondition -> {
                 val matcher = TextMatcher(condition)
                 mapValueLeaf(condition, key, map, matcher.matchesAbsent, matcher::matches)
@@ -435,7 +467,8 @@ private class Leaf(
             is NumberCondition -> mapValueLeaf(condition, key, map, false) { bytes, from, to ->
                 condition.matches(Bytes.parseNumber(bytes, from, to))
             }
-            is LevelCondition, is TimeCondition, is PatternCondition, is RecordTextCondition -> Leaf(condition, 0, false) { _, _ -> false }
+            is LevelCondition, is TimeCondition, is PatternCondition, is RecordTextCondition ->
+                Leaf(condition, 0, false) { _, _ -> false }
         }
 
         private fun mapValueLeaf(condition: Condition, key: MapKey, map: MapSyntax, absent: Boolean, test: ValueTest) =
@@ -493,7 +526,8 @@ internal class SpanReader(private val channel: FileChannel, private val fileEnd:
         if (bufferStart >= 0 && from >= bufferStart && to <= bufferStart + loaded) return (from - bufferStart).toInt()
         val length = (to - from).toInt()
         if (length > buffer.size) buffer = ByteArray(length)
-        loaded = channel.readFully(ByteBuffer.wrap(buffer, 0, minOf(buffer.size.toLong(), fileEnd - from).toInt()), from)
+        val readable = minOf(buffer.size.toLong(), fileEnd - from).toInt()
+        loaded = channel.readFully(ByteBuffer.wrap(buffer, 0, readable), from)
         bufferStart = from
         return 0
     }

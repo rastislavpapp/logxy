@@ -29,7 +29,10 @@ internal abstract class RecordSnapshot(
     /** How level texts map to levels at the time of the snapshot. */
     open val levels: LevelMapping get() = LevelMapping.DEFAULT
 
-    /** A TIMESTAMP value of [field] as the table shows it, so text conditions on timestamps match what the user sees. */
+    /**
+     * A TIMESTAMP value of [field] as the table shows it, so text conditions on timestamps match what the user
+     * sees.
+     */
     open fun formatTimestamp(field: Int, nanos: Long): String = nanos.toString()
 
     /** Walks records, cheapest in increasing order; one per thread. */
@@ -51,7 +54,10 @@ internal abstract class RecordSnapshot(
  * moves through the records it tests in increasing order. Not thread-safe.
  */
 internal interface RecordCursor {
-    /** Makes [record], below the snapshot's count, the current one; the next record or a later one in the same segment is cheapest. */
+    /**
+     * Makes [record], below the snapshot's count, the current one; the next record or a later one in the same
+     * segment is cheapest.
+     */
     fun moveTo(record: Int)
 
     /** The record moved to. */
@@ -79,7 +85,10 @@ internal interface RecordCursor {
     fun spanLength(field: Int): Int
 }
 
-/** A snapshot of a [ParsedLog]: its column segments up to [count] records, the [first] record of each, and the dictionary [texts]. */
+/**
+ * A snapshot of a [ParsedLog]: its column segments up to [count] records, the [first] record of each, and the
+ * dictionary [texts].
+ */
 internal class ParsedSnapshot(
     schema: Schema,
     count: Int,
@@ -113,7 +122,8 @@ internal class ParsedSnapshot(
         require(record in 0..<count) { "Record $record, count $count" }
         val segment = segmentOf(record)
         val end = if (record + 1 < count) recordStart(record + 1) else end
-        return ParsedLog.fieldText(schema, segments[segment], record - first[segment], field, parser, { texts[field]!![it] }) { start ->
+        val local = record - first[segment]
+        return ParsedLog.fieldText(schema, segments[segment], local, field, parser, { texts[field]!![it] }) { start ->
             readBytes(start, minOf(end - start, Int.MAX_VALUE / 2L).toInt())
         }
     }
@@ -139,7 +149,8 @@ internal class ParsedSnapshot(
                 } else {
                     var next = segment + 1
                     while (next < segments.size && segments[next].size == 0) next++
-                    segment = if (next < segments.size && record < first[next] + segments[next].size) next else segmentOf(record)
+                    val inNext = next < segments.size && record < first[next] + segments[next].size
+                    segment = if (inNext) next else segmentOf(record)
                 }
                 columns = segments[segment]
             }

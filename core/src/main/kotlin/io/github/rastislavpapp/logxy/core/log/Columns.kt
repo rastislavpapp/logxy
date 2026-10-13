@@ -78,7 +78,10 @@ internal class Columns(val schema: Schema) {
         lastTimestamp = nanos
     }
 
-    /** Sets LEVEL [field] of the current record to the text `source[from, to)`; texts past the [MAX_LEVEL_ID]th share its id, as ids are stored in a byte. */
+    /**
+     * Sets LEVEL [field] of the current record to the text `source[from, to)`; texts past the [MAX_LEVEL_ID]th
+     * share its id, as ids are stored in a byte.
+     */
     fun setLevel(field: Int, source: ByteArray, from: Int, to: Int) {
         val id = minOf(dictionaries[field]!!.idOf(source, from, to), MAX_LEVEL_ID)
         bytes[field]!![size - 1] = id.toByte()
@@ -87,10 +90,17 @@ internal class Columns(val schema: Schema) {
 
     /** A value of a field the parser declares DICT, stored as a span if the log made it one, see [ParsedLog]. */
     fun setText(field: Int, source: ByteArray, lineFrom: Int, from: Int, to: Int) {
-        if (schema.fields[field].type == ColumnType.SPAN) setSpan(field, from - lineFrom, to - from) else setDict(field, source, from, to)
+        if (schema.fields[field].type == ColumnType.SPAN) {
+            setSpan(field, from - lineFrom, to - from)
+        } else {
+            setDict(field, source, from, to)
+        }
     }
 
-    /** Sets DICT [field] of the current record to `source[from, to)`; sets [overflowed] once the field's values are mostly distinct. */
+    /**
+     * Sets DICT [field] of the current record to `source[from, to)`; sets [overflowed] once the field's values
+     * are mostly distinct.
+     */
     fun setDict(field: Int, source: ByteArray, from: Int, to: Int) {
         val id = dictionaries[field]!!.idOf(source, from, to)
         ints[field]!![size - 1] = id
@@ -98,13 +108,19 @@ internal class Columns(val schema: Schema) {
         if (id >= MIN_OVERFLOW_VALUES && id.toLong() * MAX_DISTINCT_SHARE >= size) overflowed = field
     }
 
-    /** Sets LEVEL [field] of the current record to an id already in [dictionaries], e.g. when copying a segment remapped. */
+    /**
+     * Sets LEVEL [field] of the current record to an id already in [dictionaries], e.g. when copying a segment
+     * remapped.
+     */
     fun setLevelId(field: Int, id: Int) {
         bytes[field]!![size - 1] = minOf(id, MAX_LEVEL_ID).toByte()
         present[field] = true
     }
 
-    /** Sets DICT [field] of the current record to an id already in [dictionaries], e.g. when copying a segment remapped. */
+    /**
+     * Sets DICT [field] of the current record to an id already in [dictionaries], e.g. when copying a segment
+     * remapped.
+     */
     fun setDictId(field: Int, id: Int) {
         ints[field]!![size - 1] = id
         present[field] = true
@@ -118,7 +134,9 @@ internal class Columns(val schema: Schema) {
             mapKeys[field] = null
             return
         }
-        MdcMap.forEachKey(source, MdcMap.from(entries), MdcMap.to(entries)) { keyFrom, keyTo -> keys.idOf(source, keyFrom, keyTo) }
+        MdcMap.forEachKey(source, MdcMap.from(entries), MdcMap.to(entries)) { keyFrom, keyTo ->
+            keys.idOf(source, keyFrom, keyTo)
+        }
         if (keys.size > schema.fields[field].map!!.maxKeys) mapKeys[field] = null
     }
 

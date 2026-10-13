@@ -127,7 +127,10 @@ class CompiledPattern(val pattern: String, private val zone: ZoneId = ZoneId.sys
             "M", "method" -> Triple("Method", Kind.DICT, null)
             "F", "file" -> Triple("File", Kind.DICT, null)
             "L", "line" -> Triple("Line", Kind.SPAN, null)
-            in MDC_WORDS -> Triple(options.firstOrNull()?.takeIf { it.isNotEmpty() && ',' !in it } ?: MDC, Kind.SPAN, null)
+            in MDC_WORDS -> {
+                val key = options.firstOrNull()?.takeIf { it.isNotEmpty() && ',' !in it }
+                Triple(key ?: MDC, Kind.SPAN, null)
+            }
             "K", "map", "MAP" -> Triple(options.firstOrNull()?.ifEmpty { null } ?: "Map", Kind.SPAN, null)
             "x", "NDC" -> Triple("NDC", Kind.SPAN, null)
             "pid", "processId" -> Triple("PID", Kind.DICT, null)
@@ -254,15 +257,18 @@ class CompiledPattern(val pattern: String, private val zone: ZoneId = ZoneId.sys
                         }
                         if (entries >= 0) {
                             val value = MdcMap.valueOf(bytes, MdcMap.from(entries), MdcMap.to(entries), key!!)
-                            if (value >= 0) out.setSpan(field, MdcMap.from(value) - lineFrom, MdcMap.to(value) - MdcMap.from(value))
+                            if (value >= 0) {
+                                val valueFrom = MdcMap.from(value)
+                                out.setSpan(field, valueFrom - lineFrom, MdcMap.to(value) - valueFrom)
+                            }
                         } else {
                             out.setSpan(field, starts[k] - lineFrom, ends[k] - starts[k])
                             if (out.schema.fields[field].isMap) out.addMapKeys(field, bytes, starts[k], ends[k])
                         }
                     }
                     Kind.MESSAGE -> {
-                        val toEnd = k == tokenArray.lastIndex
-                        out.setSpan(field, starts[k] - lineFrom, if (toEnd) Columns.TO_RECORD_END else ends[k] - starts[k])
+                        val length = if (k == tokenArray.lastIndex) Columns.TO_RECORD_END else ends[k] - starts[k]
+                        out.setSpan(field, starts[k] - lineFrom, length)
                     }
                 }
             }

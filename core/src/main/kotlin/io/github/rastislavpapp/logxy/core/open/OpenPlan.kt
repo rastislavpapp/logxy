@@ -45,7 +45,9 @@ object OpenPlan {
                 return@flatMap emptyList()
             }
             if (!Files.isDirectory(path)) return@flatMap listOf(FoundFile(path))
-            LogFolders.files(path) { onFound(path, it) }.map { FoundFile(it, it.parent != path) }.also { if (it.isEmpty()) empty.add(path) }
+            val found = LogFolders.files(path) { onFound(path, it) }
+            if (found.isEmpty()) empty.add(path)
+            found.map { FoundFile(it, it.parent != path) }
         }
         return Found(files.distinctBy { fileKey(it.path) }, empty, problems)
     }
@@ -54,7 +56,12 @@ object OpenPlan {
      * How to open [files] next to the [current] session's files (null if none is open): with the remembered
      * [openMode] (null to ask) and [includeSubfolders] if they fit, else by asking.
      */
-    fun decide(files: List<FoundFile>, current: List<Path>?, openMode: OpenMode?, includeSubfolders: Boolean): Decision {
+    fun decide(
+        files: List<FoundFile>,
+        current: List<Path>?,
+        openMode: OpenMode?,
+        includeSubfolders: Boolean,
+    ): Decision {
         // Files the current session already shows have nothing to add.
         val shown = current.orEmpty().mapTo(HashSet(), ::fileKey)
         val candidates = files.distinctBy { it.path }.filter { fileKey(it.path) !in shown }
@@ -70,7 +77,10 @@ object OpenPlan {
         return Decision.Ask(all, inSubfolders)
     }
 
-    /** What [count] files can do: merge with a current session of [currentCount] files, merge on their own, or open one session each. */
+    /**
+     * What [count] files can do: merge with a current session of [currentCount] files, merge on their own, or
+     * open one session each.
+     */
     fun modesFor(count: Int, currentCount: Int?): List<OpenMode> = buildList {
         if (count == 0) return@buildList
         if (currentCount != null && currentCount + count <= MergedLog.MAX_PARTS) {

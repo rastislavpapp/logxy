@@ -19,13 +19,17 @@ import java.time.format.DateTimeFormatter
  * by their size). Nested objects and arrays are shown as written. Lines that are no JSON object become
  * records with only a message.
  */
-class CompiledJson(val keys: RoleKeys = RoleKeys(), private val zone: ZoneId = ZoneId.systemDefault()) : CompiledParser() {
+class CompiledJson(
+    val keys: RoleKeys = RoleKeys(),
+    private val zone: ZoneId = ZoneId.systemDefault(),
+) : CompiledParser() {
 
     private val roles = RoleFields(keys)
 
     private val mapField = roles.fields.size
 
-    override val schema = Schema(roles.fields + Field("JSON", ColumnType.SPAN, map = JsonMap(roles.excluded), json = true))
+    override val schema =
+        Schema(roles.fields + Field("JSON", ColumnType.SPAN, map = JsonMap(roles.excluded), json = true))
 
     private val displayFormat = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS").withZone(zone)
 
@@ -112,7 +116,8 @@ internal class JsonTimestampParser(private val zone: ZoneId) {
     }
 
     private fun parseIso(bytes: ByteArray, from: Int, to: Int): Boolean {
-        val cached = cachedUtcMinute != Long.MIN_VALUE && java.util.Arrays.equals(bytes, from, from + PREFIX, cachedPrefix, 0, PREFIX)
+        val cached = cachedUtcMinute != Long.MIN_VALUE &&
+            java.util.Arrays.equals(bytes, from, from + PREFIX, cachedPrefix, 0, PREFIX)
         if (!cached && !cacheMinute(bytes, from)) return false
         var i = from + PREFIX
         var second = 0
@@ -167,7 +172,8 @@ internal class JsonTimestampParser(private val zone: ZoneId) {
 
     private fun zonedMinute(): Long {
         if (cachedZonedMinute == Long.MIN_VALUE) {
-            cachedZonedMinute = LocalDateTime.ofEpochSecond(cachedUtcMinute, 0, ZoneOffset.UTC).atZone(zone).toEpochSecond()
+            val utc = LocalDateTime.ofEpochSecond(cachedUtcMinute, 0, ZoneOffset.UTC)
+            cachedZonedMinute = utc.atZone(zone).toEpochSecond()
         }
         return cachedZonedMinute
     }
@@ -186,7 +192,10 @@ internal class JsonTimestampParser(private val zone: ZoneId) {
         return if (sign == '-') -seconds else seconds
     }
 
-    /** A whole number of seconds, milliseconds, microseconds or nanoseconds, told apart by its digits; seconds may have a fraction. */
+    /**
+     * A whole number of seconds, milliseconds, microseconds or nanoseconds, told apart by its digits; seconds may
+     * have a fraction.
+     */
     private fun parseEpoch(bytes: ByteArray, from: Int, to: Int): Boolean {
         var i = from
         var value = 0L

@@ -47,7 +47,10 @@ class TimestampFormat(pattern: String, private val zone: ZoneId = ZoneId.systemD
         return formatter!!.format(Instant.ofEpochSecond(Math.floorDiv(nanos, NANOS), Math.floorMod(nanos, NANOS)))
     }
 
-    /** A parser for one thread: byte-level for epoch numbers and fixed-width numeric layouts, java.time otherwise (slower). */
+    /**
+     * A parser for one thread: byte-level for epoch numbers and fixed-width numeric layouts, java.time otherwise
+     * (slower).
+     */
     internal fun newParser(): TimestampParser = when {
         unixUnit != null -> UnixParser(unixUnit)
         layout != null -> FixedParser(layout, zone)
@@ -121,10 +124,14 @@ class TimestampFormat(pattern: String, private val zone: ZoneId = ZoneId.systemD
 
         // Logback's ISO8601 uses a space where log4j2's has 'T', and ',' and '.' both separate fractions.
         private fun literalMatches(actual: Byte, expected: Byte): Boolean =
-            actual == expected || interchangeable(actual, expected, 'T', ' ') || interchangeable(actual, expected, ',', '.')
+            actual == expected ||
+                interchangeable(actual, expected, 'T', ' ') ||
+                interchangeable(actual, expected, ',', '.')
 
         private fun interchangeable(actual: Byte, expected: Byte, a: Char, b: Char) =
-            (actual == a.code.toByte() || actual == b.code.toByte()) && (expected == a.code.toByte() || expected == b.code.toByte())
+            isEither(actual, a, b) && isEither(expected, a, b)
+
+        private fun isEither(value: Byte, a: Char, b: Char) = value == a.code.toByte() || value == b.code.toByte()
     }
 
     private class UnixParser(private val unit: Long) : TimestampParser {

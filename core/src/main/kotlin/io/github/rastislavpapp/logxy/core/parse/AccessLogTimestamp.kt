@@ -31,9 +31,13 @@ internal class AccessLogTimestamp {
         return true
     }
 
-    /** Epoch seconds of the minute `dd/MMM/yyyy:HH:mm` at [from] in the offset that ends the timestamp; MIN_VALUE if invalid. */
+    /**
+     * Epoch seconds of the minute `dd/MMM/yyyy:HH:mm` at [from] in the offset that ends the timestamp; MIN_VALUE
+     * if invalid.
+     */
     private fun minuteSeconds(bytes: ByteArray, from: Int): Long {
-        if (bytes[from + 2] != SLASH || bytes[from + 6] != SLASH || bytes[from + 11] != COLON || bytes[from + 14] != COLON) return Long.MIN_VALUE
+        if (bytes[from + 2] != SLASH || bytes[from + 6] != SLASH) return Long.MIN_VALUE
+        if (bytes[from + 11] != COLON || bytes[from + 14] != COLON) return Long.MIN_VALUE
         val day = digits(bytes, from)
         val month = month(bytes, from + 3)
         val century = digits(bytes, from + 7)
@@ -48,7 +52,8 @@ internal class AccessLogTimestamp {
         }
         val offsetHours = digits(bytes, from + OFFSET_AT + 1)
         val offsetMinutes = digits(bytes, from + OFFSET_AT + 3)
-        if (month < 1 || year < 0 || day < 1 || day > daysIn(month, year) || hour !in 0..23 || minute !in 0..59) return Long.MIN_VALUE
+        if (month < 1 || year < 0 || day < 1 || day > daysIn(month, year)) return Long.MIN_VALUE
+        if (hour !in 0..23 || minute !in 0..59) return Long.MIN_VALUE
         if (offsetHours !in 0..18 || offsetMinutes !in 0..59) return Long.MIN_VALUE
         val offset = sign * (offsetHours * 3600 + offsetMinutes * 60)
         return epochDay(year, month, day) * 86_400 + hour * 3600 + minute * 60 - offset
@@ -88,7 +93,8 @@ internal class AccessLogTimestamp {
         const val SPACE = ' '.code.toByte()
         const val PLUS = '+'.code.toByte()
         const val MINUS = '-'.code.toByte()
-        val MONTHS = listOf("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec").map { it.toByteArray() }
+        val MONTHS = listOf("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+            .map { it.toByteArray() }
 
         /** Days since 1970-01-01 of a proleptic Gregorian date (Howard Hinnant's days_from_civil). */
         fun epochDay(year: Int, month: Int, day: Int): Long {

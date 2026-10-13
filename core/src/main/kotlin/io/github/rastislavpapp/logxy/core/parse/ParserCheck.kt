@@ -60,7 +60,8 @@ internal object ParserCheck {
         var i = from
         while (i < to && (bytes[i] == ' '.code.toByte() || bytes[i] == '\t'.code.toByte())) i++
         if (i == to || i > from) return true
-        if (Bytes.startsWith(bytes, from, to, "Caused by:") || Bytes.startsWith(bytes, from, to, "Suppressed:")) return true
+        if (Bytes.startsWith(bytes, from, to, "Caused by:")) return true
+        if (Bytes.startsWith(bytes, from, to, "Suppressed:")) return true
         // An exception header such as "java.lang.IllegalStateException: message".
         var end = from
         while (end < to && bytes[end] != ':'.code.toByte() && bytes[end] != ' '.code.toByte()) end++

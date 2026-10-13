@@ -13,7 +13,8 @@ internal class MessageReader(private val snapshot: RecordSnapshot, private val f
     private val type = snapshot.schema.fields.getOrNull(field)?.type
     private val json = snapshot.schema.fields.getOrNull(field)?.json == true
     private val reader = if (type == ColumnType.SPAN) SpanReader(channel, snapshot.end) else null
-    private val dictionary = if (type == ColumnType.DICT) arrayOfNulls<ByteArray>(snapshot.dictionaryTexts(field).size) else null
+    private val dictionary =
+        if (type == ColumnType.DICT) arrayOfNulls<ByteArray>(snapshot.dictionaryTexts(field).size) else null
     private val unescaped = if (json) ByteArray(READ_LIMIT) else null
 
     /** Writes the template of [record]'s message into [out] (see [Templates.mask]); empty if it has none. */

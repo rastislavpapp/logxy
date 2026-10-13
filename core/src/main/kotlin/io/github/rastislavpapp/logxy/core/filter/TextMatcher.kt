@@ -11,7 +11,8 @@ internal class TextMatcher(condition: TextCondition) {
 
     private val negated = condition.op == TextOp.NOT_EQUALS || condition.op == TextOp.NOT_MATCHES
     private val ignoreCase = condition.ignoreCase
-    private val glob = if (condition.op == TextOp.EQUALS || condition.op == TextOp.NOT_EQUALS) Glob.parse(condition.value) else null
+    private val glob =
+        if (condition.op == TextOp.EQUALS || condition.op == TextOp.NOT_EQUALS) Glob.parse(condition.value) else null
 
     /** Literal segments between `*`s, for byte matching; null if the pattern needs the regex. */
     private val segments: List<ByteArray>? = glob
@@ -29,7 +30,10 @@ internal class TextMatcher(condition: TextCondition) {
     /** What an absent value counts as: only negated conditions accept it. */
     val matchesAbsent get() = negated
 
-    /** Whether [text] (a value as shown, or a record's text as written) satisfies the condition: a wildcard pattern must match all of it, a regex any part. */
+    /**
+     * Whether [text] (a value as shown, or a record's text as written) satisfies the condition: a wildcard
+     * pattern must match all of it, a regex any part.
+     */
     fun matches(text: String): Boolean {
         val matcher = regex.matcher(text)
         return (if (glob != null) matcher.matches() else matcher.find()) != negated
@@ -107,8 +111,12 @@ internal class Glob private constructor(
     val hasAnyOne = segments.any { ANY_ONE in it }
 
     /** The same pattern as a regex that must match the whole text; literal text is quoted. */
-    fun toRegex(): String = segments.joinToString(".*", prefix = if (leadingStar) ".*" else "", postfix = if (trailingStar) ".*" else "") { segment ->
-        segment.split(ANY_ONE).joinToString(".") { if (it.isEmpty()) "" else Pattern.quote(it) }
+    fun toRegex(): String {
+        val prefix = if (leadingStar) ".*" else ""
+        val postfix = if (trailingStar) ".*" else ""
+        return segments.joinToString(".*", prefix, postfix) { segment ->
+            segment.split(ANY_ONE).joinToString(".") { if (it.isEmpty()) "" else Pattern.quote(it) }
+        }
     }
 
     companion object {
@@ -131,7 +139,11 @@ internal class Glob private constructor(
                         continue
                     }
                     c == '*' -> {
-                        if (segments.isEmpty() && current.isEmpty()) leadingStar = true else segments += current.toString()
+                        if (segments.isEmpty() && current.isEmpty()) {
+                            leadingStar = true
+                        } else {
+                            segments += current.toString()
+                        }
                         current.clear()
                         trailingStar = true
                     }

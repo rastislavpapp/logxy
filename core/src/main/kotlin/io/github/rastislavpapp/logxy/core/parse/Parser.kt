@@ -62,11 +62,15 @@ sealed interface Parser {
 
         /** Stored as type `pattern`, with the layout under `layout`. */
         companion object : Kind("pattern") {
-            override fun read(name: String, properties: (String) -> String?) = properties("layout")?.let { Pattern(name, it) }
+            override fun read(name: String, properties: (String) -> String?) =
+                properties("layout")?.let { Pattern(name, it) }
         }
     }
 
-    /** A regex whose named groups are the fields, with [timestampPattern] for the timestamp group; see [CompiledRegex]. */
+    /**
+     * A regex whose named groups are the fields, with [timestampPattern] for the timestamp group; see
+     * [CompiledRegex].
+     */
     data class Regex(override val name: String, val regex: String, val timestampPattern: String) : Parser {
         override val kind get() = Companion
         override fun compile() = CompiledRegex(regex, timestampPattern)
@@ -92,18 +96,25 @@ sealed interface Parser {
 
         /** Stored as type `json`, with the keys of each role under `keys.<role>`; missing roles keep the defaults. */
         companion object : Kind("json") {
-            override fun read(name: String, properties: (String) -> String?) = Json(name, RoleKeys.read(properties, "keys.", RoleKeys()))
+            override fun read(name: String, properties: (String) -> String?) =
+                Json(name, RoleKeys.read(properties, "keys.", RoleKeys()))
         }
     }
 
-    /** logfmt lines (`key=value` pairs), with [keys] naming the keys that fill the usual fields; see [CompiledLogfmt]. */
+    /**
+     * logfmt lines (`key=value` pairs), with [keys] naming the keys that fill the usual fields; see
+     * [CompiledLogfmt].
+     */
     data class Logfmt(override val name: String, val keys: RoleKeys = RoleKeys.LOGFMT) : Parser {
         override val kind get() = Companion
         override fun compile() = CompiledLogfmt(keys)
         override fun withName(name: String) = copy(name = name)
         override fun properties() = keys.properties("keys.")
 
-        /** Stored as type `logfmt`, with the keys of each role under `keys.<role>`; missing roles keep the logfmt defaults. */
+        /**
+         * Stored as type `logfmt`, with the keys of each role under `keys.<role>`; missing roles keep the logfmt
+         * defaults.
+         */
         companion object : Kind("logfmt") {
             override fun read(name: String, properties: (String) -> String?) =
                 Logfmt(name, RoleKeys.read(properties, "keys.", RoleKeys.LOGFMT))
@@ -137,7 +148,13 @@ sealed interface Parser {
             Json("JSON lines"),
         )
 
-        private class Scored(val parser: Parser, val matches: Int, val preferred: Boolean, val fields: Int, val guessed: Boolean)
+        private class Scored(
+            val parser: Parser,
+            val matches: Int,
+            val preferred: Boolean,
+            val fields: Int,
+            val guessed: Boolean,
+        )
 
         private const val SAMPLE_LINES = 1000
 
@@ -158,9 +175,8 @@ sealed interface Parser {
          * followed by a huge stack trace or dump).
          */
         fun detect(path: Path, preferred: List<Parser> = emptyList(), builtIn: List<Parser> = BUILT_IN): Parser {
-            val key = Detection(
-                path.toAbsolutePath().normalize(), Files.size(path), Files.getLastModifiedTime(path).toMillis(), preferred, builtIn,
-            )
+            val modified = Files.getLastModifiedTime(path).toMillis()
+            val key = Detection(path.toAbsolutePath().normalize(), Files.size(path), modified, preferred, builtIn)
             synchronized(detected) { detected[key] }?.let { return it }
             return detectFresh(path, preferred, builtIn).also { synchronized(detected) { detected[key] = it } }
         }
@@ -176,9 +192,11 @@ sealed interface Parser {
                 val compiled = runCatching { candidate.compile() }.getOrNull() ?: return@mapNotNull null
                 val matcher = compiled.newMatcher()
                 val matches = sample.count { matcher.match(it, 0, it.size) }
-                Scored(candidate, matches, candidate in preferred, compiled.schema.fields.size, guessed = candidate === guess)
+                val fields = compiled.schema.fields.size
+                Scored(candidate, matches, candidate in preferred, fields, guessed = candidate === guess)
             }
-            val best = scored.maxWithOrNull(compareBy({ it.matches }, { it.preferred }, { it.fields }, { !it.guessed })) ?: return Raw
+            val ranking = compareBy<Scored>({ it.matches }, { it.preferred }, { it.fields }, { !it.guessed })
+            val best = scored.maxWithOrNull(ranking) ?: return Raw
             return if (best.matches > 0 && best.matches * 20 >= realLines) best.parser else Raw
         }
     }

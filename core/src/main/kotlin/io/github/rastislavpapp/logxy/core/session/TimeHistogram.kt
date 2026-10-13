@@ -56,7 +56,10 @@ class TimeHistogram(
     /** The earliest time, in epoch nanoseconds, that falls into [bin]. */
     fun binStart(bin: Int): Long = start + bin * width
 
-    /** Adds one record of [level] at [time], moving the bins (and widening them if moving is not enough) if it falls outside them. */
+    /**
+     * Adds one record of [level] at [time], moving the bins (and widening them if moving is not enough) if it falls
+     * outside them.
+     */
     fun add(time: Long, level: Level?) = add(time, category(level), 1)
 
     /** Adds [count] records of [category] at [time]. */
@@ -143,7 +146,10 @@ class TimeHistogram(
         const val ERROR = 2
         const val CATEGORIES = 3
 
-        /** The category a record of [level] is counted in: errors (with fatal), warnings, or the rest (also no level). */
+        /**
+         * The category a record of [level] is counted in: errors (with fatal), warnings, or the rest (also no
+         * level).
+         */
         fun category(level: Level?): Int = when (level) {
             Level.ERROR, Level.FATAL -> ERROR
             Level.WARN -> WARN

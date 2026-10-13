@@ -46,7 +46,8 @@ data class RoleKeys(
         /** Reads keys written by [properties]; roles missing from them keep those of [defaults]. */
         internal fun read(property: (String) -> String?, prefix: String, defaults: RoleKeys): RoleKeys = of(
             ROLES.map { (role, keys) ->
-                property(prefix + role.name.lowercase())?.split(',')?.map { it.trim() }?.filter { it.isNotEmpty() } ?: keys(defaults)
+                val written = property(prefix + role.name.lowercase()) ?: return@map keys(defaults)
+                written.split(',').map { it.trim() }.filter { it.isNotEmpty() }
             },
         )
     }

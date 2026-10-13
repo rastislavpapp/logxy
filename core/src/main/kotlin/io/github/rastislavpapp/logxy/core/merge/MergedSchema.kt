@@ -34,7 +34,8 @@ internal class MergedSchema(parts: List<Schema>) {
                     fields += Field(uniqueName(field.name, fields), field.type, field.role, hidden = field.hidden)
                 }
                 // A column if any part shows it as one.
-                if (fields[merged].hidden && !field.hidden) fields[merged] = fields[merged].let { Field(it.name, it.type, it.role) }
+                val shown = fields[merged]
+                if (shown.hidden && !field.hidden) fields[merged] = Field(shown.name, shown.type, shown.role)
                 mapping[merged] = index
             }
             mapping
