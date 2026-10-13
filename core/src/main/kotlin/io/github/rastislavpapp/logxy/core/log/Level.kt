@@ -15,6 +15,8 @@ enum class Level {
             "FATAL" to FATAL, "CRITICAL" to FATAL, "CRIT" to FATAL, "ALERT" to FATAL, "EMERG" to FATAL,
             // Numeric levels of JSON loggers such as pino and bunyan.
             "10" to TRACE, "20" to DEBUG, "30" to INFO, "40" to WARN, "50" to ERROR, "60" to FATAL,
+            // Syslog severities, as GELF writes them.
+            "0" to FATAL, "1" to FATAL, "2" to FATAL, "3" to ERROR, "4" to WARN, "5" to INFO, "6" to INFO, "7" to DEBUG,
         )
     }
 }

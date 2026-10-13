@@ -143,14 +143,14 @@ class FormatInferenceTest {
     @Test
     fun `JSON lines with keys of their own`() {
         val format = infer("""
-            {"when":"2026-10-01T08:00:00.001Z","lvl":"info","text":"Started the application","svc":"api","log":"com.example.App"}
-            {"when":"2026-10-01T08:00:00.002Z","lvl":"error","text":"Failed to connect to the database","svc":"api","log":"com.example.Db"}
+            {"when":"2026-10-01T08:00:00.001Z","lvl":"info","text":"Started the application","svc":"api","src":"com.example.App"}
+            {"when":"2026-10-01T08:00:00.002Z","lvl":"error","text":"Failed to connect to the database","svc":"api","src":"com.example.Db"}
         """) as LogFormat.Json
-        assertEquals("JSON lines: when, lvl, text, log", format.name)
+        assertEquals("JSON lines: when, lvl, text, src", format.name)
         assertEquals(listOf("when"), format.keys.timestamp.take(1))
         assertEquals(listOf("lvl"), format.keys.level.take(1))
         assertEquals(listOf("text"), format.keys.message.take(1))
-        assertEquals(listOf("log"), format.keys.logger.take(1))
+        assertEquals(listOf("src"), format.keys.logger.take(1))
     }
 
     @Test

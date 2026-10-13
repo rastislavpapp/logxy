@@ -4,12 +4,14 @@ import io.github.rastislavpapp.logxy.core.log.Role
 
 /** Which keys of a record (JSON keys, logfmt keys) fill which role; of each list, the first key a record has wins. */
 data class RoleKeys(
-    val timestamp: List<String> = listOf("@timestamp", "timestamp", "time", "ts"),
-    val level: List<String> = listOf("level", "severity", "log.level", "levelname"),
-    val message: List<String> = listOf("message", "msg"),
+    // Besides logstash and ECS: Docker's json-file driver (log, time), Serilog's compact JSON (@t, @l, @m, @mt, @x)
+    // and GELF (short_message, full_message).
+    val timestamp: List<String> = listOf("@timestamp", "timestamp", "time", "ts", "@t"),
+    val level: List<String> = listOf("level", "severity", "log.level", "levelname", "@l"),
+    val message: List<String> = listOf("message", "msg", "log", "@m", "@mt", "short_message"),
     val logger: List<String> = listOf("logger", "logger_name", "log.logger"),
     val thread: List<String> = listOf("thread", "thread_name", "process.thread.name"),
-    val exception: List<String> = listOf("stack_trace", "exception", "error.stack_trace"),
+    val exception: List<String> = listOf("stack_trace", "exception", "error.stack_trace", "@x", "full_message"),
 ) {
     internal val byRole: List<Pair<Role, List<String>>>
         get() = listOf(
