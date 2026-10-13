@@ -2,6 +2,7 @@ package io.github.rastislavpapp.logxy.core.open
 
 import io.github.rastislavpapp.logxy.core.LogFolders
 import io.github.rastislavpapp.logxy.core.config.OpenMode
+import io.github.rastislavpapp.logxy.core.fileKey
 import io.github.rastislavpapp.logxy.core.merge.MergedLog
 import java.nio.file.Files
 import java.nio.file.Path
@@ -43,7 +44,7 @@ object OpenPlan {
             if (!Files.isDirectory(path)) return@flatMap listOf(FoundFile(path))
             LogFolders.files(path) { onFound(path, it) }.map { FoundFile(it, it.parent != path) }.also { if (it.isEmpty()) empty.add(path) }
         }
-        return Found(files.distinctBy { identity(it.path) }, empty, problems)
+        return Found(files.distinctBy { fileKey(it.path) }, empty, problems)
     }
 
     /**
@@ -52,8 +53,8 @@ object OpenPlan {
      */
     fun decide(files: List<FoundFile>, current: List<Path>?, openMode: OpenMode?, includeSubfolders: Boolean): Decision {
         // Files the current session already shows have nothing to add.
-        val shown = current.orEmpty().mapTo(HashSet(), ::identity)
-        val candidates = files.distinctBy { it.path }.filter { identity(it.path) !in shown }
+        val shown = current.orEmpty().mapTo(HashSet(), ::fileKey)
+        val candidates = files.distinctBy { it.path }.filter { fileKey(it.path) !in shown }
         if (candidates.isEmpty()) return Decision.Nothing
         val all = candidates.map { it.path }
         val inSubfolders = candidates.filter { it.inSubfolder }.mapTo(LinkedHashSet()) { it.path }
@@ -98,6 +99,4 @@ object OpenPlan {
         !Files.isReadable(path) -> "No permission to read the file"
         else -> null
     }
-
-    private fun identity(path: Path): Path = runCatching { path.toRealPath() }.getOrDefault(path)
 }

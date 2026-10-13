@@ -49,7 +49,7 @@ object LogFolders {
         // A link and its target are one log, which would otherwise show each record twice.
         return found.sorted().distinctBy { file ->
             job.ensureActive()
-            runCatching { file.toRealPath() }.getOrDefault(file)
+            fileKey(file)
         }
     }
 
