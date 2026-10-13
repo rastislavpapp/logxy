@@ -22,27 +22,7 @@ Fast desktop log viewer (Kotlin, Swing, FlatLaf, Gradle).
 
 ## Trying the app
 
-To check UI behaviour, run the app in the GUI sandbox, never on the user's desktop. `tools/gui-sandbox/gui.sh` (bash, also Git Bash on Windows) runs it on a virtual X display in a podman or docker container (`GUI_ENGINE` overrides the choice), so it cannot steal focus. Each command is one primitive action; drive a scenario interactively by taking a screenshot, reading it, and choosing the next action, rather than writing scripted scenarios.
-
-Test logs are not committed. If the project already has log files that fit the check (often under `test-data/`, but names, sizes and content vary, so look first), use them; otherwise generate one with the tools module (`generate`; `scenario` for a day with traffic, an incident and an outage to find; or `simulate` for a live, growing log). Keep checks fast:
-
-- Use the smallest file the check needs: a few MB for UI behaviour, large files only when the change is about scale. Files are read through a container mount, which is slower than native disk.
-- Reuse generated files and keep one sandbox running across checks; restart only after rebuilding the jar.
-- Wait by taking another screenshot, not by long sleeps.
-
-```sh
-./gradlew -q :app:shadowJar               # the sandbox runs app/build/libs/logxy.jar
-./gradlew -q :tools:run --args="generate tools/gui-sandbox/out/small.log 5m"   # optional --seed N
-tools/gui-sandbox/gui.sh start tools/gui-sandbox/out/small.log   # any paths; builds the image on first use
-tools/gui-sandbox/gui.sh shot filter       # writes tools/gui-sandbox/out/filter.png; read it to see the screen
-tools/gui-sandbox/gui.sh click X Y         # screen coordinates read off the latest screenshot
-tools/gui-sandbox/gui.sh type "some text"
-tools/gui-sandbox/gui.sh key ctrl+o Escape
-tools/gui-sandbox/gui.sh logs              # app stdout/stderr
-tools/gui-sandbox/gui.sh stop
-```
-
-It renders with Linux fonts and look-and-feel, so Windows- or macOS-specific behaviour still needs a check on that OS.
+Check UI behaviour in the GUI sandbox (`tools/gui-sandbox/gui.sh`), which keeps the app off the user's desktop: follow `docs/agents/gui-sandbox.md`.
 
 ## Commits
 

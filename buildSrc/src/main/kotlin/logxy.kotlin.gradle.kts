@@ -22,7 +22,14 @@ tasks.test {
     useJUnitPlatform()
 }
 
-// zstd-jni loads a native library, which Java 24+ warns about without this.
 tasks.withType<Test>().configureEach {
+    // zstd-jni loads a native library, which Java 24+ warns about without this.
     jvmArgs("--enable-native-access=ALL-UNNAMED")
+    // Failures show their assertion and stack trace in the console, also with -q (the quiet level).
+    testLogging {
+        for (level in listOf(lifecycle, quiet)) {
+            level.events(org.gradle.api.tasks.testing.logging.TestLogEvent.FAILED)
+            level.exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+        }
+    }
 }
