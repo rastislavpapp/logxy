@@ -35,8 +35,9 @@ internal interface RecordGenerator {
 /**
  * Writes log4j-style lines (`%d [%t] %-5p %c - %m%n`, or `%d [%t] %-5p %c %X - %m%n` with [mdc])
  * with occasional stack traces until [size] bytes; with [json], JSON lines as logstash-logback-encoder
- * writes them; with [rabbitmq], a RabbitMQ broker's JSON log; with [logfmt], logfmt lines; with [access], a web server's access log. With [errors] or [warnings], exactly that
- * many records of the level are written, at random places.
+ * writes them; with [rabbitmq], a RabbitMQ broker's JSON log; with [logfmt], logfmt lines; with [access], a web
+ * server's access log. With [errors] or [warnings], exactly that many records of the level are written, at random
+ * places.
  */
 fun generateLog(
     file: Path,

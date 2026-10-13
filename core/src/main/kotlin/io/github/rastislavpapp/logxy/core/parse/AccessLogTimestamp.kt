@@ -36,7 +36,9 @@ internal class AccessLogTimestamp {
         if (bytes[from + 2] != SLASH || bytes[from + 6] != SLASH || bytes[from + 11] != COLON || bytes[from + 14] != COLON) return Long.MIN_VALUE
         val day = digits(bytes, from)
         val month = month(bytes, from + 3)
-        val year = digits(bytes, from + 7) * 100 + digits(bytes, from + 9)
+        val century = digits(bytes, from + 7)
+        val yearOfCentury = digits(bytes, from + 9)
+        val year = if (century < 0 || yearOfCentury < 0) -1 else century * 100 + yearOfCentury
         val hour = digits(bytes, from + 12)
         val minute = digits(bytes, from + 15)
         val sign = when (bytes[from + OFFSET_AT]) {

@@ -54,6 +54,12 @@ class AccessLogFormat(private val zone: ZoneId = ZoneId.systemDefault()) : Recor
             this.bytes = bytes
             lineFrom = from
             starts.fill(-1)
+            var end = to
+            while (end > from && bytes[end - 1] == SPACE) end--
+            return matchFields(bytes, from, end)
+        }
+
+        private fun matchFields(bytes: ByteArray, from: Int, to: Int): Boolean {
             var i = token(bytes, from, to, HOST)
             if (!at(i, to, SPACE)) return false
             i = token(bytes, i + 1, to, IDENT)
