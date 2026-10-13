@@ -357,12 +357,10 @@ class ParsersPage(
         override fun getValueAt(row: Int, column: Int): Any {
             val line = lines[row]
             if (column == 0) {
-                return if (line.values != null) {
-                    "✓"
-                } else if (line.continuation) {
-                    "↳"
-                } else {
-                    "✗"
+                return when {
+                    line.values != null -> "✓"
+                    line.continuation -> "↳"
+                    else -> "✗"
                 }
             }
             val values = line.values ?: return if (column == 1) line.text else ""

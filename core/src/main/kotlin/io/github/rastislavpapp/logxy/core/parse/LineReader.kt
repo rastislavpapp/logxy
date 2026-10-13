@@ -51,7 +51,7 @@ internal class LineReader(
      * returns the partial line read so far, and the next one returns false.
      */
     fun next(): Boolean {
-        if (nextLineStart >= end || truncated && position >= filled) return false
+        if (nextLineStart >= end || (truncated && position >= filled)) return false
         if (bufferStart + position != nextLineStart) {
             // The previous line was longer than the buffer; continue after it.
             bufferStart = nextLineStart

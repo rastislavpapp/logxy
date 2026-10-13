@@ -29,12 +29,10 @@ internal class AccessLogGenerator(private val random: SplittableRandom) : Record
     override fun next(forcedLevel: String?): String {
         timeMillis += random.nextInt(0, 6)
         val malformed = random.nextInt(500) == 0
-        val request = if (!malformed) {
-            request()
-        } else if (random.nextBoolean()) {
-            "-"
-        } else {
-            "\\x16\\x03\\x01\\x02\\x00\\x01"
+        val request = when {
+            !malformed -> request()
+            random.nextBoolean() -> "-"
+            else -> "\\x16\\x03\\x01\\x02\\x00\\x01"
         }
         val status = when {
             forcedLevel == "ERROR" -> listOf(500, 502, 503, 504)[random.nextInt(4)]

@@ -829,12 +829,10 @@ class LogSession internal constructor(
         val first = shown.timeFrom(0)
         val last = shown.timeUntil(shown.size - 1)
         // An end without times takes the other's, so the bins do not start out spanning the years since the epoch.
-        val from = if (first != Records.NO_TIMESTAMP) {
-            first
-        } else if (last != Records.NO_TIMESTAMP) {
-            last
-        } else {
-            0
+        val from = when {
+            first != Records.NO_TIMESTAMP -> first
+            last != Records.NO_TIMESTAMP -> last
+            else -> 0
         }
         val to = if (last != Records.NO_TIMESTAMP) last else from
         return from to maxOf(from, to)
