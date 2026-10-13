@@ -2,11 +2,17 @@ package io.github.rastislavpapp.logxy.core.query
 
 import io.github.rastislavpapp.logxy.core.filter.Filter
 import io.github.rastislavpapp.logxy.core.filter.LevelCondition
+import io.github.rastislavpapp.logxy.core.filter.NumberCondition
+import io.github.rastislavpapp.logxy.core.filter.PatternCondition
 import io.github.rastislavpapp.logxy.core.filter.PresenceCondition
 import io.github.rastislavpapp.logxy.core.filter.TextCondition
 import io.github.rastislavpapp.logxy.core.filter.TextOp
 import io.github.rastislavpapp.logxy.core.filter.TimeCondition
+import io.github.rastislavpapp.logxy.core.log.ColumnType
+import io.github.rastislavpapp.logxy.core.log.Field
 import io.github.rastislavpapp.logxy.core.log.Level
+import io.github.rastislavpapp.logxy.core.log.Role
+import io.github.rastislavpapp.logxy.core.log.Schema
 import io.github.rastislavpapp.logxy.core.parse.PatternFormat
 import java.time.ZoneOffset
 import kotlin.test.Test
@@ -74,6 +80,9 @@ class QueryTest {
             Filter.And(listOf(TimeCondition("Timestamp", from = 1_791_533_400_000_000_000L + 1))),
             compile("timestamp > \"2026-10-09 08:10\""),
         )
+        assertEquals(Filter.And(listOf(NumberCondition("request id", from = 500.0))), compile("`request id` >= 500"))
+        assertEquals(Filter.And(listOf(NumberCondition("Thread", from = Math.nextUp(2.5)))), compile("thread > 2.5"))
+        assertEquals(Filter.And(listOf(NumberCondition("Message", to = Math.nextDown(-1.0)))), compile("message < \"-1\""))
         assertEquals(Filter.And(emptyList()), compile(""))
         assertEquals(Filter.And(emptyList()), compile("message == \"\""))
         assertEquals(
@@ -87,9 +96,26 @@ class QueryTest {
         fun error(text: String) = assertFailsWith<QueryException> { compiler.compile(QueryParser.parse(text)) }.message!!
         assertEquals("Unknown field “thred”; this log has Timestamp, Thread, Level, Logger, request id, Message", error("thred == x"))
         assertEquals("Unknown level “WARNING”; use one of TRACE, DEBUG, INFO, WARN, ERROR, FATAL, UNKNOWN", error("level >= WARNING"))
-        assertEquals(">= works on levels and timestamps, not on Thread", error("thread >= x"))
+        assertEquals(">= on Thread compares numbers; “x” is no number", error("thread >= x"))
         assertEquals("Invalid time “yesterday”; write e.g. 2026-10-09 08:30:00.000, 2026-10-09 or 08:30", error("timestamp >= yesterday"))
         assertEquals("Invalid regex “(”: Unclosed group", error("message =~ \"(\""))
+    }
+
+    @Test
+    fun `pattern compiles to a template condition on the message`() {
+        fun compile(text: String, compiler: QueryCompiler = this.compiler) = compiler.compile(QueryParser.parse(text))
+        val template = "Request from {} took {} ms"
+        assertEquals(Filter.And(listOf(PatternCondition("Message", setOf(template)))), compile("pattern == \"$template\""))
+        assertEquals(Filter.And(listOf(Filter.Not(PatternCondition("Message", setOf(template))))), compile("Pattern !== \"$template\""))
+        assertEquals(Filter.And(emptyList()), compile("Pattern == \"\""))
+        assertEquals("Pattern works with == and !=, not =~", assertFailsWith<QueryException> { compile("Pattern =~ x") }.message)
+
+        val noMessage = QueryCompiler(Schema(listOf(Field("Level", ColumnType.LEVEL, Role.LEVEL))))
+        assertEquals("Pattern needs a message, which this log does not have", assertFailsWith<QueryException> { compile("Pattern == x", noMessage) }.message)
+
+        // A field of the log with that name is used as it is.
+        val withField = QueryCompiler(PatternFormat("%d{yyyy-MM-dd HH:mm:ss.SSS} %X{Pattern} - %m%n", ZoneOffset.UTC).schema)
+        assertEquals(Filter.And(listOf(TextCondition("Pattern", TextOp.EQUALS, "x", ignoreCase = true))), compile("pattern == x", withField))
     }
 
     @Test

@@ -32,6 +32,7 @@ class SettingsTest {
             maxMemory = "8g",
             openMode = OpenMode.MERGE_WITH_CURRENT_IN_NEW,
             includeSubfolders = false,
+            deletedBuiltIns = setOf("Spring Boot 3", "JSON lines"),
         )
         val file = dir.resolve("nested/dir/logxy.properties")
         Settings.save(file, settings)

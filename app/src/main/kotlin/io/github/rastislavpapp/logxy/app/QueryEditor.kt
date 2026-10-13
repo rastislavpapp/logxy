@@ -17,14 +17,12 @@ import java.awt.event.KeyEvent
 import javax.swing.AbstractAction
 import javax.swing.BorderFactory
 import javax.swing.DefaultListCellRenderer
-import javax.swing.JButton
 import javax.swing.JComboBox
 import javax.swing.JComponent
 import javax.swing.JLabel
 import javax.swing.JList
 import javax.swing.JPanel
 import javax.swing.JTextField
-import javax.swing.JToggleButton
 import javax.swing.KeyStroke
 import javax.swing.UIManager
 
@@ -47,7 +45,11 @@ private enum class RuleOp(val label: String) {
     TIME_FROM("at or after"),
     TIME_AFTER("after"),
     TIME_TO("at or before"),
-    TIME_BEFORE("before");
+    TIME_BEFORE("before"),
+    NUMBER_AT_LEAST("≥"),
+    NUMBER_ABOVE(">"),
+    NUMBER_AT_MOST("≤"),
+    NUMBER_BELOW("<");
 
     val usesLevel get() = name.startsWith("LEVEL_")
     val usesCase get() = this in setOf(CONTAINS, NOT_CONTAINS, STARTS_WITH, ENDS_WITH, IS, IS_NOT)
@@ -58,6 +60,7 @@ private enum class RuleOp(val label: String) {
         val TEXT = listOf(CONTAINS, NOT_CONTAINS, STARTS_WITH, ENDS_WITH, IS, IS_NOT, MATCHES, NOT_MATCHES)
         val LEVEL = listOf(LEVEL_AT_LEAST, LEVEL_ABOVE, LEVEL_AT_MOST, LEVEL_BELOW, LEVEL_IS, LEVEL_IS_NOT)
         val TIME = listOf(TIME_FROM, TIME_AFTER, TIME_TO, TIME_BEFORE)
+        val NUMBER = listOf(NUMBER_AT_LEAST, NUMBER_ABOVE, NUMBER_AT_MOST, NUMBER_BELOW)
     }
 }
 
@@ -73,11 +76,6 @@ private enum class Match(val label: String, val all: Boolean, val negated: Boole
     companion object {
         fun of(group: Query.Group) = entries.first { it.all == group.all && it.negated == group.negated }
     }
-}
-
-/** A toggle whose on state is plainly visible: filled with the accent color. */
-fun accentToggle(text: String) = JToggleButton(text).apply {
-    putClientProperty("FlatLaf.style", "selectedBackground: \$Component.accentColor; selectedForeground: #ffffff")
 }
 
 /** Lets Enter in a combo box with a closed popup run [action]; combo boxes otherwise ignore it. */
@@ -99,6 +97,9 @@ fun applyOnEnter(combo: JComboBox<*>, action: () -> Unit) {
 class QueryEditor(private val onApply: () -> Unit) : JPanel(MigLayout("insets 0, fillx", "[grow, fill]")) {
 
     private var fields: List<Field> = emptyList()
+
+    /** Whether rules on the message template, [Query.PATTERN_FIELD], are offered; set before [setFields]. */
+    var patterns = false
     private var root = GroupView(Query.EMPTY, isRoot = true)
 
     init {
@@ -141,6 +142,8 @@ class QueryEditor(private val onApply: () -> Unit) : JPanel(MigLayout("insets 0,
 
     private fun fieldType(name: String) = fields.firstOrNull { it.name.equals(name, ignoreCase = true) }?.type
 
+    private fun isPattern(name: String) = name.equals(Query.PATTERN_FIELD, ignoreCase = true) && fieldType(name) == null
+
     /** Puts the keyboard focus into the first condition's value. */
     fun focusFirstValue() {
         fun first(container: java.awt.Container): JTextField? = container.components.firstNotNullOfOrNull { child ->
@@ -151,12 +154,6 @@ class QueryEditor(private val onApply: () -> Unit) : JPanel(MigLayout("insets 0,
             }
         }
         first(root)?.requestFocusInWindow()
-    }
-
-    private fun smallButton(text: String, tooltip: String, icon: javax.swing.Icon? = null, action: (JButton) -> Unit) = JButton(text, icon).apply {
-        toolTipText = tooltip
-        putClientProperty("JButton.buttonType", "toolBarButton")
-        addActionListener { action(this) }
     }
 
     private fun changed() {
@@ -188,7 +185,7 @@ class QueryEditor(private val onApply: () -> Unit) : JPanel(MigLayout("insets 0,
         val header = JPanel(MigLayout("insets 0", "[]push[]")).apply {
             isOpaque = false
             add(match)
-            if (!isRoot) add(smallButton("", "Remove this group", Icons.closeSmall) {
+            if (!isRoot) add(toolBarButton(Icons.closeSmall, "Remove this group", focusable = true) {
                 val counted = query(includeEmpty = false) != null
                 removeFromParent(this@GroupView)
                 if (counted) onApply()
@@ -199,8 +196,8 @@ class QueryEditor(private val onApply: () -> Unit) : JPanel(MigLayout("insets 0,
         private val footer = JPanel(MigLayout("insets 0", "[][]push")).apply {
             isOpaque = false
             // wmin pref: the buttons must never shrink into "Conditi…".
-            add(smallButton("", "Add a condition${if (isRoot) "" else " to this group"}", Icons.add) { addItem(group = false) }, "wmin pref")
-            add(smallButton("( )", "Add a group of conditions, matching all, any or none of them") { addItem(group = true) }, "wmin pref")
+            add(toolBarButton(Icons.add, "Add a condition${if (isRoot) "" else " to this group"}", focusable = true) { addItem(group = false) }, "wmin pref")
+            add(toolBarButton(null, "Add a group of conditions, matching all, any or none of them", "( )", focusable = true) { addItem(group = true) }, "wmin pref")
         }
         private val items = JPanel(MigLayout("insets 0, wrap 1, gapy 2, fillx", "[grow, fill]"))
 
@@ -312,18 +309,19 @@ class QueryEditor(private val onApply: () -> Unit) : JPanel(MigLayout("insets 0,
     }
 
     private inner class RuleView(rule: Query.Rule, private val group: GroupView) :
-        JPanel(MigLayout("insets 0", "[][][grow, fill][][][]")) {
+        JPanel(MigLayout("insets 0", "[][][grow, fill][][]")) {
 
         private val field = JComboBox<String>()
         private val op = JComboBox<RuleOp>()
+        private val case = fieldToggle("inline/matchCase", "Match exact case")
         private val text = JTextField(12).apply {
             addActionListener { onApply() }
             toolTipText = "* matches any text, ? one character"
+            withToggles(case)
         }
         private val level = JComboBox(Level.entries.filter { it != Level.UNKNOWN }.toTypedArray())
-        private val case = accentToggle("Aa").apply { toolTipText = "Match exact case" }
         private var valueSlot: JComponent = text
-        val remove = smallButton("", "Remove this condition", Icons.closeSmall) {
+        val remove = toolBarButton(Icons.closeSmall, "Remove this condition", focusable = true) {
             // Only a condition with a value filtered anything.
             val counted = rule(includeEmpty = false) != null
             group.removeItem(this)
@@ -332,7 +330,7 @@ class QueryEditor(private val onApply: () -> Unit) : JPanel(MigLayout("insets 0,
 
         init {
             isOpaque = false
-            val names = fields.map { it.name }
+            val names = fields.map { it.name } + listOfNotNull(Query.PATTERN_FIELD.takeIf { patterns })
             val known = names.firstOrNull { it.equals(rule.field, ignoreCase = true) }
             names.forEach(field::addItem)
             if (known == null) field.addItem(rule.field)
@@ -347,8 +345,7 @@ class QueryEditor(private val onApply: () -> Unit) : JPanel(MigLayout("insets 0,
             add(field)
             add(op)
             add(text, "wmin 60")
-            add(case)
-            add(smallButton("( )", "Create a group from this condition") { group.wrapInGroup(this) })
+            add(toolBarButton(null, "Create a group from this condition", "( )", focusable = true) { group.wrapInGroup(this) })
             add(remove)
             load(rule)
         }
@@ -359,10 +356,13 @@ class QueryEditor(private val onApply: () -> Unit) : JPanel(MigLayout("insets 0,
 
         private fun fieldType() = fieldType(field.selectedItem as String)
 
-        private fun ops(): List<RuleOp> = when (fieldType()) {
+        private fun isPattern() = isPattern(field.selectedItem as String)
+
+        // Templates match exactly.
+        private fun ops(): List<RuleOp> = if (isPattern()) listOf(RuleOp.IS, RuleOp.IS_NOT) else when (fieldType()) {
             ColumnType.LEVEL -> RuleOp.LEVEL + RuleOp.TEXT
             ColumnType.TIMESTAMP -> RuleOp.TIME + RuleOp.TEXT
-            else -> RuleOp.TEXT
+            else -> RuleOp.TEXT + RuleOp.NUMBER
         }
 
         private fun fillOps(selected: RuleOp) {
@@ -387,11 +387,16 @@ class QueryEditor(private val onApply: () -> Unit) : JPanel(MigLayout("insets 0,
                 valueSlot = wanted
                 changed()
             }
-            case.isEnabled = selected.usesCase
-            text.toolTipText = when (selected) {
-                RuleOp.MATCHES, RuleOp.NOT_MATCHES -> "Regular expression, found anywhere; ignores case unless it starts with (?-i)"
-                in RuleOp.TIME -> "e.g. 2026-10-09 08:30:00.000, 2026-10-09 or 08:30"
-                else -> "* matches any text, ? one character"
+            case.isEnabled = selected.usesCase && !isPattern()
+            text.toolTipText = if (isPattern()) {
+                "The message with its variable parts (numbers, ids, …) written as {}"
+            } else {
+                when (selected) {
+                    RuleOp.MATCHES, RuleOp.NOT_MATCHES -> "Regular expression, found anywhere; ignores case unless it starts with (?-i)"
+                    in RuleOp.TIME -> "e.g. 2026-10-09 08:30:00.000, 2026-10-09 or 08:30"
+                    in RuleOp.NUMBER -> "A number, e.g. 500, -1.5 or 2e3; records whose value is no number are left out"
+                    else -> "* matches any text, ? one character"
+                }
             }
         }
 
@@ -407,6 +412,12 @@ class QueryEditor(private val onApply: () -> Unit) : JPanel(MigLayout("insets 0,
                     QueryOp.AT_MOST -> RuleOp.LEVEL_AT_MOST
                     else -> RuleOp.LEVEL_BELOW
                 } to rule.value
+                rule.op.comparison && type != ColumnType.TIMESTAMP -> when (rule.op) {
+                    QueryOp.AT_LEAST -> RuleOp.NUMBER_AT_LEAST
+                    QueryOp.ABOVE -> RuleOp.NUMBER_ABOVE
+                    QueryOp.AT_MOST -> RuleOp.NUMBER_AT_MOST
+                    else -> RuleOp.NUMBER_BELOW
+                } to rule.value
                 rule.op.comparison -> when (rule.op) {
                     QueryOp.AT_LEAST -> RuleOp.TIME_FROM
                     QueryOp.ABOVE -> RuleOp.TIME_AFTER
@@ -415,6 +426,7 @@ class QueryEditor(private val onApply: () -> Unit) : JPanel(MigLayout("insets 0,
                 } to rule.value
                 type == ColumnType.LEVEL && rule.bare && levelName != null && rule.op == QueryOp.EQUALS -> RuleOp.LEVEL_IS to rule.value
                 type == ColumnType.LEVEL && rule.bare && levelName != null && rule.op == QueryOp.NOT_EQUALS -> RuleOp.LEVEL_IS_NOT to rule.value
+                isPattern() -> (if (rule.op == QueryOp.NOT_EQUALS || rule.op == QueryOp.NOT_EQUALS_CASE) RuleOp.IS_NOT else RuleOp.IS) to rule.value
                 rule.op == QueryOp.MATCHES -> RuleOp.MATCHES to rule.value
                 rule.op == QueryOp.NOT_MATCHES -> RuleOp.NOT_MATCHES to rule.value
                 // An empty value is a placeholder; show it as the default "contains".
@@ -461,7 +473,7 @@ class QueryEditor(private val onApply: () -> Unit) : JPanel(MigLayout("insets 0,
             // "is not" nothing keeps the records that have a value.
             val notEmpty = selected == RuleOp.IS_NOT && value.isEmpty()
             if (!selected.usesLevel && value.isEmpty() && !includeEmpty && !notEmpty) return null
-            val exact = case.isSelected
+            val exact = case.isSelected && !isPattern()
             val equals = if (exact) QueryOp.EQUALS_CASE else QueryOp.EQUALS
             val notEquals = if (exact) QueryOp.NOT_EQUALS_CASE else QueryOp.NOT_EQUALS
             val levelName = (level.selectedItem as Level).name
@@ -490,6 +502,10 @@ class QueryEditor(private val onApply: () -> Unit) : JPanel(MigLayout("insets 0,
                 RuleOp.TIME_AFTER -> Triple(QueryOp.ABOVE, value, false)
                 RuleOp.TIME_TO -> Triple(QueryOp.AT_MOST, value, false)
                 RuleOp.TIME_BEFORE -> Triple(QueryOp.BELOW, value, false)
+                RuleOp.NUMBER_AT_LEAST -> Triple(QueryOp.AT_LEAST, value, true)
+                RuleOp.NUMBER_ABOVE -> Triple(QueryOp.ABOVE, value, true)
+                RuleOp.NUMBER_AT_MOST -> Triple(QueryOp.AT_MOST, value, true)
+                RuleOp.NUMBER_BELOW -> Triple(QueryOp.BELOW, value, true)
             }
             return Query.Rule(name, queryOp, queryValue, bare)
         }

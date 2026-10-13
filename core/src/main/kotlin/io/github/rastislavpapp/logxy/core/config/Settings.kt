@@ -4,11 +4,8 @@ import io.github.rastislavpapp.logxy.core.log.Level
 import io.github.rastislavpapp.logxy.core.log.LevelMapping
 import io.github.rastislavpapp.logxy.core.parse.JsonKeys
 import io.github.rastislavpapp.logxy.core.parse.LogFormat
-import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.Path
-import java.nio.file.StandardCopyOption
-import java.util.Collections
 import java.util.Properties
 
 /** A named filter: the minimum level (null for all) and the query text. */
@@ -25,7 +22,7 @@ enum class OpenMode(val key: String) {
 /**
  * The user's saved formats (parsers), level names, filters, the memory limit (e.g. `8g`, null for the JVM
  * default), how to open files without asking ([openMode], null to ask) and whether opened folders include
- * their subfolders.
+ * their subfolders, and the names of the built-in formats the user deleted.
  */
 data class Settings(
     val formats: List<LogFormat> = emptyList(),
@@ -34,7 +31,11 @@ data class Settings(
     val maxMemory: String? = null,
     val openMode: OpenMode? = null,
     val includeSubfolders: Boolean = true,
+    val deletedBuiltIns: Set<String> = emptySet(),
 ) {
+    /** The built-in formats the user kept. */
+    val builtInFormats: List<LogFormat> get() = LogFormat.BUILT_IN.filter { it.name !in deletedBuiltIns }
+
     companion object {
         /** `%APPDATA%\logxy` on Windows, `$XDG_CONFIG_HOME/logxy` or `~/.config/logxy` elsewhere. */
         fun directory(): Path {
@@ -67,6 +68,7 @@ data class Settings(
          * format.2.name=My JSON
          * format.2.type=json
          * format.2.keys.level=level,severity
+         * deleted-built-in.1.name=Spring Boot 3
          * level-names=custom
          * level.NOTE=INFO
          * filter.1.name=Slow DB
@@ -81,8 +83,7 @@ data class Settings(
          */
         fun load(path: Path): Settings {
             if (!Files.exists(path)) return Settings()
-            val properties = Properties()
-            Files.newBufferedReader(path).use { properties.load(it) }
+            val properties = PropertiesFiles.load(path)
 
             val formats = numbered(properties, "format").mapNotNull { n ->
                 val name = properties.getProperty("format.$n.name")?.trim().orEmpty()
@@ -114,14 +115,18 @@ data class Settings(
             // Without the marker, level entries only add to the built-in names (as first released).
             val openMode = properties.getProperty("open.mode")?.let { mode -> OpenMode.entries.firstOrNull { it.key == mode } }
             val includeSubfolders = properties.getProperty("open.subfolders") != "false"
+            val deletedBuiltIns = numbered(properties, "deleted-built-in")
+                .mapNotNull { n -> properties.getProperty("deleted-built-in.$n.name")?.trim()?.takeIf { it.isNotEmpty() } }
+                .toSet()
             return Settings(
                 formats, LevelMapping(if (custom) levels else Level.BUILT_IN_NAMES + levels), filters, maxMemory, openMode, includeSubfolders,
+                deletedBuiltIns,
             )
         }
 
         /** Writes [settings] to [path], replacing the file only once the new one is complete. */
         fun save(path: Path, settings: Settings) {
-            val properties = SortedProperties()
+            val properties = Properties()
             settings.formats.forEachIndexed { i, format ->
                 val n = i + 1
                 when (format) {
@@ -142,6 +147,7 @@ data class Settings(
                 }
                 properties["format.$n.name"] = format.name
             }
+            settings.deletedBuiltIns.forEachIndexed { i, name -> properties["deleted-built-in.${i + 1}.name"] = name }
             settings.filters.forEachIndexed { i, filter ->
                 properties["filter.${i + 1}.name"] = filter.name
                 properties["filter.${i + 1}.level"] = filter.minimumLevel?.name.orEmpty()
@@ -154,19 +160,7 @@ data class Settings(
                 properties["level-names"] = "custom"
                 settings.levels.names.forEach { (text, level) -> properties["level.$text"] = level.name }
             }
-
-            Files.createDirectories(path.toAbsolutePath().parent)
-            val temporary = Files.createTempFile(path.toAbsolutePath().parent, "logxy", ".tmp")
-            try {
-                Files.newBufferedWriter(temporary).use { properties.store(it, "logxy settings") }
-                try {
-                    Files.move(temporary, path, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
-                } catch (_: IOException) {
-                    Files.move(temporary, path, StandardCopyOption.REPLACE_EXISTING)
-                }
-            } finally {
-                Files.deleteIfExists(temporary)
-            }
+            PropertiesFiles.store(path, properties, "logxy settings")
         }
 
         const val DEFAULT_TIMESTAMP = "yyyy-MM-dd HH:mm:ss.SSS"
@@ -208,10 +202,4 @@ data class Settings(
             .mapNotNull { Regex("""${Regex.escape(prefix)}\.(\d+)\.name""").matchEntire(it)?.groupValues?.get(1)?.toInt() }
             .sorted()
     }
-}
-
-/** Writes keys in sorted order, so the file stays readable and diffs stay small. */
-private class SortedProperties : Properties() {
-    override val entries: MutableSet<MutableMap.MutableEntry<Any, Any>>
-        get() = Collections.synchronizedSet(sortedSetOf(compareBy { it.key.toString() }, *super.entries.toTypedArray()))
 }

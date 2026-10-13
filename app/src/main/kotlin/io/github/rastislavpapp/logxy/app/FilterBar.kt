@@ -6,6 +6,7 @@ import io.github.rastislavpapp.logxy.core.log.Role
 import io.github.rastislavpapp.logxy.core.log.Schema
 import io.github.rastislavpapp.logxy.core.query.Query
 import io.github.rastislavpapp.logxy.core.query.QueryException
+import io.github.rastislavpapp.logxy.core.query.QueryOp
 import io.github.rastislavpapp.logxy.core.query.QueryParser
 import io.github.rastislavpapp.logxy.core.query.QueryPrinter
 import net.miginfocom.swing.MigLayout
@@ -14,7 +15,6 @@ import java.awt.Graphics
 import java.awt.event.ActionEvent
 import java.awt.event.KeyEvent
 import javax.swing.AbstractAction
-import javax.swing.Icon
 import javax.swing.JButton
 import javax.swing.JLabel
 import javax.swing.JOptionPane
@@ -40,19 +40,32 @@ class FilterBar(private val onApply: () -> Unit) : JPanel(MigLayout("insets 6 8 
             field = value
             levelButton.text = value?.let { "≥ $it" } ?: ALL
         }
-    private val editor = QueryEditor(onApply)
-    private val textArea = QueryTextArea(onApply)
-    private val textMode = accentToggle("").apply {
-        icon = Icons.advanced
-        toolTipText = "Advanced: write the filter as an expression, e.g. level >= WARN AND message == \"*timeout*\" (Ctrl+Enter applies)"
-        putClientProperty("JButton.buttonType", "toolBarButton")
-        isFocusable = false
+    // Any change to the filter resumes a suspended one.
+    private val applyFilter: () -> Unit = {
+        pauseButton.isSelected = false
+        onApply()
+    }
+    private val disabledBySuspend = ArrayList<java.awt.Component>()
+    private val pauseButton = accentToggle(
+        Icons.pause,
+        "Suspend the filter: show all records, keeping the filter to resume it",
+    ).apply {
+        addActionListener { onApply() }
+        addItemListener { updateInputsEnabled() }
+    }
+    private val editor = QueryEditor(applyFilter)
+    private val textArea = QueryTextArea(applyFilter)
+    private val textMode = accentToggle(
+        Icons.advanced,
+        "Advanced: write the filter as an expression, e.g. level >= WARN AND message == \"*timeout*\" (Ctrl+Enter applies)",
+    ).apply {
         addActionListener { switchMode(isSelected) }
     }
     private val actions = JPanel(MigLayout("insets 0, gap 2, hidemode 3")).apply {
         isOpaque = false
         add(levelButton, "gapright 6")
-        add(toolBarButton(Icons.run, "Apply the filter (Enter, or Ctrl+Enter in Advanced)") { onApply() })
+        add(toolBarButton(Icons.run, "Apply the filter (Enter, or Ctrl+Enter in Advanced)") { applyFilter() })
+        add(pauseButton)
         add(textMode)
         add(toolBarButton(DropDownIcon(Icons.star), "Saved filters") { showSavedMenu(it) })
         add(toolBarButton(Icons.closeSmall, "Remove all conditions (Esc)") { clear() })
@@ -78,7 +91,7 @@ class FilterBar(private val onApply: () -> Unit) : JPanel(MigLayout("insets 6 8 
         add(error, "span")
         getInputMap(WHEN_ANCESTOR_OF_FOCUSED_COMPONENT).put(KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, 0), "logxyApply")
         actionMap.put("logxyApply", object : AbstractAction() {
-            override fun actionPerformed(e: ActionEvent) = onApply()
+            override fun actionPerformed(e: ActionEvent) = applyFilter()
         })
         getInputMap(WHEN_ANCESTOR_OF_FOCUSED_COMPONENT).put(KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0), "logxyClear")
         actionMap.put("logxyClear", object : AbstractAction() {
@@ -104,13 +117,6 @@ class FilterBar(private val onApply: () -> Unit) : JPanel(MigLayout("insets 6 8 
         actionsColumn.isVisible = text
     }
 
-    private fun toolBarButton(icon: Icon, tooltip: String, action: (JButton) -> Unit) = JButton(icon).apply {
-        toolTipText = tooltip
-        putClientProperty("JButton.buttonType", "toolBarButton")
-        isFocusable = false
-        addActionListener { action(this) }
-    }
-
     /** Fields of the log being filtered: offered in the editors; the level choice needs a level field. */
     fun setSchema(schema: Schema) {
         val hasLevel = schema.indexOf(Role.LEVEL) >= 0
@@ -118,10 +124,47 @@ class FilterBar(private val onApply: () -> Unit) : JPanel(MigLayout("insets 6 8 
         val text = if (textMode.isSelected) runCatching { QueryParser.parse(textArea.text) }.getOrNull() else null
         text?.let(editor::setQuery)
         val fields = schema.fields.filter { !it.hidden }
+        editor.patterns = schema.hasPatterns()
         editor.setFields(fields)
-        textArea.setFields(fields.map { it.name })
+        textArea.setFields(fields.map { it.name } + listOfNotNull(Query.PATTERN_FIELD.takeIf { schema.hasPatterns() }))
         // The editor starts placeholder rows over on new fields; text without real conditions follows it.
         if (text != null && editor.query().items.isEmpty()) textArea.text = QueryPrinter.print(editor.query(includeEmpty = true))
+        if (suspended) updateInputsEnabled()
+    }
+
+    /**
+     * Everything but the suspend toggle is disabled while suspended. Resuming enables only what suspending
+     * disabled, as some inputs are off for reasons of their own, e.g. the case option of a regex rule.
+     */
+    private fun updateInputsEnabled() {
+        if (!pauseButton.isSelected) {
+            disabledBySuspend.forEach { it.isEnabled = true }
+            disabledBySuspend.clear()
+            return
+        }
+        fun disable(component: java.awt.Component) {
+            if (component === pauseButton) return
+            if (component.isEnabled) {
+                component.isEnabled = false
+                disabledBySuspend += component
+            }
+            if (component is java.awt.Container) component.components.forEach(::disable)
+        }
+        disable(editor)
+        disable(modePanel)
+        disable(actions)
+    }
+
+    /** True while the filter is kept but not applied. */
+    val suspended: Boolean get() = pauseButton.isSelected
+
+    /** Whether there is a filter to suspend; always true while suspended, so it can be resumed. */
+    val canSuspend: Boolean
+        get() = suspended || minimumLevel != null || runCatching { query().items.isNotEmpty() }.getOrDefault(true)
+
+    fun toggleSuspended() {
+        pauseButton.isSelected = !pauseButton.isSelected
+        onApply()
     }
 
     val minimumLevel: Level? get() = if (levelButton.isVisible) minimum else null
@@ -130,7 +173,34 @@ class FilterBar(private val onApply: () -> Unit) : JPanel(MigLayout("insets 6 8 
     fun query(): Query.Group = if (textMode.isSelected) QueryParser.parse(textArea.text) else editor.query()
 
     /** Adds [rule] to the filter, joined with AND, and applies it. */
-    fun addRule(rule: Query.Rule) {
+    fun addRule(rule: Query) = addRules(listOf(rule))
+
+    /** Adds [rules] to the filter, each joined with AND, and applies it once. */
+    fun addRules(rules: List<Query>) = combine(rules) { it }
+
+    /**
+     * Replaces the comparisons on [field] joined at the top of the filter with `>= from` and `< to`, or
+     * only removes them if [from] and [to] are null, and applies it.
+     */
+    fun setTimeRange(field: String, from: String?, to: String?) {
+        val rules = if (from == null || to == null) emptyList() else listOf(
+            Query.Rule(field, QueryOp.AT_LEAST, from),
+            Query.Rule(field, QueryOp.BELOW, to),
+        )
+        combine(rules) { items -> items.filterNot { isTimeRule(it, field) } }
+    }
+
+    /** Whether the filter has comparisons on [field] that [setTimeRange] replaces. */
+    fun hasTimeRange(field: String): Boolean {
+        val current = runCatching { query() }.getOrNull() ?: return false
+        return current.all && !current.negated && current.items.any { isTimeRule(it, field) }
+    }
+
+    private fun isTimeRule(item: Query, field: String) =
+        item is Query.Rule && !item.negated && item.op.comparison && item.field.equals(field, ignoreCase = true)
+
+    /** Joins [rules] to the filter with AND, after [keep] picked which of its top-level items stay, and applies it. */
+    private fun combine(rules: List<Query>, keep: (List<Query>) -> List<Query>) {
         val current = try {
             query()
         } catch (e: QueryException) {
@@ -138,12 +208,12 @@ class FilterBar(private val onApply: () -> Unit) : JPanel(MigLayout("insets 6 8 
             return
         }
         val combined = when {
-            current.items.isEmpty() -> Query.Group(all = true, items = listOf(rule))
-            current.all && !current.negated -> current.copy(items = current.items + rule)
-            else -> Query.Group(all = true, items = listOf(current, rule))
+            current.items.isEmpty() -> Query.Group(all = true, items = rules)
+            current.all && !current.negated -> current.copy(items = keep(current.items) + rules)
+            else -> Query.Group(all = true, items = listOf(current) + rules)
         }
         if (textMode.isSelected) textArea.text = QueryPrinter.print(combined) else editor.setQuery(combined)
-        onApply()
+        applyFilter()
     }
 
     /** Shows how far a slow filter got, from 0 to 1; null hides it. */
@@ -160,6 +230,9 @@ class FilterBar(private val onApply: () -> Unit) : JPanel(MigLayout("insets 6 8 
         g.color = UIManager.getColor("Component.accentColor")
         g.fillRect(0, height - PROGRESS_HEIGHT, (width * fraction.coerceIn(0.0, 1.0)).toInt(), PROGRESS_HEIGHT)
     }
+
+    /** Call once this bar is no longer shown, so nothing app-wide keeps it. */
+    fun release() = textArea.release()
 
     fun showError(message: String?) {
         error.text = message
@@ -200,13 +273,13 @@ class FilterBar(private val onApply: () -> Unit) : JPanel(MigLayout("insets 6 8 
         minimum = null
         editor.clear()
         textArea.text = ""
-        onApply()
+        applyFilter()
     }
 
     private fun showLevels() {
         fun choose(level: Level?) {
             minimum = level
-            onApply()
+            applyFilter()
         }
         val items = buildList {
             add(PopupItem(ALL, selected = minimum == null) { choose(null) })
@@ -246,7 +319,7 @@ class FilterBar(private val onApply: () -> Unit) : JPanel(MigLayout("insets 6 8 
             textMode.isSelected = true
             showMode(text = true)
         }
-        onApply()
+        applyFilter()
     }
 
     private fun save() {
@@ -274,11 +347,7 @@ class FilterBar(private val onApply: () -> Unit) : JPanel(MigLayout("insets 6 8 
     }
 
     private fun persist(filters: List<SavedFilter>) {
-        try {
-            AppSettings.update(AppSettings.current.copy(filters = filters))
-        } catch (e: Exception) {
-            JOptionPane.showMessageDialog(this, "Cannot write ${AppSettings.location}:\n${e.message}", "Cannot Save", JOptionPane.ERROR_MESSAGE)
-        }
+        AppSettings.updateOrShowError(this, AppSettings.current.copy(filters = filters))
     }
 
     private companion object {

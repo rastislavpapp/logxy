@@ -31,6 +31,14 @@ class LineIndexTest {
     private fun LineIndex.lines() = List(lineCount) { lineText(it) }
 
     @Test
+    fun `source text is the line as written, line end included`() {
+        index("one\r\ntwo").use { index ->
+            assertEquals("one\r\n", index.sourceText(0))
+            assertEquals("two", index.sourceText(1))
+        }
+    }
+
+    @Test
     fun `empty file has no lines`() {
         index("").use { assertEquals(0, it.lineCount) }
     }
@@ -98,6 +106,17 @@ class LineIndexTest {
     private fun growing(content: String): Pair<Path, LineIndex> {
         val file = Files.write(dir.resolve("growing.log"), content.toByteArray())
         return file to runBlocking { LineIndex.build(file) }
+    }
+
+    @Test
+    fun `a snapshot reads lines like the index, also while more are appended`() {
+        val (file, index) = growing("one\r\n\ntwo\nthree")
+        index.use {
+            val snapshot = it.filterSnapshot()
+            assertEquals(it.lines(), List(snapshot.count) { line -> snapshot.fieldText(line, 0) })
+            it.appendFrom(file, " and more\nfour\n")
+            assertEquals(listOf("one", "", "two", "three"), List(snapshot.count) { line -> snapshot.fieldText(line, 0) })
+        }
     }
 
     @Test

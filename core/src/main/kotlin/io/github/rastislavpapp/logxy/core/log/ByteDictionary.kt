@@ -29,6 +29,16 @@ class ByteDictionary {
         return id
     }
 
+    /** The id of `bytes[from, to)`, or -1 if it has none; adds nothing. */
+    fun find(bytes: ByteArray, from: Int, to: Int): Int {
+        var slot = hash(bytes, from, to) and (table.size - 1)
+        while (true) {
+            val id = table[slot]
+            if (id < 0 || keys[id].contentEquals(bytes, from, to)) return id
+            slot = (slot + 1) and (table.size - 1)
+        }
+    }
+
     fun key(id: Int): ByteArray = keys[id]
 
     /** The id in [target] of each of this dictionary's keys, by id here; adds the keys [target] lacks. */
@@ -46,15 +56,31 @@ class ByteDictionary {
         }
     }
 
-    private fun ByteArray.contentEquals(other: ByteArray, from: Int, to: Int): Boolean {
-        if (size != to - from) return false
-        for (i in indices) if (this[i] != other[from + i]) return false
-        return true
+    private fun ByteArray.contentEquals(other: ByteArray, from: Int, to: Int): Boolean =
+        size == to - from && java.util.Arrays.equals(this, 0, size, other, from, to)
+
+    // Eight bytes per step: a multiply per byte makes long keys, like message templates, slow to hash.
+    private fun hash(bytes: ByteArray, from: Int, to: Int): Int {
+        var h = -0x340D631B7BDDDCDBL
+        var i = from
+        while (i + 8 <= to) {
+            val word = (bytes[i].toLong() and 0xFF) or
+                (bytes[i + 1].toLong() and 0xFF shl 8) or
+                (bytes[i + 2].toLong() and 0xFF shl 16) or
+                (bytes[i + 3].toLong() and 0xFF shl 24) or
+                (bytes[i + 4].toLong() and 0xFF shl 32) or
+                (bytes[i + 5].toLong() and 0xFF shl 40) or
+                (bytes[i + 6].toLong() and 0xFF shl 48) or
+                (bytes[i + 7].toLong() shl 56)
+            h = (h xor word) * MULTIPLIER
+            i += 8
+        }
+        while (i < to) h = (h xor (bytes[i++].toLong() and 0xFF)) * MULTIPLIER
+        h = h xor (h ushr 29)
+        return (h xor (h ushr 32)).toInt()
     }
 
-    private fun hash(bytes: ByteArray, from: Int, to: Int): Int {
-        var h = 0x811C9DC5.toInt()
-        for (i in from..<to) h = (h xor bytes[i].toInt()) * 0x01000193
-        return h xor (h ushr 16)
+    private companion object {
+        const val MULTIPLIER = -0x61C8864680B583EBL
     }
 }

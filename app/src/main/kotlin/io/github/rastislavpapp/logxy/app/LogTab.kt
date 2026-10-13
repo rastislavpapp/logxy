@@ -1,64 +1,91 @@
 package io.github.rastislavpapp.logxy.app
 
-import io.github.rastislavpapp.logxy.core.archive.ZipSpool
+import io.github.rastislavpapp.logxy.core.archive.ArchiveOrigin
 import io.github.rastislavpapp.logxy.core.config.SavedFilter
 import io.github.rastislavpapp.logxy.core.log.ColumnType
 import io.github.rastislavpapp.logxy.core.log.Level
-import io.github.rastislavpapp.logxy.core.log.Records
 import io.github.rastislavpapp.logxy.core.log.Role
 import io.github.rastislavpapp.logxy.core.parse.LogFormat
+import io.github.rastislavpapp.logxy.core.query.Highlighter
 import io.github.rastislavpapp.logxy.core.query.Query
 import io.github.rastislavpapp.logxy.core.query.QueryException
 import io.github.rastislavpapp.logxy.core.query.QueryOp
 import io.github.rastislavpapp.logxy.core.query.QueryPrinter
+import io.github.rastislavpapp.logxy.core.query.TextSearch
 import io.github.rastislavpapp.logxy.core.query.TimeLiteral
-import io.github.rastislavpapp.logxy.core.session.FilteredRows
+import io.github.rastislavpapp.logxy.core.session.CopyResult
 import io.github.rastislavpapp.logxy.core.session.LogSession
 import io.github.rastislavpapp.logxy.core.session.SessionListener
 import io.github.rastislavpapp.logxy.core.session.SessionStatus
+import io.github.rastislavpapp.logxy.core.session.ShownLog
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.swing.Swing
 import net.miginfocom.swing.MigLayout
 import java.awt.BorderLayout
+import java.awt.Component
+import java.awt.Container
+import java.awt.Dimension
+import java.awt.Toolkit
+import java.awt.datatransfer.StringSelection
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import java.nio.file.Path
 import java.time.ZoneId
-import javax.swing.JButton
 import javax.swing.JCheckBoxMenuItem
 import javax.swing.JComponent
 import javax.swing.JLabel
+import javax.swing.JLayeredPane
 import javax.swing.JMenuItem
+import javax.swing.JOptionPane
 import javax.swing.JPanel
 import javax.swing.JPopupMenu
 import javax.swing.JProgressBar
 import javax.swing.JScrollPane
 import javax.swing.JSplitPane
+import javax.swing.JTabbedPane
 import javax.swing.JTextArea
 import javax.swing.ScrollPaneConstants
 import javax.swing.SwingUtilities
 import javax.swing.Timer
+import javax.swing.TransferHandler
 import javax.swing.UIManager
+import javax.swing.text.JTextComponent
 
 private const val MAX_DETAIL_BYTES = 1024 * 1024
 private const val MAX_TITLE_CHARS = 40
 private const val MAX_MENU_CHARS = 80
+private const val MAX_RULE_CHARS = 1000
 private val RANGE_OPS = listOf(QueryOp.AT_LEAST, QueryOp.ABOVE, QueryOp.AT_MOST, QueryOp.BELOW)
+private const val BOTTOM_TAB_PATTERNS = "patterns"
+
+/** A search taking longer than this shows its progress. */
+private const val SEARCH_PROGRESS_DELAY_MILLIS = 200L
+
+/** Where the find box floats: below the top of the rows, left of the scroll bar. */
+private const val FLOATING_TOP_GAP = 6
+private const val FLOATING_RIGHT_GAP = 24
+
+/** Records appended to a live log are searched at most this often. */
+private const val SEARCH_APPENDED_MILLIS = 1000
 
 /**
  * One open file, or several merged: shows the records of its [LogSession], with the filter bar and the
  * detail pane. [openFiles] opens dropped files; [openEach] opens files in tabs of their own. [filter]
- * is applied once the records are there. [origin] tells which files were extracted from zips.
+ * is applied once the records are there. [origin] tells which files were extracted from zips or decompressed.
  */
 class LogTab(
     paths: List<Path>,
     private val openFiles: (List<Path>) -> Unit,
     private val openEach: (List<Path>) -> Unit,
     filter: SavedFilter? = null,
-    private val origin: (Path) -> ZipSpool.Origin? = { null },
+    private val origin: (Path) -> ArchiveOrigin? = { null },
     /** The parser chosen for each of [paths], null (or missing) to detect it. */
     formats: List<LogFormat?> = emptyList(),
     private val onStatusChanged: () -> Unit,
@@ -81,51 +108,62 @@ class LogTab(
     /** Short names of [paths], as the merge's source column shows them. */
     val sourceNames: List<String> get() = session.sourceNames
 
-    /** Short name for the tab: the file name, or the merged files' names; files from zips go by the zip's name. */
+    /** Short name for the tab: the file name, or the merged files' names; files from archives go by the container's name. */
     val title: String
         get() {
-            if (!isMerged) return origin(path)?.let { "${it.zip.fileName}/${path.fileName}" } ?: path.fileName.toString()
-            val names = paths.zip(sourceNames) { path, name -> origin(path)?.zip?.fileName?.toString() ?: name }.distinct()
+            if (!isMerged) return origin(path)?.let { if (it.entry.isEmpty()) "${it.container.fileName}" else "${it.container.fileName}/${path.fileName}" } ?: path.fileName.toString()
+            val names = paths.zip(sourceNames) { p, name -> origin(p)?.container?.fileName?.toString() ?: name }.distinct()
             val all = names.joinToString(" + ")
             return if (all.length <= MAX_TITLE_CHARS) all else "${names.first()} + ${names.size - 1} more"
         }
 
-    /** The full path, or one per line for a merge; files from zips as `zip!/entry`. */
+    /** The full path, or one per line for a merge; files from archives as `container!/entry`. */
     val description: String get() = paths.joinToString("\n") { (origin(it) ?: it).toString() }
     private val content = JPanel(BorderLayout())
     private val detail = LogDetailArea()
-    private val followButton = accentToggle("").apply {
-        icon = Icons.follow
-        putClientProperty("JButton.buttonType", "toolBarButton")
-        isFocusable = false
-        toolTipText = "Follow (tail)"
+    private val filterBar = FilterBar(::applyFilter)
+    private val findBar = FindBar(::searchFor) { forward -> find(forward) }
+    private val patterns = PatternsPanel(scope, { session.patternCounts() }, { session.patternProgress }, filterBar::addRules)
+
+    /** Below the table: the selected record, or the message patterns of the shown rows. */
+    private val bottomTabs = JTabbedPane().apply {
+        addTab("Detail", JScrollPane(detail, ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED, ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER))
+        addTab("Patterns", patterns)
+        if (AppState[AppState.BOTTOM_TAB] == BOTTOM_TAB_PATTERNS) selectedComponent = patterns
+        addChangeListener { AppState[AppState.BOTTOM_TAB] = if (selectedComponent === patterns) BOTTOM_TAB_PATTERNS else null }
+    }
+    private val followButton = accentToggle(Icons.follow, "Follow (tail)").apply {
         addActionListener { session.follow = isSelected }
     }
-    private val reloadButton = JButton(Icons.refresh).apply {
-        toolTipText = "Reload the file (F5)"
-        putClientProperty("JButton.buttonType", "toolBarButton")
-        isFocusable = false
-        addActionListener { session.reload() }
-    }
+    private val reloadButton = toolBarButton(Icons.refresh, "Reload the file (F5)") { session.reload() }
     private val parserButton = dropDownButton("Parser: how lines are split into columns", maxWidth = 280) { showParsers() }
-    private val columnsButton = JButton(DropDownIcon(Icons.columns)).apply {
-        toolTipText = "Columns to show"
-        putClientProperty("JButton.buttonType", "toolBarButton")
-        isFocusable = false
+    private val columnsButton = toolBarButton(DropDownIcon(Icons.columns), "Columns to show") { showColumns() }.apply {
         isEnabled = false
-        addActionListener { showColumns() }
     }
 
     /** Names of the columns the user hid; kept when the file is read again. */
     private var hiddenColumns = emptySet<String>()
-    private val filterBar = FilterBar(::applyFilter)
     private var progressTimer: Timer? = null
     private var filterTimer: Timer? = null
 
     private var model: LogTableModel? = null
     private var table: LogTable? = null
     private var scrollPane: VirtualScrollPane? = null
-    private var levelMarks: LevelMarks? = null
+    private var histogramBar: TimeHistogramBar? = null
+
+    private var search: TextSearch? = null
+    private var foundMarks = Highlighter.NONE
+
+    /** Records the search found, in order; complete unless [searchJob] is running. */
+    private var found = IntArray(0)
+    private var searchJob: Job? = null
+
+    /** Records were appended while [searchJob] ran, so it is to run again. */
+    private var searchStale = false
+
+    /** A find asked for while the search was running: forward, and whether the current record counts. */
+    private var pendingFind: Pair<Boolean, Boolean>? = null
+    private val searchAppended = Timer(SEARCH_APPENDED_MILLIS) { runSearch(jump = false) }.apply { isRepeats = false }
 
     /** What the status bar shows for this file. */
     val status: SessionStatus get() = session.status
@@ -138,8 +176,8 @@ class LogTab(
             val first = selection.minSelectionIndex
             val last = selection.maxSelectionIndex
             if (first < 0 || first == last || last >= model.rowCount) return null
-            val start = model.records.timestamp(model.recordAt(first)) ?: return null
-            val end = model.records.timestamp(model.recordAt(last)) ?: return null
+            val start = model.shown.timestamp(model.recordAt(first)) ?: return null
+            val end = model.shown.timestamp(model.recordAt(last)) ?: return null
             return end - start
         }
 
@@ -172,7 +210,7 @@ class LogTab(
         if (isMerged) return showMergedParsers()
         val chosen = session.chosenFormat
         val custom = AppSettings.current.formats
-        val known = listOf(LogFormat.Raw) + custom + LogFormat.BUILT_IN
+        val known = listOf(LogFormat.Raw) + custom + AppSettings.current.builtInFormats
         val items = buildList {
             add(PopupItem(autoLabel(), selected = chosen == null) { session.useFormat(null) })
             (if (chosen == null || chosen in known) known else known + chosen).forEachIndexed { i, format ->
@@ -180,6 +218,9 @@ class LogTab(
                 add(PopupItem(format.name, selected = format == chosen, separatorBefore = i == 0, tools = tools) { session.useFormat(format) })
             }
             add(PopupItem("Edit Parsers", Icons.settings, separatorBefore = true) { editParsers(chosen ?: session.format) })
+            // A guessed format is none of the known ones; saving it makes it one the user can correct.
+            val detected = session.format.takeIf { chosen == null && session.formatDetected && it !in known }
+            if (detected != null) add(PopupItem("Save Detected Parser…") { editParsers(detected, adopt = true) })
         }
         showPopupList(parserButton, items)
     }
@@ -194,7 +235,7 @@ class LogTab(
         // The parser of all files when not mixed; null is Auto-detect.
         val same = chosen.first()
         val custom = AppSettings.current.formats
-        val known = listOf(LogFormat.Raw) + custom + LogFormat.BUILT_IN
+        val known = listOf(LogFormat.Raw) + custom + AppSettings.current.builtInFormats
         val items = buildList {
             val auto = if (session.formatDetected) "Auto: per file" else "Auto-detect"
             add(PopupItem(auto, selected = !mixed && same == null) { session.useFormats(chosen.map { null }) })
@@ -263,19 +304,63 @@ class LogTab(
             isEnabled = hiddenColumns.isNotEmpty()
             addActionListener { hideColumns(emptySet()) }
         })
+        popup.addSeparator()
+        popup.add(JMenuItem("Copy Column").apply {
+            toolTipText = "The whole value of “${field.name}” of every shown row, one row per line"
+            addActionListener {
+                val shown = model.shown
+                copyColumn { shown.copyColumn(shown.schema.fields.indexOf(field)) }
+            }
+        })
         popup.show(header, x, y)
     }
+
+    /** Copies the column [read] gives; reading many values may take a while. Closing the tab cancels it. */
+    private fun copyColumn(read: suspend () -> CopyResult) {
+        scope.launch {
+            val message = when (val result = read()) {
+                is CopyResult.Copied -> return@launch copy(result.text)
+                CopyResult.FileChanged -> "The file changed while copying; copy the column again."
+                is CopyResult.Failed -> "Cannot copy the column: ${result.message}"
+            }
+            JOptionPane.showMessageDialog(this@LogTab, message, "Copy Column", JOptionPane.ERROR_MESSAGE)
+        }
+    }
+
+    private fun copy(text: String) = Toolkit.getDefaultToolkit().systemClipboard.setContents(StringSelection(text), null)
 
     /** The right-click menu of a cell: show only records with that value, or all but them. */
     private fun showCellMenu(table: LogTable, row: Int, column: Int, x: Int, y: Int) {
         val model = model ?: return
         val field = model.fieldAt(column) ?: return
-        val value = model.getValueAt(row, column) as String
+        val shown = model.shown
+        val fieldIndex = shown.schema.fields.indexOf(field)
+        // The whole value, not the cell's text, which is cut to its first line and has its tabs expanded.
+        val value = shown.fieldText(model.recordAt(row), fieldIndex)
         val level = model.level(row)?.takeIf { field.role == Role.LEVEL && it != Level.UNKNOWN }
-        val pattern = value.replace("\\", "\\\\").replace("*", "\\*").replace("?", "\\?")
+        val firstLine = value.lineSequence().first()
+        val escaped = firstLine.take(MAX_RULE_CHARS).replace("\\", "\\\\").replace("*", "\\*").replace("?", "\\?")
+        // A long or multi-line value, such as a message with its stack trace, is matched by its start.
+        val pattern = if (firstLine.length > MAX_RULE_CHARS || firstLine.length < value.length) "$escaped*" else escaped
         fun rule(op: QueryOp) =
             if (level != null) Query.Rule(field.name, op, level.name, bare = true) else Query.Rule(field.name, op, pattern)
         val popup = JPopupMenu()
+        popup.add(JMenuItem("Copy Cell Value").apply {
+            addActionListener { copy(shown.fieldText(model.recordAt(row), fieldIndex)) }
+        })
+        // Within a selection of several rows, the menu also copies from all of them.
+        if (table.isRowSelected(row) && table.selectedRowCount > 1) {
+            popup.add(JMenuItem("Copy Selected Rows").apply {
+                addActionListener { table.transferHandler.exportToClipboard(table, Toolkit.getDefaultToolkit().systemClipboard, TransferHandler.COPY) }
+            })
+            popup.add(JMenuItem("Copy Column “${field.name}”").apply {
+                addActionListener {
+                    val records = table.selectedRows.map(model::recordAt).toIntArray()
+                    copyColumn { shown.copyColumn(fieldIndex, records) }
+                }
+            })
+        }
+        popup.addSeparator()
         fun add(rule: Query.Rule) {
             val text = QueryPrinter.print(rule).let { if (it.length > MAX_MENU_CHARS) it.take(MAX_MENU_CHARS - 1) + "…" else it }
             popup.add(JMenuItem(text, Icons.filter).apply {
@@ -285,17 +370,28 @@ class LogTab(
         // `== ""` is a placeholder that filters nothing; `!= ""` keeps records with a value.
         if (value.isNotEmpty()) add(rule(QueryOp.EQUALS))
         add(rule(QueryOp.NOT_EQUALS))
+        val template = if (field.role == Role.MESSAGE && shown.schema.hasPatterns()) session.templateOf(model.recordAt(row)) else null
+        if (template != null) {
+            popup.addSeparator()
+            add(Query.Rule(Query.PATTERN_FIELD, QueryOp.EQUALS, template))
+            add(Query.Rule(Query.PATTERN_FIELD, QueryOp.NOT_EQUALS, template))
+        }
         if (level != null) {
             popup.addSeparator()
             for (op in RANGE_OPS) add(Query.Rule(field.name, op, level.name, bare = true))
         }
         // The literal is written from the record's time, as the log's own layout may not parse back (e.g. offsets).
-        val time = model.records.timestamp(model.recordAt(row))?.takeIf { field.type == ColumnType.TIMESTAMP }
+        val time = shown.timestamp(model.recordAt(row))?.takeIf { field.type == ColumnType.TIMESTAMP }
         if (time != null) {
             val literal = TimeLiteral.format(time, ZoneId.systemDefault())
             popup.addSeparator()
             for (op in RANGE_OPS) add(Query.Rule(field.name, op, literal))
         }
+        popup.addSeparator()
+        popup.add(JMenuItem(if (filterBar.suspended) "Resume Filter" else "Suspend Filter", Icons.pause).apply {
+            isEnabled = filterBar.canSuspend
+            addActionListener { filterBar.toggleSuspended() }
+        })
         popup.show(table, x, y)
     }
 
@@ -306,8 +402,11 @@ class LogTab(
 
     private fun autoLabel() = if (session.formatDetected) "Auto: ${session.format.name}" else "Auto-detect"
 
-    private fun editParsers(select: LogFormat) {
-        val dialog = PreferencesDialog(SwingUtilities.getWindowAncestor(this), PreferencesDialog.Section.PARSERS, path, select, offerUse = !isMerged)
+    private fun editParsers(select: LogFormat, adopt: Boolean = false) {
+        val dialog = PreferencesDialog(
+            SwingUtilities.getWindowAncestor(this), PreferencesDialog.Section.PARSERS, path, select, offerUse = !isMerged,
+            adopt = select.takeIf { adopt },
+        )
         dialog.isVisible = true
         session.useFormat(dialog.formatToUse ?: return)
     }
@@ -365,8 +464,8 @@ class LogTab(
         showCentered(*components.toTypedArray())
     }
 
-    private fun showTable(records: Records) {
-        val model = LogTableModel(records)
+    private fun showTable(shown: ShownLog) {
+        val model = LogTableModel(shown)
         // Columns hidden before stay hidden, unless that would hide them all (the file changed meanwhile).
         model.hiddenColumns = hiddenColumns.takeIf { hidden -> model.columnChoices.any { it.name !in hidden } }.orEmpty()
         val table = LogTable(model)
@@ -391,30 +490,44 @@ class LogTab(
                 if (e.isPopupTrigger && column >= 0) showHeaderMenu(table.tableHeader, column, e.x, e.y)
             }
         })
-        // The table has its own transfer handler (for copy), which would otherwise swallow file drops.
-        table.transferHandler = FileDropHandler(openFiles, table.transferHandler)
+        // Copying rows gives the records as written; file drops on the table still open files.
+        table.transferHandler = FileDropHandler(openFiles, RecordCopyHandler(model))
         val scrollPane = VirtualScrollPane(table, model)
         scrollPane.onFollowChanged = { session.follow = it }
         scrollPane.resumeFollowAtEnd = { session.isLive }
-        val levelMarks = LevelMarks(model, scope, scrollPane::repaintMarks)
-        scrollPane.marks = levelMarks
+        val timestampField = shown.schema.fields.firstOrNull { it.role == Role.TIMESTAMP }?.name
+        scrollPane.onRowsInViewChanged = ::showMarkedTimes
+        val histogramBar = timestampField?.let { field ->
+            TimeHistogramBar { session.histogram }.apply {
+                onJump = ::jumpToTime
+                onRange = { from, to -> filterBar.setTimeRange(field, timeLiteral(from), timeLiteral(to)) }
+                onShowAllTimes = { filterBar.setTimeRange(field, null, null) }
+                hasTimeRange = { filterBar.hasTimeRange(field) }
+            }
+        }
         table.selectionModel.addListSelectionListener { event ->
+            showMarkedTimes()
             if (!event.valueIsAdjusting) {
                 showDetail(model, table.selectionModel.leadSelectionIndex)
+                showFoundCount()
                 onStatusChanged()
             }
         }
         this.model = model
         this.table = table
         this.scrollPane = scrollPane
-        this.levelMarks = levelMarks
-        filterBar.setSchema(records.schema)
+        this.histogramBar = histogramBar
+        table.found = foundMarks
+        filterBar.setSchema(shown.schema)
+        patterns.canFilter = shown.schema.hasPatterns()
         setFilterVisible(true)
 
         detail.text = ""
-        val split = JSplitPane(JSplitPane.VERTICAL_SPLIT, scrollPane, JScrollPane(
-            detail, ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED, ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER,
-        )).apply {
+        val rowsPanel = JPanel(BorderLayout()).apply {
+            histogramBar?.let { add(it, BorderLayout.NORTH) }
+            add(FloatingTopRight(scrollPane, findBar), BorderLayout.CENTER)
+        }
+        val split = JSplitPane(JSplitPane.VERTICAL_SPLIT, rowsPanel, bottomTabs).apply {
             resizeWeight = 0.75
             isOneTouchExpandable = true
             border = null
@@ -439,8 +552,9 @@ class LogTab(
     }
 
     private fun showDetail(model: LogTableModel, row: Int) {
-        detail.text = if (row < 0 || row >= model.rowCount) "" else model.records.recordText(model.recordAt(row), MAX_DETAIL_BYTES)
-        detail.caretPosition = 0
+        detail.show(if (row < 0 || row >= model.rowCount) "" else model.shown.recordText(model.recordAt(row), MAX_DETAIL_BYTES))
+        // A long record, e.g. with a stack trace, shows where the find bar's text is.
+        detail.caretPosition = detail.firstFound
     }
 
     /** Shows [record] again if it is selected; it may have grown, e.g. by a stack trace written after it. */
@@ -448,33 +562,39 @@ class LogTab(
         val model = model ?: return
         val row = table?.selectionModel?.leadSelectionIndex ?: return
         if (row !in 0..<model.rowCount || model.recordAt(row) != record) return
-        val text = model.records.recordText(record, MAX_DETAIL_BYTES)
+        val text = model.shown.recordText(record, MAX_DETAIL_BYTES)
         if (text == detail.text) return
         val caret = detail.caretPosition
-        detail.text = text
+        detail.show(text)
         detail.caretPosition = caret.coerceAtMost(detail.document.length)
     }
 
     /** Applies the filter bar's level and query to this file's records. */
     private fun applyFilter() {
-        if (session.records == null) return
+        if (session.shown == null) return
         try {
-            session.applyFilter(filterBar.minimumLevel, filterBar.query())
+            // While suspended the query is not read: text that does not parse must not keep it from showing all.
+            val query = if (filterBar.suspended) null else filterBar.query()
+            if (query == null) session.applyFilter(null, Query.Group(all = true, items = emptyList()))
+            else session.applyFilter(filterBar.minimumLevel, query)
+            val matches = query?.let(Highlighter::of) ?: Highlighter.NONE
+            table?.matches = matches
+            detail.matches = matches
             filterBar.showError(null)
         } catch (e: QueryException) {
             filterBar.showError(e.message)
         }
     }
 
-    private fun showRows(rows: FilteredRows?, keepView: Boolean) {
+    private fun showRows(keepView: Boolean, oldSize: Int, recordBefore: (row: Int) -> Int) {
         val model = model ?: return
         val table = table ?: return
         val scrollPane = scrollPane ?: return
-        val selected = table.selectedRow.takeIf { it >= 0 }?.let { model.recordAt(it) }
-        val top = if (model.totalRowCount > 0) model.recordAtIndex(scrollPane.firstVisibleRow) else null
-        model.showRows(rows)
+        val selected = (model.windowStart + table.selectedRow).takeIf { table.selectedRow >= 0 && it < oldSize }?.let(recordBefore)
+        val top = scrollPane.firstVisibleRow.takeIf { it < oldSize }?.let(recordBefore)
+        model.rowsReplaced()
         scrollPane.rowsReplaced()
-        levelMarks?.reset()
+        patterns.refresh()
         val selectedIndex = selected?.let { record -> model.indexOfRecord(record).takeIf { it >= 0 && model.recordAtIndex(it) == record } }
         if (!session.follow) {
             if (keepView && top != null) {
@@ -484,7 +604,162 @@ class LogTab(
             }
         }
         if (selectedIndex != null) scrollPane.selectRow(selectedIndex, scroll = false)
+        if (search != null) runSearch(jump = false)
     }
+
+    /** Opens the find bar, to find the text selected in the detail pane if it is one line. */
+    fun showFind() {
+        findBar.open(detail.selectedText?.takeIf { it.isNotBlank() && '\n' !in it })
+    }
+
+    /** Marks [search] and finds the records it matches, going to the first from the current one on. */
+    private fun searchFor(search: TextSearch?) {
+        this.search = search
+        foundMarks = search?.let(Highlighter::of) ?: Highlighter.NONE
+        table?.found = foundMarks
+        detail.found = foundMarks
+        found = IntArray(0)
+        if (!findBar.isVisible) table?.requestFocusInWindow()
+        runSearch(jump = search != null)
+    }
+
+    /** Finds the shown records [search] matches; with [jump], then selects the first from the current one on. */
+    private fun runSearch(jump: Boolean) {
+        searchJob?.cancel()
+        searchJob = null
+        searchStale = false
+        searchAppended.stop()
+        val evaluation = try {
+            search?.let(session::prepareSearch)
+        } catch (e: QueryException) {
+            found = IntArray(0)
+            pendingFind = null
+            findBar.showError(e.message)
+            return
+        }
+        if (evaluation == null) {
+            found = IntArray(0)
+            showFoundCount()
+            return
+        }
+        if (jump) {
+            pendingFind = true to true
+            findBar.showCount(0, null)
+        }
+        searchJob = scope.launch {
+            val progress = launch {
+                delay(SEARCH_PROGRESS_DELAY_MILLIS)
+                while (true) {
+                    findBar.showCount(0, null, evaluation.progress)
+                    delay(100)
+                }
+            }
+            val result = try {
+                evaluation.run()
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                searchJob = null
+                pendingFind = null
+                findBar.showError(e.message ?: e.javaClass.simpleName)
+                return@launch
+            } finally {
+                progress.cancel()
+            }
+            found = result.rows
+            searchJob = null
+            showFoundCount()
+            pendingFind?.let { (forward, inclusive) -> find(forward, inclusive) }
+            if (searchStale) searchAppended.start()
+        }
+    }
+
+    /** Searches appended records soon; not at once, as a live log may grow every moment. */
+    private fun searchAppendedSoon() {
+        if (search == null) return
+        if (searchJob != null) searchStale = true else if (!searchAppended.isRunning) searchAppended.start()
+    }
+
+    /**
+     * Selects the next record the search found after the current one, or the previous before it, wrapping around.
+     * The current record is the selected one, or the top one in view if none is; with [inclusive], or if none is
+     * selected, it can be found itself.
+     */
+    private fun find(forward: Boolean, inclusive: Boolean = false) {
+        if (search == null) return findBar.open()
+        pendingFind = null
+        if (searchJob != null) {
+            pendingFind = forward to inclusive
+            return
+        }
+        val model = model ?: return
+        val table = table ?: return
+        val scrollPane = scrollPane ?: return
+        if (found.isEmpty() || model.totalRowCount == 0) return
+        val lead = table.selectionModel.leadSelectionIndex
+        val selected = lead.takeIf { it in 0..<model.rowCount && table.selectionModel.isSelectedIndex(it) }
+        val current = selected?.let(model::recordAt) ?: model.recordAtIndex(scrollPane.firstVisibleRow)
+        val include = inclusive || selected == null
+        // The first found record at or after the current one.
+        val at = found.binarySearch(current).let { if (it >= 0) it else -it - 1 }
+        val isCurrent = at < found.size && found[at] == current
+        var i = when {
+            forward -> if (isCurrent && !include) at + 1 else at
+            else -> if (isCurrent && include) at else at - 1
+        }
+        // A record found may not be shown yet, while the filter's result is still on its way.
+        repeat(found.size) {
+            i = Math.floorMod(i, found.size)
+            val record = found[i]
+            val index = model.indexOfRecord(record)
+            if (index >= 0 && model.recordAtIndex(index) == record) {
+                session.follow = false
+                scrollPane.selectRow(index, scroll = index !in scrollPane.firstVisibleRow..scrollPane.lastVisibleRow)
+                return
+            }
+            i += if (forward) 1 else -1
+        }
+    }
+
+    /** Shows how many records the search found, and which of them is selected. */
+    private fun showFoundCount() {
+        if (searchJob != null) return
+        val model = model
+        val lead = table?.selectionModel?.leadSelectionIndex ?: -1
+        val selected = if (model != null && lead in 0..<model.rowCount) model.recordAt(lead) else -1
+        val position = if (selected >= 0) found.binarySearch(selected) else -1
+        findBar.showCount(if (position >= 0) position + 1 else 0, found.size)
+    }
+
+    /** Marks the times of the selected rows on the histogram, or of the top row in view if none is selected. */
+    private fun showMarkedTimes() {
+        val bar = histogramBar ?: return
+        val model = model ?: return
+        val scrollPane = scrollPane ?: return
+        val selection = table?.selectionModel ?: return
+        val first = selection.minSelectionIndex
+        val last = selection.maxSelectionIndex
+        bar.markedTimes = if (first >= 0 && last < model.rowCount) {
+            val from = model.shown.timestamp(model.recordAt(first))
+            val to = model.shown.timestamp(model.recordAt(last))
+            if (from != null && to != null) minOf(from, to) to maxOf(from, to) else (from ?: to)?.let { it to it }
+        } else if (model.totalRowCount > 0) {
+            model.shown.timestamp(model.recordAtIndex(scrollPane.firstVisibleRow))?.let { it to it }
+        } else {
+            null
+        }
+    }
+
+    /** Selects the first shown row at [time] or later, or the last row if none is. */
+    private fun jumpToTime(time: Long) {
+        val model = model ?: return
+        val scrollPane = scrollPane ?: return
+        val row = model.shown.firstRowAt(time).takeIf { it >= 0 } ?: return
+        session.follow = false
+        scrollPane.selectRow(row)
+        table?.requestFocusInWindow()
+    }
+
+    private fun timeLiteral(nanos: Long) = TimeLiteral.format(nanos, ZoneId.systemDefault())
 
     /** Follows a slow filter's progress on the filter bar while [filtering]. */
     private fun showFilterProgress(filtering: Boolean) {
@@ -499,6 +774,9 @@ class LogTab(
 
     fun focusFilter() = filterBar.focusFilter()
 
+    /** Goes to the next record with the find bar's text, or the previous; opens the bar if it is closed. */
+    fun findNext(forward: Boolean) = find(forward)
+
     fun clearFilter() = filterBar.clear()
 
     /** The filter as edited in this tab. */
@@ -507,20 +785,55 @@ class LogTab(
     /** Cancels any running work and releases the file. */
     fun dispose() {
         stopProgress()
+        patterns.reset()
         showFilterProgress(false)
+        searchAppended.stop()
         session.dispose()
         scope.cancel()
+        filterBar.release()
+        stopCarets(this)
+    }
+
+    // A caret blinks on a shared Swing timer, which would otherwise keep the closed tab, and its records, in memory.
+    private fun stopCarets(component: Component) {
+        if (component is JTextComponent) component.caret?.blinkRate = 0
+        if (component is Container) component.components.forEach(::stopCarets)
+    }
+
+    /** Shows [floating] at its preferred size over the top right corner of [base], clear of the scroll bar. */
+    private class FloatingTopRight(private val base: JComponent, private val floating: JComponent) : JLayeredPane() {
+        init {
+            // As Any: an Int would pick the overload that takes an index, not a layer.
+            add(base, DEFAULT_LAYER as Any)
+            add(floating, PALETTE_LAYER as Any)
+        }
+
+        override fun doLayout() {
+            base.setBounds(0, 0, width, height)
+            val size = floating.preferredSize
+            floating.setBounds(maxOf(0, width - size.width - FLOATING_RIGHT_GAP), FLOATING_TOP_GAP, minOf(size.width, width), size.height)
+        }
+
+        override fun getPreferredSize(): Dimension = base.preferredSize
+
+        override fun getMinimumSize(): Dimension = base.minimumSize
     }
 
     private inner class Listener : SessionListener {
-        override fun indexing(fraction: () -> Double) {
+        override fun indexing(fraction: () -> Double) = showProgress(fraction)
+
+        override fun shownEnded() {
             columnsButton.isEnabled = false
-            levelMarks?.cancel()
-            levelMarks = null
+            searchJob?.cancel()
+            searchJob = null
+            found = IntArray(0)
+            histogramBar = null
+            patterns.reset()
+            // The table may still be painted until indexing shows its progress: with no rows.
+            model?.rowsReplaced()
             model = null
             table = null
             scrollPane = null
-            showProgress(fraction)
         }
 
         override fun problem(title: String, detail: String, hint: String?) {
@@ -528,9 +841,9 @@ class LogTab(
             showProblem(title, detail, hint)
         }
 
-        override fun loaded(records: Records) {
+        override fun loaded(shown: ShownLog) {
             stopProgress()
-            showTable(records)
+            showTable(shown)
         }
 
         override fun notMergeable(paths: List<Path>) {
@@ -541,26 +854,35 @@ class LogTab(
 
         override fun formatChanged() = showFormat()
 
-        override fun recordsAppended(oldRecordCount: Int, changed: IntArray) {
-            model?.recordsAppended(oldRecordCount, changed)
-            changed.forEach(::refreshDetail)
-            if (session.shown == null) {
-                scrollPane?.rowsAppended()
-                levelMarks?.changedFrom(changed.fold(oldRecordCount, ::minOf))
-            }
+        override fun fieldsShown() {
+            val model = model ?: return
+            model.schemaChanged()
+            filterBar.setSchema(model.shown.schema)
         }
 
-        override fun rowsReplaced(rows: FilteredRows?, keepView: Boolean) = showRows(rows, keepView)
+        override fun recordsGrew(changed: IntArray) {
+            model?.recordsGrew(changed)
+            changed.forEach(::refreshDetail)
+        }
 
-        override fun rowsExtended(firstChanged: Int, oldSize: Int) {
+        override fun rowsReplaced(keepView: Boolean, oldSize: Int, recordBefore: (row: Int) -> Int) =
+            showRows(keepView, oldSize, recordBefore)
+
+        override fun rowsChanged(firstChanged: Int, oldSize: Int) {
             model?.rowsChangedFrom(firstChanged, oldSize)
             scrollPane?.rowsAppended()
-            levelMarks?.changedFrom(firstChanged)
+            patterns.refreshSoon()
+            searchAppendedSoon()
         }
 
         override fun levelMappingChanged() {
             model?.let { it.fireTableRowsUpdated(0, maxOf(0, it.rowCount - 1)) }
-            levelMarks?.reset()
+            patterns.refresh()
+        }
+
+        override fun histogramChanged() {
+            showMarkedTimes()
+            histogramBar?.repaint()
         }
 
         override fun followChanged(follow: Boolean) {

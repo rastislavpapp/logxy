@@ -21,8 +21,12 @@ dependencies {
     runtimeOnly(libs.intellij.icons)
 }
 
+// zstd-jni loads a native library, which Java 24+ warns about, and future versions block, without this.
+val nativeAccess = "--enable-native-access=ALL-UNNAMED"
+
 application {
     mainClass = "io.github.rastislavpapp.logxy.app.MainKt"
+    applicationDefaultJvmArgs = listOf(nativeAccess)
 }
 
 tasks.jar {
@@ -37,7 +41,7 @@ val intellijIcons = configurations.detachedConfiguration(dependencies.create(lib
 tasks.shadowJar {
     archiveFileName = "logxy.jar"
     // log4j-core is a multi-release jar; without this its Java 9+ classes are ignored.
-    manifest { attributes("Multi-Release" to "true") }
+    manifest { attributes("Multi-Release" to "true", "Enable-Native-Access" to "ALL-UNNAMED") }
     dependencies { exclude(dependency(libs.intellij.icons.get())) }
     // A local, so the lambda does not capture the build script, which the configuration cache rejects.
     val archives = objects.newInstance<Services>().archives
@@ -79,6 +83,9 @@ val jpackage = tasks.register<Exec>("jpackage") {
         "--main-jar", "logxy.jar",
         "--main-class", application.mainClass.get(),
         "--add-modules", "java.base,java.desktop,java.logging,java.prefs,jdk.unsupported",
+        // Twice the JVM default, so few users need a limit in Preferences, which costs a second JVM at every start.
+        "--java-options", "-XX:MaxRAMPercentage=50",
+        "--java-options", nativeAccess,
         "--dest", image.get().asFile.path,
     )
     // jpackage refuses to overwrite an existing image.

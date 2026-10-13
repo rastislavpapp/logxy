@@ -13,7 +13,11 @@ import javax.swing.UIManager
 /** The most memory logxy may use; it applies only to a newly started JVM. */
 class MemoryPage : PreferencesPage("Memory", Icons.memory) {
 
-    private val default = JRadioButton("Java default (a quarter of this computer's memory)")
+    // The packaged launcher raises the JVM default; see the jpackage task.
+    private val default = JRadioButton(
+        if (System.getProperty("jpackage.app-path") != null) "Default (half of this computer's memory)"
+        else "Java default (a quarter of this computer's memory)"
+    )
     private val custom = JRadioButton("Up to")
     private val gigabytes = JSpinner(SpinnerNumberModel(8, 1, 1024, 1))
 

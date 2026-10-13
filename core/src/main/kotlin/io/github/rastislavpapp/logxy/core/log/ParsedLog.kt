@@ -59,7 +59,7 @@ class ParsedLog private constructor(
     val format: RecordFormat,
     /** How [Columns] store the fields: the format's schema, with DICT fields stored as spans where needed. */
     private val storage: Schema,
-    override val schema: Schema,
+    schema: Schema,
     private val segments: ArrayList<Columns>,
     private val dictionaries: Array<ByteDictionary?>,
     indexedSize: Long,
@@ -67,6 +67,10 @@ class ParsedLog private constructor(
 ) : LogData() {
 
     override var indexedSize = indexedSize
+        private set
+
+    /** Changes only when appended records have an optional field none had before, which is then shown. */
+    override var schema = schema
         private set
 
     private var segmentFirst = firstRecords()
@@ -122,11 +126,10 @@ class ParsedLog private constructor(
         return levels[id]
     }
 
-    override fun timestamp(record: Int): Long? {
-        if (timestampField < 0) return null
+    override fun timestampNanos(record: Int): Long {
+        if (timestampField < 0) return Columns.ABSENT_TIMESTAMP
         val segment = segmentOf(record)
-        val nanos = segments[segment].longs[timestampField]!![record - segmentFirst[segment]]
-        return if (nanos == Columns.ABSENT_TIMESTAMP) null else nanos
+        return segments[segment].longs[timestampField]!![record - segmentFirst[segment]]
     }
 
     override fun filterSnapshot(): RecordSnapshot = ParsedSnapshot(
@@ -179,20 +182,12 @@ class ParsedLog private constructor(
         }
     }
 
-    private fun mapValue(columns: Columns, local: Int, key: MapKey, bytes: ByteArray, maxBytes: Int): String {
-        val length = columns.spanLength(key.field, local)
-        if (length == Columns.ABSENT_LENGTH) return ""
-        val from = columns.ints[key.field]!![local]
-        val to = if (length == Columns.TO_RECORD_END) bytes.size else minOf(from + length, bytes.size)
-        if (from >= to) return ""
-        val map = storage.fields[key.field].map!!
-        val entries = map.entries(bytes, from, to)
-        if (entries < 0) return ""
-        val value = map.value(bytes, MdcMap.from(entries), MdcMap.to(entries), key)
-        if (value < 0) return ""
-        if (!map.json) return Bytes.utf8Text(bytes, MdcMap.from(value), MdcMap.to(value), maxBytes)
-        val decoded = Json.decode(bytes, MdcMap.from(value), MdcMap.to(value))
-        return firstLine(decoded, 0, decoded.size, maxBytes)
+    override fun fieldText(record: Int, field: Int): String {
+        val segment = segmentOf(record)
+        val local = record - segmentFirst[segment]
+        return fieldText(schema, segments[segment], local, field, format, { dictionaries[field]!!.text(it) }) { start ->
+            read(start, minOf(recordEnd(record) - start, Int.MAX_VALUE / 2L).toInt())
+        }
     }
 
     override fun recordText(record: Int, maxBytes: Int): String {
@@ -203,6 +198,11 @@ class ParsedLog private constructor(
         val end = if (complete) Bytes.trimLineEnd(bytes, 0, bytes.size) else bytes.size
         if (complete) format.detailText(bytes, 0, end)?.let { return it }
         return Bytes.utf8Text(bytes, 0, end, maxBytes)
+    }
+
+    override fun sourceText(record: Int): String {
+        val start = recordStart(record)
+        return String(read(start, (recordEnd(record) - start).toInt()), Charsets.UTF_8)
     }
 
     override fun readAppended(size: Long): AppendedData {
@@ -233,9 +233,21 @@ class ParsedLog private constructor(
                 local.idsIn(dictionaries[field]!!)
             }
             for (i in 0..<source.size) copyRecord(source, i, target, remaps)
+            showPresent(source)
         }
         indexedSize = appended.to
         tail = appended.tail
+    }
+
+    /** Shows the optional fields hidden as absent that [source] has values of, e.g. a JSON log's first exception. */
+    private fun showPresent(source: Columns) {
+        val fields = schema.fields
+        // A map split into its keys stays hidden: it is shown through them.
+        val split = fields.mapNotNull { it.mapKey?.field }.toSet()
+        val present = fields.indices.filter { field ->
+            fields[field].hidden && fields[field].optional && field !in split && field < source.present.size && source.present[field]
+        }
+        if (present.isNotEmpty()) schema = Schema(fields.mapIndexed { i, field -> if (i in present) field.copy(hidden = false) else field })
     }
 
     private fun copyRecord(source: Columns, i: Int, target: Columns, remaps: Array<IntArray?>) {
@@ -538,6 +550,49 @@ class ParsedLog private constructor(
         private fun isBlank(bytes: ByteArray, from: Int, to: Int): Boolean {
             for (i in from..<to) if (!Json.isSpace(bytes[i])) return false
             return true
+        }
+
+        /**
+         * The whole text of [field] of the record at [local] in [columns]: all its lines, not cut. Dictionary
+         * ids are looked up with [dictionaryText]; [read] reads the record's bytes from where it starts.
+         */
+        internal fun fieldText(
+            schema: Schema,
+            columns: Columns,
+            local: Int,
+            field: Int,
+            format: RecordFormat,
+            dictionaryText: (Int) -> String,
+            read: (start: Long) -> ByteArray,
+        ): String {
+            val key = schema.fields[field].mapKey
+            if (key == null) columns.valueText(field, local, format, dictionaryText)?.let { return it }
+            val bytes = read(columns.starts[local])
+            if (key != null) return mapValue(columns, local, key, bytes, Int.MAX_VALUE - 2)
+            val length = columns.spanLength(field, local)
+            if (length == Columns.ABSENT_LENGTH) return ""
+            val relative = minOf(columns.ints[field]!![local], bytes.size)
+            if (length == Columns.TO_RECORD_END) return String(bytes, relative, Bytes.trimLineEnd(bytes, relative, bytes.size) - relative, Charsets.UTF_8)
+            val end = minOf(relative + length, bytes.size)
+            if (schema.fields[field].json) return String(Json.decode(bytes, relative, end), Charsets.UTF_8)
+            return String(bytes, relative, end - relative, Charsets.UTF_8)
+        }
+
+        /** The value of [key] in its map, as stored in [columns], cut to its first line and at most [maxBytes]. */
+        private fun mapValue(columns: Columns, local: Int, key: MapKey, bytes: ByteArray, maxBytes: Int): String {
+            val length = columns.spanLength(key.field, local)
+            if (length == Columns.ABSENT_LENGTH) return ""
+            val from = columns.ints[key.field]!![local]
+            val to = if (length == Columns.TO_RECORD_END) bytes.size else minOf(from + length, bytes.size)
+            if (from >= to) return ""
+            val map = columns.schema.fields[key.field].map!!
+            val entries = map.entries(bytes, from, to)
+            if (entries < 0) return ""
+            val value = map.value(bytes, MdcMap.from(entries), MdcMap.to(entries), key)
+            if (value < 0) return ""
+            if (!map.json) return Bytes.utf8Text(bytes, MdcMap.from(value), MdcMap.to(value), maxBytes)
+            val decoded = Json.decode(bytes, MdcMap.from(value), MdcMap.to(value))
+            return firstLine(decoded, 0, decoded.size, maxBytes)
         }
 
         /** The first line of `bytes[from, to)`, cut at [maxBytes]. */

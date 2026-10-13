@@ -1,5 +1,6 @@
 package io.github.rastislavpapp.logxy.core.merge
 
+import io.github.rastislavpapp.logxy.core.archive.ArchiveOrigin
 import io.github.rastislavpapp.logxy.core.filter.RecordSnapshot
 import io.github.rastislavpapp.logxy.core.index.ByteChunkList
 import io.github.rastislavpapp.logxy.core.index.IntChunkList
@@ -11,7 +12,6 @@ import io.github.rastislavpapp.logxy.core.log.Role
 import io.github.rastislavpapp.logxy.core.log.Schema
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import io.github.rastislavpapp.logxy.core.archive.ZipSpool
 import java.nio.file.Path
 
 /**
@@ -29,7 +29,8 @@ class MergedLog private constructor(
     val names: List<String>,
 ) : Records {
 
-    private val merged = MergedSchema(parts.map { it.schema })
+    private var partSchemas = parts.map { it.schema }
+    private var merged = MergedSchema(partSchemas)
     private val timestampFields = IntArray(parts.size) { parts[it].schema.indexOf(Role.TIMESTAMP) }
 
     // Per merged record: its part and its record there. Per part: where each of its records is.
@@ -78,7 +79,7 @@ class MergedLog private constructor(
 
     override fun level(record: Int): Level? = parts[part(record)].level(record(record))
 
-    override fun timestamp(record: Int): Long? = parts[part(record)].timestamp(record(record))
+    override fun timestampNanos(record: Int): Long = parts[part(record)].timestampNanos(record(record))
 
     override fun rowValues(record: Int, maxBytes: Int): Array<String> {
         val part = part(record)
@@ -90,6 +91,35 @@ class MergedLog private constructor(
 
     override fun recordText(record: Int, maxBytes: Int): String = parts[part(record)].recordText(record(record), maxBytes)
 
+    override fun fieldText(record: Int, field: Int): String {
+        val part = part(record)
+        if (field == MergedSchema.SOURCE) return names[part]
+        val partField = merged.partField(part, field)
+        return if (partField < 0) "" else parts[part].fieldText(record(record), partField)
+    }
+
+    override fun sourceText(record: Int): String = parts[part(record)].sourceText(record(record))
+
+    /**
+     * Reads [field] of the [count] merged records in [records] (null: the first [count]) by their index there,
+     * on any thread. Call on the owner thread, which resolves where each record is.
+     */
+    internal fun fieldReader(field: Int, records: IntArray?, count: Int): (Int) -> String {
+        val recordParts = ByteArray(count) { partOf[records?.get(it) ?: it] }
+        val partRecords = IntArray(count) { recordOf[records?.get(it) ?: it] }
+        val snapshots = parts.map { it.filterSnapshot() }
+        val partFields = IntArray(parts.size) { merged.partField(it, field) }
+        val names = names
+        return { i ->
+            val part = recordParts[i].toInt() and 0xFF
+            when {
+                field == MergedSchema.SOURCE -> names[part]
+                partFields[part] < 0 -> ""
+                else -> snapshots[part].fieldText(partRecords[i], partFields[part])
+            }
+        }
+    }
+
     /**
      * Merges the records the parts got since the last merge and adds them at the end. Returns false if
      * a part now has fewer records than were merged (its last record was parsed differently); then the
@@ -98,6 +128,11 @@ class MergedLog private constructor(
      */
     suspend fun appendNew(): Boolean {
         if (parts.indices.any { parts[it].recordCount < mergedCount(it) }) return false
+        // A part shows a field now that its appended records are the first to have; fields keep their places.
+        if (parts.indices.any { parts[it].schema !== partSchemas[it] }) {
+            partSchemas = parts.map { it.schema }
+            merged = MergedSchema(partSchemas)
+        }
         val snapshots = parts.map { it.filterSnapshot() }
         add(withContext(Dispatchers.Default) { order(snapshots) })
         return true
@@ -171,12 +206,16 @@ class MergedLog private constructor(
         /**
          * File names, prefixed with as many parent folders as needed to make them unique. A file extracted
          * from a zip (see [origin]) is named by the zip and the file, e.g. `logs.zip/app.log`, with folders
-         * inside the zip and then outside it added as needed.
+         * inside the zip and then outside it added as needed. A decompressed file is named like its .gz or .zst.
          */
-        fun sourceNames(paths: List<Path>, origin: (Path) -> ZipSpool.Origin? = { null }): List<String> {
+        fun sourceNames(paths: List<Path>, origin: (Path) -> ArchiveOrigin? = { null }): List<String> {
             val names = paths.map { path ->
-                val from = origin(path) ?: return@map Name(emptyList(), path.map { it.toString() })
-                Name(from.zip.map { it.toString() }, from.entry.split('/'))
+                val from = origin(path)
+                when {
+                    from == null -> Name(emptyList(), path.map { it.toString() })
+                    from.entry.isEmpty() -> Name(emptyList(), from.container.map { it.toString() })
+                    else -> Name(from.container.map { it.toString() }, from.entry.split('/'))
+                }
             }
             var depth = 1
             while (true) {

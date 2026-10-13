@@ -1,5 +1,6 @@
 package io.github.rastislavpapp.logxy.app
 
+import io.github.rastislavpapp.logxy.core.config.PropertiesFiles
 import io.github.rastislavpapp.logxy.core.config.Settings
 import org.slf4j.LoggerFactory
 import java.awt.Frame
@@ -12,8 +13,6 @@ import java.awt.event.ComponentAdapter
 import java.awt.event.ComponentEvent
 import java.awt.event.WindowAdapter
 import java.awt.event.WindowEvent
-import java.nio.file.Files
-import java.util.Properties
 import javax.swing.SwingUtilities
 
 /** Remembers windows' position, size, monitor and (for frames) maximized state between runs, each under its own key. */
@@ -63,13 +62,9 @@ object WindowState {
         }
     }
 
-    private fun load(): Properties = Properties().apply {
-        if (Files.exists(path)) Files.newBufferedReader(path).use { load(it) }
-    }
-
     private fun restore(window: Window, key: String) {
         try {
-            val properties = load()
+            val properties = PropertiesFiles.load(path)
             // The main window's entries had no prefix before other windows were remembered too.
             fun value(name: String) = properties.getProperty("$key.$name") ?: if (key == MAIN) properties.getProperty(name) else null
             val x = value("x") ?: return
@@ -121,7 +116,7 @@ object WindowState {
 
     private fun save(window: Window, key: String, normalBounds: Rectangle) {
         try {
-            val properties = load()
+            val properties = PropertiesFiles.load(path)
             listOf("x", "y", "width", "height", "maximized", "screen").forEach { properties.remove(it) }
             properties["$key.x"] = normalBounds.x.toString()
             properties["$key.y"] = normalBounds.y.toString()
@@ -129,8 +124,7 @@ object WindowState {
             properties["$key.height"] = normalBounds.height.toString()
             properties["$key.screen"] = window.graphicsConfiguration.device.iDstring
             if (window is Frame) properties["$key.maximized"] = isMaximized(window).toString()
-            Files.createDirectories(path.parent)
-            Files.newBufferedWriter(path).use { properties.store(it, "logxy window state") }
+            PropertiesFiles.store(path, properties, "logxy window state")
         } catch (e: Exception) {
             log.warn("Cannot save the window state to {}", path, e)
         }

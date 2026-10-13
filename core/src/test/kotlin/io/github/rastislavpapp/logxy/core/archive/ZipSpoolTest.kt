@@ -45,6 +45,10 @@ class ZipSpoolTest {
             "sub/" to ByteArray(0),
             "sub/c.log" to "three\n".toByteArray(),
             "old.zip" to inner,
+            "broken.zip" to inner.copyOf(inner.size / 2),
+            "lib/app.jar" to zipBytes("App.class" to byteArrayOf(-54, -2, -70, -66, 0, 0)),
+            "image.png" to byteArrayOf(-119, 80, 78, 71, 0, 0),
+            "empty.log" to ByteArray(0),
             "__MACOSX/._a.log" to ByteArray(3),
             "sub/.DS_Store" to ByteArray(3),
             "../escape.log" to "no\n".toByteArray(),
@@ -53,6 +57,11 @@ class ZipSpoolTest {
         val files = runBlocking { spool.extract(zip) }
         assertEquals(listOf("logs.zip/a.log", "logs.zip/sub/c.log", "logs.zip/old.zip/b.log"), spool.names(files))
         assertEquals("inner\n", Files.readString(files[2]))
+        assertEquals(
+            listOf("broken.zip", "lib/app.jar/App.class", "image.png", "empty.log"),
+            spool.leftOutOf(zip).map { it.entry },
+        )
+        assertEquals(listOf("not text", "not text", "empty"), spool.leftOutOf(zip).drop(1).map { it.reason })
         assertFalse(Files.exists(dir.resolve("spool").resolveSibling("escape.log")))
         assertEquals(ZipSpool.Origin(zip.toAbsolutePath(), "old.zip/b.log"), spool.originOf(files[2]))
         assertNull(spool.originOf(zip))

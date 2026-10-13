@@ -1,13 +1,17 @@
 package io.github.rastislavpapp.logxy.core.query
 
+import io.github.rastislavpapp.logxy.core.Bytes
 import io.github.rastislavpapp.logxy.core.filter.Filter
 import io.github.rastislavpapp.logxy.core.filter.LevelCondition
+import io.github.rastislavpapp.logxy.core.filter.NumberCondition
+import io.github.rastislavpapp.logxy.core.filter.PatternCondition
 import io.github.rastislavpapp.logxy.core.filter.PresenceCondition
 import io.github.rastislavpapp.logxy.core.filter.TextCondition
 import io.github.rastislavpapp.logxy.core.filter.TextOp
 import io.github.rastislavpapp.logxy.core.filter.TimeCondition
 import io.github.rastislavpapp.logxy.core.log.ColumnType
 import io.github.rastislavpapp.logxy.core.log.Level
+import io.github.rastislavpapp.logxy.core.log.Role
 import io.github.rastislavpapp.logxy.core.log.Schema
 import java.time.DateTimeException
 import java.time.Instant
@@ -41,13 +45,15 @@ class QueryCompiler(private val schema: Schema, private val zone: ZoneId = ZoneI
 
     private fun rule(rule: Query.Rule): Filter {
         val field = schema.fields.firstOrNull { it.name.equals(rule.field, ignoreCase = true) }
-            ?: throw QueryException("Unknown field “${rule.field}”; this log has ${schema.fields.joinToString { it.name }}")
+        // A field of the log named so wins over the template.
+        if (field == null && rule.field.equals(Query.PATTERN_FIELD, ignoreCase = true)) return pattern(rule)
+        field ?: throw QueryException("Unknown field “${rule.field}”; this log has ${schema.fields.joinToString { it.name }}")
         val name = field.name
         if (rule.op.comparison) {
             return when (field.type) {
                 ColumnType.LEVEL -> levelComparison(name, rule)
                 ColumnType.TIMESTAMP -> timeComparison(name, rule)
-                else -> throw QueryException("${rule.op.symbol} works on levels and timestamps, not on $name")
+                else -> numberComparison(name, rule)
             }
         }
         if (field.type == ColumnType.LEVEL && rule.bare && (rule.op == QueryOp.EQUALS || rule.op == QueryOp.NOT_EQUALS)) {
@@ -75,6 +81,18 @@ class QueryCompiler(private val schema: Schema, private val zone: ZoneId = ZoneI
         return TextCondition(name, op, rule.value, ignoreCase)
     }
 
+    /** Templates match exactly; `==` and `===` alike, as templates have no wildcards. */
+    private fun pattern(rule: Query.Rule): Filter {
+        val message = schema.fields.firstOrNull { it.role == Role.MESSAGE }
+            ?: throw QueryException("${Query.PATTERN_FIELD} needs a message, which this log does not have")
+        val condition = PatternCondition(message.name, setOf(rule.value))
+        return when (rule.op) {
+            QueryOp.EQUALS, QueryOp.EQUALS_CASE -> condition
+            QueryOp.NOT_EQUALS, QueryOp.NOT_EQUALS_CASE -> Filter.Not(condition)
+            else -> throw QueryException("${Query.PATTERN_FIELD} works with == and !=, not ${rule.op.symbol}")
+        }
+    }
+
     private fun level(text: String): Level = Level.entries.firstOrNull { it.name.equals(text, ignoreCase = true) }
         ?: throw QueryException("Unknown level “$text”; use one of ${Level.entries.joinToString()}")
 
@@ -89,6 +107,17 @@ class QueryCompiler(private val schema: Schema, private val zone: ZoneId = ZoneI
             }
         }
         return LevelCondition(field, levels.toSet())
+    }
+
+    private fun numberComparison(field: String, rule: Query.Rule): Filter {
+        val number = Bytes.parseNumber(rule.value)
+        if (number.isNaN()) throw QueryException("${rule.op.symbol} on $field compares numbers; “${rule.value}” is no number")
+        return when (rule.op) {
+            QueryOp.AT_LEAST -> NumberCondition(field, from = number)
+            QueryOp.ABOVE -> NumberCondition(field, from = Math.nextUp(number))
+            QueryOp.AT_MOST -> NumberCondition(field, to = number)
+            else -> NumberCondition(field, to = Math.nextDown(number))
+        }
     }
 
     private fun timeComparison(field: String, rule: Query.Rule): Filter {

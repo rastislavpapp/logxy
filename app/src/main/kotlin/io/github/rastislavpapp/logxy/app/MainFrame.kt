@@ -3,6 +3,8 @@ package io.github.rastislavpapp.logxy.app
 import com.formdev.flatlaf.FlatClientProperties
 import com.formdev.flatlaf.extras.FlatSVGUtils
 import io.github.rastislavpapp.logxy.core.LogFolders
+import io.github.rastislavpapp.logxy.core.archive.ArchiveOrigin
+import io.github.rastislavpapp.logxy.core.archive.CompressedSpool
 import io.github.rastislavpapp.logxy.core.archive.ZipSpool
 import io.github.rastislavpapp.logxy.core.config.OpenMode
 import io.github.rastislavpapp.logxy.core.config.SavedFilter
@@ -19,16 +21,18 @@ import java.awt.Dimension
 import java.awt.Graphics
 import java.awt.Graphics2D
 import java.awt.RenderingHints
-import java.awt.event.ActionEvent
+import java.awt.Toolkit
+import java.awt.datatransfer.StringSelection
 import java.awt.event.InputEvent
 import java.awt.event.KeyEvent
+import java.awt.event.MouseAdapter
+import java.awt.event.MouseEvent
 import java.io.File
 import java.nio.file.Files
 import java.nio.file.Path
 import java.text.NumberFormat
 import java.util.Base64
 import java.util.function.IntConsumer
-import javax.swing.AbstractAction
 import javax.swing.Box
 import javax.swing.ButtonGroup
 import javax.swing.Icon
@@ -44,6 +48,7 @@ import javax.swing.JMenuBar
 import javax.swing.JMenuItem
 import javax.swing.JOptionPane
 import javax.swing.JPanel
+import javax.swing.JPopupMenu
 import javax.swing.JRadioButtonMenuItem
 import javax.swing.JSeparator
 import javax.swing.JTabbedPane
@@ -67,7 +72,8 @@ private const val LEVEL_ARG = "--level"
 private const val QUERY_ARG = "--query"
 private const val LIVE_COLOR = "Actions.Green"
 private const val FOLLOW_COLOR = "Component.accentColor"
-private const val UNZIP_DIALOG_DELAY_MILLIS = 300
+private const val EXTRACT_DIALOG_DELAY_MILLIS = 300
+private const val MAX_LEFT_OUT_SHOWN = 15
 
 class MainFrame : JFrame("logxy") {
 
@@ -84,7 +90,13 @@ class MainFrame : JFrame("logxy") {
     private val spoolCreation = lazy { ZipSpool.forThisProcess(Settings.cacheDirectory()) }
     private val spool by spoolCreation
 
-    private fun originOf(path: Path): ZipSpool.Origin? = if (spoolCreation.isInitialized()) spool.originOf(path) else null
+    /** Where opened .gz and .zst files are decompressed to; made when the first one is opened. */
+    private val compressedSpoolCreation = lazy { CompressedSpool.forThisProcess(Settings.cacheDirectory()) }
+    private val compressedSpool by compressedSpoolCreation
+
+    private fun originOf(path: Path): ArchiveOrigin? =
+        (if (spoolCreation.isInitialized()) spool.originOf(path) else null)
+            ?: if (compressedSpoolCreation.isInitialized()) compressedSpool.originOf(path) else null
 
     init {
         defaultCloseOperation = WindowConstants.EXIT_ON_CLOSE
@@ -110,13 +122,11 @@ class MainFrame : JFrame("logxy") {
             fileSlot.show(selectedTab()?.fileControls)
             updateStatus()
         }
-        rootPane.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(KeyStroke.getKeyStroke(KeyEvent.VK_F, shortcut), "logxyEditFilter")
-        rootPane.actionMap.put("logxyEditFilter", object : AbstractAction() {
-            override fun actionPerformed(e: ActionEvent) {
-                selectedTab()?.focusFilter()
-            }
+        tabs.addMouseListener(object : MouseAdapter() {
+            // Pressed on Linux and macOS, released on Windows.
+            override fun mousePressed(e: MouseEvent) = maybeShowTabMenu(e)
+            override fun mouseReleased(e: MouseEvent) = maybeShowTabMenu(e)
         })
-
         center.add(DropZone(), CARD_PLACEHOLDER)
         center.add(tabs, CARD_TABS)
         statusBar.putClientProperty("FlatLaf.style", "border: 1,0,0,0,\$Component.borderColor")
@@ -154,6 +164,14 @@ class MainFrame : JFrame("logxy") {
             })
             addSeparator()
             add(menuItem("Exit", Icons.exit, null) { dispose() })
+        })
+        add(JMenu("Edit").apply {
+            mnemonic = KeyEvent.VK_E
+            add(menuItem("Find", Icons.get("general/search"), KeyEvent.VK_F, shortcut) { selectedTab()?.showFind() })
+            add(menuItem("Find Next", null, KeyEvent.VK_F3) { selectedTab()?.findNext(forward = true) })
+            add(menuItem("Find Previous", null, KeyEvent.VK_F3, InputEvent.SHIFT_DOWN_MASK) { selectedTab()?.findNext(forward = false) })
+            addSeparator()
+            add(menuItem("Edit Filter", Icons.filter, KeyEvent.VK_F, shortcut or InputEvent.SHIFT_DOWN_MASK) { selectedTab()?.focusFilter() })
         })
         add(JMenu("View").apply {
             mnemonic = KeyEvent.VK_V
@@ -216,9 +234,10 @@ class MainFrame : JFrame("logxy") {
     private class Found(val path: Path, val inSubfolder: Boolean = false)
 
     /**
-     * Opens [paths], folders as the log files in them and zip files as the files in them: a single file
-     * into a tab if none is open; otherwise the user chooses between merging them, with the current tab
-     * or into a new one, and tabs of their own.
+     * Opens [paths], folders as the log files in them, zip files as the files in them, and compressed
+     * files (.gz, .zst) as their decompressed content: a single file into a tab if none is open;
+     * otherwise the user chooses between merging them, with the current tab or into a new one,
+     * and tabs of their own.
      */
     fun openFiles(paths: List<Path>) {
         val existing = paths.map { it.toAbsolutePath().normalize() }.distinct().filter(::checkOpenable)
@@ -227,15 +246,33 @@ class MainFrame : JFrame("logxy") {
             if (!Files.isDirectory(path)) return@flatMap listOf(Found(path))
             LogFolders.files(path).map { Found(it, it.parent != path) }.also { if (it.isEmpty()) empty.add(path) }
         }
-        val zips = found.map { it.path }.filter(ZipSpool::isZip)
-        if (zips.isEmpty()) {
+        val archives = found.map { it.path }.filter(::isArchive)
+        if (archives.isEmpty()) {
             tellNothingIn(empty)
             return openFound(found)
         }
-        unzipThen(zips) { files ->
-            tellNothingIn(empty + zips.filter { files[it].isNullOrEmpty() })
+        extractThen(archives) { files ->
+            tellLeftOut(archives)
+            tellNothingIn(empty + archives.filter { files[it].isNullOrEmpty() })
             openFound(found.flatMap { item -> files[item.path]?.map { Found(it, item.inSubfolder) } ?: listOf(item) })
         }
+    }
+
+    private fun isArchive(path: Path) = ZipSpool.isZip(path) || CompressedSpool.formatOf(path) != null
+
+    /** Tells the user which files of the zips among [archives] are not opened, and why. */
+    private fun tellLeftOut(archives: List<Path>) {
+        if (!spoolCreation.isInitialized()) return
+        val text = archives.mapNotNull { archive ->
+            val left = spool.leftOutOf(archive).ifEmpty { return@mapNotNull null }
+            val lines = left.take(MAX_LEFT_OUT_SHOWN).map { "    ${it.entry}: ${it.reason}" }
+            val more = if (left.size > MAX_LEFT_OUT_SHOWN) listOf("    …and ${left.size - MAX_LEFT_OUT_SHOWN} more") else emptyList()
+            (listOf("$archive") + lines + more).joinToString("\n")
+        }
+        if (text.isEmpty()) return
+        JOptionPane.showMessageDialog(
+            this, "These files are not opened:\n\n${text.joinToString("\n\n")}", "Files Left Out", JOptionPane.WARNING_MESSAGE,
+        )
     }
 
     private fun tellNothingIn(folders: List<Path>) {
@@ -256,6 +293,8 @@ class MainFrame : JFrame("logxy") {
         if (candidates.isEmpty()) return
         val all = candidates.map { it.path }
         val inSubfolders = candidates.filter { it.inSubfolder }.map { it.path }.toSet()
+        // With nothing open yet, a single file has only one way to open.
+        if (current == null && all.size == 1 && inSubfolders.isEmpty()) return openFile(all.single())
         val settings = AppSettings.current
         val answer = settings.openMode?.let { remembered ->
             val files = if (settings.includeSubfolders) all else all - inSubfolders
@@ -263,13 +302,7 @@ class MainFrame : JFrame("logxy") {
             val mode = rememberedMode(remembered, files.size, current?.paths?.size) ?: return@let null
             OpenAnswer(mode, files, files.map { null }, settings.includeSubfolders, remember = false)
         } ?: askHowToOpen(all, inSubfolders, current) ?: return
-        if (answer.remember) {
-            try {
-                AppSettings.update(AppSettings.current.copy(openMode = answer.mode, includeSubfolders = answer.includeSubfolders))
-            } catch (e: Exception) {
-                JOptionPane.showMessageDialog(this, "Cannot write ${AppSettings.location}:\n${e.message}", "Cannot Save", JOptionPane.ERROR_MESSAGE)
-            }
-        }
+        if (answer.remember) AppSettings.updateOrShowError(this, AppSettings.current.copy(openMode = answer.mode, includeSubfolders = answer.includeSubfolders))
         when (answer.mode) {
             OpenMode.MERGE_INTO_CURRENT -> mergeWithCurrent(current!!, answer.files, answer.formats, keepCurrent = false)
             OpenMode.MERGE_WITH_CURRENT_IN_NEW -> mergeWithCurrent(current!!, answer.files, answer.formats, keepCurrent = true)
@@ -305,7 +338,7 @@ class MainFrame : JFrame("logxy") {
         for (i in 0..<tabs.tabCount) {
             val tab = tabs.getComponentAt(i) as LogTab
             add(TAB_ARG)
-            // Extracted files by their zip, as the next app extracts them anew.
+            // Extracted files by their zip or compressed file, as the next app extracts them anew.
             tab.paths.forEach { add((originOf(it) ?: it).toString()) }
             tab.filter.minimumLevel?.let { add(LEVEL_ARG); add(it.name) }
             // Encoded, as Windows command lines do not reliably keep the quotes queries are full of.
@@ -338,11 +371,17 @@ class MainFrame : JFrame("logxy") {
             SELECT_ARG -> selected = value().toIntOrNull() ?: 0
             else -> groups.last().paths.add(arg)
         }
-        val zips = groups.flatMap { it.paths }.mapNotNull(ZipSpool::parseOrigin).map { it.zip }.distinct()
-        if (zips.isEmpty()) return openGroups(groups.map { it.paths.map(Path::of) to it.filter() }, selected)
-        unzipThen(zips) {
-            val paths = { group: Group -> group.paths.map { arg -> ZipSpool.parseOrigin(arg)?.let(spool::extractedFile) ?: Path.of(arg) } }
-            openGroups(groups.map { paths(it) to it.filter() }, selected)
+        val args = groups.flatMap { it.paths }
+        val zips = args.mapNotNull(ZipSpool::parseOrigin).map { it.zip }
+        // Decompressed files are saved as their .gz or .zst, and decompressed again.
+        val compressed = args.filter { ZipSpool.parseOrigin(it) == null }.map { Path.of(it).toAbsolutePath().normalize() }
+            .filter { CompressedSpool.formatOf(it) != null }
+        val archives = (zips + compressed).distinct()
+        if (archives.isEmpty()) return openGroups(groups.map { it.paths.map(Path::of) to it.filter() }, selected)
+        extractThen(archives) { files ->
+            fun path(arg: String) = ZipSpool.parseOrigin(arg)?.let(spool::extractedFile)
+                ?: Path.of(arg).let { files[it.toAbsolutePath().normalize()]?.singleOrNull() ?: it }
+            openGroups(groups.map { group -> group.paths.map(::path) to group.filter() }, selected)
         }
     }
 
@@ -357,37 +396,50 @@ class MainFrame : JFrame("logxy") {
     }
 
     /**
-     * Unzips [zips] while showing how far it got, then calls [then] with the files of each zip; nothing
-     * more if the user cancels or a zip cannot be read.
+     * Unzips the zips among [archives] and decompresses the .gz and .zst files while showing how far it got,
+     * then calls [then] with the files of each; nothing more if the user cancels or one cannot be read.
      */
-    private fun unzipThen(zips: List<Path>, then: (Map<Path, List<Path>>) -> Unit) {
+    private fun extractThen(archives: List<Path>, then: (Map<Path, List<Path>>) -> Unit) {
         lateinit var job: Job
-        var unzipped = false
-        val dialog = UnzipDialog(this) { job.cancel() }
+        var finished = false
+        val dialog = ExtractDialog(this) { job.cancel() }
         job = scope.launch {
             val files = LinkedHashMap<Path, List<Path>>()
+            var failure = ""
+            var error: Exception? = null
             try {
-                for ((i, zip) in zips.withIndex()) {
-                    dialog.text = "Unzipping ${zip.fileName}…"
-                    files[zip] = spool.extract(zip) { dialog.fraction = (i + it) / zips.size }
+                for ((i, archive) in archives.withIndex()) {
+                    val progress = { fraction: Double -> dialog.fraction = (i + fraction) / archives.size }
+                    val format = CompressedSpool.formatOf(archive)
+                    if (format == null) {
+                        failure = "Cannot unzip $archive"
+                        dialog.text = "Unzipping ${archive.fileName}…"
+                        files[archive] = spool.extract(archive, progress)
+                    } else {
+                        failure = "Cannot decompress $archive"
+                        dialog.text = "Decompressing ${archive.fileName}…"
+                        files[archive] = listOf(compressedSpool.decompress(archive, format, progress))
+                    }
                 }
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
+                error = e
+            } finally {
+                finished = true
                 dialog.dispose()
-                val zip = zips.getOrNull(files.size) ?: zips.last()
+            }
+            // Only once finished: the timer fires while the message is open and would show the progress dialog over it.
+            error?.let { e ->
                 JOptionPane.showMessageDialog(
-                    this@MainFrame, "Cannot unzip $zip:\n${e.message ?: e.javaClass.simpleName}", "Cannot Open File", JOptionPane.ERROR_MESSAGE,
+                    this@MainFrame, "$failure:\n${e.message ?: e.javaClass.simpleName}", "Cannot Open File", JOptionPane.ERROR_MESSAGE,
                 )
                 return@launch
-            } finally {
-                unzipped = true
-                dialog.dispose()
             }
             then(files)
         }
         // Quick ones finish before the dialog would only flash.
         // Not job.isActive: the job is still running while [then] asks how to open the files.
-        Timer(UNZIP_DIALOG_DELAY_MILLIS) { if (!unzipped) dialog.isVisible = true }.apply { isRepeats = false }.start()
+        Timer(EXTRACT_DIALOG_DELAY_MILLIS) { if (!finished) dialog.isVisible = true }.apply { isRepeats = false }.start()
     }
 
     /** Opens each of [paths] in a tab of its own. */
@@ -451,6 +503,39 @@ class MainFrame : JFrame("logxy") {
         tab.dispose()
         if (tabs.tabCount == 0) cards.show(center, CARD_PLACEHOLDER)
         updateStatus()
+    }
+
+    /** Closes the tabs at [indices]; from the last, so the others keep their indices. */
+    private fun closeTabs(indices: IntRange) = indices.reversed().forEach(::closeTab)
+
+    private fun maybeShowTabMenu(e: MouseEvent) {
+        if (!e.isPopupTrigger) return
+        val index = tabs.indexAtLocation(e.x, e.y)
+        if (index < 0) return
+        val tab = tabs.getComponentAt(index) as LogTab
+        val last = tabs.tabCount - 1
+        val popup = JPopupMenu()
+        popup.add(JMenuItem("Close", Icons.close).apply {
+            accelerator = KeyStroke.getKeyStroke(KeyEvent.VK_W, shortcut)
+            addActionListener { closeTab(index) }
+        })
+        popup.add(JMenuItem("Close Other Tabs").apply {
+            isEnabled = last > 0
+            addActionListener { closeTabs(index + 1..last); closeTabs(0..<index) }
+        })
+        popup.add(JMenuItem("Close Tabs to the Right").apply {
+            isEnabled = index < last
+            addActionListener { closeTabs(index + 1..last) }
+        })
+        popup.add(JMenuItem("Close All Tabs").apply {
+            addActionListener { closeTabs(0..last) }
+        })
+        popup.addSeparator()
+        popup.add(JMenuItem(if (tab.isMerged) "Copy Paths" else "Copy Path", Icons.copy).apply {
+            // Extracted files by their zip or compressed file, as the tab's tooltip names them.
+            addActionListener { Toolkit.getDefaultToolkit().systemClipboard.setContents(StringSelection(tab.description), null) }
+        })
+        popup.show(tabs, e.x, e.y)
     }
 
     private fun updateStatus() {

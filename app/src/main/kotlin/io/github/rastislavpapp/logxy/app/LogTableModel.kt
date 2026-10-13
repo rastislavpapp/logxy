@@ -2,9 +2,8 @@ package io.github.rastislavpapp.logxy.app
 
 import io.github.rastislavpapp.logxy.core.log.Field
 import io.github.rastislavpapp.logxy.core.log.Level
-import io.github.rastislavpapp.logxy.core.log.Records
 import io.github.rastislavpapp.logxy.core.log.Role
-import io.github.rastislavpapp.logxy.core.session.FilteredRows
+import io.github.rastislavpapp.logxy.core.session.ShownLog
 import javax.swing.table.AbstractTableModel
 
 /** Longest value prefix shown in the table; the rest is cut off. */
@@ -14,18 +13,25 @@ private const val TAB_WIDTH = 4
 private const val CACHE_SIZE = 1024
 
 /**
- * Rows of [Records], all records or only those a filter let through. Raw logs get a line number
- * column; for parsed logs the message column is moved last, so it takes the remaining width. Fields
- * named in [hiddenColumns] are left out.
+ * The rows of a [ShownLog]. Raw logs get a line number column; for parsed logs the message column is
+ * moved last, so it takes the remaining width. Fields named in [hiddenColumns] are left out.
  */
-class LogTableModel(val records: Records) : AbstractTableModel(), RowWindow {
+class LogTableModel(val shown: ShownLog) : AbstractTableModel(), RowWindow {
 
-    val showsLineNumbers = records.isRaw
+    val showsLineNumbers = shown.isRaw
 
     /** Fields that can be shown as columns, in column order. */
-    val columnChoices: List<Field> = records.schema.fields
-        .filter { !it.hidden }
-        .sortedBy { it.role == Role.MESSAGE }
+    var columnChoices: List<Field> = choices()
+        private set
+
+    private fun choices() = shown.schema.fields.filter { !it.hidden }.sortedBy { it.role == Role.MESSAGE }
+
+    /** Shows the fields the records' schema shows now, e.g. one that appended records are the first to have. */
+    fun schemaChanged() {
+        columnChoices = choices()
+        columnFields = fieldsShown()
+        fireTableStructureChanged()
+    }
 
     var hiddenColumns: Set<String> = emptySet()
         set(value) {
@@ -38,18 +44,13 @@ class LogTableModel(val records: Records) : AbstractTableModel(), RowWindow {
     /** Field index of each column after the line number column. */
     private var columnFields: List<Int> = fieldsShown()
 
-    private fun fieldsShown() = columnChoices.filter { it.name !in hiddenColumns }.map { records.schema.fields.indexOf(it) }
+    private fun fieldsShown() = columnChoices.filter { it.name !in hiddenColumns }.map { shown.schema.fields.indexOf(it) }
 
     // Direct-mapped cache: repaints ask for the same few visible rows over and over.
     private val cachedRows = IntArray(CACHE_SIZE) { -1 }
     private val cachedValues = arrayOfNulls<Array<String>>(CACHE_SIZE)
 
-    /** Records shown, in order; null shows all. Owned by the session, which changes it and then tells the model. */
-    private var filtered: FilteredRows? = null
-
-    val isFiltered get() = filtered != null
-
-    override val totalRowCount get() = filtered?.size ?: records.recordCount
+    override val totalRowCount get() = shown.size
 
     override var windowStart = 0
         set(value) {
@@ -59,9 +60,8 @@ class LogTableModel(val records: Records) : AbstractTableModel(), RowWindow {
 
     override fun getRowCount() = minOf(totalRowCount, WINDOW_ROWS)
 
-    /** Shows only [rows], or all records if null. */
-    fun showRows(rows: FilteredRows?) {
-        filtered = rows
+    /** Call after all shown rows changed, e.g. to a filter's result. */
+    fun rowsReplaced() {
         windowStart = 0
         fireTableDataChanged()
     }
@@ -70,17 +70,14 @@ class LogTableModel(val records: Records) : AbstractTableModel(), RowWindow {
     fun recordAt(row: Int): Int = recordAtIndex(windowStart + row)
 
     /** The record at [index] of all shown rows. */
-    fun recordAtIndex(index: Int): Int = filtered?.get(index) ?: index
+    fun recordAtIndex(index: Int): Int = shown.recordAt(index)
 
     /** Position of [record] among the shown rows, or of the first shown record after it; -1 if none. */
-    fun indexOfRecord(record: Int): Int {
-        val rows = filtered ?: return if (record < records.recordCount) record else -1
-        return rows.indexOf(record)
-    }
+    fun indexOfRecord(record: Int): Int = shown.rowOf(record)
 
-    /** Call after the filtered rows changed from position [firstChanged] on; there were [oldSize] before. */
+    /** Call after the shown rows changed from position [firstChanged] on; there were [oldSize] before. */
     fun rowsChangedFrom(firstChanged: Int, oldSize: Int) {
-        val newSize = filtered?.size ?: return
+        val newSize = totalRowCount
         // Only the part of the window from the first change on is affected.
         val oldRows = (oldSize - windowStart).coerceIn(0, WINDOW_ROWS)
         val newRows = (newSize - windowStart).coerceIn(0, WINDOW_ROWS)
@@ -91,10 +88,21 @@ class LogTableModel(val records: Records) : AbstractTableModel(), RowWindow {
         if (first <= last) fireTableRowsUpdated(first, last)
     }
 
+    /** Call after the records at [changed] got more text, e.g. a stack trace written after them. */
+    fun recordsGrew(changed: IntArray) {
+        for (record in changed) {
+            val slot = record and (CACHE_SIZE - 1)
+            if (cachedRows[slot] == record) cachedRows[slot] = -1
+            val index = shown.rowOf(record)
+            val row = index - windowStart
+            if (index >= 0 && shown.recordAt(index) == record && row in 0..<rowCount) fireTableRowsUpdated(row, row)
+        }
+    }
+
     override fun getColumnCount() = columnFields.size + if (showsLineNumbers) 1 else 0
 
     /** The schema field shown in [column], or null for the line number column. */
-    fun fieldAt(column: Int): Field? = fieldIndex(column)?.let { records.schema.fields[it] }
+    fun fieldAt(column: Int): Field? = fieldIndex(column)?.let { shown.schema.fields[it] }
 
     private fun fieldIndex(column: Int): Int? = if (showsLineNumbers) {
         if (column == 0) null else columnFields[column - 1]
@@ -113,35 +121,16 @@ class LogTableModel(val records: Records) : AbstractTableModel(), RowWindow {
     }
 
     /** Canonical level of the record shown in [row], if the format has levels. */
-    fun level(row: Int): Level? = records.level(recordAt(row))
+    fun level(row: Int): Level? = shown.level(recordAt(row))
 
     private fun values(record: Int): Array<String> {
         val slot = record and (CACHE_SIZE - 1)
         if (cachedRows[slot] == record) return cachedValues[slot]!!
-        val values = records.rowValues(record, MAX_DISPLAY_BYTES)
+        val values = shown.rowValues(record, MAX_DISPLAY_BYTES)
         for (i in values.indices) values[i] = expandTabs(values[i])
         cachedRows[slot] = record
         cachedValues[slot] = values
         return values
-    }
-
-    /**
-     * Call after records were appended; there were [oldRecordCount] before, and the records at [changed]
-     * may have more text now. With a filter, call [rowsChangedFrom] once the filtered rows for the new
-     * records are there.
-     */
-    fun recordsAppended(oldRecordCount: Int, changed: IntArray) {
-        for (record in changed) {
-            val slot = record and (CACHE_SIZE - 1)
-            if (cachedRows[slot] == record) cachedRows[slot] = -1
-        }
-        if (filtered != null) return
-        val oldRows = minOf(oldRecordCount, WINDOW_ROWS)
-        if (rowCount > oldRows) fireTableRowsInserted(oldRows, rowCount - 1)
-        for (record in changed) {
-            val row = record - windowStart
-            if (row in 0..<rowCount) fireTableRowsUpdated(row, row)
-        }
     }
 
     // Labels do not render tabs, so expand them to tab stops.

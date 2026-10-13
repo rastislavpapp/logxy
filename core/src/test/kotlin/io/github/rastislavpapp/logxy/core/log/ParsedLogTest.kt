@@ -69,6 +69,30 @@ class ParsedLogTest {
     }
 
     @Test
+    fun `source text is the record as written, line ends included`() {
+        val first = "2026-10-01 08:00:00.001 [main] ERROR a.B - Failed\r\njava.lang.IllegalStateException: boom\r\n\tat a.B.run(B.java:1)\r\n"
+        val last = "2026-10-01 08:00:00.002 [main] INFO  a.B - {\"json\": 1}"
+        parse(first + last).use { log ->
+            assertEquals(first, log.sourceText(0))
+            assertEquals(last, log.sourceText(1))
+        }
+    }
+
+    @Test
+    fun `field text is the whole value`() {
+        val long = "x".repeat(5000)
+        parse("2026-10-01 08:00:00.001 [main] ERROR a.B - Failed $long\r\njava.lang.IllegalStateException: boom\n\tat a.B.run(B.java:1)\n").use { log ->
+            val fields = log.schema.fields.map { it.name }
+            assertEquals("main", log.fieldText(0, fields.indexOf("Thread")))
+            assertEquals("ERROR", log.fieldText(0, fields.indexOf("Level")))
+            assertEquals(
+                "Failed $long\r\njava.lang.IllegalStateException: boom\n\tat a.B.run(B.java:1)",
+                log.fieldText(0, fields.indexOf("Message")),
+            )
+        }
+    }
+
+    @Test
     fun `long values are cut`() {
         parse("2026-10-01 08:00:00.001 [main] INFO  a.B - ${"x".repeat(50)}\n").use { log ->
             assertEquals("x".repeat(10) + "…", log.rowValues(0, 10)[4])
@@ -250,6 +274,38 @@ class ParsedLogTest {
         parse(manyKeys, mdc).use { log ->
             assertEquals(6, log.schema.fields.size)
             assertFalse(log.schema.fields.any { it.hidden })
+        }
+    }
+
+    private fun ParsedLog.fieldTexts() = List(recordCount) { record -> List(schema.fields.size) { fieldText(record, it) } }
+
+    @Test
+    fun `a snapshot reads field texts like the log`() {
+        val content = buildString {
+            repeat(100) { i ->
+                append("2026-10-01 08:00:%02d.%03d [t-${i % 7}] ${if (i % 5 == 0) "ERROR" else "INFO "} log.L${i % 3} {tenant=t$i} - message $i\n".format(i % 60, i))
+                if (i % 5 == 0) append("java.lang.RuntimeException: $i\r\n\tat x.Y.z(Y.java:$i)\n")
+            }
+        }
+        for (format in listOf(format, mdc)) {
+            parse(content, format, IndexOptions(parallelism = 4, minRangeSize = 1)).use { log ->
+                val snapshot = log.filterSnapshot()
+                assertEquals(log.fieldTexts(), List(log.recordCount) { record -> List(log.schema.fields.size) { snapshot.fieldText(record, it) } })
+            }
+        }
+    }
+
+    @Test
+    fun `a snapshot keeps reading its records while more are appended`() {
+        val file = Files.writeString(dir.resolve("live.log"), "2026-10-01 08:00:00.001 [main] INFO  a.B - one\n2026-10-01 08:00:00.002 [main] WARN  a.C - two\n")
+        runBlocking { ParsedLog.build(file, format) }.use { log ->
+            val snapshot = log.filterSnapshot()
+            Files.writeString(file, "java.lang.Exception: x\n2026-10-01 08:00:00.003 [main] INFO  a.D - three\n", StandardOpenOption.APPEND)
+            log.append(log.readAppended(Files.size(file)))
+            assertEquals(3, log.recordCount)
+            val message = log.schema.fields.indexOfFirst { it.name == "Message" }
+            assertEquals(listOf("one", "two"), List(snapshot.count) { snapshot.fieldText(it, message) })
+            assertEquals("a.C", snapshot.fieldText(1, log.schema.fields.indexOfFirst { it.name == "Logger" }))
         }
     }
 }

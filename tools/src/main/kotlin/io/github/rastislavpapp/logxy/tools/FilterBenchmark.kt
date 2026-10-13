@@ -3,6 +3,7 @@ package io.github.rastislavpapp.logxy.tools
 import io.github.rastislavpapp.logxy.core.filter.Filter
 import io.github.rastislavpapp.logxy.core.filter.FilterEngine
 import io.github.rastislavpapp.logxy.core.filter.LevelCondition
+import io.github.rastislavpapp.logxy.core.filter.RecordTextCondition
 import io.github.rastislavpapp.logxy.core.filter.TextCondition
 import io.github.rastislavpapp.logxy.core.filter.TextOp
 import io.github.rastislavpapp.logxy.core.formatByteSize
@@ -15,7 +16,7 @@ import java.nio.file.Path
 
 /** Parses [file] with the detected format and times typical filters, first and cached runs. */
 fun benchmarkFiltering(file: Path) {
-    val compiled = LogFormat.detect(file).compile() ?: error("No built-in format matches $file")
+    val compiled = LogFormat.detect(file).compile() ?: error("No format detected for $file")
     val started = System.nanoTime()
     val log = runBlocking { ParsedLog.build(file, compiled) }
     println("File: $file (${formatByteSize(Files.size(file))}), %,d records, parsed in %.2f s\n"
@@ -34,6 +35,7 @@ fun benchmarkFiltering(file: Path) {
         "not (level >= WARN) or thread = main" to
             Filter.Or(listOf(Filter.Not(warn), TextCondition("Thread", TextOp.EQUALS, "main"))),
         "message matches regex 'order \\d{6}:'" to TextCondition("Message", TextOp.MATCHES, "order \\d{6}:"),
+        "search 'timeout' in whole records" to RecordTextCondition(TextOp.EQUALS, "*timeout*", ignoreCase = true),
     )
     log.use {
         val engine = FilterEngine(log)

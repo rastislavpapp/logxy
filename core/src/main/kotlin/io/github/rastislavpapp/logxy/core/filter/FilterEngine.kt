@@ -10,6 +10,8 @@ import io.github.rastislavpapp.logxy.core.log.MapKey
 import io.github.rastislavpapp.logxy.core.parse.Json
 import io.github.rastislavpapp.logxy.core.parse.MapSyntax
 import io.github.rastislavpapp.logxy.core.parse.MdcMap
+import io.github.rastislavpapp.logxy.core.pattern.PatternCounts
+import io.github.rastislavpapp.logxy.core.pattern.PatternIndex
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -40,6 +42,16 @@ interface RecordFilter {
      * records: records that were still growing then (the last one of a log) and everything after.
      */
     fun changedFrom(coveredRecords: Int): Int
+
+    /**
+     * Counts [rowCount] rows (`rows[i]`, or all records from the first if [rows] is null) by the template of
+     * their message; see [io.github.rastislavpapp.logxy.core.pattern.Templates]. Call on the thread that owns
+     * the records; cancelling the calling coroutine stops it.
+     */
+    suspend fun countPatterns(rows: IntArray?, rowCount: Int): PatternCounts
+
+    /** How far [countPatterns] got with finding the templates of records it had not seen, from 0 to 1. */
+    val patternProgress: Double
 }
 
 /** A filter ready to run; [run] may be called on any thread. */
@@ -68,6 +80,10 @@ class FilterEngine(private val log: LogData, private val maxCacheBytes: Long = D
     private val cache: MutableMap<Condition, Entry> = Collections.synchronizedMap(LinkedHashMap(16, 0.75f, true))
 
     internal val cachedConditions get() = cache.size
+
+    /** Message templates of the log's records, for [PatternCondition]s and for counting them. */
+    internal val patterns = PatternIndex()
+
     @Volatile
     private var cachedLevels: LevelMapping? = null
 
@@ -88,6 +104,11 @@ class FilterEngine(private val log: LogData, private val maxCacheBytes: Long = D
     // Only the last record of a log grows.
     override fun changedFrom(coveredRecords: Int) = maxOf(0, coveredRecords - 1)
 
+    override suspend fun countPatterns(rows: IntArray?, rowCount: Int): PatternCounts =
+        PatternCounts.count(listOf(patterns), listOf(log.filterSnapshot()), rows, rowCount, null)
+
+    override val patternProgress get() = patterns.progress
+
     /** Caches [entry], dropping the least recently used others while the cache is over [maxCacheBytes]. */
     private fun store(condition: Condition, entry: Entry) = synchronized(cache) {
         cache[condition] = entry
@@ -103,7 +124,7 @@ class FilterEngine(private val log: LogData, private val maxCacheBytes: Long = D
         is Filter.And -> AndNode(filter.parts.map { compile(it, snapshot) }.sortedBy { it.cost })
         is Filter.Or -> OrNode(filter.parts.map { compile(it, snapshot) }.sortedBy { it.cost })
         is Filter.Not -> NotNode(compile(filter.part, snapshot))
-        is Condition -> Leaf.of(filter, snapshot)
+        is Condition -> Leaf.of(filter, snapshot, patterns)
     }
 
     inner class Evaluation internal constructor(
@@ -112,7 +133,9 @@ class FilterEngine(private val log: LogData, private val maxCacheBytes: Long = D
         private val from: Int,
     ) : PreparedFilter {
         private val words = (snapshot.count + 63) / 64
-        private val chunkCount = (words + CHUNK_WORDS - 1) / CHUNK_WORDS
+        // Small logs, like the parts of a merge, get smaller tasks so that every core gets some.
+        private val chunkWords = (words / Runtime.getRuntime().availableProcessors()).coerceIn(MIN_CHUNK_WORDS, CHUNK_WORDS)
+        private val chunkCount = (words + chunkWords - 1) / chunkWords
 
         // Progress counts chunks of the conditions that read the file, as the others take next to no time.
         private val readsFile = leaves(root).any { it.readsFile }
@@ -137,6 +160,7 @@ class FilterEngine(private val log: LogData, private val maxCacheBytes: Long = D
         }
 
         override suspend fun run(): FilterResult = withContext(Dispatchers.Default) {
+            for (leaf in leaves(root)) leaf.prepare?.invoke()
             FilterResult(rows(evaluate(root, null)), from, snapshot.count, snapshot.end)
         }
 
@@ -169,48 +193,50 @@ class FilterEngine(private val log: LogData, private val maxCacheBytes: Long = D
 
         private suspend fun leaf(leaf: Leaf, candidates: LongArray): LongArray {
             val entry = cache[leaf.condition]
+            val oldBits = entry?.bits
+            val oldCoverage = entry?.coverage
+            fun cached(w: Int) = (oldBits?.getOrElse(w) { 0L } ?: 0L) and (oldCoverage?.getOrElse(w) { 0L } ?: 0L)
+
+            // The last record may still grow while tailing, so it is never cached and computed again every time.
+            val lastWord = (snapshot.count - 1) ushr 6
+            val lastBit = 1L shl ((snapshot.count - 1) and 63)
             val need = LongArray(words)
             var anyNeeded = false
+            var cacheable = false
             for (w in 0..<words) {
-                val covered = entry?.coverage?.getOrElse(w) { 0L } ?: 0L
-                need[w] = candidates[w] and covered.inv()
+                need[w] = candidates[w] and (oldCoverage?.getOrElse(w) { 0L } ?: 0L).inv()
                 if (need[w] != 0L) anyNeeded = true
+                if (need[w] and (if (w == lastWord) lastBit.inv() else -1L) != 0L) cacheable = true
             }
-            var bits = entry?.bits
-            var computedChunks = 0
-            if (anyNeeded) {
-                val (computed, chunks) = compute(leaf, need)
-                computedChunks = chunks
-                val oldCoverage = entry?.coverage
-                bits = LongArray(words) {
-                    ((bits?.getOrElse(it) { 0L } ?: 0L) and (oldCoverage?.getOrElse(it) { 0L } ?: 0L)) or computed[it]
-                }
-                val coverage = LongArray(words) { (oldCoverage?.getOrElse(it) { 0L } ?: 0L) or need[it] }
-                // The last record may still grow while tailing, so it is computed again every time.
-                if (snapshot.count > 0) {
-                    val last = snapshot.count - 1
-                    coverage[last ushr 6] = coverage[last ushr 6] and (1L shl (last and 63)).inv()
-                }
-                store(leaf.condition, Entry(bits, coverage))
-            }
+            val (computed, computedChunks) = if (anyNeeded) compute(leaf, need) else null to 0
             // Chunks without candidates (cached, or ruled out by other conditions) are done right away.
             if (counted(leaf)) doneChunks.addAndGet((chunkCount - computedChunks).toLong())
-            return LongArray(words) { (bits?.getOrElse(it) { 0L } ?: 0L) and candidates[it] }
+            if (computed == null) return LongArray(words) { cached(it) and candidates[it] }
+
+            // When only the last record was computed there is nothing new to cache, so skip copying the entry.
+            if (cacheable) {
+                val bits = LongArray(words) { cached(it) or computed[it] }
+                val coverage = LongArray(words) { (oldCoverage?.getOrElse(it) { 0L } ?: 0L) or need[it] }
+                coverage[lastWord] = coverage[lastWord] and lastBit.inv()
+                store(leaf.condition, Entry(bits, coverage))
+            }
+            for (w in 0..<words) computed[w] = computed[w] or (cached(w) and candidates[w])
+            return computed
         }
 
         /** The bits of [leaf] for the [need]ed records, and how many chunks that took. */
         private suspend fun compute(leaf: Leaf, need: LongArray): Pair<LongArray, Int> = coroutineScope {
             val out = LongArray(words)
             // Only chunks with records to test, e.g. just the appended ones while tailing.
-            val chunks = (0..<words step CHUNK_WORDS).filter { first ->
-                (first..<minOf(words, first + CHUNK_WORDS)).any { need[it] != 0L }
+            val chunks = (0..<words step chunkWords).filter { first ->
+                (first..<minOf(words, first + chunkWords)).any { need[it] != 0L }
             }
             chunks.mapIndexed { task, first ->
                 async {
                     ensureActive()
                     val cursor = snapshot.cursor()
                     val reader = if (leaf.readsFile) SpanReader(snapshot.channels.forTask(task), snapshot.end) else null
-                    for (w in first..<minOf(words, first + CHUNK_WORDS)) {
+                    for (w in first..<minOf(words, first + chunkWords)) {
                         var mask = need[w]
                         while (mask != 0L) {
                             val bit = java.lang.Long.numberOfTrailingZeros(mask)
@@ -240,8 +266,11 @@ class FilterEngine(private val log: LogData, private val maxCacheBytes: Long = D
     }
 
     private companion object {
-        /** Records per parallel task: 4096 words of 64. */
+        /** Records per parallel task at most: 4096 words of 64. Smaller tasks cost more each. */
         const val CHUNK_WORDS = 4096
+
+        /** Records per parallel task at least. */
+        const val MIN_CHUNK_WORDS = 512
 
         /** About 25 conditions on 40M records. */
         const val DEFAULT_CACHE_BYTES = 256L * 1024 * 1024
@@ -265,16 +294,21 @@ private class NotNode(val part: Node) : Node {
     override val cost = part.cost
 }
 
-/** A condition resolved against a snapshot's schema, with everything dictionary-based precomputed. */
+/**
+ * A condition resolved against a snapshot's schema, with everything dictionary-based precomputed;
+ * what needs more work than that is done by [prepare], on the evaluating thread, before any [test].
+ */
 private class Leaf(
     val condition: Condition,
     override val cost: Int,
     val readsFile: Boolean,
+    val prepare: (suspend () -> Unit)? = null,
     val test: (RecordCursor, SpanReader?) -> Boolean,
 ) : Node {
 
     companion object {
-        fun of(condition: Condition, snapshot: RecordSnapshot): Leaf {
+        fun of(condition: Condition, snapshot: RecordSnapshot, patterns: PatternIndex): Leaf {
+            if (condition is RecordTextCondition) return recordTextLeaf(condition)
             val field = snapshot.schema.fields.indexOfFirst { it.name == condition.field }
             val type = snapshot.schema.fields.getOrNull(field)?.type
             fun constant(value: Boolean) = Leaf(condition, 0, false) { _, _ -> value }
@@ -300,6 +334,13 @@ private class Leaf(
                     Leaf(condition, 0, false) { c, _ -> c.timestamp(field) in from..to }
                 }
                 is TextCondition -> textLeaf(condition, snapshot, field, type)
+                is PatternCondition -> {
+                    var matching = BooleanArray(0)
+                    val prepare: suspend () -> Unit = { matching = patterns.matching(snapshot, condition.templates) }
+                    Leaf(condition, 0, false, prepare) { c, _ -> matching.getOrElse(patterns.id(c.record)) { false } }
+                }
+                is NumberCondition -> numberLeaf(condition, snapshot, field, type)
+                is RecordTextCondition -> recordTextLeaf(condition)
             }
         }
 
@@ -322,35 +363,60 @@ private class Leaf(
                     val nanos = c.timestamp(field)
                     if (nanos == Columns.ABSENT_TIMESTAMP) absent else matcher.matches(snapshot.formatTimestamp(field, nanos))
                 }
-                ColumnType.SPAN -> {
-                    val json = snapshot.schema.fields[field].json
-                    Leaf(condition, 2, true) { c, reader ->
-                        val length = c.spanLength(field)
-                        if (length == Columns.ABSENT_LENGTH) {
-                            absent
-                        } else {
-                            val from = c.start + c.spanStart(field)
-                            val to = if (length == Columns.TO_RECORD_END) c.end else from + length
-                            val offset = reader!!.load(from, to)
-                            var end = offset + (to - from).toInt()
-                            if (length == Columns.TO_RECORD_END) end = Bytes.trimLineEnd(reader.buffer, offset, end)
-                            // Lines that are no JSON run to the record end and read as written.
-                            if (json && length != Columns.TO_RECORD_END) {
-                                matchesJson(matcher, reader.buffer, offset, minOf(end, reader.loaded))
-                            } else {
-                                matcher.matches(reader.buffer, offset, minOf(end, reader.loaded))
-                            }
-                        }
+                ColumnType.SPAN -> spanLeaf(condition, snapshot, field, absent, matcher::matches)
+            }
+        }
+
+        private fun recordTextLeaf(condition: RecordTextCondition): Leaf {
+            val matcher = TextMatcher(condition.asText())
+            return Leaf(condition, 3, true) { c, reader ->
+                val offset = reader!!.load(c.start, c.end)
+                val end = minOf(offset + (c.end - c.start).toInt(), reader.loaded)
+                matcher.matches(reader.buffer, offset, Bytes.trimLineEnd(reader.buffer, offset, end))
+            }
+        }
+
+        private fun numberLeaf(condition: NumberCondition, snapshot: RecordSnapshot, field: Int, type: ColumnType): Leaf = when (type) {
+            ColumnType.DICT, ColumnType.LEVEL -> {
+                val matching = snapshot.dictionaryTexts(field).map { condition.matches(Bytes.parseNumber(it)) }.toBooleanArray()
+                if (type == ColumnType.DICT) {
+                    Leaf(condition, 0, false) { c, _ -> matching.getOrElse(c.dictId(field)) { false } }
+                } else {
+                    Leaf(condition, 0, false) { c, _ -> matching.getOrElse(c.levelId(field)) { false } }
+                }
+            }
+            ColumnType.TIMESTAMP -> Leaf(condition, 0, false) { _, _ -> false }
+            ColumnType.SPAN -> spanLeaf(condition, snapshot, field, false) { bytes, from, to -> condition.matches(Bytes.parseNumber(bytes, from, to)) }
+        }
+
+        /** Tests the text of a SPAN field as shown, see [ValueTest]; [absent] is the result for records without a value. */
+        private fun spanLeaf(condition: Condition, snapshot: RecordSnapshot, field: Int, absent: Boolean, test: ValueTest): Leaf {
+            val json = snapshot.schema.fields[field].json
+            return Leaf(condition, 2, true) { c, reader ->
+                val length = c.spanLength(field)
+                if (length == Columns.ABSENT_LENGTH) {
+                    absent
+                } else {
+                    val from = c.start + c.spanStart(field)
+                    val to = if (length == Columns.TO_RECORD_END) c.end else from + length
+                    val offset = reader!!.load(from, to)
+                    var end = offset + (to - from).toInt()
+                    if (length == Columns.TO_RECORD_END) end = Bytes.trimLineEnd(reader.buffer, offset, end)
+                    // Lines that are no JSON run to the record end and read as written.
+                    if (json && length != Columns.TO_RECORD_END) {
+                        testJson(test, reader.buffer, offset, minOf(end, reader.loaded))
+                    } else {
+                        test.test(reader.buffer, offset, minOf(end, reader.loaded))
                     }
                 }
             }
         }
 
-        /** Matches the JSON value `bytes[from, to)` as shown; strings without escapes straight on their bytes. */
-        private fun matchesJson(matcher: TextMatcher, bytes: ByteArray, from: Int, to: Int): Boolean {
-            if (Json.isString(bytes, from, to) && Json.isPlain(bytes, from + 1, to - 1)) return matcher.matches(bytes, from + 1, to - 1)
+        /** Tests the JSON value `bytes[from, to)` as shown; strings without escapes straight on their bytes. */
+        private fun testJson(test: ValueTest, bytes: ByteArray, from: Int, to: Int): Boolean {
+            if (Json.isString(bytes, from, to) && Json.isPlain(bytes, from + 1, to - 1)) return test.test(bytes, from + 1, to - 1)
             val decoded = Json.decode(bytes, from, to)
-            return matcher.matches(decoded, 0, decoded.size)
+            return test.test(decoded, 0, decoded.size)
         }
 
         /** A field read from a map: like a span, but the value is found in the map's text. */
@@ -358,17 +424,23 @@ private class Leaf(
             is PresenceCondition -> Leaf(condition, 2, true) { c, reader -> (mapValue(c, reader!!, key, map) >= 0) == condition.present }
             is TextCondition -> {
                 val matcher = TextMatcher(condition)
-                Leaf(condition, 2, true) { c, reader ->
-                    val value = mapValue(c, reader!!, key, map)
-                    when {
-                        value < 0 -> matcher.matchesAbsent
-                        map.json -> matchesJson(matcher, reader.buffer, MdcMap.from(value), MdcMap.to(value))
-                        else -> matcher.matches(reader.buffer, MdcMap.from(value), MdcMap.to(value))
-                    }
+                mapValueLeaf(condition, key, map, matcher.matchesAbsent, matcher::matches)
+            }
+            is NumberCondition -> mapValueLeaf(condition, key, map, false) { bytes, from, to ->
+                condition.matches(Bytes.parseNumber(bytes, from, to))
+            }
+            is LevelCondition, is TimeCondition, is PatternCondition, is RecordTextCondition -> Leaf(condition, 0, false) { _, _ -> false }
+        }
+
+        private fun mapValueLeaf(condition: Condition, key: MapKey, map: MapSyntax, absent: Boolean, test: ValueTest) =
+            Leaf(condition, 2, true) { c, reader ->
+                val value = mapValue(c, reader!!, key, map)
+                when {
+                    value < 0 -> absent
+                    map.json -> testJson(test, reader.buffer, MdcMap.from(value), MdcMap.to(value))
+                    else -> test.test(reader.buffer, MdcMap.from(value), MdcMap.to(value))
                 }
             }
-            is LevelCondition, is TimeCondition -> Leaf(condition, 0, false) { _, _ -> false }
-        }
 
         /** The range of [key]'s value in the reader's buffer, packed as by [MdcMap]; -1 if the record has none. */
         private fun mapValue(c: RecordCursor, reader: SpanReader, key: MapKey, map: MapSyntax): Long {
@@ -390,6 +462,11 @@ private class Leaf(
             ColumnType.SPAN -> c.spanLength(field) != Columns.ABSENT_LENGTH
         }
     }
+}
+
+/** Tests a value's text, as shown, in `bytes[from, to)`. */
+private fun interface ValueTest {
+    fun test(bytes: ByteArray, from: Int, to: Int): Boolean
 }
 
 /**

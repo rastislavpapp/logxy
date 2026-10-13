@@ -11,6 +11,7 @@ import javax.swing.AbstractAction
 import javax.swing.DefaultListSelectionModel
 import javax.swing.JComponent
 import javax.swing.JPanel
+import javax.swing.JScrollBar
 import javax.swing.JScrollPane
 import javax.swing.JTable
 import javax.swing.KeyStroke
@@ -47,7 +48,7 @@ class VirtualScrollPane(private val table: JTable, private val window: RowWindow
         isWheelScrollingEnabled = false
     }
     private val viewport get() = scrollPane.viewport
-    private val scrollBar = MarkedScrollBar()
+    private val scrollBar = JScrollBar(JScrollBar.VERTICAL)
     private var updatingScrollBar = false
     private var moveScheduled = false
     private var wheelRemainder = 0.0
@@ -63,10 +64,8 @@ class VirtualScrollPane(private val table: JTable, private val window: RowWindow
 
     var onFollowChanged: (Boolean) -> Unit = {}
 
-    /** Rows to mark along the scroll bar. */
-    var marks: RowMarks? by scrollBar::marks
-
-    fun repaintMarks() = scrollBar.repaint()
+    /** Called whenever the rows in view may have changed. */
+    var onRowsInViewChanged: () -> Unit = {}
 
     /** Whether the user scrolling to the end turns [follow] back on. */
     var resumeFollowAtEnd: () -> Boolean = { false }
@@ -94,11 +93,6 @@ class VirtualScrollPane(private val table: JTable, private val window: RowWindow
                 scrollToRow(it.value)
                 resumeFollowIfAtEnd()
             }
-        }
-        scrollBar.onMarkClicked = { row ->
-            follow = false
-            selectRow(row)
-            table.requestFocusInWindow()
         }
         scrollPane.addMouseWheelListener(::onWheel)
         table.addKeyListener(object : KeyAdapter() {
@@ -128,6 +122,9 @@ class VirtualScrollPane(private val table: JTable, private val window: RowWindow
     /** Index of the topmost visible row in the whole list. */
     val firstVisibleRow get() = topRow
 
+    /** Index of the lowest visible row in the whole list; below [firstVisibleRow] if there are no rows. */
+    val lastVisibleRow get() = minOf(topRow + visibleRows, window.totalRowCount) - 1
+
     /** Selects [row] of the whole list; with [scroll], first scrolls it into the middle of the view. */
     fun selectRow(row: Int, scroll: Boolean = true) {
         if (row < 0 || row >= window.totalRowCount) return
@@ -154,6 +151,7 @@ class VirtualScrollPane(private val table: JTable, private val window: RowWindow
 
     private fun onViewChanged() {
         updateScrollBar()
+        onRowsInViewChanged()
         val localTop = topRow - window.windowStart
         val nearStart = localTop < EDGE_ROWS && window.windowStart > 0
         val nearEnd = localTop + visibleRows > table.rowCount - EDGE_ROWS &&

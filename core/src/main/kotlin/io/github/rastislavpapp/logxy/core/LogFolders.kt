@@ -1,7 +1,9 @@
 package io.github.rastislavpapp.logxy.core
 
+import io.github.rastislavpapp.logxy.core.archive.CompressedSpool
 import io.github.rastislavpapp.logxy.core.archive.ZipSpool
 import java.io.IOException
+import java.nio.file.FileVisitOption
 import java.nio.file.FileVisitResult
 import java.nio.file.Files
 import java.nio.file.Path
@@ -15,31 +17,45 @@ object LogFolders {
 
     /**
      * The files in [folder] and, if [recursive], its subfolders, sorted by path. Leaves out hidden files
-     * and folders (such as `.git`), empty files and binary files, except zips. Unreadable folders are
-     * skipped.
+     * and folders (such as `.git`), empty files and binary files, except zips and .gz or .zst files.
+     * Unreadable folders are skipped. Of the paths to one file, through links, keeps only the first.
      */
     fun files(folder: Path, recursive: Boolean = true): List<Path> {
         val found = ArrayList<Path>()
-        Files.walkFileTree(folder, emptySet(), if (recursive) Int.MAX_VALUE else 1, object : SimpleFileVisitor<Path>() {
+        // Following links, as logs are often links, e.g. Kubernetes' /var/log/containers; loops end in visitFileFailed.
+        val options = setOf(FileVisitOption.FOLLOW_LINKS)
+        Files.walkFileTree(folder, options, if (recursive) Int.MAX_VALUE else 1, object : SimpleFileVisitor<Path>() {
             override fun preVisitDirectory(dir: Path, attrs: BasicFileAttributes) =
                 if (dir != folder && isHidden(dir)) FileVisitResult.SKIP_SUBTREE else FileVisitResult.CONTINUE
 
             override fun visitFile(file: Path, attrs: BasicFileAttributes): FileVisitResult {
-                if (attrs.isRegularFile && attrs.size() > 0 && !isHidden(file) && (ZipSpool.isZip(file) || !isBinary(file))) found.add(file)
+                if (attrs.isRegularFile && attrs.size() > 0 && !isHidden(file) && isOpenable(file)) found.add(file)
                 return FileVisitResult.CONTINUE
             }
 
             override fun visitFileFailed(file: Path, exc: IOException) = FileVisitResult.CONTINUE
         })
-        return found.sorted()
+        // A link and its target are one log, which would otherwise show each record twice.
+        return found.sorted().distinctBy { file -> runCatching { file.toRealPath() }.getOrDefault(file) }
     }
 
     private fun isHidden(path: Path) = path.fileName.toString().startsWith(".") || runCatching { Files.isHidden(path) }.getOrDefault(false)
 
-    /** Text logs have no NUL bytes; images, archives and the like do, near their start. */
-    private fun isBinary(file: Path): Boolean = try {
-        Files.newInputStream(file).use { input -> input.readNBytes(SNIFFED_BYTES).any { it.toInt() == 0 } }
+    /** A zip or compressed file, or text. */
+    private fun isOpenable(file: Path): Boolean {
+        val start = start(file) ?: return false
+        return ZipSpool.isZip(start) || CompressedSpool.formatOf(start) != null || isText(start)
+    }
+
+    /** Whether [file] has text in it, e.g. not an image or a class file. */
+    fun isText(file: Path): Boolean = start(file)?.let { it.isNotEmpty() && isText(it) } ?: false
+
+    // Text logs have no NUL bytes, while images and the like do near their start.
+    private fun isText(start: ByteArray) = start.none { it.toInt() == 0 }
+
+    private fun start(file: Path): ByteArray? = try {
+        Files.newInputStream(file).use { it.readNBytes(SNIFFED_BYTES) }
     } catch (_: IOException) {
-        true
+        null
     }
 }

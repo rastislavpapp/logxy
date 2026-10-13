@@ -1,7 +1,7 @@
 package io.github.rastislavpapp.logxy.core.session
 
 import io.github.rastislavpapp.logxy.core.FileActivity
-import io.github.rastislavpapp.logxy.core.archive.ZipSpool
+import io.github.rastislavpapp.logxy.core.archive.ArchiveOrigin
 import io.github.rastislavpapp.logxy.core.FileChange
 import io.github.rastislavpapp.logxy.core.FileSnapshot
 import io.github.rastislavpapp.logxy.core.formatByteSize
@@ -21,22 +21,31 @@ import io.github.rastislavpapp.logxy.core.merge.MergedLog
 import io.github.rastislavpapp.logxy.core.parse.FormatMismatchException
 import io.github.rastislavpapp.logxy.core.parse.LogFormat
 import io.github.rastislavpapp.logxy.core.parse.open
+import io.github.rastislavpapp.logxy.core.pattern.PatternCounts
+import io.github.rastislavpapp.logxy.core.pattern.PatternIndex
 import io.github.rastislavpapp.logxy.core.query.Query
 import io.github.rastislavpapp.logxy.core.query.QueryCompiler
 import io.github.rastislavpapp.logxy.core.query.QueryException
+import io.github.rastislavpapp.logxy.core.query.TextSearch
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.Collections
+import java.util.concurrent.atomic.AtomicReference
 
 /** A session's state for a status bar; [records] is null while there is nothing to show (indexing, errors). */
 data class SessionStatus(
@@ -60,8 +69,11 @@ interface SessionListener {
     /** The files could not be shown. */
     fun problem(title: String, detail: String, hint: String?)
 
-    /** [records] are ready to be shown; the view applies its filter next. */
-    fun loaded(records: Records)
+    /** [shown] is ready to be shown, all records for now; the view applies its filter next. */
+    fun loaded(shown: ShownLog)
+
+    /** The shown log of the last [loaded] ended, before its files are closed: drop it and what was read from it. */
+    fun shownEnded()
 
     /** [paths] have no timestamps, so they were left out of the merge; the view may open them on their own. */
     fun notMergeable(paths: List<Path>)
@@ -70,19 +82,28 @@ interface SessionListener {
     fun formatChanged()
 
     /**
-     * Records were appended; there were [oldRecordCount] before. The records at [changed] may have grown
-     * (the last record of each file that grew). With a filter, [rowsExtended] follows.
+     * Records at [changed] may have more text now (the last record of each file that grew); their rows
+     * stay where they are. New rows, if any, follow with [rowsChanged].
      */
-    fun recordsAppended(oldRecordCount: Int, changed: IntArray)
+    fun recordsGrew(changed: IntArray)
 
-    /** All shown rows changed: [rows] with a filter, all records without. [keepView] keeps the rows on screen in place. */
-    fun rowsReplaced(rows: FilteredRows?, keepView: Boolean)
+    /** Appended records have a field no record had before, so the records' schema shows it now; [recordsGrew] follows. */
+    fun fieldsShown()
 
-    /** The filtered rows from position [firstChanged] on changed (new records); there were [oldSize] rows before. */
-    fun rowsExtended(firstChanged: Int, oldSize: Int)
+    /**
+     * All shown rows changed, e.g. to a new filter's result; [keepView] keeps the rows on screen in place.
+     * There were [oldSize] rows before, [recordBefore] tells which record each of them showed.
+     */
+    fun rowsReplaced(keepView: Boolean, oldSize: Int, recordBefore: (row: Int) -> Int)
+
+    /** The shown rows from [firstChanged] on changed, e.g. records were appended; there were [oldSize] rows before. */
+    fun rowsChanged(firstChanged: Int, oldSize: Int)
 
     /** The level mapping changed; shown levels may have different colors. */
     fun levelMappingChanged()
+
+    /** [LogSession.histogram] changed; while counted anew, it fills up from its earliest times. */
+    fun histogramChanged()
 
     fun followChanged(follow: Boolean)
 
@@ -93,15 +114,15 @@ interface SessionListener {
  * One or more open files without their UI: indexes them in the background, merges several by time
  * (see [MergedLog]), follows changes to them, and filters them. Not thread-safe: use it, and run
  * [scope], on one thread (the UI thread); [listener] is called there. [origin] tells which files were
- * extracted from zips, for naming them. [chosen] holds the format the user picked for each of the paths,
- * null (or missing) to detect it.
+ * extracted from zips or decompressed, for naming them. [chosen] holds the format the
+ * user picked for each of the paths, null (or missing) to detect it.
  */
 class LogSession(
     paths: List<Path>,
     private val scope: CoroutineScope,
     private val settings: SettingsStore,
     private val listener: SessionListener,
-    private val origin: (Path) -> ZipSpool.Origin? = { null },
+    private val origin: (Path) -> ArchiveOrigin? = { null },
     chosen: List<LogFormat?> = emptyList(),
 ) {
     constructor(path: Path, scope: CoroutineScope, settings: SettingsStore, listener: SessionListener) :
@@ -152,17 +173,20 @@ class LogSession(
     var formatDetected = false
         private set
 
-    /** What is shown: the log of a single file, or a [MergedLog]. */
-    var records: Records? = null
+    /** The log of a single file, or a [MergedLog]. */
+    internal var records: Records? = null
+        private set
+
+    /** What is shown of the files loaded, null while there is nothing to show (indexing, errors). */
+    var shown: ShownLog? = null
         private set
 
     private var engine: RecordFilter? = null
     private var activeFilter: Filter? = null
     private var filterJob: Job? = null
 
-    /** The rows shown, or null for all records. */
-    var shown: FilteredRows? = null
-        private set
+    /** Whether the rows shown are [activeFilter]'s result (all records without one). */
+    private var filterShown = false
 
     // How much of the records the shown filter result covers: records, and bytes (the last record may grow without new ones).
     private var filteredRecords = 0
@@ -172,6 +196,17 @@ class LogSession(
 
     /** How far the filter over all records got, from 0 to 1, while [SessionStatus.filtering]. */
     val filterProgress: Double get() = running?.progress ?: 0.0
+
+    /** Times of the shown rows; null until they are counted, or if the records have no timestamps. */
+    var histogram: TimeHistogram? = null
+        private set
+
+    // The shown rows before [settledRows], which no longer change, counted apart from the rest, which may.
+    private var settled: TimeHistogram? = null
+    private var settledRows = 0
+    private var countJob: Job? = null
+    private var counting: TimeCount? = null
+    private var countAgain = false
 
     private var indexMillis = 0L
     private var problem: String? = null
@@ -231,6 +266,8 @@ class LogSession(
         // Only placeholders (empty values): nothing to filter.
         if (compiled != Filter.And(emptyList())) parts += compiled
         val filter = if (parts.isEmpty()) null else Filter.And(parts)
+        // The same filter again, e.g. clearing an empty one: its result is shown or on its way.
+        if (filter == activeFilter && (filterShown || running != null)) return
         val evaluation = try {
             filter?.let { engine?.prepare(it) }
         } catch (e: IllegalArgumentException) {
@@ -238,6 +275,50 @@ class LogSession(
         }
         activeFilter = filter
         runFilter(keepView = false, evaluation)
+    }
+
+    /**
+     * Prepares finding the records that [search] matches among those the filter lets through; null if nothing is
+     * loaded. Records whose filter result is still on its way may be among them. Throws [QueryException] for an
+     * invalid regex.
+     */
+    fun prepareSearch(search: TextSearch): PreparedFilter? {
+        val engine = engine ?: return null
+        val condition = search.condition()
+        val filter = activeFilter?.let { Filter.And(listOf(it, condition)) } ?: condition
+        return try {
+            engine.prepare(filter)
+        } catch (e: IllegalArgumentException) {
+            throw QueryException(e.message ?: "Invalid search")
+        }
+    }
+
+    /** How far [patternCounts] got with finding the templates of new records, from 0 to 1. */
+    val patternProgress: Double get() = engine?.patternProgress ?: 1.0
+
+    /**
+     * Counts the shown rows by the template of their message (see [io.github.rastislavpapp.logxy.core.pattern.Templates]);
+     * null if there is nothing loaded or the records have no message. Cancelling the caller stops it.
+     */
+    suspend fun patternCounts(): PatternCounts? {
+        // Counting the times takes a fraction of finding the templates: let it have the threads first.
+        while (true) countJob?.takeIf { it.isActive }?.join() ?: break
+        val shown = shown ?: return null
+        val engine = engine ?: return null
+        if (shown.schema.indexOf(Role.MESSAGE) < 0) return null
+        return engine.countPatterns(shown.rowArray, shown.rowCount)
+    }
+
+    /** The template of [record]'s message; null if it has none, or nothing is loaded. */
+    fun templateOf(record: Int): String? {
+        val records = records ?: return null
+        if (records.schema.indexOf(Role.MESSAGE) < 0) return null
+        val template = if (records is MergedLog) {
+            PatternIndex.templateOf(records.parts[records.part(record)].filterSnapshot(), records.record(record))
+        } else {
+            PatternIndex.templateOf((records as LogData).filterSnapshot(), record)
+        }
+        return template.ifEmpty { null }
     }
 
     /** Cancels running work and releases the files. */
@@ -262,29 +343,47 @@ class LogSession(
         setStatus(SessionStatus(message = "Indexing…"))
         // Logs opened so far, closed if loading is cancelled or fails.
         val opened = Collections.synchronizedList(ArrayList<LogData>())
-        var current = sources.first()
+        // The file whose error is reported; the others of a merge are only cancelled because of it.
+        val failed = AtomicReference<Source>()
+        fun current() = failed.get() ?: sources.first()
         try {
             val started = System.nanoTime()
             val preferred = settings.current.formats
+            val builtIn = settings.current.builtInFormats
             val levels = settings.current.levels
             // A merge filters its files in parallel, so each needs only its share of channels; this bounds file handles.
-            // At least a few each, as files are indexed one at a time and that slows down a lot with fewer.
+            // At least a few each, as a small file is parsed by one thread and that slows down a lot with fewer.
             val options = IndexOptions().let { it.copy(readChannels = maxOf(minOf(4, it.parallelism), it.parallelism / sources.size)) }
-            for ((i, source) in sources.withIndex()) {
-                current = source
-                // Taken before indexing, so a file replaced meanwhile shows up as a change on the first poll.
-                source.known = withContext(Dispatchers.IO) { FileSnapshot.take(source.path) }
-                    ?: throw IOException("${source.path.fileName}: file not found")
-                source.format = source.chosen ?: withContext(Dispatchers.IO) { LogFormat.detect(source.path, preferred) }
-                withContext(Dispatchers.IO) { opened += source.format.open(source.path, progresses[i], levels, options) }
-                source.log = opened.last()
+            // Files under the split size are parsed by one thread each, so a folder of them needs several at once.
+            val permits = Semaphore(options.parallelism)
+            coroutineScope {
+                sources.mapIndexed { i, source ->
+                    async(Dispatchers.IO) {
+                        permits.withPermit {
+                            try {
+                                // Taken before indexing, so a file replaced meanwhile shows up as a change on the first poll.
+                                source.known = FileSnapshot.take(source.path)
+                                    ?: throw IOException("${source.path.fileName}: file not found")
+                                source.format = source.chosen ?: LogFormat.detect(source.path, preferred, builtIn)
+                                source.log = source.format.open(source.path, progresses[i], levels, options).also { opened += it }
+                            } catch (e: Throwable) {
+                                if (e !is CancellationException) failed.compareAndSet(null, source)
+                                throw e
+                            }
+                        }
+                    }
+                }.awaitAll()
             }
             formatDetected = true
             listener.formatChanged()
 
             var nothingToMerge = false
             if (isMerged) {
-                val unmergeable = sources.filter { it.log!!.schema.indexOf(Role.TIMESTAMP) < 0 }
+                // An optional timestamp no record had is hidden, e.g. JSON whose time key is unknown.
+                val unmergeable = sources.filter { source ->
+                    val schema = source.log!!.schema
+                    schema.indexOf(Role.TIMESTAMP).let { it < 0 || schema.fields[it].hidden }
+                }
                 if (unmergeable.isNotEmpty()) {
                     unmergeable.forEach { it.log!!.close() }
                     opened.removeAll(unmergeable.map { it.log!! }.toSet())
@@ -306,6 +405,8 @@ class LogSession(
             }
             engine = if (view is MergedLog) MergedFilter(view) else FilterEngine(view as LogData)
             records = view
+            val shown = ShownLog(view)
+            this.shown = shown
             indexMillis = (System.nanoTime() - started) / 1_000_000
             withContext(Dispatchers.IO) {
                 for (source in sources) {
@@ -314,7 +415,8 @@ class LogSession(
                 }
             }
             problem = null
-            listener.loaded(view)
+            filterShown = false
+            listener.loaded(shown)
             if (isLive) follow = true
             updateStatus()
             return true
@@ -324,7 +426,7 @@ class LogSession(
         } catch (e: FormatMismatchException) {
             opened.forEach { it.close() }
             listener.problem(
-                "${current.path.fileName} does not match the parser “${current.format.name}”.",
+                "${current().path.fileName} does not match the parser “${current().format.name}”.",
                 e.message.orEmpty(),
                 if (isMerged) "Choose another parser for it in the toolbar, or edit the parser."
                 else "Choose another parser in the toolbar, or Raw text.",
@@ -333,7 +435,7 @@ class LogSession(
             return false
         } catch (e: Exception) {
             opened.forEach { it.close() }
-            listener.problem("Cannot open ${current.path.fileName}.", e.message ?: e.javaClass.simpleName, null)
+            listener.problem("Cannot open ${current().path.fileName}.", e.message ?: e.javaClass.simpleName, null)
             setStatus(SessionStatus(message = "Error"))
             return false
         } catch (e: OutOfMemoryError) {
@@ -341,7 +443,7 @@ class LogSession(
             opened.forEach { it.close() }
             opened.clear()
             sources.forEach { it.log = null }
-            val what = if (isMerged) "these ${sources.size} files" else "${current.path.fileName}"
+            val what = if (isMerged) "these ${sources.size} files" else "${current().path.fileName}"
             listener.problem(
                 "Not enough memory to open $what.",
                 "Logxy can use up to ${formatByteSize(Runtime.getRuntime().maxMemory())} of memory. " +
@@ -359,6 +461,7 @@ class LogSession(
             val records = records ?: return
             try {
                 val oldRecordCount = records.recordCount
+                val oldSchema = records.schema
                 val changed = ArrayList<Int>()
                 val problems = ArrayList<String>()
                 var grown = false
@@ -406,8 +509,14 @@ class LogSession(
                         reload()
                         return
                     }
-                    listener.recordsAppended(oldRecordCount, changed.toIntArray())
-                    if (activeFilter != null) catchUpFilter()
+                    if (records.schema !== oldSchema) listener.fieldsShown()
+                    listener.recordsGrew(changed.toIntArray())
+                    if (activeFilter != null) {
+                        catchUpFilter()
+                    } else {
+                        if (records.recordCount > oldRecordCount) listener.rowsChanged(oldRecordCount, oldRecordCount)
+                        countTimes(anew = false)
+                    }
                     if (promoted) follow = true
                 }
             } catch (e: IOException) {
@@ -447,6 +556,8 @@ class LogSession(
             reload()
         } else if (levelsChanged && activeFilter != null) {
             runFilter(keepView = true, activeFilter?.let { engine?.prepare(it) })
+        } else if (levelsChanged) {
+            countTimes(anew = true)
         }
     }
 
@@ -467,13 +578,16 @@ class LogSession(
     /** Runs [evaluation] of [activeFilter] over all records, or shows all records without a filter. */
     private fun runFilter(keepView: Boolean, evaluation: PreparedFilter?) {
         filterJob?.cancel()
+        filterShown = evaluation == null
+        val shown = shown ?: return
         if (evaluation == null) {
-            if (shown != null || !keepView || filtering) {
+            if (shown.isFiltered || !keepView || filtering) {
                 filtering = false
                 running = null
-                shown = null
-                listener.rowsReplaced(null, keepView)
+                val oldSize = shown.size
+                listener.rowsReplaced(keepView, oldSize, shown.showRows(null))
                 updateStatus()
+                countTimes(anew = true)
             }
             return
         }
@@ -501,12 +615,14 @@ class LogSession(
             indicator.cancel()
             filtering = false
             running = null
-            val rows = FilteredRows(result.rows)
-            shown = rows
+            val oldSize = shown.size
+            val recordBefore = shown.showRows(result.rows)
+            filterShown = true
             filteredRecords = result.recordCount
             filteredBytes = result.indexedSize
-            listener.rowsReplaced(rows, keepView)
+            listener.rowsReplaced(keepView, oldSize, recordBefore)
             updateStatus()
+            countTimes(anew = true)
             // Still the current job (a replaced one would have been cancelled), but done.
             filterJob = null
             catchUpFilter()
@@ -519,7 +635,7 @@ class LogSession(
      */
     private fun catchUpFilter() {
         val filter = activeFilter ?: return
-        val rows = shown ?: return
+        val shown = shown?.takeIf { it.isFiltered } ?: return
         if (filterJob?.isActive == true || filteredBytes >= indexedSize()) return
         // Records covered then may have grown since (the last one of each file), so they are filtered again.
         val engine = engine ?: return
@@ -527,15 +643,74 @@ class LogSession(
         val evaluation = engine.prepare(filter, from)
         filterJob = scope.launch {
             val result = evaluation.run()
-            val oldSize = rows.size
-            val firstChanged = rows.replaceFrom(from, result.rows)
+            val oldSize = shown.rowCount
+            val firstChanged = shown.replaceRowsFrom(from, result.rows)
             filteredRecords = result.recordCount
             filteredBytes = result.indexedSize
-            listener.rowsExtended(firstChanged, oldSize)
+            listener.rowsChanged(firstChanged, oldSize)
             updateStatus()
+            countTimes(anew = false)
             filterJob = null
             catchUpFilter()
         }
+    }
+
+    /**
+     * Counts the times of the shown rows on other threads: [anew] all of them, keeping [histogram] meanwhile,
+     * or only those added or changed since the last count. A count of new rows asked for while another runs
+     * follows it.
+     */
+    private fun countTimes(anew: Boolean) {
+        val records = records ?: return
+        val engine = engine ?: return
+        if (records.schema.indexOf(Role.TIMESTAMP) < 0) return
+        if (anew) {
+            countJob?.cancel()
+        } else if (countJob?.isActive == true) {
+            countAgain = true
+            return
+        }
+        countAgain = false
+        val shown = shown ?: return
+        val size = shown.rowCount
+        // From the first record still growing on, rows may change: they are counted again each time.
+        val changing = engine.changedFrom(if (shown.isFiltered) filteredRecords else records.recordCount)
+        val settle = shown.rowOf(changing).let { if (it < 0) size else it }
+        val base = settled?.takeIf { !anew && settle >= settledRows }
+        val from = if (base == null) 0 else settledRows
+        val (expectedFrom, expectedTo) = expectedTimes(shown)
+        val count = TimeCount(records, shown.rowArray, from, size, settle, expectedFrom, expectedTo)
+        counting = count
+        // Counted anew, the histogram is shown as it fills up; a stale part may still arrive after another count started.
+        val onCounted: ((TimeHistogram) -> Unit)? = if (base != null) null else { counted ->
+            scope.launch {
+                if (counting === count) {
+                    histogram = counted
+                    listener.histogramChanged()
+                }
+            }
+        }
+        countJob = scope.launch {
+            val (settledPart, restPart) = count.run(onCounted)
+            val all = base?.apply { addAll(settledPart) } ?: settledPart
+            settled = all
+            settledRows = settle
+            histogram = all.copy().apply { addAll(restPart) }
+            counting = null
+            countJob = null
+            listener.histogramChanged()
+            if (countAgain) countTimes(anew = false)
+        }
+    }
+
+    /** The times of about the first and the last of the shown rows, for the bins to start with. */
+    private fun expectedTimes(shown: ShownLog): Pair<Long, Long> {
+        val first = shown.timeFrom(0)
+        val last = shown.timeUntil(shown.size - 1)
+        // An end without times takes the other's, so the bins do not start out spanning the years since the epoch.
+        val from = if (first != Records.NO_TIMESTAMP) first else if (last != Records.NO_TIMESTAMP) last else 0
+        val to = if (last != Records.NO_TIMESTAMP) last else from
+        return from to maxOf(from, to)
     }
 
     private fun indexedSize(): Long = sources.sumOf { it.log?.indexedSize ?: 0L }
@@ -551,7 +726,7 @@ class LogSession(
             SessionStatus(
                 size = indexedSize(),
                 records = records.recordCount,
-                shown = shown?.size,
+                shown = shown?.takeIf { it.isFiltered }?.rowCount,
                 unit = if (records.isRaw) "line" else "record",
                 live = isLive,
                 following = follow,
@@ -563,12 +738,24 @@ class LogSession(
     }
 
     private fun closeLogs() {
+        // Before closing: what the view still holds must not read closed files.
+        shown?.let {
+            it.end()
+            shown = null
+            listener.shownEnded()
+        }
         filterJob?.cancel()
+        countJob?.cancel()
+        countJob = null
+        counting = null
+        countAgain = false
+        histogram = null
+        settled = null
+        settledRows = 0
         filteredRecords = 0
         filteredBytes = 0L
         filtering = false
         running = null
-        shown = null
         activeFilter = null
         for (source in sources) {
             source.log?.close()

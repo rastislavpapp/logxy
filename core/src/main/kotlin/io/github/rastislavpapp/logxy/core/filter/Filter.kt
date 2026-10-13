@@ -25,6 +25,17 @@ data class TextCondition(
     val ignoreCase: Boolean = false,
 ) : Condition
 
+/** Compares a record's whole text as written in the file, e.g. for searching; [field] is not one of the log's. */
+data class RecordTextCondition(val op: TextOp, val value: String, val ignoreCase: Boolean = false) : Condition {
+    override val field get() = RECORD_TEXT
+
+    internal fun asText() = TextCondition(RECORD_TEXT, op, value, ignoreCase)
+
+    companion object {
+        const val RECORD_TEXT = "\u0000record"
+    }
+}
+
 data class PresenceCondition(override val field: String, val present: Boolean = true) : Condition
 
 /** The record's canonical level is one of [levels]. */
@@ -40,5 +51,16 @@ data class LevelCondition(override val field: String, val levels: Set<Level>) : 
     }
 }
 
+/** The template of the message [field] (see [io.github.rastislavpapp.logxy.core.pattern.Templates]) is one of [templates]. */
+data class PatternCondition(override val field: String, val templates: Set<String>) : Condition
+
 /** The timestamp, in epoch nanoseconds, lies in `[from, to]`; a null bound is open. */
 data class TimeCondition(override val field: String, val from: Long? = null, val to: Long? = null) : Condition
+
+/**
+ * The value, read as a decimal number, lies in `[from, to]`; a null bound is open. Values that are no
+ * number match nothing, like absent ones.
+ */
+data class NumberCondition(override val field: String, val from: Double? = null, val to: Double? = null) : Condition {
+    internal fun matches(number: Double) = number >= (from ?: Double.NEGATIVE_INFINITY) && number <= (to ?: Double.POSITIVE_INFINITY)
+}

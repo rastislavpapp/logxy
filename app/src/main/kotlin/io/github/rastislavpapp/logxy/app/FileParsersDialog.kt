@@ -47,6 +47,8 @@ class FileParsersDialog(
         rootPane.defaultButton = apply
         rootPane.registerKeyboardAction({ dispose() }, KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0), JComponent.WHEN_IN_FOCUSED_WINDOW)
         pack()
+        // So restored bounds from a smaller saved size cannot cut off what is under the list.
+        minimumSize = minimumSize
         setLocationRelativeTo(owner)
         WindowState.install(this, "file-parsers")
     }

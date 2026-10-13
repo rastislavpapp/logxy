@@ -33,6 +33,22 @@ class BytesTest {
     }
 
     @Test
+    fun `decimal numbers`() {
+        fun parse(text: String) = Bytes.parseNumber(text)
+        assertEquals(500.0, parse("500"))
+        assertEquals(-12.0, parse(" -12\t"))
+        assertEquals(3.5, parse("+3.5"))
+        assertEquals(0.25, parse(".25"))
+        assertEquals(1e-3, parse("1E-3"))
+        assertEquals(12345678901234567890.0, parse("12345678901234567890"))
+        for (none in listOf("", " ", "-", ".", "1.2.3", "12ms", "1e", "0x1F", "NaN", "Infinity", "1f", "1,5")) {
+            assertTrue(parse(none).isNaN(), none)
+        }
+        val bytes = "id=42;".toByteArray()
+        assertEquals(42.0, Bytes.parseNumber(bytes, 3, 5))
+    }
+
+    @Test
     fun `long text is cut on a character boundary`() {
         val bytes = "ab€cd".toByteArray()   // € is three bytes
         assertEquals("ab€cd", Bytes.utf8Text(bytes, 0, bytes.size, 7))

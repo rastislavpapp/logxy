@@ -1,8 +1,9 @@
 package io.github.rastislavpapp.logxy.core.log
 
-import io.github.rastislavpapp.logxy.core.filter.Condition
 import io.github.rastislavpapp.logxy.core.filter.FilterEngine
+import io.github.rastislavpapp.logxy.core.filter.Filter
 import io.github.rastislavpapp.logxy.core.filter.LevelCondition
+import io.github.rastislavpapp.logxy.core.filter.NumberCondition
 import io.github.rastislavpapp.logxy.core.filter.PresenceCondition
 import io.github.rastislavpapp.logxy.core.filter.TextCondition
 import io.github.rastislavpapp.logxy.core.filter.TextOp
@@ -34,7 +35,7 @@ class JsonLogTest {
         List(recordCount) { rowValues(it, 1000)[field] }
     }
 
-    private fun ParsedLog.matching(condition: Condition) = runBlocking { FilterEngine(this@matching).prepare(condition).run() }.rows.toList()
+    private fun ParsedLog.matching(condition: Filter) = runBlocking { FilterEngine(this@matching).prepare(condition).run() }.rows.toList()
 
     private val sample = """
         Starting the application
@@ -93,6 +94,25 @@ class JsonLogTest {
             assertEquals(listOf(0), log.matching(TextCondition("Message", TextOp.EQUALS, "starting*", ignoreCase = true)))
             assertEquals(listOf(2), log.matching(PresenceCondition("Exception")))
             assertEquals(listOf(2, 3), log.matching(LevelCondition("Level", setOf(Level.WARN, Level.ERROR))))
+        }
+    }
+
+    @Test
+    fun `compares numbers, also in strings`() {
+        val content = """
+            {"message":"a","status":200,"duration":12.5}
+            {"message":"b","status":"503","duration":2001}
+            {"message":"c","status":"n/a","duration":-3e2}
+            {"message":"d"}
+        """.trimIndent() + "\n"
+        parse(content).use { log ->
+            assertEquals(listOf(1), log.matching(NumberCondition("status", from = 500.0)))
+            assertEquals(listOf(0), log.matching(NumberCondition("status", to = 499.0)))
+            assertEquals(listOf(0, 2, 3), log.matching(Filter.Not(NumberCondition("status", from = 500.0))))
+            assertEquals(listOf(1), log.matching(NumberCondition("duration", from = Math.nextUp(2000.0))))
+            assertEquals(listOf(0, 2), log.matching(NumberCondition("duration", to = 12.5)))
+            assertEquals(listOf(), log.matching(NumberCondition("Message", from = 0.0)))
+            assertEquals(listOf(), log.matching(NumberCondition("nope", from = 0.0)))
         }
     }
 

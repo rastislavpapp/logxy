@@ -1,8 +1,8 @@
 package io.github.rastislavpapp.logxy.app
 
+import io.github.rastislavpapp.logxy.core.config.PropertiesFiles
 import io.github.rastislavpapp.logxy.core.config.Settings
 import org.slf4j.LoggerFactory
-import java.nio.file.Files
 import java.util.Properties
 
 /** Small UI state remembered between runs (theme, last folder, …); unlike [AppSettings], not configuration. */
@@ -10,12 +10,11 @@ object AppState {
 
     private val log = LoggerFactory.getLogger(AppState::class.java)
     private val path = Settings.directory().resolve("ui.properties")
-    private val properties = Properties().apply {
-        try {
-            if (Files.exists(path)) Files.newBufferedReader(path).use { load(it) }
-        } catch (e: Exception) {
-            log.warn("Cannot read {}", path, e)
-        }
+    private val properties = try {
+        PropertiesFiles.load(path)
+    } catch (e: Exception) {
+        log.warn("Cannot read {}", path, e)
+        Properties()
     }
 
     operator fun get(key: String): String? = properties.getProperty(key)
@@ -23,8 +22,7 @@ object AppState {
     operator fun set(key: String, value: String?) {
         if (value == null) properties.remove(key) else properties[key] = value
         try {
-            Files.createDirectories(path.parent)
-            Files.newBufferedWriter(path).use { properties.store(it, "logxy UI state") }
+            PropertiesFiles.store(path, properties, "logxy UI state")
         } catch (e: Exception) {
             log.warn("Cannot write {}", path, e)
         }
@@ -34,6 +32,7 @@ object AppState {
     const val TITLE_BAR = "titleBar.integrated"
     const val LAST_DIRECTORY = "lastDirectory"
     const val DETAIL_DIVIDER = "detail.divider"
+    const val BOTTOM_TAB = "bottom.tab"
     const val FILTER_MODE = "filter.mode"
     const val PREFERENCES_SECTION = "preferences.section"
 }

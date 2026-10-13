@@ -5,4 +5,5 @@ plugins {
 
 dependencies {
     api(libs.kotlinx.coroutines.core)
+    implementation(libs.zstd.jni)
 }

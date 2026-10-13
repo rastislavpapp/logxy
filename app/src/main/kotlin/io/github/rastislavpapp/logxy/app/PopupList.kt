@@ -49,8 +49,7 @@ fun dropDownButton(tooltip: String, maxWidth: Int? = null, sizedFor: List<String
     }.apply {
         horizontalTextPosition = SwingConstants.LEADING
         toolTipText = tooltip
-        putClientProperty("JButton.buttonType", "toolBarButton")
-        isFocusable = false
+        flat()
         addActionListener { action(this) }
     }
 
@@ -74,16 +73,12 @@ private class PopupRow(private val item: PopupItem, private val popup: JPopupMen
     private var hovered = false
     private val label = JLabel(item.text, item.icon, JLabel.LEADING).apply { isEnabled = item.enabled }
     private val tools = item.tools.map { tool ->
-        JButton(tool.icon).apply {
-            toolTipText = tool.tooltip
-            putClientProperty("JButton.buttonType", "toolBarButton")
-            isFocusable = false
+        toolBarButton(tool.icon, tool.tooltip) {
+            popup.isVisible = false
+            tool.action()
+        }.apply {
             // Invisible, but still taking its space, until the row is hovered.
             isVisible = false
-            addActionListener {
-                popup.isVisible = false
-                tool.action()
-            }
         }
     }
 

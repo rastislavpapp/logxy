@@ -22,7 +22,7 @@ fun benchmarkMerging(files: List<Path>, iterations: Int, readChannels: Int?) {
     println("read channels per file: ${options.readChannels}")
     val (parts, parseSeconds) = measured {
         files.map { file ->
-            val compiled = LogFormat.detect(file).compile() ?: error("No built-in format matches $file")
+            val compiled = LogFormat.detect(file).compile() ?: error("No format detected for $file")
             val (log, seconds) = measured { runBlocking { ParsedLog.build(file, compiled, options = options) } }
             println("$file: %,d records in %.3f s".format(log.recordCount, seconds))
             log

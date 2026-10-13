@@ -1,7 +1,7 @@
 package io.github.rastislavpapp.logxy.core.session
 
 /** The records a filter lets through, in order; grows while the log is tailed. Used on one thread. */
-class FilteredRows(rows: IntArray) {
+internal class FilteredRows(rows: IntArray) {
 
     // May have room to grow beyond [size].
     private var rows = rows
@@ -12,6 +12,12 @@ class FilteredRows(rows: IntArray) {
     /** The record at [index], which must be below [size]. */
     operator fun get(index: Int): Int = rows[index]
 
+    /**
+     * The rows below [size], for reading on another thread. Only the part [replaceFrom] replaces may change
+     * under the reader, so a result for the rows read then is complete up to there.
+     */
+    internal fun array(): IntArray = rows
+
     /** Position of [record], or of the first record after it; -1 if there is none. */
     fun indexOf(record: Int): Int {
         val found = rows.binarySearch(record, 0, size)
@@ -21,16 +27,18 @@ class FilteredRows(rows: IntArray) {
 
     /**
      * Replaces the records from [from] on with [rows] (sorted, all `>= from`), e.g. a filter result
-     * for appended records and the last one before them, which may have changed. Returns the position
-     * where the replaced part starts.
+     * for appended records and the last one before them, which may have changed. Returns the first
+     * position whose record changed, or where rows were added or removed.
      */
     fun replaceFrom(from: Int, rows: IntArray): Int {
         val found = this.rows.binarySearch(from, 0, size)
         val cut = if (found >= 0) found else -found - 1
         val newSize = cut + rows.size
+        var changed = cut
+        while (changed < minOf(size, newSize) && this.rows[changed] == rows[changed - cut]) changed++
         if (newSize > this.rows.size) this.rows = this.rows.copyOf(maxOf(newSize, this.rows.size * 2))
         System.arraycopy(rows, 0, this.rows, cut, rows.size)
         size = newSize
-        return cut
+        return changed
     }
 }

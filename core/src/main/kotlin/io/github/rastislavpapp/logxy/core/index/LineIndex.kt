@@ -12,6 +12,7 @@ import kotlinx.coroutines.withContext
 import io.github.rastislavpapp.logxy.core.filter.LineSnapshot
 import io.github.rastislavpapp.logxy.core.filter.RecordSnapshot
 import io.github.rastislavpapp.logxy.core.log.AppendedData
+import io.github.rastislavpapp.logxy.core.log.Columns
 import io.github.rastislavpapp.logxy.core.log.Level
 import io.github.rastislavpapp.logxy.core.log.LevelMapping
 import io.github.rastislavpapp.logxy.core.log.LogData
@@ -74,7 +75,7 @@ class LineIndex private constructor(
 
     override fun level(record: Int): Level? = null
 
-    override fun timestamp(record: Int): Long? = null
+    override fun timestampNanos(record: Int): Long = Columns.ABSENT_TIMESTAMP
 
     val lineCount: Int get() = starts.size
 
@@ -85,6 +86,14 @@ class LineIndex private constructor(
     override fun filterSnapshot(): RecordSnapshot = LineSnapshot(lineCount, indexedSize, channels, starts)
 
     override fun recordText(record: Int, maxBytes: Int) = lineText(record, maxBytes)
+
+    override fun fieldText(record: Int, field: Int) = lineText(record)
+
+    override fun sourceText(record: Int): String {
+        val bytes = ByteArray((lineLimit(record) - lineStart(record)).toInt())
+        val length = channels.main.readFully(ByteBuffer.wrap(bytes), lineStart(record))
+        return String(bytes, 0, length, Charsets.UTF_8)
+    }
 
     fun lineStart(line: Int): Long = starts[line]
 

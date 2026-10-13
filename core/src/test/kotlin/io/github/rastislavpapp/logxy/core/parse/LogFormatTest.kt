@@ -24,8 +24,32 @@ class LogFormatTest {
     }
 
     @Test
-    fun `prefers the more specific of two matching formats`() {
+    fun `guesses a layout that no built-in format reads`() {
         val file = Files.writeString(dir.resolve("b.log"), "2026-10-01 08:00:00.001 INFO  [main] com.example.App - Started\n")
+        assertEquals(
+            LogFormat.Pattern("date LEVEL [thread] logger - message", "%d{yyyy-MM-dd HH:mm:ss.SSS} %p [%t] %c - %m%n"),
+            LogFormat.detect(file),
+        )
+    }
+
+    @Test
+    fun `guessed JSON keys replace the built-in JSON format`() {
+        val file = Files.writeString(dir.resolve("j.log"), "{\"when\":\"2026-10-01T08:00:00Z\",\"lvl\":\"info\",\"msg\":\"Started\"}\n")
+        assertEquals("JSON lines: when, lvl", LogFormat.detect(file).name)
+    }
+
+    @Test
+    fun `detects a file again once it changed`() {
+        val file = Files.writeString(dir.resolve("c.log"), "2026-10-01 08:00:00.001 [main] INFO  com.example.App - Started\n")
+        assertEquals(LogFormat.BUILT_IN[0], LogFormat.detect(file))
+        assertEquals(LogFormat.BUILT_IN[0], LogFormat.detect(file))
+        Files.writeString(file, "{\"@timestamp\":\"2026-10-01T08:00:00Z\",\"level\":\"INFO\",\"message\":\"Started\"}\n")
+        assertEquals(LogFormat.Json("JSON lines"), LogFormat.detect(file))
+    }
+
+    @Test
+    fun `a built-in format wins a tie with the guess`() {
+        val file = Files.writeString(dir.resolve("t.log"), "08:00:00.001 [main] INFO  com.example.App - Started\n")
         assertEquals(LogFormat.BUILT_IN[1], LogFormat.detect(file))
     }
 
@@ -47,13 +71,14 @@ class LogFormatTest {
     fun `detects Spring Boot layouts`() {
         val boot2 = Files.writeString(dir.resolve("boot2.log"),
             "2026-10-08 12:00:00.123  INFO 12345 --- [           main] c.e.demo.DemoApplication                 : Started\n")
-        assertEquals("Spring Boot 2", LogFormat.detect(boot2).name)
+        assertEquals("date LEVEL pid --- [thread] logger : message", LogFormat.detect(boot2).name)
         val boot3 = Files.writeString(dir.resolve("boot3.log"),
             "2026-10-08T12:00:00.123+02:00  WARN 12345 --- [           main] c.e.demo.DemoApplication                 : Slow\n")
         assertEquals("Spring Boot 3", LogFormat.detect(boot3).name)
         val boot3named = Files.writeString(dir.resolve("boot3n.log"),
-            "2026-10-08T12:00:00.123+02:00  WARN 12345 --- [demo] [           main] c.e.demo.DemoApplication                 : Slow\n")
-        assertEquals("Spring Boot 3 with application name", LogFormat.detect(boot3named).name)
+            "2026-10-08T12:00:00.123+02:00  WARN 12345 --- [demo] [           main] c.e.demo.DemoApplication                 : Slow\n" +
+                "2026-10-08T12:00:00.124+02:00  INFO 12345 --- [demo] [  restartedMain] c.e.demo.DemoApplication                 : Up\n")
+        assertEquals("date LEVEL pid --- [field] [thread] logger : message", LogFormat.detect(boot3named).name)
     }
 
     @Test

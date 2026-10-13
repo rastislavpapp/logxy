@@ -141,6 +141,10 @@ internal class Columns(val schema: Schema) {
      * [dictionary]. Null for SPAN fields, whose text is in the file.
      */
     fun valueText(field: Int, record: Int, format: RecordFormat, dictionary: ByteDictionary?): String? =
+        valueText(field, record, format) { dictionary!!.text(it) }
+
+    /** Like the other [valueText], with dictionary texts by id from [dictionaryText]. */
+    inline fun valueText(field: Int, record: Int, format: RecordFormat, dictionaryText: (Int) -> String): String? =
         when (schema.fields[field].type) {
             ColumnType.TIMESTAMP -> {
                 val nanos = longs[field]!![record]
@@ -148,11 +152,11 @@ internal class Columns(val schema: Schema) {
             }
             ColumnType.LEVEL -> {
                 val id = bytes[field]!![record].toInt() and 0xFF
-                if (id > MAX_LEVEL_ID) "" else dictionary!!.text(id)
+                if (id > MAX_LEVEL_ID) "" else dictionaryText(id)
             }
             ColumnType.DICT -> {
                 val id = ints[field]!![record]
-                if (id < 0) "" else dictionary!!.text(id)
+                if (id < 0) "" else dictionaryText(id)
             }
             ColumnType.SPAN -> null
         }

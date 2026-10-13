@@ -29,6 +29,7 @@ private const val SYNTAX_STYLE = "text/x-logxy-query"
 class QueryTextArea(private val onApply: () -> Unit) : RSyntaxTextArea(3, 60) {
 
     private val completions = DefaultCompletionProvider()
+    private val autoCompletion = AutoCompletion(completions)
 
     init {
         (TokenMakerFactory.getDefaultInstance() as AbstractTokenMakerFactory)
@@ -42,7 +43,7 @@ class QueryTextArea(private val onApply: () -> Unit) : RSyntaxTextArea(3, 60) {
         parserDelay = 300
 
         completions.setAutoActivationRules(true, null)
-        AutoCompletion(completions).apply {
+        autoCompletion.apply {
             isAutoActivationEnabled = true
             autoActivationDelay = 400
             install(this@QueryTextArea)
@@ -55,6 +56,11 @@ class QueryTextArea(private val onApply: () -> Unit) : RSyntaxTextArea(3, 60) {
             override fun actionPerformed(e: ActionEvent) = onApply()
         })
         applyTheme()
+    }
+
+    /** Lets go of what outlives this area otherwise: completion listens to look-and-feel changes app-wide. */
+    fun release() {
+        autoCompletion.uninstall()
     }
 
     /** Field names offered by completion, besides keywords, operators and levels. */

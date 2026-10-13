@@ -10,7 +10,7 @@ import java.nio.file.Path
 /** Measures parsing [file] with [pattern] or the detected format, plus the heap the result holds. */
 fun benchmarkParsing(file: Path, iterations: Int, pattern: String? = null) {
     val format = pattern?.let { LogFormat.Pattern(it, it) } ?: LogFormat.detect(file)
-    val compiled = format.compile() ?: error("No built-in format matches $file")
+    val compiled = format.compile() ?: error("No format detected for $file")
     val size = Files.size(file)
     println("File: $file (${formatByteSize(size)}), format: ${format.name}\n")
     var log: ParsedLog? = null

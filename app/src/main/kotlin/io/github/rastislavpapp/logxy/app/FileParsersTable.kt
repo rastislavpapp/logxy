@@ -48,7 +48,7 @@ class FileParsersTable(
     private val excludable: Boolean = false,
     private val onChange: () -> Unit = {},
 ) {
-    private val parsers: List<LogFormat?> = listOf(null, LogFormat.Raw) + AppSettings.current.formats + LogFormat.BUILT_IN
+    private val parsers: List<LogFormat?> = listOf(null, LogFormat.Raw) + AppSettings.current.formats + AppSettings.current.builtInFormats
     private val chosen = HashMap<Path, LogFormat?>().apply { files.forEachIndexed { i, file -> put(file, initial.getOrNull(i)) } }
     private val fileColumn = if (excludable) 1 else 0
     private val parserColumn = fileColumn + 1
@@ -75,8 +75,8 @@ class FileParsersTable(
     private val warning = JLabel(" ").apply { horizontalAlignment = SwingConstants.LEADING }
     private val scrollPane = JScrollPane(table)
 
-    val component = JPanel(MigLayout("insets 0, wrap 1", "[grow, fill]", "[grow][]")).apply {
-        add(scrollPane, "grow, hmin pref")
+    val component = JPanel(MigLayout("fill, insets 0, wrap 1", "[grow, fill]", "[grow][]")).apply {
+        add(scrollPane, "grow")
         add(warning)
     }
 
@@ -141,7 +141,7 @@ class FileParsersTable(
                     foreground = if (file in excluded) UIManager.getColor("Label.disabledForeground") else null
                     super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column)
                     val format = value as LogFormat?
-                    text = (if (format == null) detected[file]?.let { "Auto: ${it.name}" } else null ?: parserName(format)) + "  ⌄"
+                    text = ((if (format == null) detected[file]?.let { "Auto: ${it.name}" } else null) ?: parserName(format)) + "  ⌄"
                     icon = when {
                         file in problems -> Icons.warning
                         file in fitting -> Icons.fits
@@ -158,9 +158,10 @@ class FileParsersTable(
                 if (table.tableHeader.columnAtPoint(e.point) == parserColumn && files.size > 1) chooseForAll()
             }
         })
-        val height = table.tableHeader.preferredSize.height + table.rowHeight * files.size.coerceIn(3, 12) + 4
+        fun height(rows: Int) = table.tableHeader.preferredSize.height + table.rowHeight * rows + 4
         val width = (0..<table.columnCount).sumOf { table.columnModel.getColumn(it).preferredWidth }
-        scrollPane.preferredSize = Dimension(width + scrollPane.verticalScrollBar.preferredSize.width + 4, height)
+        scrollPane.preferredSize = Dimension(width + scrollPane.verticalScrollBar.preferredSize.width + 4, height(files.size.coerceIn(3, 12)))
+        scrollPane.minimumSize = Dimension(0, height(3))
         files.forEach(::check)
     }
 
@@ -177,11 +178,12 @@ class FileParsersTable(
         detected.remove(file)
         val chosen = chosen[file]
         val preferred = AppSettings.current.formats
+        val builtIn = AppSettings.current.builtInFormats
         checks[file] = scope.launch {
             var found: LogFormat? = null
             val problem = withContext(Dispatchers.IO) {
                 try {
-                    val format = chosen ?: LogFormat.detect(file, preferred).also { found = it }
+                    val format = chosen ?: LogFormat.detect(file, preferred, builtIn).also { found = it }
                     format.mismatch(file)
                 } catch (e: IOException) {
                     e.message ?: e.javaClass.simpleName
@@ -255,7 +257,7 @@ class FileParsersTable(
             parserColumn -> "Parser"
             else -> "Open"
         }
-        override fun getColumnClass(column: Int): Class<*> = if (column < fileColumn) java.lang.Boolean::class.java else Any::class.java
+        override fun getColumnClass(column: Int): Class<*> = if (column < fileColumn) Boolean::class.javaObjectType else Any::class.java
         override fun isCellEditable(row: Int, column: Int) = column != fileColumn
 
         override fun getValueAt(row: Int, column: Int): Any? {

@@ -8,6 +8,9 @@ import io.github.rastislavpapp.logxy.core.log.LevelMapping
 import io.github.rastislavpapp.logxy.core.log.LogData
 import io.github.rastislavpapp.logxy.core.log.ParsedLog
 import io.github.rastislavpapp.logxy.core.parse.PatternFormat
+import io.github.rastislavpapp.logxy.core.pattern.Templates
+import io.github.rastislavpapp.logxy.core.query.QueryException
+import io.github.rastislavpapp.logxy.core.query.TextSearch
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Files
@@ -48,6 +51,25 @@ class FilterEngineTest {
     private fun FilterEngine.rows(filter: Filter) = runBlocking { prepare(filter).run() }.rows.toList()
 
     private fun nanos(text: String) = LocalDateTime.parse(text).toEpochSecond(ZoneOffset.UTC) * 1_000_000_000
+
+    @Test
+    fun `searches the whole text of records, across fields and lines`() {
+        parse(sample).use { log ->
+            val engine = FilterEngine(log)
+            fun find(search: TextSearch) = engine.rows(search.condition())
+            assertEquals(listOf(2), find(TextSearch("sqlexception: BOOM")))
+            assertEquals(emptyList(), find(TextSearch("sqlexception", matchCase = true)))
+            assertEquals(listOf(2, 5), find(TextSearch("[worker-1] error")))
+            assertEquals(listOf(1), find(TextSearch("ŽLUŤOUČKÝ")))
+            assertEquals(listOf(0), find(TextSearch("banner")))
+            // Wildcards are text like any other.
+            assertEquals(emptyList(), find(TextSearch("Db.java:4*")))
+            assertEquals(listOf(4), find(TextSearch("tick", wholeWords = true)))
+            assertEquals(emptyList(), find(TextSearch("tic", wholeWords = true)))
+            assertEquals(listOf(3), find(TextSearch("worker-\\d] WARN", regex = true)))
+            assertFailsWith<QueryException> { TextSearch("(", regex = true).condition() }
+        }
+    }
 
     @Test
     fun `conditions on each kind of field`() {
@@ -134,6 +156,27 @@ class FilterEngineTest {
         runBlocking { LineIndex.build(file) }.use { log ->
             assertEquals(listOf(0), FilterEngine(log).rows(TextCondition("Line", TextOp.EQUALS, "a\\*b")))
             assertEquals(listOf(0, 1), FilterEngine(log).rows(TextCondition("Line", TextOp.EQUALS, "a*b")))
+        }
+    }
+
+    @Test
+    fun `numbers in dictionary, span and map fields`() {
+        val mdc = PatternFormat("%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %-5p %c %X - %m%n", ZoneOffset.UTC)
+        val content = """
+            2026-10-01 08:00:00.000 [7] INFO  app.Http {status=200, ms=15} - 12
+            2026-10-01 08:00:01.000 [12] INFO  app.Http {status=503, ms=2400} - 1.5e3
+            2026-10-01 08:00:02.000 [main] INFO  app.Http {status=, ms=x} - slow
+        """.trimIndent() + "\n"
+        val file = Files.writeString(dir.resolve("numbers.log"), content)
+        runBlocking { ParsedLog.build(file, mdc, IndexProgress()) }.use { log ->
+            val engine = FilterEngine(log)
+            assertEquals(listOf(1), engine.rows(NumberCondition("Thread", from = 10.0)))
+            assertEquals(listOf(0, 1), engine.rows(NumberCondition("Thread", to = 12.0)))
+            assertEquals(listOf(1), engine.rows(NumberCondition("Message", from = 100.0)))
+            assertEquals(listOf(0, 1), engine.rows(NumberCondition("Message")))
+            assertEquals(listOf(1), engine.rows(NumberCondition("MDC[status]", from = 500.0)))
+            assertEquals(listOf(0), engine.rows(NumberCondition("MDC[ms]", to = 2000.0)))
+            assertEquals(listOf(), engine.rows(NumberCondition("Timestamp", from = 0.0)))
         }
     }
 
@@ -263,6 +306,7 @@ class FilterEngineTest {
             Filter.And(listOf(LevelCondition.atLeast("Level", Level.WARN), TextCondition("Message", TextOp.EQUALS, "*needle*"))),
             Filter.Or(listOf(TextCondition("Thread", TextOp.EQUALS, "t-3"), Filter.Not(TextCondition("Logger", TextOp.EQUALS, "log.L1")))),
             Filter.And(listOf(TextCondition("Message", TextOp.EQUALS, "*NEEDLE*", ignoreCase = true), TimeCondition("Timestamp", from = nanos("2026-10-01T02:00:00")))),
+            Filter.And(listOf(LevelCondition.atLeast("Level", Level.INFO), Filter.Not(PatternCondition("Message", setOf("message {} hay"))))),
         )
         fun expected(log: LogData, filter: Filter): List<Int> = (0..<log.recordCount).filter { matches(log as ParsedLog, it, filter) }
 
@@ -286,6 +330,7 @@ class FilterEngineTest {
         is Filter.Or -> filter.parts.any { matches(log, record, it) }
         is Filter.Not -> !matches(log, record, filter.part)
         is LevelCondition -> log.level(record) in filter.levels
+        is NumberCondition, is RecordTextCondition -> error("unused")
         is TimeCondition -> {
             val text = log.rowValues(record, 1000)[0]
             text.isNotEmpty() && nanos(text.replace(' ', 'T')) >= (filter.from ?: Long.MIN_VALUE)
@@ -306,6 +351,7 @@ class FilterEngineTest {
                 else -> error("unused")
             }
         }
+        is PatternCondition -> Templates.mask(log.rowValues(record, 1000)[log.schema.fields.indexOfFirst { it.name == filter.field }]) in filter.templates
         is PresenceCondition -> error("unused")
     }
 }

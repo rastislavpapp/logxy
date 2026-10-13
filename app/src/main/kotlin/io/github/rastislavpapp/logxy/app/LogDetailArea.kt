@@ -1,17 +1,26 @@
 package io.github.rastislavpapp.logxy.app
 
 import com.formdev.flatlaf.FlatLaf
+import io.github.rastislavpapp.logxy.core.query.Highlighter
 import org.fife.ui.rsyntaxtextarea.AbstractTokenMakerFactory
 import org.fife.ui.rsyntaxtextarea.RSyntaxTextArea
 import org.fife.ui.rsyntaxtextarea.Theme
 import org.fife.ui.rsyntaxtextarea.Token
 import org.fife.ui.rsyntaxtextarea.TokenMakerBase
 import org.fife.ui.rsyntaxtextarea.TokenMakerFactory
+import java.awt.Color
 import java.awt.Font
 import javax.swing.UIManager
+import javax.swing.text.DefaultHighlighter
 import javax.swing.text.Segment
 
 private const val SYNTAX_STYLE = "text/x-logxy-record"
+
+/** Background of text matched by the filter, translucent to suit light and dark looks. */
+val HIGHLIGHT_COLOR = Color(255, 200, 0, 110)
+
+/** Background of text the find bar found; unlike the filter's, also shown on selected rows. */
+val FOUND_COLOR = Color(40, 200, 90, 130)
 
 /** Applies the editor colors matching the light or dark look and the monospaced UI font. */
 fun RSyntaxTextArea.applyEditorTheme() {
@@ -26,6 +35,27 @@ fun RSyntaxTextArea.applyEditorTheme() {
 class LogDetailArea : RSyntaxTextArea() {
 
     private var initialized = false
+    private val painter = DefaultHighlighter.DefaultHighlightPainter(HIGHLIGHT_COLOR)
+    private val foundPainter = DefaultHighlighter.DefaultHighlightPainter(FOUND_COLOR)
+
+    /** Marks what this filter matched in the shown text. */
+    var matches: Highlighter = Highlighter.NONE
+        set(value) {
+            field = value
+            mark()
+        }
+
+    /** Marks what the find bar found in the shown text. */
+    var found: Highlighter = Highlighter.NONE
+        set(value) {
+            field = value
+            mark()
+        }
+
+    private var foundRanges = IntArray(0)
+
+    /** Where the find bar's text first occurs in the shown text; 0 if it does not. */
+    val firstFound: Int get() = foundRanges.firstOrNull() ?: 0
 
     init {
         (TokenMakerFactory.getDefaultInstance() as AbstractTokenMakerFactory)
@@ -43,6 +73,21 @@ class LogDetailArea : RSyntaxTextArea() {
         super.updateUI()
         // Also called from the superclass constructor, before this class is initialized.
         if (initialized) applyTheme()
+    }
+
+    /** Shows [value] with the matches marked. */
+    fun show(value: String) {
+        text = value
+        mark()
+    }
+
+    private fun mark() {
+        if (!initialized) return
+        highlighter.removeAllHighlights()
+        val ranges = matches.ranges(null, text, Highlighter.DETAIL_BUDGET_NANOS)
+        for (i in ranges.indices step 2) highlighter.addHighlight(ranges[i], ranges[i + 1], painter)
+        foundRanges = found.ranges(null, text, Highlighter.DETAIL_BUDGET_NANOS)
+        for (i in foundRanges.indices step 2) highlighter.addHighlight(foundRanges[i], foundRanges[i + 1], foundPainter)
     }
 
     /** The editor theme, with levels in the same colors as the table's level badges. */
