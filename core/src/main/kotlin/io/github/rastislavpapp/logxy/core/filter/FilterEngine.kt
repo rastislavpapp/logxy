@@ -127,6 +127,10 @@ class FilterEngine(private val log: LogData, private val maxCacheBytes: Long = D
         is Condition -> Leaf.of(filter, snapshot, patterns)
     }
 
+    /**
+     * One run of a compiled filter over a [snapshot], from record [from] on, in chunks of 64-record words spread
+     * over all cores. Reuses and fills the engine's per-condition cache.
+     */
     inner class Evaluation internal constructor(
         private val root: Node,
         private val snapshot: RecordSnapshot,
@@ -277,6 +281,7 @@ class FilterEngine(private val log: LogData, private val maxCacheBytes: Long = D
     }
 }
 
+/** A [Filter] compiled against one snapshot's schema; [Evaluation] walks the tree. */
 internal sealed interface Node {
     /** Higher costs are evaluated later, on fewer candidates. */
     val cost: Int

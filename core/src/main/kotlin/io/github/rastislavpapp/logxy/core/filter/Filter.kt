@@ -4,8 +4,13 @@ import io.github.rastislavpapp.logxy.core.log.Level
 
 /** A condition tree over the fields of a log's records; see [FilterEngine]. */
 sealed interface Filter {
+    /** Every one of [parts] matches; with no parts, every record does. */
     data class And(val parts: List<Filter>) : Filter
+
+    /** At least one of [parts] matches; with no parts, no record does. */
     data class Or(val parts: List<Filter>) : Filter
+
+    /** [part] does not match. */
     data class Not(val part: Filter) : Filter
 }
 
@@ -29,13 +34,16 @@ data class TextCondition(
 data class RecordTextCondition(val op: TextOp, val value: String, val ignoreCase: Boolean = false) : Condition {
     override val field get() = RECORD_TEXT
 
+    /** The same test as a [TextCondition], for the text matcher that both share. */
     internal fun asText() = TextCondition(RECORD_TEXT, op, value, ignoreCase)
 
     companion object {
+        /** The pseudo field name of the whole record; the leading NUL keeps it apart from the fields of real logs. */
         const val RECORD_TEXT = "\u0000record"
     }
 }
 
+/** The record has a value of [field] ([present]), or has none (not [present]). A log without the field has none. */
 data class PresenceCondition(override val field: String, val present: Boolean = true) : Condition
 
 /** The record's canonical level is one of [levels]. */
@@ -62,5 +70,6 @@ data class TimeCondition(override val field: String, val from: Long? = null, val
  * number match nothing, like absent ones.
  */
 data class NumberCondition(override val field: String, val from: Double? = null, val to: Double? = null) : Condition {
+    /** Whether [number] lies in the range; false for NaN, which stands for a value that is no number. */
     internal fun matches(number: Double) = number >= (from ?: Double.NEGATIVE_INFINITY) && number <= (to ?: Double.POSITIVE_INFINITY)
 }

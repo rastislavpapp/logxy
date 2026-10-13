@@ -26,13 +26,16 @@ internal abstract class RecordSnapshot(
     /** Dictionary texts of LEVEL and DICT fields, by id. */
     abstract fun dictionaryTexts(field: Int): List<String>
 
+    /** How level texts map to levels at the time of the snapshot. */
     open val levels: LevelMapping get() = LevelMapping.DEFAULT
 
+    /** A TIMESTAMP value of [field] as the table shows it, so text conditions on timestamps match what the user sees. */
     open fun formatTimestamp(field: Int, nanos: Long): String = nanos.toString()
 
     /** Walks records, cheapest in increasing order; one per thread. */
     abstract fun cursor(): RecordCursor
 
+    /** [length] bytes of the file from [position]; fewer if the file ends before. */
     protected fun readBytes(position: Long, length: Int): ByteArray {
         val bytes = ByteArray(length)
         val read = channels.main.readFully(ByteBuffer.wrap(bytes), position)
@@ -43,22 +46,40 @@ internal abstract class RecordSnapshot(
     abstract fun fieldText(record: Int, field: Int): String
 }
 
+/**
+ * The stored values of one record at a time, without reading the file. Moving forward is cheap; a filter
+ * moves through the records it tests in increasing order. Not thread-safe.
+ */
 internal interface RecordCursor {
+    /** Makes [record] the current one. */
     fun moveTo(record: Int)
 
     /** The record moved to. */
     val record: Int
+
+    /** File offset where the record starts. */
     val start: Long
+
+    /** File offset where the record ends, line terminator included. */
     val end: Long
+
+    /** Epoch nanoseconds of TIMESTAMP [field], or [Columns.ABSENT_TIMESTAMP]. */
     fun timestamp(field: Int): Long
+
+    /** Dictionary id of LEVEL [field]'s text, above [Columns.MAX_LEVEL_ID] if absent. */
     fun levelId(field: Int): Int
+
+    /** Dictionary id of DICT [field]'s value, negative if absent. */
     fun dictId(field: Int): Int
+
+    /** Where SPAN [field]'s value starts, relative to [start]. */
     fun spanStart(field: Int): Int
 
     /** [Columns.ABSENT_LENGTH], [Columns.TO_RECORD_END], or a length. */
     fun spanLength(field: Int): Int
 }
 
+/** A snapshot of a [ParsedLog]: its column segments up to [count] records, the [first] record of each, and the dictionary [texts]. */
 internal class ParsedSnapshot(
     schema: Schema,
     count: Int,
