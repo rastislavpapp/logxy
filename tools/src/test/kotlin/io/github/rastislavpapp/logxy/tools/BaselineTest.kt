@@ -4,6 +4,7 @@ import io.github.rastislavpapp.logxy.core.filter.Filter
 import io.github.rastislavpapp.logxy.core.filter.FilterEngine
 import io.github.rastislavpapp.logxy.core.filter.LevelCondition
 import io.github.rastislavpapp.logxy.core.filter.PatternCondition
+import io.github.rastislavpapp.logxy.core.filter.RecordTextCondition
 import io.github.rastislavpapp.logxy.core.filter.TextCondition
 import io.github.rastislavpapp.logxy.core.filter.TextOp
 import io.github.rastislavpapp.logxy.core.log.Level
@@ -15,6 +16,7 @@ import io.github.rastislavpapp.logxy.core.parse.LogFormat
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
+import java.nio.file.StandardOpenOption
 import java.util.Locale
 import java.util.Properties
 import kotlin.test.Test
@@ -38,6 +40,7 @@ private val DATA_DIR = Path.of("build/benchmark")
 private const val MAIN_SIZE = 1L shl 30
 private const val MERGE_FILES = 8
 private const val MERGE_FILE_SIZE = 64L shl 20
+private const val APPEND_SIZE = 64L shl 10
 private const val RUNS = 5
 private const val SETUP = "main=1g seed=1; merge=8x64m seeds=2..9; best of 5"
 
@@ -85,6 +88,29 @@ private fun measureAll(): Map<String, Double> {
         record("patterns: count all again", best { runBlocking { engine.countPatterns(null, parsed.recordCount) } })
         val hide = Filter.Not(PatternCondition("Message", setOf(top)))
         record("filter hide most common pattern", best { runBlocking { FilterEngine(parsed).prepare(hide).run() } })
+    }
+
+    // A followed log: a filter and a search catch up on records appended to a copy of the main file.
+    val followed = DATA_DIR.resolve("followed.log")
+    Files.copy(main, followed, StandardCopyOption.REPLACE_EXISTING)
+    try {
+        val appended = Files.readAllBytes(dataFile("appended.log", APPEND_SIZE, 10))
+        runBlocking { ParsedLog.build(followed, format) }.use { parsed ->
+            val engine = FilterEngine(parsed)
+            val search = RecordTextCondition(TextOp.EQUALS, "*timeout*", ignoreCase = true)
+            val filter = Filter.And(listOf(LevelCondition.atLeast("Level", Level.WARN), search))
+            runBlocking { engine.prepare(filter).run() }
+            record("follow: filter appended records", (1..RUNS).minOf {
+                val covered = parsed.recordCount
+                Files.write(followed, appended, StandardOpenOption.APPEND)
+                parsed.append(parsed.readAppended(Files.size(followed)))
+                val started = System.nanoTime()
+                runBlocking { engine.prepare(filter, engine.changedFrom(covered)).run() }
+                (System.nanoTime() - started) / 1e9
+            })
+        }
+    } finally {
+        Files.deleteIfExists(followed)
     }
 
     val parts = ArrayList<LogData>()
