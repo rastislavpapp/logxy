@@ -24,7 +24,6 @@ detekt {
     // Only what differs from detekt's defaults.
     buildUponDefaultConfig = true
     config.setFrom(rootDir.resolve("config/detekt.yml"))
-    ignoreFailures = true
 }
 
 tasks.test {

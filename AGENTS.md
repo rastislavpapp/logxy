@@ -12,6 +12,7 @@ Fast desktop log viewer (Kotlin, Swing, FlatLaf, Gradle).
 - **Length follows the content**: one line by default, more when the contract needs it (units, threading, nullability, edge cases, the reason for a non-obvious approach).
 - **KDoc** where the name and signature leave something out: the contract, an edge case, the reason. In `core`, the API the app builds on, look for that on every class and non-private function; where the name and signature already say it all, leave the KDoc out.
 - Match the style of the surrounding code.
+- `./gradlew build` runs detekt (`config/detekt.yml`) and fails on any finding. `./gradlew detekt --auto-correct` fixes whitespace, imports and braces; a line over 120 characters needs restructuring (a `val`, a `when`, one argument per line only as a last resort), not just wrapping.
 
 ## Rules
 
