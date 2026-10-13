@@ -1,6 +1,7 @@
 // Shared setup for every module.
 plugins {
     id("org.jetbrains.kotlin.jvm")
+    id("dev.detekt")
 }
 
 group = "io.github.rastislavpapp.logxy"
@@ -16,6 +17,14 @@ dependencies {
     testImplementation(platform(libs.findLibrary("junit-bom").get()))
     testImplementation(libs.findLibrary("junit-jupiter").get())
     testRuntimeOnly(libs.findLibrary("junit-platform-launcher").get())
+    detektPlugins(libs.findLibrary("detekt-rules-ktlint-wrapper").get())
+}
+
+detekt {
+    // Only what differs from detekt's defaults.
+    buildUponDefaultConfig = true
+    config.setFrom(rootDir.resolve("config/detekt.yml"))
+    ignoreFailures = true
 }
 
 tasks.test {

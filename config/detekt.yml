@@ -1,0 +1,54 @@
+# Only what differs from detekt's defaults: https://detekt.dev/docs/rules/
+
+complexity:
+  # Hot loops over bytes are long and branchy on purpose: splitting them costs speed.
+  CyclomaticComplexMethod:
+    active: false
+  LongMethod:
+    active: false
+  TooManyFunctions:
+    active: false
+
+style:
+  # Mostly Swing pixel sizes and byte constants, which read best where they are used.
+  MagicNumber:
+    active: false
+  # Early returns and guard clauses are the house style.
+  ReturnCount:
+    active: false
+
+ktlint:
+  # The formatter fixes whitespace, imports and braces but does not reflow code: splitting a long line well
+  # takes extracting a `val` or a `when`, which no formatter does, so over-long lines are reported instead.
+  ArgumentListWrapping:
+    active: false
+  BinaryExpressionWrapping:
+    active: false
+  ClassSignature:
+    active: false
+  ConditionWrapping:
+    active: false
+  FunctionLiteral:
+    active: false
+  FunctionSignature:
+    active: false
+  ParameterListWrapping:
+    active: false
+  ParameterWrapping:
+    active: false
+  PropertyWrapping:
+    active: false
+  Wrapping:
+    active: false
+  # Reported by style>MaxLineLength.
+  MaximumLineLength:
+    active: false
+  # Would turn block bodies into expression bodies, packing more onto one line.
+  FunctionExpressionBody:
+    active: false
+  BlankLineBetweenWhenConditions:
+    active: false
+  # A one-line if may have one else and no nested if; once it spans lines, every branch gets braces
+  # (MultiLineIfElse, on by default).
+  IfElseWrapping:
+    active: true
