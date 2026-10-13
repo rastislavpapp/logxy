@@ -46,7 +46,8 @@ object WindowState {
         if (window is Frame) restoreUnmaximized(window) { normalBounds }
     }
 
-    private fun isMaximized(window: Window) = window is Frame && window.extendedState and Frame.MAXIMIZED_BOTH == Frame.MAXIMIZED_BOTH
+    private fun isMaximized(window: Window) =
+        window is Frame && window.extendedState and Frame.MAXIMIZED_BOTH == Frame.MAXIMIZED_BOTH
 
     private fun restoreUnmaximized(frame: Frame, normalBounds: () -> Rectangle) {
         // Bounds to return to when un-maximized; window managers forget them if the window started maximized.
@@ -67,7 +68,10 @@ object WindowState {
             val properties = PropertiesFiles.load(path)
 
             // The main window's entries had no prefix before other windows were remembered too.
-            fun value(name: String) = properties.getProperty("$key.$name") ?: if (key == MAIN) properties.getProperty(name) else null
+            fun value(name: String): String? {
+                properties.getProperty("$key.$name")?.let { return it }
+                return if (key == MAIN) properties.getProperty(name) else null
+            }
             val x = value("x") ?: return
             val saved = Rectangle(x.toInt(), value("y")!!.toInt(), value("width")!!.toInt(), value("height")!!.toInt())
             val screen = screenFor(saved, value("screen"))
@@ -112,7 +116,9 @@ object WindowState {
     /** The saved monitor is gone: keep the size, but center the window on [area]. */
     private fun centeredIn(bounds: Rectangle, area: Rectangle): Rectangle {
         val fitted = fitInto(bounds, area)
-        return Rectangle(area.x + (area.width - fitted.width) / 2, area.y + (area.height - fitted.height) / 2, fitted.width, fitted.height)
+        val x = area.x + (area.width - fitted.width) / 2
+        val y = area.y + (area.height - fitted.height) / 2
+        return Rectangle(x, y, fitted.width, fitted.height)
     }
 
     private fun save(window: Window, key: String, normalBounds: Rectangle) {

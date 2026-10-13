@@ -48,14 +48,19 @@ class FindBar(
 
     /** What to find; null while the bar is hidden or empty. */
     val search: TextSearch?
-        get() = if (isVisible && input.text.isNotEmpty()) TextSearch(input.text, matchCase.isSelected, wholeWords.isSelected, regex.isSelected) else null
+        get() {
+            if (!isVisible || input.text.isEmpty()) return null
+            return TextSearch(input.text, matchCase.isSelected, wholeWords.isSelected, regex.isSelected)
+        }
 
     init {
         isOpaque = false
         isVisible = false
         count.isVisible = false
         add(input)
-        add(toolBarButton(Icons.get("general/chevronUp"), "Previous match (Shift+Enter, Shift+F3)") { find(forward = false) })
+        add(toolBarButton(Icons.get("general/chevronUp"), "Previous match (Shift+Enter, Shift+F3)") {
+            find(forward = false)
+        })
         add(toolBarButton(Icons.get("general/chevronDown"), "Next match (Enter, F3)") { find(forward = true) })
         add(toolBarButton(Icons.closeSmall, "Close (Esc)") { close() })
         add(count, "span, gapleft 4")
@@ -131,7 +136,8 @@ class FindBar(
         val numbers = NumberFormat.getIntegerInstance()
         count.text = when {
             input.text.isEmpty() -> ""
-            total == null -> if (progress != null && progress > 0) "Searching ${(progress * 100).toInt()} %" else "Searching…"
+            total == null && progress != null && progress > 0 -> "Searching ${(progress * 100).toInt()} %"
+            total == null -> "Searching…"
             total == 0 -> "No matches"
             current > 0 -> "${numbers.format(current)} of ${numbers.format(total)}"
             total == 1 -> "1 match"

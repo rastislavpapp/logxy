@@ -29,7 +29,8 @@ import javax.swing.UIManager
  * saved filters and Clear.
  * Enter in any input applies. [onApply] is called to (re)apply; [minimumLevel] and [query] give the state.
  */
-class FilterBar(private val onApply: () -> Unit) : JPanel(MigLayout("insets 6 8 6 8, fillx, gapy 3, hidemode 3", "[grow, fill]0[]")) {
+class FilterBar(private val onApply: () -> Unit) :
+    JPanel(MigLayout("insets 6 8 6 8, fillx, gapy 3, hidemode 3", "[grow, fill]0[]")) {
 
     private val levelButton = dropDownButton(
         "Show only records of this level or more severe",
@@ -58,7 +59,8 @@ class FilterBar(private val onApply: () -> Unit) : JPanel(MigLayout("insets 6 8 
     private val textArea = QueryTextArea(applyFilter)
     private val textMode = accentToggle(
         Icons.advanced,
-        "Advanced: write the filter as an expression, e.g. level >= WARN AND message == \"*timeout*\" (Ctrl+Enter applies)",
+        "Advanced: write the filter as an expression, e.g. level >= WARN AND message == \"*timeout*\" " +
+            "(Ctrl+Enter applies)",
     ).apply {
         addActionListener { switchMode(isSelected) }
     }
@@ -129,7 +131,9 @@ class FilterBar(private val onApply: () -> Unit) : JPanel(MigLayout("insets 6 8 
         editor.setFields(fields)
         textArea.setFields(fields.map { it.name } + listOfNotNull(Query.PATTERN_FIELD.takeIf { schema.hasPatterns() }))
         // The editor starts placeholder rows over on new fields; text without real conditions follows it.
-        if (text != null && editor.query().items.isEmpty()) textArea.text = QueryPrinter.print(editor.query(includeEmpty = true))
+        if (text != null && editor.query().items.isEmpty()) {
+            textArea.text = QueryPrinter.print(editor.query(includeEmpty = true))
+        }
         if (suspended) updateInputsEnabled()
     }
 
@@ -292,7 +296,8 @@ class FilterBar(private val onApply: () -> Unit) : JPanel(MigLayout("insets 6 8 
                 add(PopupItem("≥ $level", selected = minimum == level, separatorBefore = i == 0) { choose(level) })
             }
             add(PopupItem("Log Level Mapping", Icons.levels, separatorBefore = true) {
-                PreferencesDialog(SwingUtilities.getWindowAncestor(this@FilterBar), PreferencesDialog.Section.LEVELS).isVisible = true
+                val window = SwingUtilities.getWindowAncestor(this@FilterBar)
+                PreferencesDialog(window, PreferencesDialog.Section.LEVELS).isVisible = true
             })
         }
         showPopupList(levelButton, items)
@@ -303,7 +308,8 @@ class FilterBar(private val onApply: () -> Unit) : JPanel(MigLayout("insets 6 8 
         val items = buildList {
             if (filters.isEmpty()) add(PopupItem("No saved filters", enabled = false))
             filters.forEach { filter ->
-                add(PopupItem(filter.name, tools = listOf(PopupTool(Icons.clear, "Delete this filter") { delete(filter) })) { load(filter) })
+                val deleteTool = PopupTool(Icons.clear, "Delete this filter") { delete(filter) }
+                add(PopupItem(filter.name, tools = listOf(deleteTool)) { load(filter) })
             }
             add(PopupItem("Save Current Filter As", Icons.add, separatorBefore = true) { save() })
         }
@@ -334,22 +340,23 @@ class FilterBar(private val onApply: () -> Unit) : JPanel(MigLayout("insets 6 8 
             showError(e.message)
             return
         }
-        val name = JOptionPane.showInputDialog(this, "Name of the filter:", "Save Filter", JOptionPane.PLAIN_MESSAGE)?.trim()
+        val name = JOptionPane.showInputDialog(this, "Name of the filter:", "Save Filter", JOptionPane.PLAIN_MESSAGE)
+            ?.trim()
         if (name.isNullOrEmpty()) return
         val filters = AppSettings.current.filters
-        if (filters.any { it.name == name } &&
-            JOptionPane.showConfirmDialog(this, "Replace the saved filter “$name”?", "Save Filter", JOptionPane.YES_NO_OPTION) != JOptionPane.YES_OPTION
-        ) {
-            return
-        }
+        val exists = filters.any { it.name == name }
+        if (exists && !confirm("Replace the saved filter “$name”?", "Save Filter")) return
         val filter = SavedFilter(name, minimumLevel, text)
-        persist(if (filters.any { it.name == name }) filters.map { if (it.name == name) filter else it } else filters + filter)
+        persist(if (exists) filters.map { if (it.name == name) filter else it } else filters + filter)
     }
 
     private fun delete(filter: SavedFilter) {
-        if (JOptionPane.showConfirmDialog(this, "Delete the saved filter “${filter.name}”?", "Delete Filter", JOptionPane.YES_NO_OPTION) != JOptionPane.YES_OPTION) return
+        if (!confirm("Delete the saved filter “${filter.name}”?", "Delete Filter")) return
         persist(AppSettings.current.filters.filter { it.name != filter.name })
     }
+
+    private fun confirm(message: String, title: String) =
+        JOptionPane.showConfirmDialog(this, message, title, JOptionPane.YES_NO_OPTION) == JOptionPane.YES_OPTION
 
     private fun persist(filters: List<SavedFilter>) {
         AppSettings.updateOrShowError(this, AppSettings.current.copy(filters = filters))

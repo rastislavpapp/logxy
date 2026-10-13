@@ -62,8 +62,12 @@ private const val PLACEHOLDERS_CARD = "placeholders"
 
 private val PADDING = EmptyBorder(0, 0, 0, 12)
 
-/** Whether records with [this] schema can be filtered by message template: they have a message, and no field of the log takes the name. */
-fun Schema.hasPatterns() = indexOf(Role.MESSAGE) >= 0 && fields.none { it.name.equals(Query.PATTERN_FIELD, ignoreCase = true) }
+/**
+ * Whether records with [this] schema can be filtered by message template: they have a message, and no field of
+ * the log takes the name.
+ */
+fun Schema.hasPatterns() =
+    indexOf(Role.MESSAGE) >= 0 && fields.none { it.name.equals(Query.PATTERN_FIELD, ignoreCase = true) }
 
 /**
  * The shown rows grouped by the template of their message (see [Templates]), most frequent first, with
@@ -115,7 +119,8 @@ class PatternsPanel(
             override fun mouseReleased(e: MouseEvent) = menu(e)
 
             override fun mouseClicked(e: MouseEvent) {
-                if (e.clickCount == 2 && e.button == MouseEvent.BUTTON1 && table.rowAtPoint(e.point) >= 0) showOnly(selectedTemplates())
+                val onRow = table.rowAtPoint(e.point) >= 0
+                if (e.clickCount == 2 && e.button == MouseEvent.BUTTON1 && onRow) showOnly(selectedTemplates())
             }
 
             // The popup trigger comes with the press on some systems, with the release on others.
@@ -137,7 +142,8 @@ class PatternsPanel(
     }
 
     private fun updateLook() {
-        val base = UIManager.getFont("monospaced.font") ?: Font(Font.MONOSPACED, Font.PLAIN, UIManager.getFont("Table.font").size)
+        val base = UIManager.getFont("monospaced.font")
+            ?: Font(Font.MONOSPACED, Font.PLAIN, UIManager.getFont("Table.font").size)
         table.font = Font(base.name, base.style, base.size)
         table.rowHeight = table.getFontMetrics(table.font).height + 4
         setUpColumns()
@@ -207,7 +213,8 @@ class PatternsPanel(
             g.fillRect(0, 0, (width * fraction.coerceIn(0.0, 1.0)).toInt(), PROGRESS_HEIGHT)
         } else {
             val segment = width / 4
-            val x = (System.currentTimeMillis() % CYCLE_MILLIS.toLong() / CYCLE_MILLIS * (width + segment)).toInt() - segment
+            val phase = System.currentTimeMillis() % CYCLE_MILLIS.toLong() / CYCLE_MILLIS
+            val x = (phase * (width + segment)).toInt() - segment
             g.fillRect(x, 0, segment, PROGRESS_HEIGHT)
         }
     }
@@ -255,13 +262,16 @@ class PatternsPanel(
 
     /** The selected templates, without the entries that stand for no single template. */
     private fun selectedTemplates(): List<String> =
-        table.selectedRows.toList().mapNotNull { model.template(table.convertRowIndexToModel(it)) }.filter { it.isNotEmpty() }
+        table.selectedRows.toList()
+            .mapNotNull { model.template(table.convertRowIndexToModel(it)) }
+            .filter { it.isNotEmpty() }
 
     private fun showMenu(x: Int, y: Int) {
         val templates = selectedTemplates()
         val several = templates.size > 1
         val popup = JPopupMenu()
-        popup.add(JMenuItem(if (several) "Show Only These ${templates.size} Patterns" else "Show Only This Pattern", Icons.filter).apply {
+        val showOnly = if (several) "Show Only These ${templates.size} Patterns" else "Show Only This Pattern"
+        popup.add(JMenuItem(showOnly, Icons.filter).apply {
             isEnabled = canFilter && templates.isNotEmpty()
             addActionListener { showOnly(templates) }
         })
@@ -272,7 +282,10 @@ class PatternsPanel(
         popup.addSeparator()
         popup.add(JMenuItem(if (several) "Copy Patterns" else "Copy Pattern").apply {
             isEnabled = templates.isNotEmpty()
-            addActionListener { Toolkit.getDefaultToolkit().systemClipboard.setContents(StringSelection(templates.joinToString("\n")), null) }
+            addActionListener {
+                val selection = StringSelection(templates.joinToString("\n"))
+                Toolkit.getDefaultToolkit().systemClipboard.setContents(selection, null)
+            }
         })
         popup.show(table, x, y)
     }
@@ -351,7 +364,8 @@ class PatternsPanel(
             else -> levels[column - 1].name
         }
 
-        override fun getColumnClass(column: Int): Class<*> = if (column < columnCount - 1) Int::class.javaObjectType else String::class.java
+        override fun getColumnClass(column: Int): Class<*> =
+            if (column < columnCount - 1) Int::class.javaObjectType else String::class.java
 
         override fun getValueAt(row: Int, column: Int): Any? {
             val counts = counts ?: return null
@@ -373,7 +387,8 @@ class PatternsPanel(
             table: JTable, value: Any?, isSelected: Boolean, hasFocus: Boolean, row: Int, column: Int,
         ): Component {
             val n = value as Int? ?: 0
-            super.getTableCellRendererComponent(table, if (n == 0) "" else "%,d".format(n), isSelected, hasFocus, row, column)
+            val text = if (n == 0) "" else "%,d".format(n)
+            super.getTableCellRendererComponent(table, text, isSelected, hasFocus, row, column)
             if (!isSelected) foreground = levelColor(level, table.foreground)
             // Apart from the next column, which starts at its left edge.
             border = CompoundBorder(border, PADDING)

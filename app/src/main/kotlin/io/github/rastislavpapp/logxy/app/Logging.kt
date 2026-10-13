@@ -29,6 +29,7 @@ object Logging {
         }
         val log = LoggerFactory.getLogger(Logging::class.java)
         Thread.setDefaultUncaughtExceptionHandler { thread, e -> log.error("Uncaught exception in {}", thread.name, e) }
-        log.info("logxy {} on Java {} ({})", Logging::class.java.`package`?.implementationVersion ?: "development build", Runtime.version(), System.getProperty("java.home"))
+        val version = Logging::class.java.`package`?.implementationVersion ?: "development build"
+        log.info("logxy {} on Java {} ({})", version, Runtime.version(), System.getProperty("java.home"))
     }
 }

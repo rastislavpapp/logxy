@@ -32,7 +32,8 @@ object Restart {
     fun now(window: Window?) {
         val main = generateSequence(window) { it.owner }.lastOrNull()
         if (!start((main as? MainFrame)?.tabArgs().orEmpty(), AppSettings.current.maxMemory)) {
-            JOptionPane.showMessageDialog(main, "logxy could not be started again; start it yourself to apply the limit.", "Restart", JOptionPane.ERROR_MESSAGE)
+            val message = "logxy could not be started again; start it yourself to apply the limit."
+            JOptionPane.showMessageDialog(main, message, "Restart", JOptionPane.ERROR_MESSAGE)
             return
         }
         // Closing rather than exiting, so the window state is saved.

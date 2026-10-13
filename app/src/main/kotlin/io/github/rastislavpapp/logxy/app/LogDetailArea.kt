@@ -25,8 +25,10 @@ val FOUND_COLOR = Color(40, 200, 90, 130)
 /** Applies the editor colors matching the light or dark look and the monospaced UI font. */
 fun RSyntaxTextArea.applyEditorTheme() {
     val name = if (FlatLaf.isLafDark()) "dark.xml" else "default.xml"
-    RSyntaxTextArea::class.java.getResourceAsStream("/org/fife/ui/rsyntaxtextarea/themes/$name")?.use { Theme.load(it).apply(this) }
-    val base = UIManager.getFont("monospaced.font") ?: Font(Font.MONOSPACED, Font.PLAIN, UIManager.getFont("TextArea.font").size)
+    val theme = RSyntaxTextArea::class.java.getResourceAsStream("/org/fife/ui/rsyntaxtextarea/themes/$name")
+    theme?.use { Theme.load(it).apply(this) }
+    val base = UIManager.getFont("monospaced.font")
+        ?: Font(Font.MONOSPACED, Font.PLAIN, UIManager.getFont("TextArea.font").size)
     font = Font(base.name, base.style, base.size)
     background = UIManager.getColor("TextArea.background")
 }
@@ -164,7 +166,7 @@ class LogRecordTokenMaker : TokenMakerBase() {
                             Token.RESERVED_WORD
                         }
                         word == "Caused" || word == "Suppressed" || word == "by" -> Token.RESERVED_WORD
-                        '.' in word && (word.endsWith("Exception") || word.endsWith("Error") || word.endsWith("Throwable")) -> Token.DATA_TYPE
+                        '.' in word && THROWABLE_SUFFIXES.any { word.endsWith(it) } -> Token.DATA_TYPE
                         inFrame -> Token.FUNCTION
                         else -> Token.IDENTIFIER
                     }
@@ -185,5 +187,6 @@ class LogRecordTokenMaker : TokenMakerBase() {
         val ERROR_LEVELS = setOf("ERROR", "FATAL", "SEVERE", "CRITICAL")
         val WARN_LEVELS = setOf("WARN", "WARNING")
         val OTHER_LEVELS = setOf("INFO", "DEBUG", "TRACE")
+        val THROWABLE_SUFFIXES = listOf("Exception", "Error", "Throwable")
     }
 }

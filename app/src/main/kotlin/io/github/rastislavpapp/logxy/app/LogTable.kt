@@ -22,7 +22,10 @@ private const val CELL_PADDING = 12
 /** What Swing ends a label's text with when it does not fit. */
 private const val CLIP = "..."
 
-/** The last column (usually the message) keeps this many characters; when columns do not fit, the others shrink first. */
+/**
+ * The last column (usually the message) keeps this many characters; when columns do not fit, the others shrink
+ * first.
+ */
 private const val MIN_LAST_COLUMN_CHARS = 40
 
 /** The text color of [level]: red for errors, yellow for warnings, dim for debug output, else [default]. */
@@ -95,7 +98,8 @@ class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
     }
 
     private fun updateLook() {
-        val base = UIManager.getFont("monospaced.font") ?: Font(Font.MONOSPACED, Font.PLAIN, UIManager.getFont("Table.font").size)
+        val base = UIManager.getFont("monospaced.font")
+            ?: Font(Font.MONOSPACED, Font.PLAIN, UIManager.getFont("Table.font").size)
         // A plain Font, not a FontUIResource, so a theme switch does not replace it.
         font = Font(base.name, base.style, base.size)
         rowHeight = getFontMetrics(font).height + 4
@@ -182,7 +186,11 @@ class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
         ): Component {
             super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column)
             val field = logModel.fieldAt(column)
-            ranges = if (field == null || value !is String || isSelected) IntArray(0) else matches.ranges(field.name, value)
+            ranges = if (field == null || value !is String || isSelected) {
+                IntArray(0)
+            } else {
+                matches.ranges(field.name, value)
+            }
             foundRanges = if (field == null || value !is String) IntArray(0) else found.ranges(field.name, value)
             return this
         }
@@ -199,7 +207,12 @@ class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
                 }
                 val metrics = getFontMetrics(font)
                 val insets = insets
-                val view = Rectangle(insets.left, insets.top, width - insets.left - insets.right, height - insets.top - insets.bottom)
+                val view = Rectangle(
+                    insets.left,
+                    insets.top,
+                    width - insets.left - insets.right,
+                    height - insets.top - insets.bottom,
+                )
                 val textBounds = Rectangle()
                 // Laid out as the label paints it, so marks stop where a cut value's "..." begins.
                 val shown = SwingUtilities.layoutCompoundLabel(

@@ -33,9 +33,15 @@ class PopupItem(
 
 /**
  * A flat "text ⌄" button that opens a [showPopupList], like IntelliJ's run configuration widget. Without
- * [maxWidth] it never shrinks (no "All lev…"); [sizedFor] are all its texts, so its width stays put when the text changes.
+ * [maxWidth] it never shrinks (no "All lev…"); [sizedFor] are all its texts, so its width stays put when the
+ * text changes.
  */
-fun dropDownButton(tooltip: String, maxWidth: Int? = null, sizedFor: List<String> = emptyList(), action: (JButton) -> Unit): JButton =
+fun dropDownButton(
+    tooltip: String,
+    maxWidth: Int? = null,
+    sizedFor: List<String> = emptyList(),
+    action: (JButton) -> Unit,
+): JButton =
     object : JButton(Icons.get("general/chevronDown")) {
         override fun getPreferredSize(): Dimension = super.getPreferredSize().apply {
             val metrics = getFontMetrics(font)

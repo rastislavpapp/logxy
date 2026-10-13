@@ -38,7 +38,8 @@ class FileDropHandler(
 
     private fun droppedPaths(transferable: Transferable): List<Path> {
         if (transferable.isDataFlavorSupported(DataFlavor.javaFileListFlavor)) {
-            return (transferable.getTransferData(DataFlavor.javaFileListFlavor) as List<*>).map { (it as File).toPath() }
+            val files = transferable.getTransferData(DataFlavor.javaFileListFlavor) as List<*>
+            return files.map { (it as File).toPath() }
         }
         val uris = transferable.getTransferData(URI_LIST_FLAVOR) as String
         return uris.lineSequence()

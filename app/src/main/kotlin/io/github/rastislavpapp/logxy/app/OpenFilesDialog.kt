@@ -51,8 +51,11 @@ class OpenFilesDialog(
     private val remember = JCheckBox("Always open files this way")
     private val openButton = JButton("Open")
 
-    // All choices this context can offer, always shown: those that do not fit the files are disabled, so the dialog keeps its size.
-    private val choices = OpenMode.entries.filter { current != null || (it != OpenMode.MERGE_INTO_CURRENT && it != OpenMode.MERGE_WITH_CURRENT_IN_NEW) }
+    // All choices this context can offer, always shown: those that do not fit the files are disabled, so the dialog
+    // keeps its size.
+    private val choices = OpenMode.entries.filter {
+        current != null || (it != OpenMode.MERGE_INTO_CURRENT && it != OpenMode.MERGE_WITH_CURRENT_IN_NEW)
+    }
     private val radios = choices.map { JRadioButton() }
 
     // Only what the user clicked; a choice that was the only one left was not picked.
@@ -64,11 +67,14 @@ class OpenFilesDialog(
             group.add(radio)
             radio.addActionListener { picked = choices[i] }
         }
-        subfolders.addActionListener { parsers.shown = if (subfolders.isSelected) files else files.filter { it !in inSubfolders } }
+        subfolders.addActionListener {
+            parsers.shown = if (subfolders.isSelected) files else files.filter { it !in inSubfolders }
+        }
         val hint = JLabel("To ask again, see File › Preferences › Opening Files.").apply {
             foreground = UIManager.getColor("Label.disabledForeground")
         }
-        contentPane = JPanel(MigLayout("fill, insets dialog, wrap 1, hidemode 3", "[grow, fill]", "[][grow][][][][][][]")).apply {
+        val layout = MigLayout("fill, insets dialog, wrap 1, hidemode 3", "[grow, fill]", "[][grow][][][][][][]")
+        contentPane = JPanel(layout).apply {
             add(heading)
             add(parsers.component, "grow")
             add(JPanel(MigLayout("insets 0, wrap 1, gapy 2")).apply { radios.forEach(::add) }, "gaptop para")
@@ -80,7 +86,8 @@ class OpenFilesDialog(
         update()
         openButton.addActionListener { open() }
         rootPane.defaultButton = openButton
-        rootPane.registerKeyboardAction({ dispose() }, KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0), JComponent.WHEN_IN_FOCUSED_WINDOW)
+        val escape = KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0)
+        rootPane.registerKeyboardAction({ dispose() }, escape, JComponent.WHEN_IN_FOCUSED_WINDOW)
         pack()
         // So restored bounds from a smaller saved size cannot cut off what is under the list.
         minimumSize = minimumSize
@@ -117,7 +124,8 @@ class OpenFilesDialog(
         val detected = parsers.chosenParsers.all { it == null }
         remember.isEnabled = detected
         if (!detected) remember.isSelected = false
-        remember.toolTipText = if (detected) null else "Only when every parser is Auto-detect: chosen parsers are not remembered"
+        remember.toolTipText =
+            if (detected) null else "Only when every parser is Auto-detect: chosen parsers are not remembered"
     }
 
     private fun open() {
@@ -138,6 +146,7 @@ class OpenFilesDialog(
 }
 
 /** OK and Cancel style buttons at the right, the same width, never narrower than their text whatever the font. */
-fun dialogButtons(vararg buttons: JButton) = JPanel(MigLayout("insets 0, fillx", "push" + "[]".repeat(buttons.size))).apply {
-    buttons.forEach { add(it, "sg button, wmin pref") }
-}
+fun dialogButtons(vararg buttons: JButton) =
+    JPanel(MigLayout("insets 0, fillx", "push" + "[]".repeat(buttons.size))).apply {
+        buttons.forEach { add(it, "sg button, wmin pref") }
+    }

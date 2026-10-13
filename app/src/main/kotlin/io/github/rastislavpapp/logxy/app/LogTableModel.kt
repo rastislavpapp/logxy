@@ -44,7 +44,8 @@ class LogTableModel(val shown: ShownLog) : AbstractTableModel(), RowWindow {
     /** Field index of each column after the line number column. */
     private var columnFields: List<Int> = fieldsShown()
 
-    private fun fieldsShown() = columnChoices.filter { it.name !in hiddenColumns }.map { shown.schema.fields.indexOf(it) }
+    private fun fieldsShown() =
+        columnChoices.filter { it.name !in hiddenColumns }.map { shown.schema.fields.indexOf(it) }
 
     // Direct-mapped cache: repaints ask for the same few visible rows over and over.
     private val cachedRows = IntArray(CACHE_SIZE) { -1 }
@@ -112,7 +113,8 @@ class LogTableModel(val shown: ShownLog) : AbstractTableModel(), RowWindow {
 
     override fun getColumnName(column: Int) = fieldAt(column)?.name ?: "#"
 
-    override fun getColumnClass(column: Int) = if (fieldAt(column) == null) Int::class.javaObjectType else String::class.java
+    override fun getColumnClass(column: Int) =
+        if (fieldAt(column) == null) Int::class.javaObjectType else String::class.java
 
     override fun getValueAt(row: Int, column: Int): Any {
         val record = recordAt(row)

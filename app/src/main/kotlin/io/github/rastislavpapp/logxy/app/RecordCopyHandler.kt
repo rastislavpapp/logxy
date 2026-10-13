@@ -6,7 +6,10 @@ import javax.swing.JComponent
 import javax.swing.JTable
 import javax.swing.TransferHandler
 
-/** Copies the selected rows of a log table as their records are written in the file, so pasted text reads like the log. */
+/**
+ * Copies the selected rows of a log table as their records are written in the file, so pasted text reads like the
+ * log.
+ */
 class RecordCopyHandler(private val model: LogTableModel) : TransferHandler() {
 
     override fun getSourceActions(c: JComponent) = COPY

@@ -163,8 +163,9 @@ class TimeHistogramBar(private val histogram: () -> TimeHistogram?) : JComponent
         if (histogram.isEmpty || width <= 0) return null
         val most = maxOf(1, width / UIScale.scale(SLICE_WIDTH))
         var group = 1
-        while (histogram.lastBin / group - histogram.firstBin / group + 1 > most) group *= 2
-        return Slices(histogram, histogram.firstBin / group * group, group, histogram.lastBin / group - histogram.firstBin / group + 1)
+        fun count() = histogram.lastBin / group - histogram.firstBin / group + 1
+        while (count() > most) group *= 2
+        return Slices(histogram, histogram.firstBin / group * group, group, count())
     }
 
     private fun sliceX(slices: Slices, slice: Int) = (slice.toLong() * width / slices.count).toInt()
@@ -197,7 +198,8 @@ class TimeHistogramBar(private val histogram: () -> TimeHistogram?) : JComponent
                 paintRegion(g2, x1, maxOf(x1 + UIScale.scale(2), timeX(slices, to)), accent, 0.12f)
             }
             selection?.let {
-                paintRegion(g2, sliceX(slices, it.first).toDouble(), sliceX(slices, it.last + 1).toDouble(), accent, 0.3f)
+                val from = sliceX(slices, it.first).toDouble()
+                paintRegion(g2, from, sliceX(slices, it.last + 1).toDouble(), accent, 0.3f)
             }
             paintTicks(g2, slices)
         } finally {
@@ -276,7 +278,8 @@ class TimeHistogramBar(private val histogram: () -> TimeHistogram?) : JComponent
         var formatter = tickFormatter(step, multiDay)
         for (candidate in TICK_STEPS) {
             val candidateFormatter = tickFormatter(candidate, multiDay)
-            val labelWidth = metrics.stringWidth(candidateFormatter.format(Instant.ofEpochSecond(0, from))) + UIScale.scale(LABEL_GAP)
+            val label = candidateFormatter.format(Instant.ofEpochSecond(0, from))
+            val labelWidth = metrics.stringWidth(label) + UIScale.scale(LABEL_GAP)
             if (candidate.toDouble() / span * width >= labelWidth) {
                 step = candidate
                 formatter = candidateFormatter
@@ -324,9 +327,12 @@ class TimeHistogramBar(private val histogram: () -> TimeHistogram?) : JComponent
             slices.errors[slice].takeIf { it > 0 }?.let { add("%,d errors".format(it)) }
             slices.warnings[slice].takeIf { it > 0 }?.let { add("%,d warnings".format(it)) }
         }
-        val range = "${formatter.format(Instant.ofEpochSecond(0, from))} – ${formatter.format(Instant.ofEpochSecond(0, to))}"
-        return "<html>$range<br>${parts.joinToString(", ")}<br><small>Click to go there, drag to filter by time</small></html>"
+        val range = "${formatter.format(Instant.ofEpochSecond(0, from))} – " +
+            formatter.format(Instant.ofEpochSecond(0, to))
+        val hint = "<small>Click to go there, drag to filter by time</small>"
+        return "<html>$range<br>${parts.joinToString(", ")}<br>$hint</html>"
     }
 
-    private fun withAlpha(color: Color, alpha: Float) = Color(color.red, color.green, color.blue, (alpha.coerceIn(0f, 1f) * 255).toInt())
+    private fun withAlpha(color: Color, alpha: Float) =
+        Color(color.red, color.green, color.blue, (alpha.coerceIn(0f, 1f) * 255).toInt())
 }
