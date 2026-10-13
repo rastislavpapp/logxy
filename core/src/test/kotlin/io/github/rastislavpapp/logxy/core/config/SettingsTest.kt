@@ -90,4 +90,14 @@ class SettingsTest {
         assertNull(Settings.parseMemory("8"))
         assertNull(Settings.parseMemory("-Xmx8g"))
     }
+
+    @Test
+    fun `known formats are raw text, then the saved ones, then the built-in ones kept`() {
+        val mine = LogFormat.Pattern("Mine", "%d [%t] %-5p %c - %m%n")
+        val settings = Settings(formats = listOf(mine), deletedBuiltIns = setOf("Spring Boot 3", "JSON lines"))
+        assertEquals(
+            listOf("Raw text", "Mine", "date [thread] LEVEL logger - message", "time [thread] LEVEL logger - message"),
+            settings.knownFormats.map { it.name },
+        )
+    }
 }

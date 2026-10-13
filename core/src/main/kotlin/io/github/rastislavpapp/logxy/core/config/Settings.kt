@@ -36,6 +36,9 @@ data class Settings(
     /** The built-in formats the user kept. */
     val builtInFormats: List<LogFormat> get() = LogFormat.BUILT_IN.filter { it.name !in deletedBuiltIns }
 
+    /** The formats a file can be read with, as parser menus list them. */
+    val knownFormats: List<LogFormat> get() = listOf(LogFormat.Raw) + formats + builtInFormats
+
     companion object {
         /** `%APPDATA%\logxy` on Windows, `$XDG_CONFIG_HOME/logxy` or `~/.config/logxy` elsewhere. */
         fun directory(): Path {

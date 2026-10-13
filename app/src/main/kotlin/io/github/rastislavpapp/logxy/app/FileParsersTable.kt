@@ -48,7 +48,7 @@ class FileParsersTable(
     private val excludable: Boolean = false,
     private val onChange: () -> Unit = {},
 ) {
-    private val parsers: List<LogFormat?> = listOf(null, LogFormat.Raw) + AppSettings.current.formats + AppSettings.current.builtInFormats
+    private val parsers: List<LogFormat?> = listOf(null) + AppSettings.current.knownFormats
     private val chosen = HashMap<Path, LogFormat?>().apply { files.forEachIndexed { i, file -> put(file, initial.getOrNull(i)) } }
     private val fileColumn = if (excludable) 1 else 0
     private val parserColumn = fileColumn + 1
