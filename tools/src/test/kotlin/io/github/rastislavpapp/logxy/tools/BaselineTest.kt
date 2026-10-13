@@ -12,7 +12,7 @@ import io.github.rastislavpapp.logxy.core.log.LogData
 import io.github.rastislavpapp.logxy.core.log.ParsedLog
 import io.github.rastislavpapp.logxy.core.merge.MergedFilter
 import io.github.rastislavpapp.logxy.core.merge.MergedLog
-import io.github.rastislavpapp.logxy.core.parse.LogFormat
+import io.github.rastislavpapp.logxy.core.parse.Parser
 import io.github.rastislavpapp.logxy.core.session.countTimes
 import java.nio.file.Files
 import java.nio.file.Path
@@ -60,13 +60,13 @@ private fun measureAll(): Map<String, Double> {
     }
 
     val main = dataFile("main.log", MAIN_SIZE, 1)
-    val format = LogFormat.detect(main).compile() ?: error("No format detected for $main")
+    val parser = Parser.detect(main).compile() ?: error("No parser detected for $main")
     var log: ParsedLog? = null
     record("parse 1 GB file", best {
         log?.close()
         log = null
         System.gc()
-        log = runBlocking { ParsedLog.build(main, format) }
+        log = runBlocking { ParsedLog.build(main, parser) }
     })
     log!!.use { parsed ->
         val error = LevelCondition.atLeast("Level", Level.ERROR)
@@ -97,7 +97,7 @@ private fun measureAll(): Map<String, Double> {
     Files.copy(main, followed, StandardCopyOption.REPLACE_EXISTING)
     try {
         val appended = Files.readAllBytes(dataFile("appended.log", APPEND_SIZE, 10))
-        runBlocking { ParsedLog.build(followed, format) }.use { parsed ->
+        runBlocking { ParsedLog.build(followed, parser) }.use { parsed ->
             val engine = FilterEngine(parsed)
             val search = RecordTextCondition(TextOp.EQUALS, "*timeout*", ignoreCase = true)
             val filter = Filter.And(listOf(LevelCondition.atLeast("Level", Level.WARN), search))
@@ -123,7 +123,7 @@ private fun measureAll(): Map<String, Double> {
             parts.clear()
             System.gc()
             for (file in files) {
-                val compiled = LogFormat.detect(file).compile() ?: error("No format detected for $file")
+                val compiled = Parser.detect(file).compile() ?: error("No parser detected for $file")
                 parts += runBlocking { ParsedLog.build(file, compiled) }
             }
         })
@@ -137,7 +137,7 @@ private fun measureAll(): Map<String, Double> {
                 files.map { file ->
                     async(Dispatchers.IO) {
                         permits.withPermit {
-                            val compiled = LogFormat.detect(file).compile() ?: error("No format detected for $file")
+                            val compiled = Parser.detect(file).compile() ?: error("No parser detected for $file")
                             ParsedLog.build(file, compiled)
                         }
                     }

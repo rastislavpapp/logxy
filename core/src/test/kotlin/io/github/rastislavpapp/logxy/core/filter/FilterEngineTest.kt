@@ -7,7 +7,7 @@ import io.github.rastislavpapp.logxy.core.log.Level
 import io.github.rastislavpapp.logxy.core.log.LevelMapping
 import io.github.rastislavpapp.logxy.core.log.LogData
 import io.github.rastislavpapp.logxy.core.log.ParsedLog
-import io.github.rastislavpapp.logxy.core.parse.PatternFormat
+import io.github.rastislavpapp.logxy.core.parse.CompiledPattern
 import io.github.rastislavpapp.logxy.core.pattern.Templates
 import io.github.rastislavpapp.logxy.core.query.QueryException
 import io.github.rastislavpapp.logxy.core.query.TextSearch
@@ -30,7 +30,7 @@ class FilterEngineTest {
     @TempDir
     lateinit var dir: Path
 
-    private val format = PatternFormat("%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %-5p %c - %m%n", ZoneOffset.UTC)
+    private val parser = CompiledPattern("%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %-5p %c - %m%n", ZoneOffset.UTC)
 
     private val sample = """
         banner before any record
@@ -45,7 +45,7 @@ class FilterEngineTest {
 
     private fun parse(content: String, options: IndexOptions = IndexOptions()): ParsedLog {
         val file = Files.writeString(dir.resolve("f-${content.hashCode()}-${options.hashCode()}.log"), content)
-        return runBlocking { ParsedLog.build(file, format, IndexProgress(), options) }
+        return runBlocking { ParsedLog.build(file, parser, IndexProgress(), options) }
     }
 
     private fun FilterEngine.rows(filter: Filter) = runBlocking { prepare(filter).run() }.rows.toList()
@@ -161,7 +161,7 @@ class FilterEngineTest {
 
     @Test
     fun `numbers in dictionary, span and map fields`() {
-        val mdc = PatternFormat("%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %-5p %c %X - %m%n", ZoneOffset.UTC)
+        val mdc = CompiledPattern("%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %-5p %c %X - %m%n", ZoneOffset.UTC)
         val content = """
             2026-10-01 08:00:00.000 [7] INFO  app.Http {status=200, ms=15} - 12
             2026-10-01 08:00:01.000 [12] INFO  app.Http {status=503, ms=2400} - 1.5e3
@@ -264,7 +264,7 @@ class FilterEngineTest {
     @Test
     fun `cached results follow the last record as it grows`() {
         val file = Files.writeString(dir.resolve("grow.log"), "2026-10-01 08:00:01.000 [w] ERROR app.Db - Query failed\n")
-        runBlocking { ParsedLog.build(file, format) }.use { log ->
+        runBlocking { ParsedLog.build(file, parser) }.use { log ->
             val engine = FilterEngine(log)
             val npe = TextCondition("Message", TextOp.EQUALS, "*NullPointer*", ignoreCase = true)
             val endsFailed = TextCondition("Message", TextOp.EQUALS, "*failed")
@@ -310,7 +310,7 @@ class FilterEngineTest {
         )
         fun expected(log: LogData, filter: Filter): List<Int> = (0..<log.recordCount).filter { matches(log as ParsedLog, it, filter) }
 
-        runBlocking { ParsedLog.build(file, format, IndexProgress(), IndexOptions(parallelism = 6, minRangeSize = 1)) }.use { log ->
+        runBlocking { ParsedLog.build(file, parser, IndexProgress(), IndexOptions(parallelism = 6, minRangeSize = 1)) }.use { log ->
             val engine = FilterEngine(log)
             for (filter in filters) assertEquals(expected(log, filter), engine.rows(filter))
             // Cached leaves are reused, and only appended records are computed afresh.

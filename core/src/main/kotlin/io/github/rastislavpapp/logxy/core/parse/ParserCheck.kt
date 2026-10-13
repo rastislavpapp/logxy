@@ -3,29 +3,29 @@ package io.github.rastislavpapp.logxy.core.parse
 import io.github.rastislavpapp.logxy.core.Bytes
 import java.nio.channels.FileChannel
 
-/** The file's first entries do not fit the chosen format. */
-class FormatMismatchException(message: String) : Exception(message)
+/** The file's first entries do not fit the chosen parser. */
+class ParserMismatchException(message: String) : Exception(message)
 
 /**
- * Checks a format against the start of a file before parsing it, so a wrong format fails fast
+ * Checks a parser against the start of a file before parsing it, so a wrong parser fails fast
  * instead of turning the whole file into one record.
  */
-internal object FormatCheck {
+internal object ParserCheck {
 
-    /** Lines that should start a record; if this many in a row do not match, the format is wrong. */
+    /** Lines that should start a record; if this many in a row do not match, the parser is wrong. */
     const val REAL_LINES = 10
 
     private const val BUFFER_SIZE = 1024 * 1024
     private const val SHOWN_LINE_CHARS = 200
 
     /**
-     * Throws [FormatMismatchException] unless one of the first [REAL_LINES] lines that do not look
+     * Throws [ParserMismatchException] unless one of the first [REAL_LINES] lines that do not look
      * like continuations matches, or the file has no content at all. Continuations before the first
      * match are skipped, as the file may start in the middle of a stack trace; after it nothing more
      * is read, as a single record may be huge. Reads at most [limit] bytes; if they do not decide it,
-     * the format passes.
+     * the parser passes.
      */
-    fun check(channel: FileChannel, size: Long, parser: RecordParser, limit: Long = size) {
+    fun check(channel: FileChannel, size: Long, matcher: LineMatcher, limit: Long = size) {
         val reader = LineReader(channel, 0, minOf(size, limit), BUFFER_SIZE)
         var firstContent: String? = null
         var firstMismatch: String? = null
@@ -34,7 +34,7 @@ internal object FormatCheck {
             val bytes = reader.buffer
             val from = reader.lineFrom
             val to = reader.lineTo
-            if (parser.match(bytes, from, to)) return
+            if (matcher.match(bytes, from, to)) return
             if (isBlank(bytes, from, to)) continue
             if (firstContent == null) firstContent = shown(bytes, from, to)
             if (looksLikeContinuation(bytes, from, to)) continue
@@ -44,7 +44,7 @@ internal object FormatCheck {
         if (mismatches < REAL_LINES && limit < size) return
         val example = firstMismatch ?: firstContent ?: return
         val which = if (mismatches == REAL_LINES) "None of the first $REAL_LINES entries" else "No entry"
-        throw FormatMismatchException("$which in the file matches the parser. First one:\n$example")
+        throw ParserMismatchException("$which in the file matches the parser. First one:\n$example")
     }
 
     private fun shown(bytes: ByteArray, from: Int, to: Int) =

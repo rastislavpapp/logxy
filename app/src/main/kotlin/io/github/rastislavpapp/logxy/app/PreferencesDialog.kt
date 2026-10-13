@@ -1,7 +1,7 @@
 package io.github.rastislavpapp.logxy.app
 
 import io.github.rastislavpapp.logxy.core.config.Settings
-import io.github.rastislavpapp.logxy.core.parse.LogFormat
+import io.github.rastislavpapp.logxy.core.parse.Parser
 import net.miginfocom.swing.MigLayout
 import java.awt.CardLayout
 import java.awt.Component
@@ -38,15 +38,15 @@ class PreferencesDialog(
     owner: Window?,
     section: Section? = null,
     previewFile: Path? = null,
-    select: LogFormat? = null,
+    select: Parser? = null,
     offerUse: Boolean = false,
-    adopt: LogFormat? = null,
+    adopt: Parser? = null,
 ) : JDialog(owner, "Preferences", ModalityType.APPLICATION_MODAL) {
 
     enum class Section { PARSERS, LEVELS, MEMORY, OPENING }
 
     /** Set when the dialog closed with "Save and Use for This File". */
-    var formatToUse: LogFormat? = null
+    var parserToUse: Parser? = null
         private set
 
     private val parsers = ParsersPage(previewFile, select, adopt)
@@ -97,7 +97,7 @@ class PreferencesDialog(
         }, "wmin 0")
         if (offerUse) {
             add(JButton("Save and Use for This File").apply {
-                addActionListener { if (save()) { formatToUse = parsers.selectedFormat; close() } }
+                addActionListener { if (save()) { parserToUse = parsers.selectedParser; close() } }
             })
         }
         add(JButton("Save").apply {

@@ -3,13 +3,13 @@ package io.github.rastislavpapp.logxy.core.parse
 import io.github.rastislavpapp.logxy.core.log.Columns
 import io.github.rastislavpapp.logxy.core.log.Schema
 
-/** A compiled log layout: the [schema] it produces and parsers for it. Thread-safe. */
-abstract class RecordFormat {
+/** A [Parser] compiled for reading: the [schema] it produces and matchers for its lines. Thread-safe. */
+abstract class CompiledParser {
 
     abstract val schema: Schema
 
-    /** A new parser, for one thread; parsers are stateful, the format is not. */
-    internal abstract fun newParser(): RecordParser
+    /** A new matcher, for one thread; matchers are stateful, the compiled parser is not. */
+    internal abstract fun newMatcher(): LineMatcher
 
     /** Display text of a TIMESTAMP field's value, in the log's own layout. */
     abstract fun formatTimestamp(field: Int, nanos: Long): String
@@ -22,7 +22,7 @@ abstract class RecordFormat {
 }
 
 /** Recognizes the first line of a record. Stateful; one per thread. */
-internal interface RecordParser {
+internal interface LineMatcher {
 
     /** Whether `bytes[from, to)`, a line without terminator, starts a record. */
     fun match(bytes: ByteArray, from: Int, to: Int): Boolean

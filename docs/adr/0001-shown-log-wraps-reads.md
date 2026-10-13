@@ -1,6 +1,6 @@
 # The shown log wraps record reads instead of handing out Records
 
-The session hands the UI a shown log, which forwards each record read to the session's records rather than exposing them. When the load ends (reload, format change, close), the session marks the shown log ended before closing any file, and from then on it reports no rows and its reads return empty. A stale reference left in a queued repaint or callback then goes quiet, where a reference to the records themselves would read from closed files and throw. The forwarding costs one check per read, never per record in the passes over all records, which use the raw row array inside `core`.
+The session hands the UI a shown log, which forwards each record read to the session's records rather than exposing them. When the load ends (reload, parser change, close), the session marks the shown log ended before closing any file, and from then on it reports no rows and its reads return empty. A stale reference left in a queued repaint or callback then goes quiet, where a reference to the records themselves would read from closed files and throw. The forwarding costs one check per read, never per record in the passes over all records, which use the raw row array inside `core`.
 
 ## Considered Options
 

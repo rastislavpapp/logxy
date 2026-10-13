@@ -7,78 +7,78 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 import org.junit.jupiter.api.io.TempDir
 
-class LogFormatTest {
+class ParserTest {
 
     @TempDir
     lateinit var dir: Path
 
     @Test
-    fun `detects the matching built-in format`() {
+    fun `detects the matching built-in parser`() {
         val file = Files.writeString(dir.resolve("a.log"), """
             2026-10-01 08:00:00.001 [main] INFO  com.example.App - Started
             2026-10-01 08:00:00.002 [main] ERROR com.example.App - Failed
             java.lang.IllegalStateException: boom
             	at com.example.App.main(App.java:10)
         """.trimIndent())
-        assertEquals(LogFormat.BUILT_IN[0], LogFormat.detect(file))
+        assertEquals(Parser.BUILT_IN[0], Parser.detect(file))
     }
 
     @Test
-    fun `guesses a layout that no built-in format reads`() {
+    fun `guesses a layout that no built-in parser reads`() {
         val file = Files.writeString(dir.resolve("b.log"), "2026-10-01 08:00:00.001 INFO  [main] com.example.App - Started\n")
         assertEquals(
-            LogFormat.Pattern("date LEVEL [thread] logger - message", "%d{yyyy-MM-dd HH:mm:ss.SSS} %p [%t] %c - %m%n"),
-            LogFormat.detect(file),
+            Parser.Pattern("date LEVEL [thread] logger - message", "%d{yyyy-MM-dd HH:mm:ss.SSS} %p [%t] %c - %m%n"),
+            Parser.detect(file),
         )
     }
 
     @Test
-    fun `guessed JSON keys replace the built-in JSON format`() {
+    fun `guessed JSON keys replace the built-in JSON parser`() {
         val file = Files.writeString(dir.resolve("j.log"), "{\"when\":\"2026-10-01T08:00:00Z\",\"lvl\":\"info\",\"msg\":\"Started\"}\n")
-        assertEquals("JSON lines: when, lvl", LogFormat.detect(file).name)
+        assertEquals("JSON lines: when, lvl", Parser.detect(file).name)
     }
 
     @Test
     fun `detects a file again once it changed`() {
         val file = Files.writeString(dir.resolve("c.log"), "2026-10-01 08:00:00.001 [main] INFO  com.example.App - Started\n")
-        assertEquals(LogFormat.BUILT_IN[0], LogFormat.detect(file))
-        assertEquals(LogFormat.BUILT_IN[0], LogFormat.detect(file))
+        assertEquals(Parser.BUILT_IN[0], Parser.detect(file))
+        assertEquals(Parser.BUILT_IN[0], Parser.detect(file))
         Files.writeString(file, "{\"@timestamp\":\"2026-10-01T08:00:00Z\",\"level\":\"INFO\",\"message\":\"Started\"}\n")
-        assertEquals(LogFormat.Json("JSON lines"), LogFormat.detect(file))
+        assertEquals(Parser.Json("JSON lines"), Parser.detect(file))
     }
 
     @Test
-    fun `a built-in format wins a tie with the guess`() {
+    fun `a built-in parser wins a tie with the guess`() {
         val file = Files.writeString(dir.resolve("t.log"), "08:00:00.001 [main] INFO  com.example.App - Started\n")
-        assertEquals(LogFormat.BUILT_IN[1], LogFormat.detect(file))
+        assertEquals(Parser.BUILT_IN[1], Parser.detect(file))
     }
 
     @Test
-    fun `detects a format whose first record is followed by a huge indented dump`() {
+    fun `detects a parser whose first record is followed by a huge indented dump`() {
         val file = Files.writeString(dir.resolve("d.log"), "2026-10-01 08:00:00.001 [main] INFO  a.B - xml:\n" +
             (1..5000).joinToString("") { "    <item id=\"$it\"/>\n" })
-        assertEquals(LogFormat.BUILT_IN[0], LogFormat.detect(file))
+        assertEquals(Parser.BUILT_IN[0], Parser.detect(file))
     }
 
     @Test
-    fun `the user's format wins a tie with a built-in one`() {
+    fun `the user's parser wins a tie with a built-in one`() {
         val file = Files.writeString(dir.resolve("e.log"), "2026-10-01 08:00:00.001 [main] INFO  com.example.App - Started\n")
-        val mine = LogFormat.Pattern("Mine", "%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %-5p %c - %m%n")
-        assertEquals(mine, LogFormat.detect(file, preferred = listOf(mine)))
+        val mine = Parser.Pattern("Mine", "%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %-5p %c - %m%n")
+        assertEquals(mine, Parser.detect(file, preferred = listOf(mine)))
     }
 
     @Test
     fun `detects Spring Boot layouts`() {
         val boot2 = Files.writeString(dir.resolve("boot2.log"),
             "2026-10-08 12:00:00.123  INFO 12345 --- [           main] c.e.demo.DemoApplication                 : Started\n")
-        assertEquals("date LEVEL pid --- [thread] logger : message", LogFormat.detect(boot2).name)
+        assertEquals("date LEVEL pid --- [thread] logger : message", Parser.detect(boot2).name)
         val boot3 = Files.writeString(dir.resolve("boot3.log"),
             "2026-10-08T12:00:00.123+02:00  WARN 12345 --- [           main] c.e.demo.DemoApplication                 : Slow\n")
-        assertEquals("Spring Boot 3", LogFormat.detect(boot3).name)
+        assertEquals("Spring Boot 3", Parser.detect(boot3).name)
         val boot3named = Files.writeString(dir.resolve("boot3n.log"),
             "2026-10-08T12:00:00.123+02:00  WARN 12345 --- [demo] [           main] c.e.demo.DemoApplication                 : Slow\n" +
                 "2026-10-08T12:00:00.124+02:00  INFO 12345 --- [demo] [  restartedMain] c.e.demo.DemoApplication                 : Up\n")
-        assertEquals("date LEVEL pid --- [field] [thread] logger : message", LogFormat.detect(boot3named).name)
+        assertEquals("date LEVEL pid --- [field] [thread] logger : message", Parser.detect(boot3named).name)
     }
 
     @Test
@@ -90,9 +90,9 @@ class LogFormatTest {
               File "app.py", line 1, in <module>
             2026-10-13 10:00:01,002 - root - INFO - ok
         """.trimIndent())
-        val format = LogFormat.detect(file)
-        assertEquals("Python logging", format.name)
-        val preview = FormatPreview.preview(format.compile()!!, Files.readAllLines(file).map { it.toByteArray() })
+        val parser = Parser.detect(file)
+        assertEquals("Python logging", parser.name)
+        val preview = ParserPreview.preview(parser.compile()!!, Files.readAllLines(file).map { it.toByteArray() })
         assertEquals(listOf("2026-10-13 10:00:00,123", "app.db", "WARNING", "slow query"), preview[0].values)
         assertEquals(null, preview[2].values)
     }
@@ -103,7 +103,7 @@ class LogFormatTest {
             time=2026-10-13T10:00:00Z level=info msg="listening" addr=:8080
             time=2026-10-13T10:00:01Z level=warn msg="slow request" path=/api duration=2.1s
         """.trimIndent())
-        assertEquals(LogFormat.Logfmt("logfmt"), LogFormat.detect(file))
+        assertEquals(Parser.Logfmt("logfmt"), Parser.detect(file))
     }
 
     @Test
@@ -112,12 +112,12 @@ class LogFormatTest {
             203.0.113.7 - - [13/Oct/2026:10:00:00 +0200] "GET / HTTP/1.1" 200 512
             203.0.113.8 - bob [13/Oct/2026:10:00:01 +0200] "POST /login HTTP/1.1" 302 -
         """.trimIndent())
-        assertEquals(LogFormat.AccessLog("Access log"), LogFormat.detect(common))
+        assertEquals(Parser.AccessLog("Access log"), Parser.detect(common))
         val combined = Files.writeString(dir.resolve("access-combined.log"), """
             203.0.113.7 - - [13/Oct/2026:10:00:00 +0200] "GET / HTTP/1.1" 200 512 "-" "curl/8.0"
             203.0.113.8 - - [13/Oct/2026:10:00:01 +0200] "GET /a HTTP/2.0" 404 0 "https://example.com/" "Mozilla/5.0"
         """.trimIndent())
-        assertEquals(LogFormat.AccessLog("Access log"), LogFormat.detect(combined))
+        assertEquals(Parser.AccessLog("Access log"), Parser.detect(combined))
     }
 
     @Test
@@ -126,17 +126,17 @@ class LogFormatTest {
             2026-10-01 08:00:00.001 [main] INFO  com.example.App - user=alice action=login result=ok
             2026-10-01 08:00:00.002 [main] WARN  com.example.App - user=bob action=login result=denied
         """.trimIndent())
-        assertEquals(LogFormat.BUILT_IN[0], LogFormat.detect(file))
+        assertEquals(Parser.BUILT_IN[0], Parser.detect(file))
         val lines = listOf("user=alice action=login", "a=1", "hello world a=1 b=2", " a=1 b=2", "a=\"open b=2", "\"a\"=1 b=2")
-        val parser = LogFormat.Logfmt("logfmt").compile().newParser()
-        assertEquals(listOf(true, false, false, false, false, false), lines.map { it.toByteArray().let { b -> parser.match(b, 0, b.size) } })
+        val matcher = Parser.Logfmt("logfmt").compile().newMatcher()
+        assertEquals(listOf(true, false, false, false, false, false), lines.map { it.toByteArray().let { b -> matcher.match(b, 0, b.size) } })
     }
 
     @Test
     fun `preview shows fields of matching lines`() {
         val lines = listOf("2026-10-01 08:00:00.001 [main] INFO  a.B - hello", "\tat x.Y(Y.java:1)", "nonsense")
             .map { it.toByteArray() }
-        val preview = FormatPreview.preview(LogFormat.BUILT_IN[0].compile()!!, lines)
+        val preview = ParserPreview.preview(Parser.BUILT_IN[0].compile()!!, lines)
         assertEquals(listOf("2026-10-01 08:00:00.001", "main", "INFO", "a.B", "hello"), preview[0].values)
         assertEquals(null to true, preview[1].values to preview[1].continuation)
         assertEquals(null to false, preview[2].values to preview[2].continuation)
@@ -145,7 +145,7 @@ class LogFormatTest {
     @Test
     fun `falls back to raw text`() {
         val file = Files.writeString(dir.resolve("c.log"), "hello\nworld\n")
-        assertEquals(LogFormat.Raw, LogFormat.detect(file))
+        assertEquals(Parser.Raw, Parser.detect(file))
     }
 
     @Test
@@ -154,18 +154,18 @@ class LogFormatTest {
             2026-10-01 08:00:00.001 [main] INFO  com.example.App {} - Started
             2026-10-01 08:00:00.002 [http-1] INFO  com.example.Api {breadcrumbId=ID-1, tenant=acme} - GET /a - done
         """.trimIndent())
-        assertEquals("date [thread] LEVEL logger {MDC} - message", LogFormat.detect(file).name)
+        assertEquals("date [thread] LEVEL logger {MDC} - message", Parser.detect(file).name)
     }
 
     @Test
-    fun `tells whether a format fits a file before opening it`() {
+    fun `tells whether a parser fits a file before opening it`() {
         val file = Files.writeString(dir.resolve("m.log"), "2026-10-01 08:00:00.001 [main] INFO  a.B - hello\n")
-        assertEquals(null, LogFormat.BUILT_IN[0].mismatch(file))
-        assertEquals(null, LogFormat.Raw.mismatch(file))
-        assertTrue(LogFormat.Json("JSON").mismatch(file)!!.startsWith("No entry in the file matches the parser."))
-        assertEquals("The pattern has no fields", LogFormat.Pattern("Broken", "just text").mismatch(file))
+        assertEquals(null, Parser.BUILT_IN[0].mismatch(file))
+        assertEquals(null, Parser.Raw.mismatch(file))
+        assertTrue(Parser.Json("JSON").mismatch(file)!!.startsWith("No entry in the file matches the parser."))
+        assertEquals("The pattern has no fields", Parser.Pattern("Broken", "just text").mismatch(file))
         // A start the first bytes cannot decide passes.
         val dump = Files.writeString(dir.resolve("dump.log"), (1..400_000).joinToString("") { "    <item id=\"$it\"/>\n" })
-        assertEquals(null, LogFormat.Json("JSON").mismatch(dump))
+        assertEquals(null, Parser.Json("JSON").mismatch(dump))
     }
 }

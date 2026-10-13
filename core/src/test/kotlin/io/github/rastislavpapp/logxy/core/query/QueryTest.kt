@@ -13,7 +13,7 @@ import io.github.rastislavpapp.logxy.core.log.Field
 import io.github.rastislavpapp.logxy.core.log.Level
 import io.github.rastislavpapp.logxy.core.log.Role
 import io.github.rastislavpapp.logxy.core.log.Schema
-import io.github.rastislavpapp.logxy.core.parse.PatternFormat
+import io.github.rastislavpapp.logxy.core.parse.CompiledPattern
 import java.time.ZoneOffset
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -21,7 +21,7 @@ import kotlin.test.assertFailsWith
 
 class QueryTest {
 
-    private val schema = PatternFormat("%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %-5p %c %X{request id} - %m%n", ZoneOffset.UTC).schema
+    private val schema = CompiledPattern("%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %-5p %c %X{request id} - %m%n", ZoneOffset.UTC).schema
     private val compiler = QueryCompiler(schema, ZoneOffset.UTC)
 
     private fun roundTrip(text: String) = QueryPrinter.print(QueryParser.parse(text))
@@ -114,7 +114,7 @@ class QueryTest {
         assertEquals("Pattern needs a message, which this log does not have", assertFailsWith<QueryException> { compile("Pattern == x", noMessage) }.message)
 
         // A field of the log with that name is used as it is.
-        val withField = QueryCompiler(PatternFormat("%d{yyyy-MM-dd HH:mm:ss.SSS} %X{Pattern} - %m%n", ZoneOffset.UTC).schema)
+        val withField = QueryCompiler(CompiledPattern("%d{yyyy-MM-dd HH:mm:ss.SSS} %X{Pattern} - %m%n", ZoneOffset.UTC).schema)
         assertEquals(Filter.And(listOf(TextCondition("Pattern", TextOp.EQUALS, "x", ignoreCase = true))), compile("pattern == x", withField))
     }
 

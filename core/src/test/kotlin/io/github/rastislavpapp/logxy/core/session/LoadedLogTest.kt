@@ -4,7 +4,7 @@ import io.github.rastislavpapp.logxy.core.filter.TextCondition
 import io.github.rastislavpapp.logxy.core.filter.TextOp
 import io.github.rastislavpapp.logxy.core.log.LogData
 import io.github.rastislavpapp.logxy.core.log.Records
-import io.github.rastislavpapp.logxy.core.parse.LogFormat
+import io.github.rastislavpapp.logxy.core.parse.Parser
 import io.github.rastislavpapp.logxy.core.parse.open
 import io.github.rastislavpapp.logxy.core.pattern.PatternIndex
 import kotlinx.coroutines.runBlocking
@@ -30,13 +30,13 @@ abstract class LoadedLogContract {
     /** Whether appended data can make the load merge again. */
     abstract val canMergeAgain: Boolean
 
-    protected fun open(name: String, content: String, format: LogFormat? = null): LogData {
+    protected fun open(name: String, content: String, parser: Parser? = null): LogData {
         val file = Files.writeString(dir.resolve(name), content)
-        return runBlocking { (format ?: LogFormat.detect(file)).open(file) }
+        return runBlocking { (parser ?: Parser.detect(file)).open(file) }
     }
 
-    private fun <T> load(content: String, name: String = "a.log", format: LogFormat? = null, test: (LoadedLog) -> T): T {
-        val loaded = load(open(name, content, format))
+    private fun <T> load(content: String, name: String = "a.log", parser: Parser? = null, test: (LoadedLog) -> T): T {
+        val loaded = load(open(name, content, parser))
         try {
             return test(loaded)
         } finally {
@@ -89,11 +89,11 @@ abstract class LoadedLogContract {
     }
 
     // A record's message is one word.
-    private val oneWord = LogFormat.Regex("One word", """^(?<timestamp>\S+ \S+) (?<message>\w+)$""", "yyyy-MM-dd HH:mm:ss.SSS")
+    private val oneWord = Parser.Regex("One word", """^(?<timestamp>\S+ \S+) (?<message>\w+)$""", "yyyy-MM-dd HH:mm:ss.SSS")
 
     @Test
     fun `a last record parsed differently merges again`() =
-        load("2026-10-01 10:00:01.000 A1\n2026-10-01 10:00:03.000 A2", format = oneWord) { loaded ->
+        load("2026-10-01 10:00:01.000 A1\n2026-10-01 10:00:03.000 A2", parser = oneWord) { loaded ->
             val before = loaded.parts[0].recordCount
             // Without its line end, the last line was a record; with more words it is part of the one before.
             val outcome = loaded.grow(" and more\n").second

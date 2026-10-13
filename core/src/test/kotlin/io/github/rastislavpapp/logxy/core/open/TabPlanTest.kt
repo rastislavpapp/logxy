@@ -3,7 +3,7 @@ package io.github.rastislavpapp.logxy.core.open
 import io.github.rastislavpapp.logxy.core.config.OpenMode
 import io.github.rastislavpapp.logxy.core.config.SavedFilter
 import io.github.rastislavpapp.logxy.core.log.Level
-import io.github.rastislavpapp.logxy.core.parse.LogFormat
+import io.github.rastislavpapp.logxy.core.parse.Parser
 import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.test.Test
@@ -45,11 +45,11 @@ class TabPlanTest {
     @Test
     fun `a merge into the current session replaces its tab, keeping its filter and parsers`() {
         val filter = SavedFilter("", Level.WARN, "")
-        val tabs = listOf(SessionFiles(listOf(Path.of("/logs/a.log")), listOf(LogFormat.Raw), filter))
+        val tabs = listOf(SessionFiles(listOf(Path.of("/logs/a.log")), listOf(Parser.Raw), filter))
 
         val actions = TabPlan.open(OpenMode.MERGE_INTO_CURRENT, listOf(Path.of("/logs/b.log")), listOf(null), tabs, current = 0)
 
-        val merged = SessionFiles(listOf(Path.of("/logs/a.log"), Path.of("/logs/b.log")), listOf(LogFormat.Raw, null), filter)
+        val merged = SessionFiles(listOf(Path.of("/logs/a.log"), Path.of("/logs/b.log")), listOf(Parser.Raw, null), filter)
         assertEquals(listOf(TabAction.Replace(0, merged)), actions)
     }
 

@@ -1,8 +1,8 @@
 package io.github.rastislavpapp.logxy.app
 
 import io.github.rastislavpapp.logxy.core.config.Settings
-import io.github.rastislavpapp.logxy.core.parse.FormatPreview
-import io.github.rastislavpapp.logxy.core.parse.LogFormat
+import io.github.rastislavpapp.logxy.core.parse.ParserPreview
+import io.github.rastislavpapp.logxy.core.parse.Parser
 import io.github.rastislavpapp.logxy.core.parse.PreviewLine
 import io.github.rastislavpapp.logxy.core.parse.RoleKeys
 import net.miginfocom.swing.MigLayout
@@ -30,16 +30,16 @@ import javax.swing.table.DefaultTableCellRenderer
 private const val PREVIEW_LINES = 200
 
 /**
- * Edits the saved parsers (formats), with a preview of [previewFile] read by the one being edited.
- * [adopt], e.g. a detected format, is added as a new parser.
+ * Edits the saved parsers, with a preview of [previewFile] read by the one being edited.
+ * [adopt], e.g. a detected parser, is added as a new one.
  */
 class ParsersPage(
     private val previewFile: Path?,
-    select: LogFormat?,
-    adopt: LogFormat? = null,
+    select: Parser?,
+    adopt: Parser? = null,
 ) : PreferencesPage("Parsers", Icons.settings) {
 
-    private class Entry(val format: LogFormat, val builtIn: Boolean)
+    private class Entry(val parser: Parser, val builtIn: Boolean)
 
     /** A setting of a parser kind: the property it is stored as, and its value for a parser that has none. */
     private class Setting(val label: String, val key: String, val default: String, val list: Boolean = false) {
@@ -54,8 +54,8 @@ class ParsersPage(
     }
 
     /** A parser kind as the kind selector offers it, with the settings shown for it. */
-    private class KindChoice(val label: String, val kind: LogFormat.Kind, val settings: List<Setting>) {
-        fun format(name: String): LogFormat? = settings.associate { it.key to it.field.text }.let { values -> kind.read(name) { values[it] } }
+    private class KindChoice(val label: String, val kind: Parser.Kind, val settings: List<Setting>) {
+        fun parser(name: String): Parser? = settings.associate { it.key to it.field.text }.let { values -> kind.read(name) { values[it] } }
 
         override fun toString() = label
     }
@@ -75,7 +75,7 @@ class ParsersPage(
     private val previewTable = JTable(previewModel)
     private val sample: List<ByteArray> = previewFile?.let {
         try {
-            FormatPreview.sample(it, PREVIEW_LINES)
+            ParserPreview.sample(it, PREVIEW_LINES)
         } catch (_: Exception) {
             null
         }
@@ -84,20 +84,20 @@ class ParsersPage(
     private var loadingEditor = false
 
     init {
-        AppSettings.current.formats.forEach { entries.addElement(Entry(it, builtIn = false)) }
-        AppSettings.current.builtInFormats.forEach { entries.addElement(Entry(it, builtIn = true)) }
+        AppSettings.current.parsers.forEach { entries.addElement(Entry(it, builtIn = false)) }
+        AppSettings.current.builtInParsers.forEach { entries.addElement(Entry(it, builtIn = true)) }
         updateRestoreButton()
 
         layout = MigLayout("fill, insets 0", "[grow]", "[grow]")
         add(editor(), "grow")
 
-        val index = (0..<entries.size).firstOrNull { entries[it].format == select } ?: 0
+        val index = (0..<entries.size).firstOrNull { entries[it].parser == select } ?: 0
         if (entries.size > 0) list.selectedIndex = index
-        adopt?.let { addFormat(named(it, uniqueName(it.name))) }
+        adopt?.let { addParser(named(it, uniqueName(it.name))) }
     }
 
     /** The selected parser, if it is one the user may use. */
-    val selectedFormat: LogFormat? get() = selected()?.format
+    val selectedParser: Parser? get() = selected()?.parser
 
     private fun editor(): JSplitPane {
         list.selectionMode = ListSelectionModel.SINGLE_SELECTION
@@ -106,9 +106,9 @@ class ParsersPage(
                 list: JList<*>?, value: Any?, index: Int, isSelected: Boolean, cellHasFocus: Boolean,
             ): Component {
                 val entry = value as Entry
-                super.getListCellRendererComponent(list, entry.format.name, index, isSelected, cellHasFocus)
+                super.getListCellRendererComponent(list, entry.parser.name, index, isSelected, cellHasFocus)
                 if (entry.builtIn) {
-                    text = "${entry.format.name} (built-in)"
+                    text = "${entry.parser.name} (built-in)"
                     if (!isSelected) foreground = UIManager.getColor("Label.disabledForeground")
                 }
                 return this
@@ -126,8 +126,8 @@ class ParsersPage(
 
         val left = JPanel(MigLayout("fill, insets 0", "[grow]", "[grow][]")).apply {
             add(JScrollPane(list), "grow, wrap")
-            add(JButton("New").apply { addActionListener { addFormat(newFormat()) } }, "split 3")
-            add(JButton("Duplicate").apply { addActionListener { selected()?.let { addFormat(copyOf(it.format)) } } })
+            add(JButton("New").apply { addActionListener { addParser(newParser()) } }, "split 3")
+            add(JButton("Duplicate").apply { addActionListener { selected()?.let { addParser(copyOf(it.parser)) } } })
             add(deleteButton, "wrap")
             add(restoreButton)
         }
@@ -160,11 +160,11 @@ class ParsersPage(
         val entry = selected()
         loadingEditor = true
         try {
-            val format = entry?.format
-            nameField.text = format?.name.orEmpty()
-            kindBox.selectedItem = choices.firstOrNull { it.kind == format?.kind } ?: choices.first()
-            val properties = format?.properties().orEmpty()
-            for (choice in choices) choice.settings.forEach { it.show(if (choice.kind == format?.kind) properties else emptyMap()) }
+            val parser = entry?.parser
+            nameField.text = parser?.name.orEmpty()
+            kindBox.selectedItem = choices.firstOrNull { it.kind == parser?.kind } ?: choices.first()
+            val properties = parser?.properties().orEmpty()
+            for (choice in choices) choice.settings.forEach { it.show(if (choice.kind == parser?.kind) properties else emptyMap()) }
             val editable = entry != null && !entry.builtIn
             deleteButton.isEnabled = entry != null
             (listOf(nameField, kindBox) + settings().map { it.field }).forEach { it.isEnabled = editable }
@@ -178,7 +178,7 @@ class ParsersPage(
     private fun kindChanged() {
         if (loadingEditor) return
         // Carry over what the new kind shares with the one edited so far (the layout); role keys have defaults per kind.
-        val properties = selected()?.format?.properties().orEmpty()
+        val properties = selected()?.parser?.properties().orEmpty()
         loadingEditor = true
         try {
             choice().settings.filter { it.key in properties && !it.list }.forEach { it.show(properties) }
@@ -194,8 +194,8 @@ class ParsersPage(
         val index = list.selectedIndex
         val entry = selected() ?: return
         if (entry.builtIn) return
-        val format = choice().format(nameField.text.trim()) ?: return
-        entries.setElementAt(Entry(format, builtIn = false), index)
+        val parser = choice().parser(nameField.text.trim()) ?: return
+        entries.setElementAt(Entry(parser, builtIn = false), index)
         previewTimer.restart()
     }
 
@@ -215,9 +215,9 @@ class ParsersPage(
     }
 
     private fun updatePreview() {
-        val format = selected()?.format
+        val parser = selected()?.parser
         val compiled = try {
-            format?.compile()
+            parser?.compile()
         } catch (e: Exception) {
             status.text = e.message ?: e.toString()
             status.foreground = UIManager.getColor("Component.error.focusedBorderColor")
@@ -230,7 +230,7 @@ class ParsersPage(
             previewModel.show(null, emptyList())
             return
         }
-        val lines = FormatPreview.preview(compiled, sample)
+        val lines = ParserPreview.preview(compiled, sample)
         previewModel.show(compiled.schema.fields.map { it.name }, lines)
         status.text = when {
             previewFile == null -> "Open a file to preview the parser on it."
@@ -244,9 +244,9 @@ class ParsersPage(
         }
     }
 
-    private fun addFormat(format: LogFormat) {
+    private fun addParser(parser: Parser) {
         val userCount = (0..<entries.size).count { !entries[it].builtIn }
-        entries.add(userCount, Entry(format, builtIn = false))
+        entries.add(userCount, Entry(parser, builtIn = false))
         list.selectedIndex = userCount
         nameField.requestFocusInWindow()
         nameField.selectAll()
@@ -260,49 +260,49 @@ class ParsersPage(
         updateRestoreButton()
     }
 
-    private fun builtIns() = (0..<entries.size).map { entries[it] }.filter { it.builtIn }.map { it.format }
+    private fun builtIns() = (0..<entries.size).map { entries[it] }.filter { it.builtIn }.map { it.parser }
 
     private fun restoreBuiltIns() {
         val kept = builtIns()
-        val selectedFormat = selected()?.format
+        val selectedParser = selected()?.parser
         val firstBuiltIn = (0..<entries.size).count { !entries[it].builtIn }
         // Re-added in their original order, after the user's parsers.
-        LogFormat.BUILT_IN.forEachIndexed { i, format ->
-            if (format !in kept) entries.add(firstBuiltIn + i, Entry(format, builtIn = true))
+        Parser.BUILT_IN.forEachIndexed { i, parser ->
+            if (parser !in kept) entries.add(firstBuiltIn + i, Entry(parser, builtIn = true))
         }
-        list.setSelectedValue((0..<entries.size).map { entries[it] }.firstOrNull { it.format == selectedFormat }, true)
+        list.setSelectedValue((0..<entries.size).map { entries[it] }.firstOrNull { it.parser == selectedParser }, true)
         updateRestoreButton()
     }
 
     private fun updateRestoreButton() {
-        restoreButton.isEnabled = builtIns().size < LogFormat.BUILT_IN.size
+        restoreButton.isEnabled = builtIns().size < Parser.BUILT_IN.size
     }
 
     private fun uniqueName(base: String): String {
-        val names = (0..<entries.size).map { entries[it].format.name }.toSet()
+        val names = (0..<entries.size).map { entries[it].parser.name }.toSet()
         return (sequenceOf(base) + generateSequence(2) { it + 1 }.map { "$base $it" }).first { it !in names }
     }
 
-    private fun newFormat() = LogFormat.Pattern(uniqueName("My parser"), "%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %-5p %c - %m%n")
+    private fun newParser() = Parser.Pattern(uniqueName("My parser"), "%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %-5p %c - %m%n")
 
-    private fun copyOf(format: LogFormat): LogFormat = named(format, uniqueName("${format.name} copy"))
+    private fun copyOf(parser: Parser): Parser = named(parser, uniqueName("${parser.name} copy"))
 
-    private fun named(format: LogFormat, name: String): LogFormat = if (format == LogFormat.Raw) newFormat() else format.withName(name)
+    private fun named(parser: Parser, name: String): Parser = if (parser == Parser.Raw) newParser() else parser.withName(name)
 
-    private fun formats() = (0..<entries.size).map { entries[it] }.filterNot { it.builtIn }.map { it.format }
+    private fun userParsers() = (0..<entries.size).map { entries[it] }.filterNot { it.builtIn }.map { it.parser }
 
     override fun problem(): String? {
-        val formats = formats()
-        return formats.firstNotNullOfOrNull { format ->
+        val parsers = userParsers()
+        return parsers.firstNotNullOfOrNull { parser ->
             when {
-                format.name.isBlank() -> "A parser has no name."
-                formats.count { it.name == format.name } > 1 || builtIns().any { it.name == format.name } ->
-                    "The name “${format.name}” is used more than once."
+                parser.name.isBlank() -> "A parser has no name."
+                parsers.count { it.name == parser.name } > 1 || builtIns().any { it.name == parser.name } ->
+                    "The name “${parser.name}” is used more than once."
                 else -> try {
-                    format.compile()
+                    parser.compile()
                     null
                 } catch (e: Exception) {
-                    "“${format.name}”: ${e.message}"
+                    "“${parser.name}”: ${e.message}"
                 }
             }
         }
@@ -310,20 +310,20 @@ class ParsersPage(
 
     override fun applyTo(settings: Settings): Settings {
         val kept = builtIns()
-        return settings.copy(formats = formats(), deletedBuiltIns = LogFormat.BUILT_IN.filter { it !in kept }.map { it.name }.toSet())
+        return settings.copy(parsers = userParsers(), deletedBuiltIns = Parser.BUILT_IN.filter { it !in kept }.map { it.name }.toSet())
     }
 
     private companion object {
         /** The kinds a user can choose; each new kind of parser adds its line here. */
         fun kindChoices() = listOf(
-            KindChoice("log4j / logback pattern", LogFormat.Pattern, listOf(Setting("Layout:", "layout", ""))),
+            KindChoice("log4j / logback pattern", Parser.Pattern, listOf(Setting("Layout:", "layout", ""))),
             KindChoice(
-                "Regex with named groups", LogFormat.Regex,
-                listOf(Setting("Layout:", "layout", ""), Setting("Timestamp:", "timestamp", LogFormat.Regex.DEFAULT_TIMESTAMP)),
+                "Regex with named groups", Parser.Regex,
+                listOf(Setting("Layout:", "layout", ""), Setting("Timestamp:", "timestamp", Parser.Regex.DEFAULT_TIMESTAMP)),
             ),
-            KindChoice("JSON lines", LogFormat.Json, roleKeys(RoleKeys())),
-            KindChoice("logfmt (key=value)", LogFormat.Logfmt, roleKeys(RoleKeys.LOGFMT)),
-            KindChoice("Web server access log", LogFormat.AccessLog, emptyList()),
+            KindChoice("JSON lines", Parser.Json, roleKeys(RoleKeys())),
+            KindChoice("logfmt (key=value)", Parser.Logfmt, roleKeys(RoleKeys.LOGFMT)),
+            KindChoice("Web server access log", Parser.AccessLog, emptyList()),
         )
 
         /** One setting per role, listing the keys that fill it. */
@@ -332,7 +332,7 @@ class ParsersPage(
         }
     }
 
-    /** Sample lines as the edited format reads them: one row per line, one column per field. */
+    /** Sample lines as the edited parser reads them: one row per line, one column per field. */
     private inner class PreviewModel : AbstractTableModel() {
         private var columns: List<String> = emptyList()
         var lines: List<PreviewLine> = emptyList()

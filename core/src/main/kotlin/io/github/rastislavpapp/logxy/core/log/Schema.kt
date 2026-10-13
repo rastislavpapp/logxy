@@ -17,7 +17,7 @@ enum class ColumnType {
     SPAN,
 }
 
-/** What a field means, independent of the format it came from. */
+/** What a field means, independent of the parser it came from. */
 enum class Role { TIMESTAMP, LEVEL, MESSAGE, THREAD, LOGGER, EXCEPTION, SOURCE }
 
 /** A field of a log's records: a column of the table unless [hidden], named [name], stored as [type]. */

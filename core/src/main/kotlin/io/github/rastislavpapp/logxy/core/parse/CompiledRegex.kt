@@ -6,20 +6,19 @@ import io.github.rastislavpapp.logxy.core.log.Field
 import io.github.rastislavpapp.logxy.core.log.Role
 import io.github.rastislavpapp.logxy.core.log.Schema
 import java.time.ZoneId
-import java.util.regex.Matcher
 import java.util.regex.Pattern
 
 /**
  * Fallback for layouts the pattern syntax cannot express: a regex matched at the start of each line,
  * whose named groups become fields. Group names pick the role, e.g. `timestamp`, `level`, `thread`,
- * `logger`, `message`. Slower than [PatternFormat], since every line runs through the regex engine.
+ * `logger`, `message`. Slower than [CompiledPattern], since every line runs through the regex engine.
  */
-class RegexFormat(
+class CompiledRegex(
     val regex: String,
     /** Layout of the `timestamp` group, in the same syntax as `%d{...}`. */
     val timestampPattern: String = "yyyy-MM-dd HH:mm:ss.SSS",
     zone: ZoneId = ZoneId.systemDefault(),
-) : RecordFormat() {
+) : CompiledParser() {
 
     private val compiled = Pattern.compile(regex)
     private val groups: List<Pair<String, Int>> = compiled.namedGroups().entries
@@ -38,10 +37,10 @@ class RegexFormat(
 
     override fun formatTimestamp(field: Int, nanos: Long) = timestampFormat.format(nanos)
 
-    override fun newParser(): RecordParser = Parser()
+    override fun newMatcher(): LineMatcher = Matcher()
 
-    private inner class Parser : RecordParser {
-        private val matcher: Matcher = compiled.matcher("")
+    private inner class Matcher : LineMatcher {
+        private val matcher: java.util.regex.Matcher = compiled.matcher("")
         private val timestampParser = timestampFormat.newParser()
         private var bytes = ByteArray(0)
         private var lineFrom = 0

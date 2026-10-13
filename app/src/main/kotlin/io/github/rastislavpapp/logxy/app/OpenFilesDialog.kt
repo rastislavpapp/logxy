@@ -2,7 +2,7 @@ package io.github.rastislavpapp.logxy.app
 
 import io.github.rastislavpapp.logxy.core.config.OpenMode
 import io.github.rastislavpapp.logxy.core.open.OpenPlan
-import io.github.rastislavpapp.logxy.core.parse.LogFormat
+import io.github.rastislavpapp.logxy.core.parse.Parser
 import net.miginfocom.swing.MigLayout
 import java.awt.Window
 import java.awt.event.KeyEvent
@@ -18,11 +18,11 @@ import javax.swing.JRadioButton
 import javax.swing.KeyStroke
 import javax.swing.UIManager
 
-/** How the user chose to open files: [formats] has the parser for each of [files], null to detect it. */
+/** How the user chose to open files: [parsers] has the parser for each of [files], null to detect it. */
 class OpenAnswer(
     val mode: OpenMode,
     val files: List<Path>,
-    val formats: List<LogFormat?>,
+    val parsers: List<Parser?>,
     val includeSubfolders: Boolean,
     /** Open files this way from now on, without asking. */
     val remember: Boolean,
@@ -114,7 +114,7 @@ class OpenFilesDialog(
         radios.forEachIndexed { i, radio -> radio.isSelected = choices[i] == selected }
         openButton.isEnabled = parsers.allFit
         openButton.toolTipText = parsers.notReady
-        val detected = parsers.formats.all { it == null }
+        val detected = parsers.chosenParsers.all { it == null }
         remember.isEnabled = detected
         if (!detected) remember.isSelected = false
         remember.toolTipText = if (detected) null else "Only when every parser is Auto-detect: chosen parsers are not remembered"
@@ -123,7 +123,7 @@ class OpenFilesDialog(
     private fun open() {
         parsers.stopEditing()
         val mode = choices.getOrNull(radios.indexOfFirst { it.isSelected && it.isEnabled }) ?: return
-        answer = OpenAnswer(mode, parsers.included, parsers.formats, subfolders.isSelected, remember.isSelected)
+        answer = OpenAnswer(mode, parsers.included, parsers.chosenParsers, subfolders.isSelected, remember.isSelected)
         dispose()
     }
 

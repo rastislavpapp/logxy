@@ -14,7 +14,7 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import org.junit.jupiter.api.io.TempDir
 
-class JsonFormatTest {
+class CompiledJsonTest {
 
     @TempDir
     lateinit var dir: Path
@@ -119,13 +119,13 @@ class JsonFormatTest {
 
     @Test
     fun `reads roles from the first key of each list that a record has`() {
-        val format = JsonFormat(RoleKeys(message = listOf("message", "msg")), ZoneOffset.UTC)
+        val parser = CompiledJson(RoleKeys(message = listOf("message", "msg")), ZoneOffset.UTC)
         val lines = listOf(
             """{"msg":"short","message":"long","level":"WARN","@timestamp":"2026-10-01T08:00:00.123Z","logger_name":"a.B"}""",
             """not json""",
         ).map { it.toByteArray() }
-        val preview = FormatPreview.preview(format, lines)
-        val names = format.schema.fields.map { it.name }
+        val preview = ParserPreview.preview(parser, lines)
+        val names = parser.schema.fields.map { it.name }
         val values = preview[0].values!!
         assertEquals("long", values[names.indexOf("Message")])
         assertEquals("WARN", values[names.indexOf("Level")])
@@ -136,10 +136,10 @@ class JsonFormatTest {
 
     @Test
     fun `reads Docker, Serilog and GELF records with the default keys`() {
-        val format = JsonFormat(zone = ZoneOffset.UTC)
-        val names = format.schema.fields.map { it.name }
+        val parser = CompiledJson(zone = ZoneOffset.UTC)
+        val names = parser.schema.fields.map { it.name }
         fun read(line: String, field: String) =
-            FormatPreview.preview(format, listOf(line.toByteArray()))[0].values!![names.indexOf(field)]
+            ParserPreview.preview(parser,listOf(line.toByteArray()))[0].values!![names.indexOf(field)]
 
         val docker = """{"log":"Started\n","stream":"stdout","time":"2026-10-01T08:00:00.123456789Z"}"""
         assertEquals("Started\n", read(docker, "Message"))
@@ -174,8 +174,8 @@ class JsonFormatTest {
             {"@timestamp":"2026-10-01T08:00:00.123Z","level":"INFO","message":"Started"}
             {"@timestamp":"2026-10-01T08:00:00.124Z","level":"ERROR","message":"Failed","stack_trace":"x\n\tat y"}
         """.trimIndent())
-        assertEquals("JSON lines", LogFormat.detect(file).name)
-        assertTrue(LogFormat.BUILT_IN.last() is LogFormat.Json)
-        assertFalse(JsonFormat().multiLine)
+        assertEquals("JSON lines", Parser.detect(file).name)
+        assertTrue(Parser.BUILT_IN.last() is Parser.Json)
+        assertFalse(CompiledJson().multiLine)
     }
 }

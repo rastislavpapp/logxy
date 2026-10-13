@@ -9,7 +9,7 @@ import io.github.rastislavpapp.logxy.core.filter.TextCondition
 import io.github.rastislavpapp.logxy.core.filter.TextOp
 import io.github.rastislavpapp.logxy.core.index.IndexOptions
 import io.github.rastislavpapp.logxy.core.index.IndexProgress
-import io.github.rastislavpapp.logxy.core.parse.JsonFormat
+import io.github.rastislavpapp.logxy.core.parse.CompiledJson
 import java.nio.file.Files
 import java.nio.file.Path
 import java.time.ZoneOffset
@@ -24,11 +24,11 @@ class JsonLogTest {
     @TempDir
     lateinit var dir: Path
 
-    private val format = JsonFormat(zone = ZoneOffset.UTC)
+    private val parser = CompiledJson(zone = ZoneOffset.UTC)
 
     private fun parse(content: String, options: IndexOptions = IndexOptions()): ParsedLog {
         val file = Files.writeString(dir.resolve("test-${content.hashCode()}-${options.hashCode()}.json"), content)
-        return runBlocking { ParsedLog.build(file, format, IndexProgress(), options) }
+        return runBlocking { ParsedLog.build(file, parser, IndexProgress(), options) }
     }
 
     private fun ParsedLog.column(name: String) = schema.fields.indexOfFirst { it.name == name }.let { field ->
@@ -119,7 +119,7 @@ class JsonLogTest {
     @Test
     fun `tails appended lines`() {
         val file = Files.writeString(dir.resolve("tail.json"), """{"level":"INFO","message":"one"}""" + "\n" + """{"level":"INFO","mess""")
-        runBlocking { ParsedLog.build(file, format) }.use { log ->
+        runBlocking { ParsedLog.build(file, parser) }.use { log ->
             assertEquals(2, log.recordCount)
             Files.writeString(file, """age":"two"}""" + "\n" + """{"level":"WARN","message":"three"}""" + "\n", java.nio.file.StandardOpenOption.APPEND)
             log.append(log.readAppended(Files.size(file)))

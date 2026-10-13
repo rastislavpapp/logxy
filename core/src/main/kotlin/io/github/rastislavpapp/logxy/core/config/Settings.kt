@@ -2,7 +2,7 @@ package io.github.rastislavpapp.logxy.core.config
 
 import io.github.rastislavpapp.logxy.core.log.Level
 import io.github.rastislavpapp.logxy.core.log.LevelMapping
-import io.github.rastislavpapp.logxy.core.parse.LogFormat
+import io.github.rastislavpapp.logxy.core.parse.Parser
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.Properties
@@ -19,12 +19,12 @@ enum class OpenMode(val key: String) {
 }
 
 /**
- * The user's saved formats (parsers), level names, filters, the memory limit (e.g. `8g`, null for the JVM
+ * The user's saved parsers, level names, filters, the memory limit (e.g. `8g`, null for the JVM
  * default), how to open files without asking ([openMode], null to ask) and whether opened folders include
- * their subfolders, and the names of the built-in formats the user deleted.
+ * their subfolders, and the names of the built-in parsers the user deleted.
  */
 data class Settings(
-    val formats: List<LogFormat> = emptyList(),
+    val parsers: List<Parser> = emptyList(),
     val levels: LevelMapping = LevelMapping.DEFAULT,
     val filters: List<SavedFilter> = emptyList(),
     val maxMemory: String? = null,
@@ -32,11 +32,11 @@ data class Settings(
     val includeSubfolders: Boolean = true,
     val deletedBuiltIns: Set<String> = emptySet(),
 ) {
-    /** The built-in formats the user kept. */
-    val builtInFormats: List<LogFormat> get() = LogFormat.BUILT_IN.filter { it.name !in deletedBuiltIns }
+    /** The built-in parsers the user kept. */
+    val builtInParsers: List<Parser> get() = Parser.BUILT_IN.filter { it.name !in deletedBuiltIns }
 
-    /** The formats a file can be read with, as parser menus list them. */
-    val knownFormats: List<LogFormat> get() = listOf(LogFormat.Raw) + formats + builtInFormats
+    /** The parsers a file can be read with, as parser menus list them. */
+    val knownParsers: List<Parser> get() = listOf(Parser.Raw) + parsers + builtInParsers
 
     companion object {
         /** `%APPDATA%\logxy` on Windows, `$XDG_CONFIG_HOME/logxy` or `~/.config/logxy` elsewhere. */
@@ -65,12 +65,12 @@ data class Settings(
         /**
          * Reads settings from a properties file, e.g.:
          * ```
-         * format.1.name=My app
-         * format.1.type=pattern
-         * format.1.layout=%d [%t] %-5p %c - %m%n
-         * format.2.name=My JSON
-         * format.2.type=json
-         * format.2.keys.level=level,severity
+         * parser.1.name=My app
+         * parser.1.type=pattern
+         * parser.1.layout=%d [%t] %-5p %c - %m%n
+         * parser.2.name=My JSON
+         * parser.2.type=json
+         * parser.2.keys.level=level,severity
          * deleted-built-in.1.name=Spring Boot 3
          * level-names=custom
          * level.NOTE=INFO
@@ -88,7 +88,7 @@ data class Settings(
             if (!Files.exists(path)) return Settings()
             val properties = PropertiesFiles.load(path)
 
-            val formats = numbered(properties, "format").mapNotNull { n -> readFormat(properties, "format.$n.")?.takeIf { it != LogFormat.Raw } }
+            val parsers = numbered(properties, "parser").mapNotNull { n -> readParser(properties, "parser.$n.")?.takeIf { it != Parser.Raw } }
             val levels = properties.stringPropertyNames()
                 .filter { it.startsWith("level.") }
                 .mapNotNull { key ->
@@ -111,7 +111,7 @@ data class Settings(
                 .mapNotNull { n -> properties.getProperty("deleted-built-in.$n.name")?.trim()?.takeIf { it.isNotEmpty() } }
                 .toSet()
             return Settings(
-                formats, LevelMapping(if (custom) levels else Level.BUILT_IN_NAMES + levels), filters, maxMemory, openMode, includeSubfolders,
+                parsers, LevelMapping(if (custom) levels else Level.BUILT_IN_NAMES + levels), filters, maxMemory, openMode, includeSubfolders,
                 deletedBuiltIns,
             )
         }
@@ -119,7 +119,7 @@ data class Settings(
         /** Writes [settings] to [path], replacing the file only once the new one is complete. */
         fun save(path: Path, settings: Settings) {
             val properties = Properties()
-            settings.formats.filter { it != LogFormat.Raw }.forEachIndexed { i, format -> writeFormat(properties, "format.${i + 1}.", format) }
+            settings.parsers.filter { it != Parser.Raw }.forEachIndexed { i, parser -> writeParser(properties, "parser.${i + 1}.", parser) }
             settings.deletedBuiltIns.forEachIndexed { i, name -> properties["deleted-built-in.${i + 1}.name"] = name }
             settings.filters.forEachIndexed { i, filter ->
                 properties["filter.${i + 1}.name"] = filter.name
@@ -136,20 +136,20 @@ data class Settings(
             PropertiesFiles.store(path, properties, "logxy settings")
         }
 
-        /** Reads the format stored under [prefix] (e.g. `format.1.`); null if it is incomplete. */
-        internal fun readFormat(properties: Properties, prefix: String): LogFormat? {
+        /** Reads the parser stored under [prefix] (e.g. `parser.1.`); null if it is incomplete. */
+        internal fun readParser(properties: Properties, prefix: String): Parser? {
             val name = properties.getProperty("${prefix}name")?.trim().orEmpty()
             if (name.isEmpty()) return null
             val type = properties.getProperty("${prefix}type", "pattern")
-            val kind = LogFormat.KINDS.firstOrNull { it.type == type } ?: return null
+            val kind = Parser.KINDS.firstOrNull { it.type == type } ?: return null
             return kind.read(name) { properties.getProperty(prefix + it) }
         }
 
-        /** Stores [format] under [prefix] (e.g. `format.1.`) as [readFormat] reads it back; also used for the arguments a restart passes on. */
-        internal fun writeFormat(properties: Properties, prefix: String, format: LogFormat) {
-            properties["${prefix}type"] = format.kind.type
-            format.properties().forEach { (key, value) -> properties[prefix + key] = value }
-            properties["${prefix}name"] = format.name
+        /** Stores [parser] under [prefix] (e.g. `parser.1.`) as [readParser] reads it back; also used for the arguments a restart passes on. */
+        internal fun writeParser(properties: Properties, prefix: String, parser: Parser) {
+            properties["${prefix}type"] = parser.kind.type
+            parser.properties().forEach { (key, value) -> properties[prefix + key] = value }
+            properties["${prefix}name"] = parser.name
         }
 
         /**

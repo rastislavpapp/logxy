@@ -1,6 +1,6 @@
 package io.github.rastislavpapp.logxy.app
 
-import io.github.rastislavpapp.logxy.core.parse.LogFormat
+import io.github.rastislavpapp.logxy.core.parse.Parser
 import net.miginfocom.swing.MigLayout
 import java.awt.Window
 import java.awt.event.KeyEvent
@@ -12,16 +12,16 @@ import javax.swing.JLabel
 import javax.swing.JPanel
 import javax.swing.KeyStroke
 
-/** Chooses the parser of each of a merge's [files], starting from [current]; [formats] is null if cancelled. */
+/** Chooses the parser of each of a merge's [files], starting from [current]; [chosenParsers] is null if cancelled. */
 class FileParsersDialog(
     owner: Window,
     files: List<Path>,
     names: List<String>,
     descriptions: List<String>,
-    current: List<LogFormat?>,
+    current: List<Parser?>,
 ) : JDialog(owner, "Parser per File", ModalityType.APPLICATION_MODAL) {
 
-    var formats: List<LogFormat?>? = null
+    var chosenParsers: List<Parser?>? = null
         private set
 
     private val apply = JButton("Apply")
@@ -35,7 +35,7 @@ class FileParsersDialog(
         apply.apply {
             addActionListener {
                 parsers.stopEditing()
-                formats = parsers.formats
+                chosenParsers = parsers.chosenParsers
                 dispose()
             }
         }

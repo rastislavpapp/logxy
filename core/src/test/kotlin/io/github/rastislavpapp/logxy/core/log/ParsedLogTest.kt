@@ -6,11 +6,11 @@ import io.github.rastislavpapp.logxy.core.filter.TextCondition
 import io.github.rastislavpapp.logxy.core.filter.TextOp
 import io.github.rastislavpapp.logxy.core.index.IndexOptions
 import io.github.rastislavpapp.logxy.core.index.IndexProgress
-import io.github.rastislavpapp.logxy.core.parse.FormatMismatchException
+import io.github.rastislavpapp.logxy.core.parse.ParserMismatchException
 import io.github.rastislavpapp.logxy.core.parse.MdcMap
-import io.github.rastislavpapp.logxy.core.parse.PatternFormat
-import io.github.rastislavpapp.logxy.core.parse.RecordFormat
-import io.github.rastislavpapp.logxy.core.parse.RegexFormat
+import io.github.rastislavpapp.logxy.core.parse.CompiledPattern
+import io.github.rastislavpapp.logxy.core.parse.CompiledParser
+import io.github.rastislavpapp.logxy.core.parse.CompiledRegex
 import io.github.rastislavpapp.logxy.core.query.QueryCompiler
 import io.github.rastislavpapp.logxy.core.query.QueryParser
 import java.nio.file.Files
@@ -30,11 +30,11 @@ class ParsedLogTest {
     @TempDir
     lateinit var dir: Path
 
-    private val format = PatternFormat("%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %-5p %c - %m%n", ZoneOffset.UTC)
+    private val parser = CompiledPattern("%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %-5p %c - %m%n", ZoneOffset.UTC)
 
-    private fun parse(content: String, format: RecordFormat = this.format, options: IndexOptions = IndexOptions()): ParsedLog {
+    private fun parse(content: String, parser: CompiledParser = this.parser, options: IndexOptions = IndexOptions()): ParsedLog {
         val file = Files.writeString(dir.resolve("test-${content.hashCode()}-${options.hashCode()}.log"), content)
-        return runBlocking { ParsedLog.build(file, format, IndexProgress(), options) }
+        return runBlocking { ParsedLog.build(file, parser, IndexProgress(), options) }
     }
 
     private fun ParsedLog.rows() = List(recordCount) { rowValues(it, 1000).toList() }
@@ -120,7 +120,7 @@ class ParsedLogTest {
     @Test
     fun `appending continues records and reparses an incomplete last line`() {
         val file = Files.writeString(dir.resolve("live.log"), "2026-10-01 08:00:00.001 [main] INFO  a.B - one\n")
-        runBlocking { ParsedLog.build(file, format) }.use { log ->
+        runBlocking { ParsedLog.build(file, parser) }.use { log ->
             fun write(text: String) {
                 Files.writeString(file, text, StandardOpenOption.APPEND)
                 log.append(log.readAppended(Files.size(file)))
@@ -142,7 +142,7 @@ class ParsedLogTest {
     @Test
     fun `appending to an empty file`() {
         val file = Files.writeString(dir.resolve("empty.log"), "")
-        runBlocking { ParsedLog.build(file, format) }.use { log ->
+        runBlocking { ParsedLog.build(file, parser) }.use { log ->
             assertEquals(0, log.recordCount)
             Files.writeString(file, "2026-10-01 08:00:00.001 [main] INFO  a.B - one\n", StandardOpenOption.APPEND)
             log.append(log.readAppended(Files.size(file)))
@@ -152,7 +152,7 @@ class ParsedLogTest {
 
     private fun assertMismatch(content: String) {
         val file = Files.writeString(dir.resolve("mismatch-${content.hashCode()}.log"), content)
-        assertFailsWith<FormatMismatchException> { runBlocking { ParsedLog.build(file, format) } }
+        assertFailsWith<ParserMismatchException> { runBlocking { ParsedLog.build(file, parser) } }
     }
 
     @Test
@@ -189,8 +189,8 @@ class ParsedLogTest {
     }
 
     @Test
-    fun `regex format with named groups`() {
-        val regex = RegexFormat("""(?<timestamp>\S+ \S+) (?<level>\w+) \[(?<thread>[^]]*)] (?<message>.*)""", zone = ZoneOffset.UTC)
+    fun `regex parser with named groups`() {
+        val regex = CompiledRegex("""(?<timestamp>\S+ \S+) (?<level>\w+) \[(?<thread>[^]]*)] (?<message>.*)""", zone = ZoneOffset.UTC)
         parse("2026-10-01 08:00:00.001 INFO [main] hello world\n\tmore\n", regex).use { log ->
             assertEquals(listOf("2026-10-01 08:00:00.001", "INFO", "main", "hello world"), log.rows()[0])
             assertEquals("2026-10-01 08:00:00.001 INFO [main] hello world\n\tmore", log.recordText(0, 1000))
@@ -205,7 +205,7 @@ class ParsedLogTest {
         for (options in listOf(IndexOptions(parallelism = 1), IndexOptions(parallelism = 2, minRangeSize = 1))) {
             val progress = IndexProgress()
             val file = Files.writeString(dir.resolve("distinct-${options.parallelism}.log"), content)
-            runBlocking { ParsedLog.build(file, format, progress, options) }.use { log ->
+            runBlocking { ParsedLog.build(file, parser, progress, options) }.use { log ->
                 assertEquals(ColumnType.SPAN, log.schema.fields[3].type)
                 assertEquals(ColumnType.DICT, log.schema.fields[1].type)
                 assertEquals(30_000, log.recordCount)
@@ -219,7 +219,7 @@ class ParsedLogTest {
 
     @Test
     fun `a named MDC field shows only its value, also when the whole map was written there`() {
-        val mdc = PatternFormat("%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %-5p %c %X{breadcrumbId} - %m%n", ZoneOffset.UTC)
+        val mdc = CompiledPattern("%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %-5p %c %X{breadcrumbId} - %m%n", ZoneOffset.UTC)
         val content = """
             2026-10-01 08:00:00.001 [main] INFO  a.B {breadcrumbId=ID-1, tenant=acme} - map with the key
             2026-10-01 08:00:00.002 [main] INFO  a.B {tenant=acme, breadcrumbId=ID-2} - key not first
@@ -234,7 +234,7 @@ class ParsedLogTest {
         }
     }
 
-    private val mdc = PatternFormat("%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %-5p %c %X - %m%n", ZoneOffset.UTC)
+    private val mdc = CompiledPattern("%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %-5p %c %X - %m%n", ZoneOffset.UTC)
 
     @Test
     fun `an MDC map is split into a column per key`() {
@@ -287,8 +287,8 @@ class ParsedLogTest {
                 if (i % 5 == 0) append("java.lang.RuntimeException: $i\r\n\tat x.Y.z(Y.java:$i)\n")
             }
         }
-        for (format in listOf(format, mdc)) {
-            parse(content, format, IndexOptions(parallelism = 4, minRangeSize = 1)).use { log ->
+        for (parser in listOf(parser, mdc)) {
+            parse(content, parser,IndexOptions(parallelism = 4, minRangeSize = 1)).use { log ->
                 val snapshot = log.filterSnapshot()
                 assertEquals(log.fieldTexts(), List(log.recordCount) { record -> List(log.schema.fields.size) { snapshot.fieldText(record, it) } })
             }
@@ -298,7 +298,7 @@ class ParsedLogTest {
     @Test
     fun `a snapshot keeps reading its records while more are appended`() {
         val file = Files.writeString(dir.resolve("live.log"), "2026-10-01 08:00:00.001 [main] INFO  a.B - one\n2026-10-01 08:00:00.002 [main] WARN  a.C - two\n")
-        runBlocking { ParsedLog.build(file, format) }.use { log ->
+        runBlocking { ParsedLog.build(file, parser) }.use { log ->
             val snapshot = log.filterSnapshot()
             Files.writeString(file, "java.lang.Exception: x\n2026-10-01 08:00:00.003 [main] INFO  a.D - three\n", StandardOpenOption.APPEND)
             log.append(log.readAppended(Files.size(file)))

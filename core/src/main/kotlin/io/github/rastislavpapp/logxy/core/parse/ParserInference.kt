@@ -5,10 +5,10 @@ import io.github.rastislavpapp.logxy.core.log.Level
 import java.time.ZoneOffset
 
 /**
- * Guesses the layout of a log from its first lines, as a format the usual parsers then read: the keys of
+ * Guesses the layout of a log from its first lines, as a JSON or pattern parser: the keys of
  * JSON lines, or a pattern layout of a timestamp, a level, the columns between and the message.
  */
-internal object FormatInference {
+internal object ParserInference {
 
     /** Share of lines a guess has to agree with. */
     private const val AGREEMENT = 0.9
@@ -17,8 +17,8 @@ internal object FormatInference {
     private const val MAX_TOKENS = 32
 
     /** A parser guessed from the [sample] lines: JSON lines with the keys they use, else a pattern layout; null if neither fits. */
-    fun infer(sample: List<ByteArray>): LogFormat? {
-        val lines = sample.filter { !FormatCheck.looksLikeContinuation(it, 0, it.size) }
+    fun infer(sample: List<ByteArray>): Parser? {
+        val lines = sample.filter { !ParserCheck.looksLikeContinuation(it, 0, it.size) }
         if (lines.isEmpty()) return null
         return inferJson(lines) ?: inferText(lines)
     }
@@ -35,7 +35,7 @@ internal object FormatInference {
         var traces = 0
     }
 
-    private fun inferJson(lines: List<ByteArray>): LogFormat? {
+    private fun inferJson(lines: List<ByteArray>): Parser? {
         val keys = LinkedHashMap<String, KeyStats>()
         val timestamps = JsonTimestampParser(ZoneOffset.UTC)
         var objects = 0
@@ -83,9 +83,9 @@ internal object FormatInference {
             .takeIf { defaults.message.none { (keys[it]?.count ?: 0) >= half } }
             ?.maxByOrNull { it.value.stringLength / it.value.strings }?.key
         val found = listOfNotNull(timestamp, level, message, logger, thread, exception)
-        if (found.isEmpty()) return LogFormat.Json("JSON lines")
+        if (found.isEmpty()) return Parser.Json("JSON lines")
         fun first(key: String?, rest: List<String>) = listOfNotNull(key) + rest
-        return LogFormat.Json(
+        return Parser.Json(
             "JSON lines: ${found.joinToString(", ")}",
             RoleKeys(
                 first(timestamp, defaults.timestamp), first(level, defaults.level), first(message, defaults.message),
@@ -119,7 +119,7 @@ internal object FormatInference {
         val label get() = prefix + (if ('y' in layout || 'd' in layout) "date" else "time") + if (prefix.isEmpty()) "" else "]"
     }
 
-    private fun inferText(lines: List<ByteArray>): LogFormat? {
+    private fun inferText(lines: List<ByteArray>): Parser? {
         val stamp = findTimestamp(lines)
         val records = if (stamp == null) lines else lines.filter { stamp.end(it) >= 0 }
         val tokens = records.map { line -> tokenize(line, stamp?.end(line) ?: 0) }
@@ -146,13 +146,13 @@ internal object FormatInference {
         for (end in header downTo 0) {
             if (stamp == null && (levelColumn == null || end <= levelColumn)) break
             val (pattern, name) = layout(stamp, columns, levelColumn, end) ?: continue
-            val format = try {
-                PatternFormat(pattern)
+            val compiled = try {
+                CompiledPattern(pattern)
             } catch (_: IllegalArgumentException) {
                 continue
             }
-            val reader = format.newParser()
-            if (records.count { reader.match(it, 0, it.size) } >= records.size * AGREEMENT) return LogFormat.Pattern(name, pattern)
+            val matcher = compiled.newMatcher()
+            if (records.count { matcher.match(it, 0, it.size) } >= records.size * AGREEMENT) return Parser.Pattern(name, pattern)
         }
         return null
     }

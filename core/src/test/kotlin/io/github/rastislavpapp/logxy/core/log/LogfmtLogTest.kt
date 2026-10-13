@@ -6,7 +6,7 @@ import io.github.rastislavpapp.logxy.core.filter.TextCondition
 import io.github.rastislavpapp.logxy.core.filter.TextOp
 import io.github.rastislavpapp.logxy.core.index.IndexOptions
 import io.github.rastislavpapp.logxy.core.index.IndexProgress
-import io.github.rastislavpapp.logxy.core.parse.LogfmtFormat
+import io.github.rastislavpapp.logxy.core.parse.CompiledLogfmt
 import java.nio.file.Files
 import java.nio.file.Path
 import java.time.ZoneOffset
@@ -22,7 +22,7 @@ class LogfmtLogTest {
 
     private fun parse(content: String, options: IndexOptions = IndexOptions()): ParsedLog {
         val file = Files.writeString(dir.resolve("test-${content.hashCode()}-${options.hashCode()}.log"), content)
-        return runBlocking { ParsedLog.build(file, LogfmtFormat(zone = ZoneOffset.UTC), IndexProgress(), options) }
+        return runBlocking { ParsedLog.build(file, CompiledLogfmt(zone = ZoneOffset.UTC), IndexProgress(), options) }
     }
 
     private fun ParsedLog.column(name: String) = schema.fields.indexOfFirst { it.name == name }.let { field ->

@@ -7,11 +7,11 @@ import io.github.rastislavpapp.logxy.core.index.IndexOptions
 import io.github.rastislavpapp.logxy.core.filter.ParsedSnapshot
 import io.github.rastislavpapp.logxy.core.filter.RecordSnapshot
 import io.github.rastislavpapp.logxy.core.index.IndexProgress
-import io.github.rastislavpapp.logxy.core.parse.FormatCheck
+import io.github.rastislavpapp.logxy.core.parse.ParserCheck
 import io.github.rastislavpapp.logxy.core.parse.Json
 import io.github.rastislavpapp.logxy.core.parse.LineReader
 import io.github.rastislavpapp.logxy.core.parse.MdcMap
-import io.github.rastislavpapp.logxy.core.parse.RecordFormat
+import io.github.rastislavpapp.logxy.core.parse.CompiledParser
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -44,20 +44,20 @@ private class AppendedRecords(
 ) : AppendedData
 
 /**
- * A log parsed into records by a [RecordFormat]. Values live in [Columns] segments, one per range
+ * A log parsed into records by a [CompiledParser]. Values live in [Columns] segments, one per range
  * that was parsed in parallel; dictionary ids are shared across segments. Lines that do not start a
  * record continue the previous one (stack traces); such lines before the first record become records
  * of their own, with only a message.
  *
- * [schema] differs from the format's: a DICT field whose values turn out mostly distinct (e.g. a
+ * [schema] differs from the parser's: a DICT field whose values turn out mostly distinct (e.g. a
  * misdetected layout) is a SPAN, and each key found in an MDC map while indexing gets a field of its
  * own, read from the map; keys that first appear in appended records do not.
  */
 class ParsedLog private constructor(
     override val path: Path,
     private val channels: ReadChannels,
-    val format: RecordFormat,
-    /** How [Columns] store the fields: the format's schema, with DICT fields stored as spans where needed. */
+    val parser: CompiledParser,
+    /** How [Columns] store the fields: the parser's schema, with DICT fields stored as spans where needed. */
     private val storage: Schema,
     schema: Schema,
     private val segments: ArrayList<Columns>,
@@ -138,7 +138,7 @@ class ParsedLog private constructor(
         first = segmentFirst.copyOf(),
         texts = Array(schema.fields.size) { field -> dictionaries.getOrNull(field)?.let { d -> List(d.size) { d.text(it) } } },
         levels = levelMapping,
-        format = format,
+        parser = parser,
     )
 
     override fun rowValues(record: Int, maxBytes: Int): Array<String> {
@@ -146,7 +146,7 @@ class ParsedLog private constructor(
         val columns = segments[segment]
         val local = record - segmentFirst[segment]
         val start = columns.starts[local]
-        // A record can be huge, e.g. a whole file of lines that do not match the format.
+        // A record can be huge, e.g. a whole file of lines that do not match the parser.
         val recordLength = minOf(recordEnd(record) - start, Int.MAX_VALUE / 2L).toInt()
 
         // One read covers every span shown in the row.
@@ -165,7 +165,7 @@ class ParsedLog private constructor(
         return Array(schema.fields.size) { field ->
             val key = schema.fields[field].mapKey
             if (key != null) return@Array mapValue(columns, local, key, bytes, maxBytes)
-            columns.valueText(field, local, format, dictionaries[field]) ?: run {
+            columns.valueText(field, local, parser, dictionaries[field]) ?: run {
                 val length = columns.spanLength(field, local)
                 if (length == Columns.ABSENT_LENGTH) "" else {
                     val relative = columns.ints[field]!![local]
@@ -185,7 +185,7 @@ class ParsedLog private constructor(
     override fun fieldText(record: Int, field: Int): String {
         val segment = segmentOf(record)
         val local = record - segmentFirst[segment]
-        return fieldText(schema, segments[segment], local, field, format, { dictionaries[field]!!.text(it) }) { start ->
+        return fieldText(schema, segments[segment], local, field, parser, { dictionaries[field]!!.text(it) }) { start ->
             read(start, minOf(recordEnd(record) - start, Int.MAX_VALUE / 2L).toInt())
         }
     }
@@ -196,7 +196,7 @@ class ParsedLog private constructor(
         val bytes = read(start, minOf(length, maxBytes + 2L).toInt())
         val complete = bytes.size.toLong() == length
         val end = if (complete) Bytes.trimLineEnd(bytes, 0, bytes.size) else bytes.size
-        if (complete) format.detailText(bytes, 0, end)?.let { return it }
+        if (complete) parser.detailText(bytes, 0, end)?.let { return it }
         return Bytes.utf8Text(bytes, 0, end, maxBytes)
     }
 
@@ -211,7 +211,7 @@ class ParsedLog private constructor(
         val columns = Columns(storage)
         if (size <= indexedSize) return AppendedRecords(from, from, columns, false, tail)
         val hasPrevious = recordCount - (if (removeLast) 1 else 0) > 0
-        val result = parseRange(channels.main, from, size, format, columns, hasPrevious, {}, null)
+        val result = parseRange(channels.main, from, size, parser, columns, hasPrevious, {}, null)
         return AppendedRecords(from, result.end, columns, removeLast, result.tail)
     }
 
@@ -319,11 +319,11 @@ class ParsedLog private constructor(
 
         /**
          * Parses [path] on [Dispatchers.IO]; cancelling the calling coroutine stops it. Throws
-         * [io.github.rastislavpapp.logxy.core.parse.FormatMismatchException] if the file does not fit [format].
+         * [io.github.rastislavpapp.logxy.core.parse.ParserMismatchException] if the file does not fit [parser].
          */
         suspend fun build(
             path: Path,
-            format: RecordFormat,
+            parser: CompiledParser,
             progress: IndexProgress = IndexProgress(),
             options: IndexOptions = IndexOptions(),
         ): ParsedLog = withContext(Dispatchers.IO) {
@@ -332,18 +332,18 @@ class ParsedLog private constructor(
                 val channel = channels.main
                 val size = channel.size()
                 progress.totalBytes = size
-                FormatCheck.check(channel, size, format.newParser())
+                ParserCheck.check(channel, size, parser.newMatcher())
                 val count = options.rangeCount(size)
 
                 // Ranges must start where records start, so each can be parsed on its own.
                 val bounds = LongArray(count + 1)
                 bounds[count] = size
                 (1..<count).map { i ->
-                    async { bounds[i] = resync(channels.forTask(i), size / count * i, size, format) }
+                    async { bounds[i] = resync(channels.forTask(i), size / count * i, size, parser) }
                 }.awaitAll()
                 for (i in 1..count) bounds[i] = bounds[i].coerceIn(bounds[i - 1], size)
 
-                val (storage, parsed) = parseAll(channels, bounds, format, progress)
+                val (storage, parsed) = parseAll(channels, bounds, parser, progress)
                 ensureActive()
 
                 val segments = ArrayList<Columns>()
@@ -358,7 +358,7 @@ class ParsedLog private constructor(
                 }
                 val dictionaries = mergeDictionaries(storage, segments)
                 val schema = withoutAbsent(withMapKeys(storage, mapKeys(storage, segments)), segments)
-                ParsedLog(path, channels, format, storage, schema, segments, dictionaries, indexedSize, tail)
+                ParsedLog(path, channels, parser, storage, schema, segments, dictionaries, indexedSize, tail)
             } catch (e: Throwable) {
                 channels.close()
                 throw e
@@ -372,13 +372,13 @@ class ParsedLog private constructor(
         private suspend fun parseAll(
             channels: ReadChannels,
             bounds: LongArray,
-            format: RecordFormat,
+            parser: CompiledParser,
             progress: IndexProgress,
         ): Pair<Schema, List<Pair<Columns, RangeResult>>> {
-            var schema = format.schema
+            var schema = parser.schema
             while (true) {
                 try {
-                    return schema to parseRanges(channels, bounds, format, schema, progress)
+                    return schema to parseRanges(channels, bounds, parser, schema, progress)
                 } catch (e: DictionaryOverflow) {
                     // Noticed early on, so starting over costs little.
                     schema = schema.asSpan(e.field)
@@ -390,7 +390,7 @@ class ParsedLog private constructor(
         private suspend fun parseRanges(
             channels: ReadChannels,
             bounds: LongArray,
-            format: RecordFormat,
+            parser: CompiledParser,
             schema: Schema,
             progress: IndexProgress,
         ): List<Pair<Columns, RangeResult>> = coroutineScope {
@@ -403,7 +403,7 @@ class ParsedLog private constructor(
                         if (columns.overflowed >= 0) throw DictionaryOverflow(columns.overflowed)
                     }
                     val result = parseRange(
-                        channels.forTask(i), bounds[i], bounds[i + 1], format, columns,
+                        channels.forTask(i), bounds[i], bounds[i + 1], parser, columns,
                         hasPrevious = false, check = check, progress = progress,
                     )
                     columns to result
@@ -457,14 +457,14 @@ class ParsedLog private constructor(
         )
 
         /** The start of the first record at or after [from]; [end] if there is none. */
-        private fun resync(channel: FileChannel, from: Long, end: Long, format: RecordFormat): Long {
-            val parser = format.newParser()
+        private fun resync(channel: FileChannel, from: Long, end: Long, parser: CompiledParser): Long {
+            val matcher = parser.newMatcher()
             // Start one byte early: the first line read is then only the rest of a line, and skipped.
             val reader = LineReader(channel, from - 1, end, RESYNC_BUFFER_SIZE)
             if (!reader.next()) return end
             while (reader.next()) {
-                val starts = if (format.multiLine) {
-                    parser.match(reader.buffer, reader.lineFrom, reader.lineTo)
+                val starts = if (parser.multiLine) {
+                    matcher.match(reader.buffer, reader.lineFrom, reader.lineTo)
                 } else {
                     !isBlank(reader.buffer, reader.lineFrom, reader.lineTo)
                 }
@@ -477,27 +477,27 @@ class ParsedLog private constructor(
             channel: FileChannel,
             from: Long,
             to: Long,
-            format: RecordFormat,
+            parser: CompiledParser,
             out: Columns,
             hasPrevious: Boolean,
             check: () -> Unit,
             progress: IndexProgress?,
         ): RangeResult {
             val reader = LineReader(channel, from, to, BUFFER_SIZE) { progress?.add(it.toLong()) }
-            val parser = format.newParser()
-            val multiLine = format.multiLine
+            val matcher = parser.newMatcher()
+            val multiLine = parser.multiLine
             val messageField = out.schema.indexOf(Role.MESSAGE)
             var inRecord = hasPrevious
             var tail = Tail(from, lastLineComplete = true, lastLineStartedRecord = false)
             var lines = 0
             while (reader.next()) {
                 if (++lines and 1023 == 0) check()
-                val matched = parser.match(reader.buffer, reader.lineFrom, reader.lineTo)
+                val matched = matcher.match(reader.buffer, reader.lineFrom, reader.lineTo)
                 // Without multi-line records, only blank lines continue one.
                 val startsRecord = matched || !inRecord || (!multiLine && !isBlank(reader.buffer, reader.lineFrom, reader.lineTo))
                 if (matched) {
                     out.beginRecord(reader.lineStart)
-                    parser.write(out)
+                    matcher.write(out)
                 } else if (startsRecord) {
                     out.beginRecord(reader.lineStart)
                     if (messageField >= 0) out.setSpan(messageField, 0, Columns.TO_RECORD_END)
@@ -561,12 +561,12 @@ class ParsedLog private constructor(
             columns: Columns,
             local: Int,
             field: Int,
-            format: RecordFormat,
+            parser: CompiledParser,
             dictionaryText: (Int) -> String,
             read: (start: Long) -> ByteArray,
         ): String {
             val key = schema.fields[field].mapKey
-            if (key == null) columns.valueText(field, local, format, dictionaryText)?.let { return it }
+            if (key == null) columns.valueText(field, local, parser, dictionaryText)?.let { return it }
             val bytes = read(columns.starts[local])
             if (key != null) return mapValue(columns, local, key, bytes, Int.MAX_VALUE - 2)
             val length = columns.spanLength(field, local)

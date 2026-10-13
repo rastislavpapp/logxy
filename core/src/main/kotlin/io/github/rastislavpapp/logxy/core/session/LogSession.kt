@@ -16,8 +16,8 @@ import io.github.rastislavpapp.logxy.core.log.LogData
 import io.github.rastislavpapp.logxy.core.log.Records
 import io.github.rastislavpapp.logxy.core.log.Role
 import io.github.rastislavpapp.logxy.core.merge.MergedLog
-import io.github.rastislavpapp.logxy.core.parse.FormatMismatchException
-import io.github.rastislavpapp.logxy.core.parse.LogFormat
+import io.github.rastislavpapp.logxy.core.parse.ParserMismatchException
+import io.github.rastislavpapp.logxy.core.parse.Parser
 import io.github.rastislavpapp.logxy.core.parse.open
 import io.github.rastislavpapp.logxy.core.pattern.PatternCounts
 import io.github.rastislavpapp.logxy.core.query.Query
@@ -75,8 +75,8 @@ interface SessionListener {
     /** [paths] have no timestamps, so they were left out of the merge; the view may open them on their own. */
     fun notMergeable(paths: List<Path>)
 
-    /** The formats in use, or how they were chosen, changed. */
-    fun formatChanged()
+    /** The parsers in use, or how they were chosen, changed. */
+    fun parserChanged()
 
     /**
      * Records at [changed] may have more text now (the last record of each file that grew); their rows
@@ -116,7 +116,7 @@ interface SessionListener {
  * One or more open files without their UI: indexes them in the background, merges several by time
  * (see [MergedLog]), follows changes to them, and filters them. Not thread-safe: use it, and run
  * [scope], on one thread (the UI thread); [listener] is called there. [origin] tells which files were
- * extracted from zips or decompressed, for naming them. [chosen] holds the format the
+ * extracted from zips or decompressed, for naming them. [chosen] holds the parser the
  * user picked for each of the paths, null (or missing) to detect it.
  */
 class LogSession internal constructor(
@@ -125,7 +125,7 @@ class LogSession internal constructor(
     private val settings: SettingsStore,
     private val listener: SessionListener,
     private val origin: (Path) -> ArchiveOrigin?,
-    chosen: List<LogFormat?>,
+    chosen: List<Parser?>,
     /** Filters the records of a load; tests watch what it is asked. */
     private val engineOf: (LoadedLog) -> RecordFilter,
 ) {
@@ -135,14 +135,14 @@ class LogSession internal constructor(
         settings: SettingsStore,
         listener: SessionListener,
         origin: (Path) -> ArchiveOrigin? = { null },
-        chosen: List<LogFormat?> = emptyList(),
+        chosen: List<Parser?> = emptyList(),
     ) : this(paths, scope, settings, listener, origin, chosen, { it.newFilter() })
 
     constructor(path: Path, scope: CoroutineScope, settings: SettingsStore, listener: SessionListener) :
         this(listOf(path), scope, settings, listener)
 
-    private class Source(val path: Path, var chosen: LogFormat?) {
-        var format: LogFormat = LogFormat.Raw
+    private class Source(val path: Path, var chosen: Parser?) {
+        var parser: Parser = Parser.Raw
         var log: LogData? = null
         var known: FileSnapshot? = null
         var activity = FileActivity.STATIC
@@ -160,8 +160,8 @@ class LogSession internal constructor(
     private var job: Job? = null
     private val settingsListener = { settingsChanged() }
 
-    /** The saved formats before the latest change, to tell a detected saved format from a guess of the same name. */
-    private var savedFormats = settings.current.formats
+    /** The saved parsers before the latest change, to tell a detected saved parser from a guess of the same name. */
+    private var savedParsers = settings.current.parsers
 
     /** The files shown; files of a merge that turned out to have no timestamps are left out. */
     val paths: List<Path> get() = sources.map { it.path }
@@ -173,20 +173,20 @@ class LogSession internal constructor(
     /** Several files merged into one view. */
     val isMerged get() = sources.size > 1
 
-    /** The format the user picked for a single file (the first one of a merge), or null to detect it. */
-    val chosenFormat: LogFormat? get() = sources.first().chosen
+    /** The parser the user picked for a single file (the first one of a merge), or null to detect it. */
+    val chosenParser: Parser? get() = sources.first().chosen
 
-    /** The format the user picked for each of [paths], null where it is detected. */
-    val chosenFormats: List<LogFormat?> get() = sources.map { it.chosen }
+    /** The parser the user picked for each of [paths], null where it is detected. */
+    val chosenParsers: List<Parser?> get() = sources.map { it.chosen }
 
-    /** The format in use (or last used) for each of [paths]. */
-    val formats: List<LogFormat> get() = sources.map { it.format }
+    /** The parser in use (or last used) for each of [paths]. */
+    val parsers: List<Parser> get() = sources.map { it.parser }
 
-    /** The format of the first (for a single file: the) file. */
-    val format: LogFormat get() = sources.first().format
+    /** The parser of the first (for a single file: the) file. */
+    val parser: Parser get() = sources.first().parser
 
-    /** Whether the formats were determined, by the user or by detection. */
-    var formatDetected = false
+    /** Whether the parsers were determined, by the user or by detection. */
+    var parserDetected = false
         private set
 
     /** The records of the files loaded, null while there are none (indexing, errors). */
@@ -268,22 +268,22 @@ class LogSession internal constructor(
         launchLoad()
     }
 
-    /** Uses [format] for a single file from now on, or detects the format if null; reads the file again. */
-    fun useFormat(format: LogFormat?) {
-        require(!isMerged) { "A merge takes a format per file" }
-        useFormats(listOf(format))
+    /** Uses [parser] for a single file from now on, or detects the parser if null; reads the file again. */
+    fun useParser(parser: Parser?) {
+        require(!isMerged) { "A merge takes a parser per file" }
+        useParsers(listOf(parser))
     }
 
-    /** Uses [formats] for the files at [paths] from now on, detecting those that are null; reads the files again. */
-    fun useFormats(formats: List<LogFormat?>) {
-        require(formats.size == sources.size) { "${formats.size} formats for ${sources.size} files" }
-        if (formats == chosenFormats) return
-        sources.forEachIndexed { i, source -> source.chosen = formats[i] }
-        listener.formatChanged()
+    /** Uses [parsers] for the files at [paths] from now on, detecting those that are null; reads the files again. */
+    fun useParsers(parsers: List<Parser?>) {
+        require(parsers.size == sources.size) { "${parsers.size} parsers for ${sources.size} files" }
+        if (parsers == chosenParsers) return
+        sources.forEachIndexed { i, source -> source.chosen = parsers[i] }
+        listener.parserChanged()
         reload()
     }
 
-    /** Starts over with the files now at [paths], e.g. after rotation, truncation or a format change. */
+    /** Starts over with the files now at [paths], e.g. after rotation, truncation or a parser change. */
     fun reload() {
         job?.cancel()
         closeLogs()
@@ -381,8 +381,8 @@ class LogSession internal constructor(
         fun current() = failed.get() ?: sources.first()
         try {
             val started = System.nanoTime()
-            val preferred = settings.current.formats
-            val builtIn = settings.current.builtInFormats
+            val preferred = settings.current.parsers
+            val builtIn = settings.current.builtInParsers
             val levels = settings.current.levels
             // A merge filters its files in parallel, so each needs only its share of channels; this bounds file handles.
             // At least a few each, as a small file is parsed by one thread and that slows down a lot with fewer.
@@ -397,8 +397,8 @@ class LogSession internal constructor(
                                 // Taken before indexing, so a file replaced meanwhile shows up as a change on the first poll.
                                 source.known = FileSnapshot.take(source.path)
                                     ?: throw IOException("${source.path.fileName}: file not found")
-                                source.format = source.chosen ?: LogFormat.detect(source.path, preferred, builtIn)
-                                source.log = source.format.open(source.path, progresses[i], levels, options).also { opened += it }
+                                source.parser = source.chosen ?: Parser.detect(source.path, preferred, builtIn)
+                                source.log = source.parser.open(source.path, progresses[i], levels, options).also { opened += it }
                             } catch (e: Throwable) {
                                 if (e !is CancellationException) failed.compareAndSet(null, source)
                                 throw e
@@ -407,8 +407,8 @@ class LogSession internal constructor(
                     }
                 }.awaitAll()
             }
-            formatDetected = true
-            listener.formatChanged()
+            parserDetected = true
+            listener.parserChanged()
 
             var nothingToMerge = false
             if (isMerged) {
@@ -424,7 +424,7 @@ class LogSession internal constructor(
                     nothingToMerge = unmergeable.size == sources.size
                     if (nothingToMerge) sources.forEach { it.log = null } else sources = sources - unmergeable.toSet()
                     listener.notMergeable(unmergeable.map { it.path })
-                    listener.formatChanged()
+                    listener.parserChanged()
                 }
             }
             if (nothingToMerge) {
@@ -453,10 +453,10 @@ class LogSession internal constructor(
         } catch (e: CancellationException) {
             opened.forEach { it.close() }
             throw e
-        } catch (e: FormatMismatchException) {
+        } catch (e: ParserMismatchException) {
             opened.forEach { it.close() }
             listener.problem(
-                "${current().path.fileName} does not match the parser “${current().format.name}”.",
+                "${current().path.fileName} does not match the parser “${current().parser.name}”.",
                 e.message.orEmpty(),
                 if (isMerged) "Choose another parser for it in the toolbar, or edit the parser."
                 else "Choose another parser in the toolbar, or Raw text.",
@@ -567,20 +567,20 @@ class LogSession internal constructor(
             log.levelMapping = settings.levels
         }
         if (levelsChanged) listener.levelMappingChanged()
-        // A saved format this session uses was edited: read the files with the new definition.
+        // A saved parser this session uses was edited: read the files with the new definition.
         var edited = false
         for (source in sources) {
-            val used = source.chosen ?: source.format.takeIf { it in savedFormats } ?: continue
-            val changed = settings.formats.firstOrNull { it.name == used.name && it != used } ?: continue
-            // A detected format is detected again, as the edit may no longer fit the file best.
+            val used = source.chosen ?: source.parser.takeIf { it in savedParsers } ?: continue
+            val changed = settings.parsers.firstOrNull { it.name == used.name && it != used } ?: continue
+            // A detected parser is detected again, as the edit may no longer fit the file best.
             if (source.chosen != null) source.chosen = changed
             edited = true
         }
         // Only renamed: nothing to read again, just show the new name.
-        for (source in sources) source.chosen?.let { renamed(it, settings.formats) }?.let { source.chosen = it }
-        for (source in sources) renamed(source.format, settings.formats)?.let { source.format = it }
-        savedFormats = settings.formats
-        listener.formatChanged()
+        for (source in sources) source.chosen?.let { renamed(it, settings.parsers) }?.let { source.chosen = it }
+        for (source in sources) renamed(source.parser, settings.parsers)?.let { source.parser = it }
+        savedParsers = settings.parsers
+        listener.parserChanged()
         if (edited) {
             reload()
         } else if (levelsChanged && activeFilter != null) {
@@ -590,10 +590,10 @@ class LogSession internal constructor(
         }
     }
 
-    /** The saved format that [format] became by a rename, i.e. with the same definition under a new name. */
-    private fun renamed(format: LogFormat, saved: List<LogFormat>): LogFormat? {
-        if (format == LogFormat.Raw || format in LogFormat.BUILT_IN || saved.any { it.name == format.name }) return null
-        return saved.firstOrNull { format.sameDefinition(it) }
+    /** The saved parser that [parser] became by a rename, i.e. with the same definition under a new name. */
+    private fun renamed(parser: Parser, saved: List<Parser>): Parser? {
+        if (parser == Parser.Raw || parser in Parser.BUILT_IN || saved.any { it.name == parser.name }) return null
+        return saved.firstOrNull { parser.sameDefinition(it) }
     }
 
     /** Runs [evaluation] of [activeFilter] over all records, or shows all records without a filter. */

@@ -15,7 +15,7 @@ import java.time.format.DateTimeFormatter
  * adds a quoted referer and user agent; anything after those is ignored. `-` means no value, except in the
  * request, which is shown as written. There is no level: the status says more, and is a field of its own.
  */
-class AccessLogFormat(private val zone: ZoneId = ZoneId.systemDefault()) : RecordFormat() {
+class CompiledAccessLog(private val zone: ZoneId = ZoneId.systemDefault()) : CompiledParser() {
 
     override val schema = Schema(
         listOf(
@@ -39,9 +39,9 @@ class AccessLogFormat(private val zone: ZoneId = ZoneId.systemDefault()) : Recor
     override fun formatTimestamp(field: Int, nanos: Long): String =
         displayFormat.format(Instant.ofEpochSecond(Math.floorDiv(nanos, NANOS), Math.floorMod(nanos, NANOS)))
 
-    override fun newParser(): RecordParser = Parser()
+    override fun newMatcher(): LineMatcher = Matcher()
 
-    private class Parser : RecordParser {
+    private class Matcher : LineMatcher {
         private val timestamps = AccessLogTimestamp()
 
         /** Start and end of each field's value in [bytes], quotes left out; start -1 for none. */

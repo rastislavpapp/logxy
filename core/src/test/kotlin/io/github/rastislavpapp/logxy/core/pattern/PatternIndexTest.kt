@@ -10,8 +10,8 @@ import io.github.rastislavpapp.logxy.core.log.LogData
 import io.github.rastislavpapp.logxy.core.log.ParsedLog
 import io.github.rastislavpapp.logxy.core.merge.MergedFilter
 import io.github.rastislavpapp.logxy.core.merge.MergedLog
-import io.github.rastislavpapp.logxy.core.parse.JsonFormat
-import io.github.rastislavpapp.logxy.core.parse.PatternFormat
+import io.github.rastislavpapp.logxy.core.parse.CompiledJson
+import io.github.rastislavpapp.logxy.core.parse.CompiledPattern
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.launch
@@ -30,7 +30,7 @@ class PatternIndexTest {
     @TempDir
     lateinit var dir: Path
 
-    private val format = PatternFormat("%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %-5p %c - %m%n", ZoneOffset.UTC)
+    private val parser = CompiledPattern("%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %-5p %c - %m%n", ZoneOffset.UTC)
 
     private val sample = """
         2026-10-01 08:00:00.000 [main] INFO  app.Main - Request from 10.0.0.1 took 5 ms
@@ -47,7 +47,7 @@ class PatternIndexTest {
 
     private fun parse(content: String, name: String = "a.log"): ParsedLog {
         val file = Files.writeString(dir.resolve(name), content)
-        return runBlocking { ParsedLog.build(file, format, IndexProgress()) }
+        return runBlocking { ParsedLog.build(file, parser, IndexProgress()) }
     }
 
     private fun PatternIndex.templates(log: LogData): List<String?> = runBlocking {
@@ -134,7 +134,7 @@ class PatternIndexTest {
             {"level":"WARN","message":"Disk 93% full"}
             {"level":"INFO"}
         """.trimIndent() + "\n")
-        runBlocking { ParsedLog.build(file, JsonFormat(zone = ZoneOffset.UTC), IndexProgress()) }.use { log ->
+        runBlocking { ParsedLog.build(file, CompiledJson(zone = ZoneOffset.UTC), IndexProgress()) }.use { log ->
             assertEquals(listOf("User \"bob\" logged in from {}", "Disk {} full", ""), PatternIndex().templates(log))
             assertEquals("Disk {} full", PatternIndex.templateOf(log.filterSnapshot(), 1))
         }
