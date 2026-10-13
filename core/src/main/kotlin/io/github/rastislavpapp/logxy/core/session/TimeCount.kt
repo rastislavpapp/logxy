@@ -15,27 +15,28 @@ import kotlinx.coroutines.withContext
 private const val TASK_ROWS = 1 shl 20
 
 /** Counts the times of all records of [log], as a session does; for measuring it. Call on the thread that owns [log]. */
-suspend fun countTimes(log: LogData): TimeHistogram = countAll(log)
+suspend fun countTimes(log: LogData): TimeHistogram = countAll(SingleLoad(log))
 
 /** Counts the times of all records of [log], as a session does; for measuring it. Call on the thread that owns [log]. */
-suspend fun countTimes(log: MergedLog): TimeHistogram = countAll(log)
+suspend fun countTimes(log: MergedLog): TimeHistogram = countAll(MergedLoad(log))
 
-private suspend fun countAll(records: Records): TimeHistogram {
+private suspend fun countAll(loaded: LoadedLog): TimeHistogram {
+    val records = loaded.records
     val count = records.recordCount
     val from = if (count == 0) 0 else records.timestampNanos(0)
     val to = if (count == 0) 0 else records.timestampNanos(count - 1)
-    val (before, after) = TimeCount(records, null, 0, count, count, from, maxOf(from, to)).run()
+    val (before, after) = TimeCount(loaded, null, 0, count, count, from, maxOf(from, to)).run()
     return before.apply { addAll(after) }
 }
 
 /**
  * Counts the times of the shown rows from [from] until [to] (`rows[i]`, or the records themselves if
  * [rows] is null) into [TimeHistogram]s expected to cover [expectedFrom] to [expectedTo]: one of the
- * rows before [split], one of the rest. Created on the thread that owns [records]; [run] reads
- * snapshots of them on other threads, in parallel.
+ * rows before [split], one of the rest. Created on the thread that owns [loaded]; [run] reads
+ * snapshots of its parts on other threads, in parallel.
  */
 internal class TimeCount(
-    records: Records,
+    private val loaded: LoadedLog,
     private val rows: IntArray?,
     from: Int,
     to: Int,
@@ -44,8 +45,7 @@ internal class TimeCount(
     private val expectedTo: Long,
     taskRows: Int = TASK_ROWS,
 ) {
-    private val merged = records as? MergedLog
-    private val parts: List<LogData> = merged?.parts ?: listOf(records as LogData)
+    private val parts = loaded.parts
     private val snapshots = parts.map { it.filterSnapshot() }
 
     // Per part, by level id: the category its records are counted in.
@@ -63,9 +63,9 @@ internal class TimeCount(
     /** Where the tasks start, in row order, which is about time order; the last is [to]. */
     private val bounds = ((from..<to step taskRows).toList() + split.coerceIn(from, to) + to).distinct().sorted().toIntArray()
 
-    // All rows of a merge are each part's records in a range: read straight through, with no positions to look up.
-    private val partBounds = if (rows == null && merged != null) {
-        Array(parts.size) { part -> IntArray(bounds.size) { merged.firstRecordFrom(part, bounds[it]) } }
+    // All rows are each part's records in a range: read straight through, with no positions to look up.
+    private val partBounds = if (rows == null) {
+        Array(parts.size) { part -> IntArray(bounds.size) { loaded.firstRecordFrom(part, bounds[it]) } }
     } else {
         null
     }
@@ -109,21 +109,22 @@ internal class TimeCount(
         val histogram = newHistogram()
         val start = bounds[task]
         val end = bounds[task + 1]
-        if (partBounds != null) {
+        val rows = rows
+        val origin = loaded.origin
+        if (rows == null) {
             for (part in parts.indices) {
                 val reader = Reader(part)
-                for (record in partBounds[part][task]..<partBounds[part][task + 1]) reader.addTo(histogram, record)
+                for (record in partBounds!![part][task]..<partBounds[part][task + 1]) reader.addTo(histogram, record)
             }
+        } else if (origin == null) {
+            val reader = Reader(0)
+            for (i in start..<end) reader.addTo(histogram, rows[i])
         } else {
             val readers = arrayOfNulls<Reader>(parts.size)
             for (i in start..<end) {
-                val position = if (rows == null) i else rows[i]
-                if (merged == null) {
-                    (readers[0] ?: Reader(0).also { readers[0] = it }).addTo(histogram, position)
-                } else {
-                    val part = merged.part(position)
-                    (readers[part] ?: Reader(part).also { readers[part] = it }).addTo(histogram, merged.record(position))
-                }
+                val position = rows[i]
+                val part = origin.part(position)
+                (readers[part] ?: Reader(part).also { readers[part] = it }).addTo(histogram, origin.record(position))
             }
         }
         return histogram

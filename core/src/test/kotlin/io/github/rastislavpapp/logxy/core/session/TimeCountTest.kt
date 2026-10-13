@@ -37,7 +37,7 @@ class TimeCountTest {
             repeat(50) {
                 if (partials.isNotEmpty()) return@repeat
                 val result = runBlocking {
-                    TimeCount(log, null, 0, 1000, 600, from, to, taskRows = 100).run { synchronized(partials) { partials += it } }
+                    TimeCount(SingleLoad(log), null, 0, 1000, 600, from, to, taskRows = 100).run { synchronized(partials) { partials += it } }
                 }
                 before = result.first
                 after = result.second

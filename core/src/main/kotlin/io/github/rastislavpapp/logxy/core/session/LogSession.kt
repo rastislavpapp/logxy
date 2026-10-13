@@ -6,7 +6,6 @@ import io.github.rastislavpapp.logxy.core.FileChange
 import io.github.rastislavpapp.logxy.core.FileSnapshot
 import io.github.rastislavpapp.logxy.core.formatByteSize
 import io.github.rastislavpapp.logxy.core.filter.Filter
-import io.github.rastislavpapp.logxy.core.filter.FilterEngine
 import io.github.rastislavpapp.logxy.core.filter.LevelCondition
 import io.github.rastislavpapp.logxy.core.filter.PreparedFilter
 import io.github.rastislavpapp.logxy.core.filter.RecordFilter
@@ -16,13 +15,11 @@ import io.github.rastislavpapp.logxy.core.log.Level
 import io.github.rastislavpapp.logxy.core.log.LogData
 import io.github.rastislavpapp.logxy.core.log.Records
 import io.github.rastislavpapp.logxy.core.log.Role
-import io.github.rastislavpapp.logxy.core.merge.MergedFilter
 import io.github.rastislavpapp.logxy.core.merge.MergedLog
 import io.github.rastislavpapp.logxy.core.parse.FormatMismatchException
 import io.github.rastislavpapp.logxy.core.parse.LogFormat
 import io.github.rastislavpapp.logxy.core.parse.open
 import io.github.rastislavpapp.logxy.core.pattern.PatternCounts
-import io.github.rastislavpapp.logxy.core.pattern.PatternIndex
 import io.github.rastislavpapp.logxy.core.query.Query
 import io.github.rastislavpapp.logxy.core.query.QueryCompiler
 import io.github.rastislavpapp.logxy.core.query.QueryException
@@ -128,7 +125,7 @@ class LogSession internal constructor(
     private val origin: (Path) -> ArchiveOrigin?,
     chosen: List<LogFormat?>,
     /** Filters the records of a load; tests watch what it is asked. */
-    private val engineOf: (Records) -> RecordFilter,
+    private val engineOf: (LoadedLog) -> RecordFilter,
 ) {
     constructor(
         paths: List<Path>,
@@ -137,9 +134,7 @@ class LogSession internal constructor(
         listener: SessionListener,
         origin: (Path) -> ArchiveOrigin? = { null },
         chosen: List<LogFormat?> = emptyList(),
-    ) : this(paths, scope, settings, listener, origin, chosen, { records ->
-        if (records is MergedLog) MergedFilter(records) else FilterEngine(records as LogData)
-    })
+    ) : this(paths, scope, settings, listener, origin, chosen, { it.newFilter() })
 
     constructor(path: Path, scope: CoroutineScope, settings: SettingsStore, listener: SessionListener) :
         this(listOf(path), scope, settings, listener)
@@ -189,9 +184,11 @@ class LogSession internal constructor(
     var formatDetected = false
         private set
 
-    /** The log of a single file, or a [MergedLog]. */
-    internal var records: Records? = null
+    /** The records of the files loaded, null while there are none (indexing, errors). */
+    internal var loaded: LoadedLog? = null
         private set
+
+    internal val records: Records? get() = loaded?.records
 
     /** What is shown of the files loaded, null while there is nothing to show (indexing, errors). */
     var shown: ShownLog? = null
@@ -346,14 +343,9 @@ class LogSession internal constructor(
 
     /** The template of [record]'s message; null if it has none, or nothing is loaded. */
     fun templateOf(record: Int): String? {
-        val records = records ?: return null
-        if (records.schema.indexOf(Role.MESSAGE) < 0) return null
-        val template = if (records is MergedLog) {
-            PatternIndex.templateOf(records.parts[records.part(record)].filterSnapshot(), records.record(record))
-        } else {
-            PatternIndex.templateOf((records as LogData).filterSnapshot(), record)
-        }
-        return template.ifEmpty { null }
+        val loaded = loaded ?: return null
+        if (loaded.records.schema.indexOf(Role.MESSAGE) < 0) return null
+        return loaded.templateOf(record).ifEmpty { null }
     }
 
     /** Cancels running work and releases the files. */
@@ -429,18 +421,15 @@ class LogSession internal constructor(
                     listener.formatChanged()
                 }
             }
-            val view: Records = when {
-                nothingToMerge -> {
-                    listener.problem("None of these files has timestamps to merge by.", "They are opened in their own tabs.", null)
-                    setStatus(SessionStatus(message = "Nothing to merge"))
-                    return false
-                }
-                sources.size == 1 -> sources.single().log!!
-                else -> MergedLog.build(sources.map { it.log!! }, sourceNames)
+            if (nothingToMerge) {
+                listener.problem("None of these files has timestamps to merge by.", "They are opened in their own tabs.", null)
+                setStatus(SessionStatus(message = "Nothing to merge"))
+                return false
             }
-            engine = engineOf(view)
-            records = view
-            val shown = ShownLog(view)
+            val loaded = loadedLog(sources.map { it.log!! }, sourceNames)
+            engine = engineOf(loaded)
+            this.loaded = loaded
+            val shown = ShownLog(loaded)
             this.shown = shown
             indexMillis = (System.nanoTime() - started) / 1_000_000
             withContext(Dispatchers.IO) {
@@ -493,10 +482,9 @@ class LogSession internal constructor(
     private suspend fun watch() {
         while (true) {
             delay(if (isLive) LIVE_POLL_MILLIS else STATIC_POLL_MILLIS)
-            val records = records ?: return
+            val loaded = loaded ?: return
             try {
-                val oldRecordCount = records.recordCount
-                val oldSchema = records.schema
+                val oldRecordCount = loaded.records.recordCount
                 val changed = ArrayList<Int>()
                 val problems = ArrayList<String>()
                 var grown = false
@@ -516,10 +504,8 @@ class LogSession internal constructor(
                                 return
                             }
                             FileChange.GROWN -> {
-                                val shownCount = (records as? MergedLog)?.mergedCount(part) ?: log.recordCount
-                                if (shownCount > 0) changed += position(part, shownCount - 1)
                                 val appended = withContext(Dispatchers.IO) { log.readAppended(current!!.size) }
-                                log.append(appended)
+                                loaded.append(part, appended).let { if (it >= 0) changed += it }
                                 grown = true
                                 if (source.activity == FileActivity.STATIC) {
                                     source.activity = FileActivity.LIVE
@@ -539,17 +525,19 @@ class LogSession internal constructor(
                 }
                 problem = problems.joinToString(", ").ifEmpty { null }
                 if (grown) {
-                    // A last record parsed differently now cannot keep its merged place: merge again.
-                    if (records is MergedLog && !records.appendNew()) {
-                        reload()
-                        return
+                    when (loaded.settle()) {
+                        Appended.MERGE_AGAIN -> {
+                            reload()
+                            return
+                        }
+                        Appended.NEW_FIELDS -> listener.fieldsShown()
+                        Appended.GREW -> {}
                     }
-                    if (records.schema !== oldSchema) listener.fieldsShown()
                     listener.recordsGrew(changed.toIntArray())
                     if (activeFilter != null) {
                         catchUpFilter()
                     } else {
-                        if (records.recordCount > oldRecordCount) listener.rowsChanged(oldRecordCount, oldRecordCount)
+                        if (loaded.records.recordCount > oldRecordCount) listener.rowsChanged(oldRecordCount, oldRecordCount)
                         countTimes(anew = false)
                         searchShown(anew = false)
                     }
@@ -563,9 +551,6 @@ class LogSession internal constructor(
             updateStatus()
         }
     }
-
-    /** Where [record] of the file at [part] is shown. */
-    private fun position(part: Int, record: Int): Int = (records as? MergedLog)?.position(part, record) ?: record
 
     private fun settingsChanged() {
         val settings = settings.current
@@ -788,7 +773,8 @@ class LogSession internal constructor(
      * follows it.
      */
     private fun countTimes(anew: Boolean) {
-        val records = records ?: return
+        val loaded = loaded ?: return
+        val records = loaded.records
         val engine = engine ?: return
         if (records.schema.indexOf(Role.TIMESTAMP) < 0) return
         if (anew) {
@@ -806,7 +792,7 @@ class LogSession internal constructor(
         val base = settled?.takeIf { !anew && settle >= settledRows }
         val from = if (base == null) 0 else settledRows
         val (expectedFrom, expectedTo) = expectedTimes(shown)
-        val count = TimeCount(records, shown.rowArray, from, size, settle, expectedFrom, expectedTo)
+        val count = TimeCount(loaded, shown.rowArray, from, size, settle, expectedFrom, expectedTo)
         counting = count
         // Counted anew, the histogram is shown as it fills up; a stale part may still arrive after another count started.
         val onCounted: ((TimeHistogram) -> Unit)? = if (base != null) null else { counted ->
@@ -895,7 +881,7 @@ class LogSession internal constructor(
             source.log?.close()
             source.log = null
         }
-        records = null
+        loaded = null
         engine = null
     }
 

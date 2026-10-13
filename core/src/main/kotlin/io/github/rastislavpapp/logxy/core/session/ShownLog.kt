@@ -1,10 +1,8 @@
 package io.github.rastislavpapp.logxy.core.session
 
 import io.github.rastislavpapp.logxy.core.log.Level
-import io.github.rastislavpapp.logxy.core.log.LogData
 import io.github.rastislavpapp.logxy.core.log.Records
 import io.github.rastislavpapp.logxy.core.log.Schema
-import io.github.rastislavpapp.logxy.core.merge.MergedLog
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
@@ -27,7 +25,9 @@ sealed interface CopyResult {
  * and filtered; use it on the session's thread. Once the session reloads or closes, it is [ended]:
  * it shows no rows and its reads return empty (see docs/adr/0001).
  */
-class ShownLog internal constructor(private val records: Records) {
+class ShownLog internal constructor(private val loaded: LoadedLog) {
+
+    private val records = loaded.records
 
     // The rows shown, or null for all records.
     private var rows: FilteredRows? = null
@@ -142,7 +142,7 @@ class ShownLog internal constructor(private val records: Records) {
 
     // The records are resolved here, on the owner thread, and read through snapshots on another.
     private suspend fun copy(field: Int, records: IntArray?, count: Int): CopyResult {
-        val read = fieldReader(field, records, count)
+        val read = loaded.fieldReader(field, records, count)
         val result = try {
             withContext(Dispatchers.IO) {
                 val text = StringBuilder()
@@ -160,15 +160,6 @@ class ShownLog internal constructor(private val records: Records) {
             CopyResult.Failed(e.message ?: e.javaClass.simpleName)
         }
         return if (ended) CopyResult.FileChanged else result
-    }
-
-    private fun fieldReader(field: Int, records: IntArray?, count: Int): (Int) -> String = when (val log = this.records) {
-        is MergedLog -> log.fieldReader(field, records, count)
-        is LogData -> {
-            val snapshot = log.filterSnapshot()
-            if (records == null) { i -> snapshot.fieldText(i, field) } else { i -> snapshot.fieldText(records[i], field) }
-        }
-        else -> throw UnsupportedOperationException("Cannot copy from ${log.javaClass.simpleName}")
     }
 
     /** The rows shown, null for all records, and how many; for passes over them on other threads. */
