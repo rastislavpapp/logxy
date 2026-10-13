@@ -90,7 +90,10 @@ class SettingsTest {
                 Parser.Pattern("Pattern", "%d [%t] %-5p %c - %m%n"),
                 Parser.Regex("Regex", "^(?<message>.*)$", "HH:mm:ss"),
                 Parser.Regex("Regex without timestamp", "^(?<message>.*)$", "yyyy-MM-dd HH:mm:ss.SSS"),
-                Parser.Json("JSON", RoleKeys(timestamp = listOf("t"), level = listOf("lvl", "severity"), message = emptyList())),
+                Parser.Json(
+                    "JSON",
+                    RoleKeys(timestamp = listOf("t"), level = listOf("lvl", "severity"), message = emptyList()),
+                ),
                 Parser.Pattern("No type", "%m%n"),
             ),
             Settings.load(file).parsers,
@@ -131,7 +134,15 @@ class SettingsTest {
         val mine = Parser.Pattern("Mine", "%d [%t] %-5p %c - %m%n")
         val settings = Settings(parsers = listOf(mine), deletedBuiltIns = setOf("Spring Boot 3", "JSON lines"))
         assertEquals(
-            listOf("Raw text", "Mine", "date [thread] LEVEL logger - message", "time [thread] LEVEL logger - message", "Python logging", "logfmt", "Access log"),
+            listOf(
+                "Raw text",
+                "Mine",
+                "date [thread] LEVEL logger - message",
+                "time [thread] LEVEL logger - message",
+                "Python logging",
+                "logfmt",
+                "Access log",
+            ),
             settings.knownParsers.map { it.name },
         )
     }

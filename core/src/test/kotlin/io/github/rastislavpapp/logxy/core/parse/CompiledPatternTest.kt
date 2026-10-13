@@ -20,7 +20,10 @@ class CompiledPatternTest {
         val schema = CompiledPattern("%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %-5p %c{1} %X{user} - %m%n").schema
         assertEquals(listOf("Timestamp", "Thread", "Level", "Logger", "user", "Message"), schema.fields.map { it.name })
         assertEquals(
-            listOf(ColumnType.TIMESTAMP, ColumnType.DICT, ColumnType.LEVEL, ColumnType.DICT, ColumnType.SPAN, ColumnType.SPAN),
+            listOf(
+                ColumnType.TIMESTAMP, ColumnType.DICT, ColumnType.LEVEL,
+                ColumnType.DICT, ColumnType.SPAN, ColumnType.SPAN,
+            ),
             schema.fields.map { it.type },
         )
         assertEquals(5, schema.indexOf(Role.MESSAGE))
@@ -48,7 +51,8 @@ class CompiledPatternTest {
     @Test
     fun `wrappers in log4j2 and logback syntax`() {
         assertTrue(matches("%d{HH:mm:ss.SSS} %highlight{%-5level} %logger - %msg%n", "12:00:00.000 WARN  a.B - hi"))
-        assertTrue(matches("%d{HH:mm:ss.SSS} %highlight(%-5level) %cyan(%logger) - %msg%n", "12:00:00.000 WARN  a.B - hi"))
+        val logback = "%d{HH:mm:ss.SSS} %highlight(%-5level) %cyan(%logger) - %msg%n"
+        assertTrue(matches(logback, "12:00:00.000 WARN  a.B - hi"))
     }
 
     @Test

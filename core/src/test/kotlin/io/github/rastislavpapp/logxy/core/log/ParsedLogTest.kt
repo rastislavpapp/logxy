@@ -32,7 +32,11 @@ class ParsedLogTest {
 
     private val parser = CompiledPattern("%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %-5p %c - %m%n", ZoneOffset.UTC)
 
-    private fun parse(content: String, parser: CompiledParser = this.parser, options: IndexOptions = IndexOptions()): ParsedLog {
+    private fun parse(
+        content: String,
+        parser: CompiledParser = this.parser,
+        options: IndexOptions = IndexOptions(),
+    ): ParsedLog {
         val file = Files.writeString(dir.resolve("test-${content.hashCode()}-${options.hashCode()}.log"), content)
         return runBlocking { ParsedLog.build(file, parser, IndexProgress(), options) }
     }
@@ -70,7 +74,8 @@ class ParsedLogTest {
 
     @Test
     fun `source text is the record as written, line ends included`() {
-        val first = "2026-10-01 08:00:00.001 [main] ERROR a.B - Failed\r\njava.lang.IllegalStateException: boom\r\n\tat a.B.run(B.java:1)\r\n"
+        val first = "2026-10-01 08:00:00.001 [main] ERROR a.B - Failed\r\n" +
+            "java.lang.IllegalStateException: boom\r\n\tat a.B.run(B.java:1)\r\n"
         val last = "2026-10-01 08:00:00.002 [main] INFO  a.B - {\"json\": 1}"
         parse(first + last).use { log ->
             assertEquals(first, log.sourceText(0))
@@ -81,7 +86,9 @@ class ParsedLogTest {
     @Test
     fun `field text is the whole value`() {
         val long = "x".repeat(5000)
-        parse("2026-10-01 08:00:00.001 [main] ERROR a.B - Failed $long\r\njava.lang.IllegalStateException: boom\n\tat a.B.run(B.java:1)\n").use { log ->
+        val content = "2026-10-01 08:00:00.001 [main] ERROR a.B - Failed $long\r\n" +
+            "java.lang.IllegalStateException: boom\n\tat a.B.run(B.java:1)\n"
+        parse(content).use { log ->
             val fields = log.schema.fields.map { it.name }
             assertEquals("main", log.fieldText(0, fields.indexOf("Thread")))
             assertEquals("ERROR", log.fieldText(0, fields.indexOf("Level")))
@@ -103,7 +110,8 @@ class ParsedLogTest {
     fun `parallel parsing matches a single range`() {
         val content = buildString {
             repeat(300) { i ->
-                append("2026-10-01 08:00:%02d.%03d [t-${i % 7}] ${if (i % 5 == 0) "ERROR" else "INFO "} log.L${i % 3} - message $i\n".format(i % 60, i))
+                val level = if (i % 5 == 0) "ERROR" else "INFO "
+                append("2026-10-01 08:00:%02d.%03d [t-${i % 7}] $level log.L${i % 3} - message $i\n".format(i % 60, i))
                 if (i % 5 == 0) append("java.lang.RuntimeException: $i\n\tat x.Y.z(Y.java:$i)\n")
             }
         }
@@ -129,14 +137,18 @@ class ParsedLogTest {
             }
             write("java.lang.Exception: x\n")
             assertEquals(1, log.recordCount)
-            assertEquals("2026-10-01 08:00:00.001 [main] INFO  a.B - one\njava.lang.Exception: x", log.recordText(0, 1000))
+            assertEquals(
+                "2026-10-01 08:00:00.001 [main] INFO  a.B - one\njava.lang.Exception: x",
+                log.recordText(0, 1000),
+            )
 
             // Incomplete, it does not match the layout yet, so it continues the previous record.
             write("2026-10-01 08:00:00.002 [main] WA")
             assertEquals(1, log.recordCount)
             write("RN  a.B - two\n")
             assertEquals(2, log.recordCount)
-            assertEquals(listOf("2026-10-01 08:00:00.002", "main", "WARN", "a.B", "two"), log.rowValues(1, 1000).toList())
+            val values = log.rowValues(1, 1000).toList()
+            assertEquals(listOf("2026-10-01 08:00:00.002", "main", "WARN", "a.B", "two"), values)
             assertEquals(Level.WARN, log.level(1))
         }
     }
@@ -173,7 +185,8 @@ class ParsedLogTest {
 
     @Test
     fun `a file starting inside a stack trace is accepted`() {
-        val content = "java.lang.IllegalStateException: boom\n\tat x.Y.z(Y.java:1)\nCaused by: java.io.IOException\n\n" +
+        val content = "java.lang.IllegalStateException: boom\n\tat x.Y.z(Y.java:1)\n" +
+            "Caused by: java.io.IOException\n\n" +
             "2026-10-01 08:00:00.001 [main] INFO  a.B - one\n"
         parse(content).use { assertEquals(2, it.recordCount) }
     }
@@ -192,7 +205,8 @@ class ParsedLogTest {
 
     @Test
     fun `regex parser with named groups`() {
-        val regex = CompiledRegex("""(?<timestamp>\S+ \S+) (?<level>\w+) \[(?<thread>[^]]*)] (?<message>.*)""", zone = ZoneOffset.UTC)
+        val pattern = """(?<timestamp>\S+ \S+) (?<level>\w+) \[(?<thread>[^]]*)] (?<message>.*)"""
+        val regex = CompiledRegex(pattern, zone = ZoneOffset.UTC)
         parse("2026-10-01 08:00:00.001 INFO [main] hello world\n\tmore\n", regex).use { log ->
             assertEquals(listOf("2026-10-01 08:00:00.001", "INFO", "main", "hello world"), log.rows()[0])
             assertEquals("2026-10-01 08:00:00.001 INFO [main] hello world\n\tmore", log.recordText(0, 1000))
@@ -211,8 +225,12 @@ class ParsedLogTest {
                 assertEquals(ColumnType.SPAN, log.schema.fields[3].type)
                 assertEquals(ColumnType.DICT, log.schema.fields[1].type)
                 assertEquals(30_000, log.recordCount)
-                assertEquals(listOf("2026-10-01 08:00:00.000", "worker-4", "INFO", "app.Logger12345", "Message 12345"), log.rows()[12345])
-                val rows = runBlocking { FilterEngine(log).prepare(TextCondition("Logger", TextOp.EQUALS, "app.Logger2999?")).run() }.rows
+                assertEquals(
+                    listOf("2026-10-01 08:00:00.000", "worker-4", "INFO", "app.Logger12345", "Message 12345"),
+                    log.rows()[12345],
+                )
+                val last = TextCondition("Logger", TextOp.EQUALS, "app.Logger2999?")
+                val rows = runBlocking { FilterEngine(log).prepare(last).run() }.rows
                 assertEquals((29_990..<30_000).toList(), rows.toList())
                 assertEquals(Files.size(file), progress.bytesDone)
             }
@@ -249,9 +267,14 @@ class ParsedLogTest {
         for (options in listOf(IndexOptions(parallelism = 1), IndexOptions(parallelism = 3, minRangeSize = 1))) {
             parse(content, mdc, options).use { log ->
                 val visible = log.schema.fields.filter { !it.hidden }.map { it.name }
-                assertEquals(listOf("Timestamp", "Thread", "Level", "Logger", "Message", "MDC[breadcrumbId]", "MDC[tenant]"), visible)
+                assertEquals(
+                    listOf("Timestamp", "Thread", "Level", "Logger", "Message", "MDC[breadcrumbId]", "MDC[tenant]"),
+                    visible,
+                )
                 val names = log.schema.fields.map { it.name }
-                val rows = log.rows().map { row -> listOf(row[names.indexOf("MDC[breadcrumbId]")], row[names.indexOf("MDC[tenant]")]) }
+                val breadcrumb = names.indexOf("MDC[breadcrumbId]")
+                val tenant = names.indexOf("MDC[tenant]")
+                val rows = log.rows().map { row -> listOf(row[breadcrumb], row[tenant]) }
                 assertEquals(listOf(listOf("", ""), listOf("ID-1", "acme"), listOf("", "globex")), rows)
 
                 fun matching(condition: io.github.rastislavpapp.logxy.core.filter.Condition) =
@@ -271,38 +294,49 @@ class ParsedLogTest {
     fun `an MDC field stays one column if a value is no map or there are too many keys`() {
         val notMap = "2026-10-01 08:00:00.001 [main] INFO  a.B {a=1} - map\n" +
             "2026-10-01 08:00:00.002 [main] INFO  a.B plain - not a map\n"
-        parse(notMap, mdc).use { log -> assertEquals(listOf("MDC"), log.schema.fields.filter { it.name == "MDC" && !it.hidden }.map { it.name }) }
-        val manyKeys = (0..MdcMap.maxKeys).joinToString("") { "2026-10-01 08:00:00.001 [main] INFO  a.B {key$it=1} - x\n" }
+        parse(notMap, mdc).use { log ->
+            assertEquals(listOf("MDC"), log.schema.fields.filter { it.name == "MDC" && !it.hidden }.map { it.name })
+        }
+        val manyKeys =
+            (0..MdcMap.maxKeys).joinToString("") { "2026-10-01 08:00:00.001 [main] INFO  a.B {key$it=1} - x\n" }
         parse(manyKeys, mdc).use { log ->
             assertEquals(6, log.schema.fields.size)
             assertFalse(log.schema.fields.any { it.hidden })
         }
     }
 
-    private fun ParsedLog.fieldTexts() = List(recordCount) { record -> List(schema.fields.size) { fieldText(record, it) } }
+    private fun ParsedLog.fieldTexts() =
+        List(recordCount) { record -> List(schema.fields.size) { fieldText(record, it) } }
 
     @Test
     fun `a snapshot reads field texts like the log`() {
         val content = buildString {
             repeat(100) { i ->
-                append("2026-10-01 08:00:%02d.%03d [t-${i % 7}] ${if (i % 5 == 0) "ERROR" else "INFO "} log.L${i % 3} {tenant=t$i} - message $i\n".format(i % 60, i))
+                val level = if (i % 5 == 0) "ERROR" else "INFO "
+                val time = "08:00:%02d.%03d".format(i % 60, i)
+                append("2026-10-01 $time [t-${i % 7}] $level log.L${i % 3} {tenant=t$i} - message $i\n")
                 if (i % 5 == 0) append("java.lang.RuntimeException: $i\r\n\tat x.Y.z(Y.java:$i)\n")
             }
         }
         for (parser in listOf(parser, mdc)) {
             parse(content, parser, IndexOptions(parallelism = 4, minRangeSize = 1)).use { log ->
                 val snapshot = log.filterSnapshot()
-                assertEquals(log.fieldTexts(), List(log.recordCount) { record -> List(log.schema.fields.size) { snapshot.fieldText(record, it) } })
+                val snapshotTexts = List(log.recordCount) { record ->
+                    List(log.schema.fields.size) { snapshot.fieldText(record, it) }
+                }
+                assertEquals(log.fieldTexts(), snapshotTexts)
             }
         }
     }
 
     @Test
     fun `a snapshot keeps reading its records while more are appended`() {
-        val file = Files.writeString(dir.resolve("live.log"), "2026-10-01 08:00:00.001 [main] INFO  a.B - one\n2026-10-01 08:00:00.002 [main] WARN  a.C - two\n")
+        val content = "2026-10-01 08:00:00.001 [main] INFO  a.B - one\n2026-10-01 08:00:00.002 [main] WARN  a.C - two\n"
+        val file = Files.writeString(dir.resolve("live.log"), content)
         runBlocking { ParsedLog.build(file, parser) }.use { log ->
             val snapshot = log.filterSnapshot()
-            Files.writeString(file, "java.lang.Exception: x\n2026-10-01 08:00:00.003 [main] INFO  a.D - three\n", StandardOpenOption.APPEND)
+            val appended = "java.lang.Exception: x\n2026-10-01 08:00:00.003 [main] INFO  a.D - three\n"
+            Files.writeString(file, appended, StandardOpenOption.APPEND)
             log.append(log.readAppended(Files.size(file)))
             assertEquals(3, log.recordCount)
             val message = log.schema.fields.indexOfFirst { it.name == "Message" }

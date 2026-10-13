@@ -37,7 +37,8 @@ class TabPlanTest {
         val file = write("a.log")
         val other = dir.resolve("sub/../a.log")
 
-        val actions = TabPlan.open(OpenMode.TABS, listOf(file, other), listOf(null, null), tabs = emptyList(), current = null)
+        val actions =
+            TabPlan.open(OpenMode.TABS, listOf(file, other), listOf(null, null), tabs = emptyList(), current = null)
 
         assertEquals(listOf(TabAction.Add(SessionFiles(listOf(file), listOf(null))), TabAction.Select(0)), actions)
     }
@@ -47,9 +48,11 @@ class TabPlanTest {
         val filter = SavedFilter("", Level.WARN, "")
         val tabs = listOf(SessionFiles(listOf(Path.of("/logs/a.log")), listOf(Parser.Raw), filter))
 
-        val actions = TabPlan.open(OpenMode.MERGE_INTO_CURRENT, listOf(Path.of("/logs/b.log")), listOf(null), tabs, current = 0)
+        val actions =
+            TabPlan.open(OpenMode.MERGE_INTO_CURRENT, listOf(Path.of("/logs/b.log")), listOf(null), tabs, current = 0)
 
-        val merged = SessionFiles(listOf(Path.of("/logs/a.log"), Path.of("/logs/b.log")), listOf(Parser.Raw, null), filter)
+        val paths = listOf(Path.of("/logs/a.log"), Path.of("/logs/b.log"))
+        val merged = SessionFiles(paths, listOf(Parser.Raw, null), filter)
         assertEquals(listOf(TabAction.Replace(0, merged)), actions)
     }
 

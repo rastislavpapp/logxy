@@ -39,7 +39,8 @@ class LogFoldersTest {
             it.closeEntry()
         }
 
-        suspend fun names(recursive: Boolean) = LogFolders.files(dir, recursive).map { dir.relativize(it).joinToString("/") }
+        suspend fun names(recursive: Boolean) =
+            LogFolders.files(dir, recursive).map { dir.relativize(it).joinToString("/") }
         assertEquals(listOf("a.log", "b.log", "old.zip", "sub/deep/c.txt"), names(recursive = true))
         assertEquals(listOf("a.log", "b.log", "old.zip"), names(recursive = false))
     }

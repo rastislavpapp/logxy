@@ -57,7 +57,8 @@ class PatternIndexTest {
     }
 
     private fun count(log: LogData, rows: IntArray? = null): PatternCounts = runBlocking {
-        PatternCounts.count(listOf(PatternIndex()), listOf(log.filterSnapshot()), rows, rows?.size ?: log.recordCount, null)
+        val rowCount = rows?.size ?: log.recordCount
+        PatternCounts.count(listOf(PatternIndex()), listOf(log.filterSnapshot()), rows, rowCount, null)
     }
 
     private fun PatternCounts.entries() = List(size) { templates[it] to total(it) }
@@ -66,7 +67,9 @@ class PatternIndexTest {
 
     @Test
     fun `an update cancelled part way keeps what it finished, and the next one completes it`() {
-        val content = buildString { repeat(2000) { append("2026-10-01 08:00:00.000 [main] INFO  app.Main - Job ${it % 7} took $it ms\n") } }
+        val content = buildString {
+            repeat(2000) { append("2026-10-01 08:00:00.000 [main] INFO  app.Main - Job ${it % 7} took $it ms\n") }
+        }
         parse(content).use { log ->
             val expected = PatternIndex().templates(log)
             val index = PatternIndex(chunkSize = 10)
@@ -99,7 +102,10 @@ class PatternIndexTest {
     @Test
     fun `parallel chunks give the same ids as one`() {
         val content = buildString {
-            for (i in 0..<500) append("2026-10-01 08:00:00.000 [t] INFO  app.L - kind ${i % 7} message ${if (i % 7 == 0) "x" else "y$i"}\n")
+            for (i in 0..<500) {
+                val word = if (i % 7 == 0) "x" else "y$i"
+                append("2026-10-01 08:00:00.000 [t] INFO  app.L - kind ${i % 7} message $word\n")
+            }
         }
         parse(content).use { log ->
             val expected = PatternIndex().templates(log)
@@ -111,7 +117,8 @@ class PatternIndexTest {
     @Test
     fun `records over the template limit share one entry`() {
         parse(sample).use { log ->
-            assertEquals(listOf(request, null, request, request, null, null), PatternIndex(maxTemplates = 1).templates(log))
+            val templates = PatternIndex(maxTemplates = 1).templates(log)
+            assertEquals(listOf(request, null, request, request, null, null), templates)
         }
     }
 
@@ -164,7 +171,8 @@ class PatternIndexTest {
             val counts = runBlocking { filter.countPatterns(null, merged.recordCount) }
             assertEquals(listOf(request to 3, query to 3, "Cache warmed" to 2), counts.entries())
             val rows = runBlocking { filter.prepare(PatternCondition("Message", setOf(query))).run() }.rows.toList()
-            assertEquals(listOf("Query 17 failed", "Query 18 failed", "Query 99 failed"), rows.map { merged.rowValues(it, 100).last() })
+            val messages = rows.map { merged.rowValues(it, 100).last() }
+            assertEquals(listOf("Query 17 failed", "Query 18 failed", "Query 99 failed"), messages)
         } finally {
             a.close()
             b.close()

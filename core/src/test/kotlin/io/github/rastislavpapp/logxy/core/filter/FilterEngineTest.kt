@@ -50,6 +50,9 @@ class FilterEngineTest {
 
     private fun FilterEngine.rows(filter: Filter) = runBlocking { prepare(filter).run() }.rows.toList()
 
+    private fun message(op: TextOp, value: String, ignoreCase: Boolean = false) =
+        TextCondition("Message", op, value, ignoreCase)
+
     private fun nanos(text: String) = LocalDateTime.parse(text).toEpochSecond(ZoneOffset.UTC) * 1_000_000_000
 
     @Test
@@ -78,7 +81,8 @@ class FilterEngineTest {
             assertEquals(listOf(2, 3, 5), engine.rows(LevelCondition.atLeast("Level", Level.WARN)))
             assertEquals(listOf(1, 4), engine.rows(TextCondition("Thread", TextOp.EQUALS, "main")))
             assertEquals(listOf(3, 5), engine.rows(TextCondition("Logger", TextOp.EQUALS, "app.H*")))
-            assertEquals(listOf(2), engine.rows(TimeCondition("Timestamp", nanos("2026-10-01T08:00:01"), nanos("2026-10-01T08:00:02") - 1)))
+            val second = TimeCondition("Timestamp", nanos("2026-10-01T08:00:01"), nanos("2026-10-01T08:00:02") - 1)
+            assertEquals(listOf(2), engine.rows(second))
             assertEquals(listOf(1, 2, 3, 4, 5), engine.rows(PresenceCondition("Timestamp")))
             assertEquals(listOf(0), engine.rows(PresenceCondition("Thread", present = false)))
             assertEquals(listOf(3), engine.rows(TextCondition("Timestamp", TextOp.EQUALS, "*:02.*")))
@@ -89,12 +93,12 @@ class FilterEngineTest {
     fun `message text includes continuation lines`() {
         parse(sample).use { log ->
             val engine = FilterEngine(log)
-            assertEquals(listOf(2), engine.rows(TextCondition("Message", TextOp.EQUALS, "*SQLException*")))
-            assertEquals(listOf(5), engine.rows(TextCondition("Message", TextOp.EQUALS, "*billing*", ignoreCase = true)))
-            assertEquals(listOf(), engine.rows(TextCondition("Message", TextOp.EQUALS, "*billing*")))
-            assertEquals(listOf(1), engine.rows(TextCondition("Message", TextOp.EQUALS, "*ŽLUŤOUČKÝ*", ignoreCase = true)))
-            assertEquals(listOf(3, 5), engine.rows(TextCondition("Message", TextOp.MATCHES, "(?i)slow|timeout")))
-            assertEquals(listOf(0), engine.rows(TextCondition("Message", TextOp.EQUALS, "banner before any record")))
+            assertEquals(listOf(2), engine.rows(message(TextOp.EQUALS, "*SQLException*")))
+            assertEquals(listOf(5), engine.rows(message(TextOp.EQUALS, "*billing*", ignoreCase = true)))
+            assertEquals(listOf(), engine.rows(message(TextOp.EQUALS, "*billing*")))
+            assertEquals(listOf(1), engine.rows(message(TextOp.EQUALS, "*ŽLUŤOUČKÝ*", ignoreCase = true)))
+            assertEquals(listOf(3, 5), engine.rows(message(TextOp.MATCHES, "(?i)slow|timeout")))
+            assertEquals(listOf(0), engine.rows(message(TextOp.EQUALS, "banner before any record")))
         }
     }
 
@@ -142,15 +146,16 @@ class FilterEngineTest {
     fun `wildcards and regexes`() {
         parse(sample).use { log ->
             val engine = FilterEngine(log)
-            assertEquals(listOf(2), engine.rows(TextCondition("Message", TextOp.EQUALS, "query*boom*", ignoreCase = true)))
+            assertEquals(listOf(2), engine.rows(message(TextOp.EQUALS, "query*boom*", ignoreCase = true)))
             assertEquals(listOf(1, 4), engine.rows(TextCondition("Logger", TextOp.EQUALS, "app.M??n")))
             assertEquals(listOf(2, 3, 5), engine.rows(TextCondition("Thread", TextOp.EQUALS, "worker-?")))
             assertEquals(listOf(0, 1, 4), engine.rows(TextCondition("Thread", TextOp.NOT_EQUALS, "worker-*")))
-            assertEquals(listOf(4), engine.rows(TextCondition("Message", TextOp.EQUALS, "*ick")))
-            assertEquals(listOf(), engine.rows(TextCondition("Message", TextOp.EQUALS, "*ICK")))
-            assertEquals(listOf(1), engine.rows(TextCondition("Message", TextOp.EQUALS, "*KůŇ", ignoreCase = true)))
-            assertEquals(listOf(0, 1, 2, 4), engine.rows(TextCondition("Message", TextOp.NOT_MATCHES, "slow|timeout", ignoreCase = true)))
-            assertEquals(listOf(3), engine.rows(TextCondition("Message", TextOp.MATCHES, "/orders$")))
+            assertEquals(listOf(4), engine.rows(message(TextOp.EQUALS, "*ick")))
+            assertEquals(listOf(), engine.rows(message(TextOp.EQUALS, "*ICK")))
+            assertEquals(listOf(1), engine.rows(message(TextOp.EQUALS, "*KůŇ", ignoreCase = true)))
+            val neither = message(TextOp.NOT_MATCHES, "slow|timeout", ignoreCase = true)
+            assertEquals(listOf(0, 1, 2, 4), engine.rows(neither))
+            assertEquals(listOf(3), engine.rows(message(TextOp.MATCHES, "/orders$")))
         }
         val file = Files.writeString(dir.resolve("stars.log"), "a*b\naxb\n")
         runBlocking { LineIndex.build(file) }.use { log ->
@@ -183,7 +188,7 @@ class FilterEngineTest {
     @Test
     fun `invalid regex is reported when preparing`() {
         parse(sample).use { log ->
-            assertFailsWith<IllegalArgumentException> { FilterEngine(log).prepare(TextCondition("Message", TextOp.MATCHES, "(")) }
+            assertFailsWith<IllegalArgumentException> { FilterEngine(log).prepare(message(TextOp.MATCHES, "(")) }
         }
     }
 
@@ -231,14 +236,15 @@ class FilterEngineTest {
         val levels = listOf("DEBUG", "INFO ", "WARN ", "ERROR")
         val content = buildString {
             for (i in 0..<300) {
-                append("2026-10-01 08:00:00.000 [t-${i % 5}] ${levels[i % 4]} app.L - message $i${if (i % 7 == 0) " needle" else ""}\n")
+                val needle = if (i % 7 == 0) " needle" else ""
+                append("2026-10-01 08:00:00.000 [t-${i % 5}] ${levels[i % 4]} app.L - message $i$needle\n")
             }
         }
         parse(content).use { log ->
             val filters = listOf(
                 LevelCondition.atLeast("Level", Level.WARN),
-                TextCondition("Message", TextOp.EQUALS, "*needle*"),
-                Filter.Or(listOf(TextCondition("Thread", TextOp.EQUALS, "t-1"), TextCondition("Message", TextOp.EQUALS, "*needle*"))),
+                message(TextOp.EQUALS, "*needle*"),
+                Filter.Or(listOf(TextCondition("Thread", TextOp.EQUALS, "t-1"), message(TextOp.EQUALS, "*needle*"))),
                 Filter.Not(TextCondition("Thread", TextOp.EQUALS, "t-2")),
             )
             val cached = FilterEngine(log)
@@ -263,7 +269,8 @@ class FilterEngineTest {
 
     @Test
     fun `cached results follow the last record as it grows`() {
-        val file = Files.writeString(dir.resolve("grow.log"), "2026-10-01 08:00:01.000 [w] ERROR app.Db - Query failed\n")
+        val file =
+            Files.writeString(dir.resolve("grow.log"), "2026-10-01 08:00:01.000 [w] ERROR app.Db - Query failed\n")
         runBlocking { ParsedLog.build(file, parser) }.use { log ->
             val engine = FilterEngine(log)
             val npe = TextCondition("Message", TextOp.EQUALS, "*NullPointer*", ignoreCase = true)
@@ -295,22 +302,42 @@ class FilterEngineTest {
         val levels = listOf("TRACE", "DEBUG", "INFO ", "WARN ", "ERROR")
         fun records(from: Int, count: Int) = buildString {
             for (i in from..<from + count) {
-                append("2026-10-01 %02d:%02d:%02d.000 [t-%d] %s log.L%d - message %d %s\n"
-                    .format(i / 3600 % 24, i / 60 % 60, i % 60, random.nextInt(9), levels[random.nextInt(5)], random.nextInt(4), i,
-                        if (random.nextInt(10) == 0) "needle" else "hay",))
+                val time = "%02d:%02d:%02d".format(i / 3600 % 24, i / 60 % 60, i % 60)
+                val thread = random.nextInt(9)
+                val level = levels[random.nextInt(5)]
+                val logger = random.nextInt(4)
+                val word = if (random.nextInt(10) == 0) "needle" else "hay"
+                append("2026-10-01 $time.000 [t-$thread] $level log.L$logger - message $i $word\n")
                 if (random.nextInt(20) == 0) append("java.lang.Exception: deep needle\n\tat x.Y(Y.java:1)\n")
             }
         }
         val file = Files.writeString(dir.resolve("random.log"), records(0, 20_000))
         val filters = listOf(
-            Filter.And(listOf(LevelCondition.atLeast("Level", Level.WARN), TextCondition("Message", TextOp.EQUALS, "*needle*"))),
-            Filter.Or(listOf(TextCondition("Thread", TextOp.EQUALS, "t-3"), Filter.Not(TextCondition("Logger", TextOp.EQUALS, "log.L1")))),
-            Filter.And(listOf(TextCondition("Message", TextOp.EQUALS, "*NEEDLE*", ignoreCase = true), TimeCondition("Timestamp", from = nanos("2026-10-01T02:00:00")))),
-            Filter.And(listOf(LevelCondition.atLeast("Level", Level.INFO), Filter.Not(PatternCondition("Message", setOf("message {} hay"))))),
+            Filter.And(listOf(LevelCondition.atLeast("Level", Level.WARN), message(TextOp.EQUALS, "*needle*"))),
+            Filter.Or(
+                listOf(
+                    TextCondition("Thread", TextOp.EQUALS, "t-3"),
+                    Filter.Not(TextCondition("Logger", TextOp.EQUALS, "log.L1")),
+                ),
+            ),
+            Filter.And(
+                listOf(
+                    message(TextOp.EQUALS, "*NEEDLE*", ignoreCase = true),
+                    TimeCondition("Timestamp", from = nanos("2026-10-01T02:00:00")),
+                ),
+            ),
+            Filter.And(
+                listOf(
+                    LevelCondition.atLeast("Level", Level.INFO),
+                    Filter.Not(PatternCondition("Message", setOf("message {} hay"))),
+                ),
+            ),
         )
-        fun expected(log: LogData, filter: Filter): List<Int> = (0..<log.recordCount).filter { matches(log as ParsedLog, it, filter) }
+        fun expected(log: LogData, filter: Filter): List<Int> =
+            (0..<log.recordCount).filter { matches(log as ParsedLog, it, filter) }
 
-        runBlocking { ParsedLog.build(file, parser, IndexProgress(), IndexOptions(parallelism = 6, minRangeSize = 1)) }.use { log ->
+        val options = IndexOptions(parallelism = 6, minRangeSize = 1)
+        runBlocking { ParsedLog.build(file, parser, IndexProgress(), options) }.use { log ->
             val engine = FilterEngine(log)
             for (filter in filters) assertEquals(expected(log, filter), engine.rows(filter))
             // Cached leaves are reused, and only appended records are computed afresh.
@@ -351,7 +378,10 @@ class FilterEngineTest {
                 else -> error("unused")
             }
         }
-        is PatternCondition -> Templates.mask(log.rowValues(record, 1000)[log.schema.fields.indexOfFirst { it.name == filter.field }]) in filter.templates
+        is PatternCondition -> {
+            val field = log.schema.fields.indexOfFirst { it.name == filter.field }
+            Templates.mask(log.rowValues(record, 1000)[field]) in filter.templates
+        }
         is PresenceCondition -> error("unused")
     }
 }

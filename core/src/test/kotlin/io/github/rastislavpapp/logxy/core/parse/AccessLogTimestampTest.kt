@@ -14,7 +14,8 @@ class AccessLogTimestampTest {
         return if (parser.parse(bytes, 1, bytes.size - 1)) parser.nanos else null
     }
 
-    private fun epochNanos(iso: String) = OffsetDateTime.parse(iso).toInstant().let { it.epochSecond * 1_000_000_000 + it.nano }
+    private fun epochNanos(iso: String) =
+        OffsetDateTime.parse(iso).toInstant().let { it.epochSecond * 1_000_000_000 + it.nano }
 
     @Test
     fun `parses every month`() {
@@ -38,7 +39,8 @@ class AccessLogTimestampTest {
     @Test
     fun `rejects what is no access-log timestamp`() {
         for (bad in listOf(
-            "13/oct/2026:10:00:00 +0000", "13/Okt/2026:10:00:00 +0000", "32/Oct/2026:10:00:00 +0000", "13/Oct/2026:24:00:00 +0000",
+            "13/oct/2026:10:00:00 +0000", "13/Okt/2026:10:00:00 +0000",
+            "32/Oct/2026:10:00:00 +0000", "13/Oct/2026:24:00:00 +0000",
             "13/Oct/2026:10:00:00", "13/Oct/2026:10:00:00 0000", "2026-10-13T10:00:00Z", "30/Feb/2026:10:00:00 +0000",
             "13/Oct/20x6:10:00:00 +0000", "13/Oct/x026:10:00:00 +0000",
         )) {

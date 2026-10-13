@@ -40,14 +40,22 @@ class HighlighterTest {
 
     @Test
     fun exactValuesMarkWholeWordsOnly() {
-        val h = of(rule(QueryOp.EQUALS, "main", field = "thread"), rule(QueryOp.EQUALS, "com.example*", field = "logger"))
+        val h = of(
+            rule(QueryOp.EQUALS, "main", field = "thread"),
+            rule(QueryOp.EQUALS, "com.example*", field = "logger"),
+        )
         assertContentEquals(intArrayOf(0, 4, 20, 31), h.ranges(null, "main domain mainly [com.example.Order]"))
         assertContentEquals(intArrayOf(0, 4), h.ranges("thread", "main"))
     }
 
     @Test
     fun skipsNegatedAndInvalid() {
-        assertTrue(of(rule(QueryOp.NOT_EQUALS, "*a*"), rule(QueryOp.EQUALS, "*a*", negated = true), rule(QueryOp.MATCHES, "(")).isEmpty)
+        val h = of(
+            rule(QueryOp.NOT_EQUALS, "*a*"),
+            rule(QueryOp.EQUALS, "*a*", negated = true),
+            rule(QueryOp.MATCHES, "("),
+        )
+        assertTrue(h.isEmpty)
     }
 
     @Test

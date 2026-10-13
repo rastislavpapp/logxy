@@ -137,19 +137,24 @@ class ShownLogTest {
 
     @Test
     fun `copies a column of the rows shown or of given records`() {
-        parse("a.log", "2026-10-01 10:00:01.000 INFO  a.A - one\n2026-10-01 10:00:02.000 WARN  a.B - two\nat x.y\n2026-10-01 10:00:03.000 INFO  a.A - three\n").use { log ->
+        val content = "2026-10-01 10:00:01.000 INFO  a.A - one\n" +
+            "2026-10-01 10:00:02.000 WARN  a.B - two\nat x.y\n" +
+            "2026-10-01 10:00:03.000 INFO  a.A - three\n"
+        parse("a.log", content).use { log ->
             val shown = ShownLog(SingleLoad(log))
             val message = log.field("Message")
             assertEquals(CopyResult.Copied("one\ntwo\nat x.y\nthree\n"), runBlocking { shown.copyColumn(message) })
             shown.showRows(intArrayOf(0, 2))
             assertEquals(CopyResult.Copied("a.A\na.A\n"), runBlocking { shown.copyColumn(log.field("Logger")) })
-            assertEquals(CopyResult.Copied("WARN\n"), runBlocking { shown.copyColumn(log.field("Level"), intArrayOf(1)) })
+            val level = runBlocking { shown.copyColumn(log.field("Level"), intArrayOf(1)) }
+            assertEquals(CopyResult.Copied("WARN\n"), level)
         }
     }
 
     @Test
     fun `copies the records there were while more are appended`() {
-        val file = Files.writeString(dir.resolve("live.log"), (1..1000).joinToString("") { "2026-10-01 10:00:01.000 INFO  a.A - m$it\n" })
+        val content = (1..1000).joinToString("") { "2026-10-01 10:00:01.000 INFO  a.A - m$it\n" }
+        val file = Files.writeString(dir.resolve("live.log"), content)
         runBlocking { ParsedLog.build(file, parser, IndexProgress()) }.use { log ->
             val shown = ShownLog(SingleLoad(log))
             val result = runBlocking {
@@ -171,8 +176,10 @@ class ShownLogTest {
         a.use {
             b.use {
                 val shown = ShownLog(MergedLoad(merged))
-                assertEquals(CopyResult.Copied("A1\nB1\nA2\n"), runBlocking { shown.copyColumn(merged.field("Message")) })
-                assertEquals(CopyResult.Copied("b.log\na.log\n"), runBlocking { shown.copyColumn(merged.field("Source"), intArrayOf(1, 2)) })
+                val messages = runBlocking { shown.copyColumn(merged.field("Message")) }
+                assertEquals(CopyResult.Copied("A1\nB1\nA2\n"), messages)
+                val sources = runBlocking { shown.copyColumn(merged.field("Source"), intArrayOf(1, 2)) }
+                assertEquals(CopyResult.Copied("b.log\na.log\n"), sources)
             }
         }
     }

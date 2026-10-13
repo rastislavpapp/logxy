@@ -12,13 +12,25 @@ class SessionArgsTest {
     @Test
     fun `arguments written for a restart reopen the same sessions with the same parsers and filters`() {
         val sessions = listOf(
-            OpenSession(listOf("/logs/a.log"), listOf(Parser.Raw), SavedFilter("", Level.WARN, """message ~ "time out" AND logger = "x.y"""")),
+            OpenSession(
+                listOf("/logs/a.log"),
+                listOf(Parser.Raw),
+                SavedFilter("", Level.WARN, """message ~ "time out" AND logger = "x.y""""),
+            ),
             OpenSession(
                 listOf("/logs/b.log", "/logs/old.zip!c.log", "/logs/d.log"),
-                listOf(Parser.Pattern("Mine", "%d [%t] %p %m%n"), null, Parser.Json("Json", RoleKeys(level = listOf("lvl")))),
+                listOf(
+                    Parser.Pattern("Mine", "%d [%t] %p %m%n"),
+                    null,
+                    Parser.Json("Json", RoleKeys(level = listOf("lvl"))),
+                ),
                 null,
             ),
-            OpenSession(listOf("/logs/e.log"), listOf(Parser.Regex("Re", """(?<level>\w+) (?<message>.*)""", "HH:mm")), null),
+            OpenSession(
+                listOf("/logs/e.log"),
+                listOf(Parser.Regex("Re", """(?<level>\w+) (?<message>.*)""", "HH:mm")),
+                null,
+            ),
             OpenSession(listOf("/logs/f.log"), listOf(null), SavedFilter("", null, "level = ERROR")),
         )
 

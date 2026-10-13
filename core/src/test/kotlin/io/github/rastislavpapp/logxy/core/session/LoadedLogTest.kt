@@ -54,7 +54,10 @@ abstract class LoadedLogContract {
         return changed to runBlocking { settle() }
     }
 
-    private fun LoadedLog.grow(text: String): Pair<Int, Appended> = grow(text, listOf(0)).let { (changed, outcome) -> changed.single() to outcome }
+    private fun LoadedLog.grow(text: String): Pair<Int, Appended> {
+        val (changed, outcome) = grow(text, listOf(0))
+        return changed.single() to outcome
+    }
 
     private fun Records.field(name: String) = schema.fields.indexOfFirst { it.name == name }
 
@@ -74,22 +77,25 @@ abstract class LoadedLogContract {
         val (changed, outcome) = loaded.grow("java.lang.NullPointerException\n" + line(9, "A3"))
         assertEquals(Appended.GREW, outcome)
         assertEquals(before + 1, loaded.records.recordCount)
-        assertEquals("A2\njava.lang.NullPointerException", loaded.records.fieldText(changed, loaded.records.field("Message")))
+        val message = loaded.records.fieldText(changed, loaded.records.field("Message"))
+        assertEquals("A2\njava.lang.NullPointerException", message)
         assertEquals("A3", loaded.records.messages().last())
     }
 
     @Test
-    fun `a field first present in appended records grows the schema`() = load(json(1, "A1") + "\n", "a.json") { loaded ->
-        val schema = loaded.records.schema
-        assertTrue(schema.fields.single { it.name == "Exception" }.hidden)
-        assertEquals(Appended.NEW_FIELDS, loaded.grow(json(5, "A2", ""","stack_trace":"boom"""") + "\n").second)
-        assertNotEquals(schema, loaded.records.schema)
-        assertFalse(loaded.records.schema.fields.single { it.name == "Exception" }.hidden)
-        assertEquals(Appended.GREW, loaded.grow(json(6, "A3") + "\n").second)
-    }
+    fun `a field first present in appended records grows the schema`() =
+        load(json(1, "A1") + "\n", "a.json") { loaded ->
+            val schema = loaded.records.schema
+            assertTrue(schema.fields.single { it.name == "Exception" }.hidden)
+            assertEquals(Appended.NEW_FIELDS, loaded.grow(json(5, "A2", ""","stack_trace":"boom"""") + "\n").second)
+            assertNotEquals(schema, loaded.records.schema)
+            assertFalse(loaded.records.schema.fields.single { it.name == "Exception" }.hidden)
+            assertEquals(Appended.GREW, loaded.grow(json(6, "A3") + "\n").second)
+        }
 
     // A record's message is one word.
-    private val oneWord = Parser.Regex("One word", """^(?<timestamp>\S+ \S+) (?<message>\w+)$""", "yyyy-MM-dd HH:mm:ss.SSS")
+    private val oneWord =
+        Parser.Regex("One word", """^(?<timestamp>\S+ \S+) (?<message>\w+)$""", "yyyy-MM-dd HH:mm:ss.SSS")
 
     @Test
     fun `a last record parsed differently merges again`() =
@@ -98,7 +104,11 @@ abstract class LoadedLogContract {
             // Without its line end, the last line was a record; with more words it is part of the one before.
             val outcome = loaded.grow(" and more\n").second
             assertEquals(before - 1, loaded.parts[0].recordCount)
-            if (canMergeAgain) assertEquals(Appended.MERGE_AGAIN, outcome) else assertNotEquals(Appended.MERGE_AGAIN, outcome)
+            if (canMergeAgain) {
+                assertEquals(Appended.MERGE_AGAIN, outcome)
+            } else {
+                assertNotEquals(Appended.MERGE_AGAIN, outcome)
+            }
         }
 
     @Test
@@ -120,22 +130,24 @@ abstract class LoadedLogContract {
     }
 
     @Test
-    fun `the template of a record is its part's`() = load(line(1, "order 17 shipped") + line(2, "order 18 shipped") + line(3, "done")) { loaded ->
-        val part = loaded.parts[0]
-        val templates = List(part.recordCount) { PatternIndex.templateOf(part.filterSnapshot(), it) }
-        assertEquals(templates[0], templates[1])
-        for (record in 0..<loaded.records.recordCount) {
-            if ((loaded.origin?.part(record) ?: 0) != 0) continue
-            assertEquals(templates[loaded.origin?.record(record) ?: record], loaded.templateOf(record))
+    fun `the template of a record is its part's`() =
+        load(line(1, "order 17 shipped") + line(2, "order 18 shipped") + line(3, "done")) { loaded ->
+            val part = loaded.parts[0]
+            val templates = List(part.recordCount) { PatternIndex.templateOf(part.filterSnapshot(), it) }
+            assertEquals(templates[0], templates[1])
+            for (record in 0..<loaded.records.recordCount) {
+                if ((loaded.origin?.part(record) ?: 0) != 0) continue
+                assertEquals(templates[loaded.origin?.record(record) ?: record], loaded.templateOf(record))
+            }
         }
-    }
 
     @Test
     fun `reads a field of all records or of given ones`() = load(lines) { loaded ->
         val records = loaded.records
         for (field in records.schema.fields.indices) {
             val all = loaded.fieldReader(field, null, records.recordCount)
-            assertEquals(List(records.recordCount) { records.fieldText(it, field) }, List(records.recordCount) { all(it) })
+            val expected = List(records.recordCount) { records.fieldText(it, field) }
+            assertEquals(expected, List(records.recordCount) { all(it) })
             val some = intArrayOf(records.recordCount - 1, 0)
             val read = loaded.fieldReader(field, some, some.size)
             assertEquals(some.map { records.fieldText(it, field) }, List(some.size) { read(it) })
@@ -164,7 +176,10 @@ class SingleLoadTest : LoadedLogContract() {
 class MergedLoadTest : LoadedLogContract() {
     override fun load(file: LogData): LoadedLog {
         // Interleaves with part 0, and its last record is the latest.
-        val other = open("b.log", "2026-10-01 10:00:02.000 [main] INFO  app.B - B1\n2026-10-01 10:00:08.000 [main] INFO  app.B - B2\n")
+        val other = open(
+            "b.log",
+            "2026-10-01 10:00:02.000 [main] INFO  app.B - B1\n2026-10-01 10:00:08.000 [main] INFO  app.B - B2\n",
+        )
         return runBlocking { loadedLog(listOf(file, other), listOf("a", "b")) }
     }
 

@@ -29,7 +29,8 @@ class LogfmtLogTest {
         List(recordCount) { rowValues(it, 1000)[field] }
     }
 
-    private fun ParsedLog.matching(condition: Filter) = runBlocking { FilterEngine(this@matching).prepare(condition).run() }.rows.toList()
+    private fun ParsedLog.matching(condition: Filter) =
+        runBlocking { FilterEngine(this@matching).prepare(condition).run() }.rows.toList()
 
     private val sample = """
         ts=2026-10-01T08:00:00.001Z level=info msg="server started" port=8080 caller=main.go:12
@@ -46,8 +47,14 @@ class LogfmtLogTest {
             parse(sample, options).use { log ->
                 assertEquals(3, log.recordCount)
                 val visible = log.schema.fields.filter { !it.hidden }.map { it.name }
-                assertEquals(listOf("Timestamp", "Level", "Logger", "Message", "duration", "path", "port", "retry", "user"), visible)
-                assertEquals(listOf("2026-10-01 08:00:00.001", "2026-10-01 08:00:00.002", "2026-10-01 08:00:01.000"), log.column("Timestamp"))
+                assertEquals(
+                    listOf("Timestamp", "Level", "Logger", "Message", "duration", "path", "port", "retry", "user"),
+                    visible,
+                )
+                assertEquals(
+                    listOf("2026-10-01 08:00:00.001", "2026-10-01 08:00:00.002", "2026-10-01 08:00:01.000"),
+                    log.column("Timestamp"),
+                )
                 assertEquals(listOf("server started", "request failed: \"timeout\"", "slow"), log.column("Message"))
                 assertEquals(listOf("main.go:12", "", ""), log.column("Logger"))
                 assertEquals(listOf("8080", "", ""), log.column("port"))
