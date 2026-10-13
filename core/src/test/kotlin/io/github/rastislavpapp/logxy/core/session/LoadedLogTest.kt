@@ -44,13 +44,17 @@ abstract class LoadedLogContract {
         }
     }
 
-    /** Appends [text] to part 0's file and applies it; the record that may have changed, and the outcome. */
-    private fun LoadedLog.grow(text: String): Pair<Int, Appended> {
-        val part = parts[0]
-        Files.writeString(part.path, text, StandardOpenOption.APPEND)
-        val changed = append(0, part.readAppended(Files.size(part.path)))
+    /** Appends [text] to the files of [parts] and applies it; the records that may have changed, and the outcome. */
+    private fun LoadedLog.grow(text: String, parts: List<Int>): Pair<List<Int>, Appended> {
+        val changed = parts.map { part ->
+            val log = this.parts[part]
+            Files.writeString(log.path, text, StandardOpenOption.APPEND)
+            append(part, log.readAppended(Files.size(log.path)))
+        }
         return changed to runBlocking { settle() }
     }
+
+    private fun LoadedLog.grow(text: String): Pair<Int, Appended> = grow(text, listOf(0)).let { (changed, outcome) -> changed.single() to outcome }
 
     private fun Records.field(name: String) = schema.fields.indexOfFirst { it.name == name }
 
@@ -144,10 +148,10 @@ abstract class LoadedLogContract {
         val npe = TextCondition("Message", TextOp.EQUALS, "*NullPointer*")
         assertEquals(emptyList(), runBlocking { filter.prepare(npe).run() }.rows.toList())
         val covered = loaded.records.recordCount
-        val (changed, _) = loaded.grow("java.lang.NullPointerException\n")
+        val (changed, _) = loaded.grow("java.lang.NullPointerException\n", loaded.parts.indices.toList())
         val from = filter.changedFrom(covered)
-        assertTrue(from <= changed)
-        assertEquals(listOf(changed), runBlocking { filter.prepare(npe, from).run() }.rows.toList())
+        assertTrue(from <= changed.min())
+        assertEquals(changed.sorted(), runBlocking { filter.prepare(npe, from).run() }.rows.toList())
     }
 }
 

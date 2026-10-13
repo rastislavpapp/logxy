@@ -46,8 +46,8 @@ internal interface LoadedLog {
     fun templateOf(record: Int): String
 
     /**
-     * Reads [field] of the [count] records in [records] (null: the first [count]) by their index there,
-     * on any thread. Call on the owner thread.
+     * Reads [field] of the [count] records in [records] (null: the first [count]) by their index there.
+     * Created on the owner thread; the reader runs on any thread.
      */
     fun fieldReader(field: Int, records: IntArray?, count: Int): (Int) -> String
 
