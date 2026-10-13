@@ -12,10 +12,11 @@ import javax.swing.JProgressBar
 import javax.swing.Timer
 
 /**
- * How far opening files got, such as unzipping them, with a Cancel button that calls [onCancel]; an [indeterminate]
- * bar for work of unknown size. [text] and [fraction] may be set from any thread.
+ * Shows the slow steps of opening files: looking for logs in folders, unzipping, decompressing. [text] says
+ * what is being done and [fraction] how far it got; both may be set from any thread. An [indeterminate] bar
+ * is for work of unknown size, such as walking a folder. Cancel and closing the dialog call [onCancel].
  */
-internal class ExtractDialog(owner: Window, indeterminate: Boolean = false, private val onCancel: () -> Unit) :
+internal class OpeningProgressDialog(owner: Window, indeterminate: Boolean = false, private val onCancel: () -> Unit) :
     JDialog(owner, "Opening Files", ModalityType.APPLICATION_MODAL) {
 
     @Volatile

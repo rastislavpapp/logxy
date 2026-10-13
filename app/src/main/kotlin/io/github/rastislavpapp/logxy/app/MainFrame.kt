@@ -77,7 +77,7 @@ private const val CARD_PLACEHOLDER = "placeholder"
 private const val CARD_TABS = "tabs"
 private const val LIVE_COLOR = "Actions.Green"
 private const val FOLLOW_COLOR = "Component.accentColor"
-private const val EXTRACT_DIALOG_DELAY_MILLIS = 300
+private const val PROGRESS_DIALOG_DELAY_MILLIS = 300
 private const val MAX_LEFT_OUT_SHOWN = 15
 
 class MainFrame : JFrame("logxy") {
@@ -273,11 +273,11 @@ class MainFrame : JFrame("logxy") {
         if (paths.none { Files.isDirectory(it) }) return OpenPlan.find(paths)
         lateinit var walk: Deferred<Found>
         var finished = false
-        val dialog = ExtractDialog(this@MainFrame, indeterminate = true) { walk.cancel() }
+        val dialog = OpeningProgressDialog(this@MainFrame, indeterminate = true) { walk.cancel() }
         fun tell(folder: Path, count: Int) { dialog.text = "Looking for logs in $folder… ($count found)" }
         tell(paths.first { Files.isDirectory(it) }, 0)
         walk = async(Dispatchers.IO) { OpenPlan.find(paths, ::tell) }
-        Timer(EXTRACT_DIALOG_DELAY_MILLIS) { if (!finished) dialog.isVisible = true }.apply { isRepeats = false }.start()
+        Timer(PROGRESS_DIALOG_DELAY_MILLIS) { if (!finished) dialog.isVisible = true }.apply { isRepeats = false }.start()
         return try {
             walk.await()
         } catch (e: CancellationException) {
@@ -392,7 +392,7 @@ class MainFrame : JFrame("logxy") {
     private fun extractThen(archives: List<Path>, then: (Map<Path, List<Path>>) -> Unit): Job {
         lateinit var job: Job
         var finished = false
-        val dialog = ExtractDialog(this) { job.cancel() }
+        val dialog = OpeningProgressDialog(this) { job.cancel() }
         job = scope.launch {
             val files = LinkedHashMap<Path, List<Path>>()
             var failure = ""
@@ -429,7 +429,7 @@ class MainFrame : JFrame("logxy") {
         }
         // Quick ones finish before the dialog would only flash.
         // Not job.isActive: the job is still running while [then] asks how to open the files.
-        Timer(EXTRACT_DIALOG_DELAY_MILLIS) { if (!finished) dialog.isVisible = true }.apply { isRepeats = false }.start()
+        Timer(PROGRESS_DIALOG_DELAY_MILLIS) { if (!finished) dialog.isVisible = true }.apply { isRepeats = false }.start()
         return job
     }
 
