@@ -56,7 +56,7 @@ class TimeHistogram(
     /** The earliest time, in epoch nanoseconds, that falls into [bin]. */
     fun binStart(bin: Int): Long = start + bin * width
 
-    /** Adds one record of [level] at [time], widening the bins if it falls outside them. */
+    /** Adds one record of [level] at [time], moving the bins (and widening them if moving is not enough) if it falls outside them. */
     fun add(time: Long, level: Level?) = add(time, category(level), 1)
 
     /** Adds [count] records of [category] at [time]. */

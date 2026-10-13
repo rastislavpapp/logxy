@@ -22,13 +22,13 @@ import java.nio.ByteBuffer
 import java.nio.channels.FileChannel
 import java.nio.file.Path
 
-/** How a file is read when indexed or parsed; the defaults suit the app, tests shrink them to exercise ranges. */
+/** How a file is read when indexed or parsed; tests shrink the ranges to exercise them, a merge uses fewer read channels per file. */
 data class IndexOptions(
     /** The most ranges a file is split into, scanned in parallel. */
     val parallelism: Int = Runtime.getRuntime().availableProcessors(),
     /** Files are only split into ranges of at least this size, so small files use one thread. */
     val minRangeSize: Long = 64L * 1024 * 1024,
-    /** Bytes read per call into each range's buffer. */
+    /** Bytes read per call into each range's buffer when indexing raw lines; parsing sizes its own. */
     val bufferSize: Int = 1024 * 1024,
     /** Channels per file where positional reads are serial (Windows); fewer when many files are open together. */
     val readChannels: Int = parallelism,

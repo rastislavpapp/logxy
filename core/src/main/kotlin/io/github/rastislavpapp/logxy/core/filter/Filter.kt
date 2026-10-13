@@ -10,7 +10,7 @@ sealed interface Filter {
     /** At least one of [parts] matches; with no parts, no record does. */
     data class Or(val parts: List<Filter>) : Filter
 
-    /** [part] does not match. */
+    /** The records [part] does not match, also those that lack its field. */
     data class Not(val part: Filter) : Filter
 }
 
