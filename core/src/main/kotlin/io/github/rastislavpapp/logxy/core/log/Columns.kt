@@ -70,6 +70,7 @@ internal class Columns(val schema: Schema) {
         }
     }
 
+    /** Sets TIMESTAMP [field] of the current record to [nanos], noting whether timestamps are still in order. */
     fun setTimestamp(field: Int, nanos: Long) {
         longs[field]!![size - 1] = nanos
         present[field] = true
@@ -77,6 +78,7 @@ internal class Columns(val schema: Schema) {
         lastTimestamp = nanos
     }
 
+    /** Sets LEVEL [field] of the current record to the text `source[from, to)`; texts past the [MAX_LEVEL_ID]th share its id, as ids are stored in a byte. */
     fun setLevel(field: Int, source: ByteArray, from: Int, to: Int) {
         val id = minOf(dictionaries[field]!!.idOf(source, from, to), MAX_LEVEL_ID)
         bytes[field]!![size - 1] = id.toByte()
@@ -88,6 +90,7 @@ internal class Columns(val schema: Schema) {
         if (schema.fields[field].type == ColumnType.SPAN) setSpan(field, from - lineFrom, to - from) else setDict(field, source, from, to)
     }
 
+    /** Sets DICT [field] of the current record to `source[from, to)`; sets [overflowed] once the field's values are mostly distinct. */
     fun setDict(field: Int, source: ByteArray, from: Int, to: Int) {
         val id = dictionaries[field]!!.idOf(source, from, to)
         ints[field]!![size - 1] = id
@@ -95,11 +98,13 @@ internal class Columns(val schema: Schema) {
         if (id >= MIN_OVERFLOW_VALUES && id.toLong() * MAX_DISTINCT_SHARE >= size) overflowed = field
     }
 
+    /** Sets LEVEL [field] of the current record to an id already in [dictionaries], e.g. when copying a segment remapped. */
     fun setLevelId(field: Int, id: Int) {
         bytes[field]!![size - 1] = minOf(id, MAX_LEVEL_ID).toByte()
         present[field] = true
     }
 
+    /** Sets DICT [field] of the current record to an id already in [dictionaries], e.g. when copying a segment remapped. */
     fun setDictId(field: Int, id: Int) {
         ints[field]!![size - 1] = id
         present[field] = true
@@ -164,6 +169,7 @@ internal class Columns(val schema: Schema) {
     /** Length of a SPAN field: [ABSENT_LENGTH], [TO_RECORD_END], or a length. */
     fun spanLength(field: Int, record: Int): Int = lengths[field]?.get(record) ?: TO_RECORD_END
 
+    /** Drops the last record, e.g. one whose first line was unfinished, to parse it again once more bytes arrive. */
     fun removeLast() {
         starts.removeLast()
         for (i in schema.fields.indices) {

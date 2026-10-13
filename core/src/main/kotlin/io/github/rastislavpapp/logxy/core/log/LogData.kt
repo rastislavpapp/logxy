@@ -26,6 +26,10 @@ abstract class LogData : Records, Closeable {
     /** Reads bytes between [indexedSize] and [size] without changing this log. */
     abstract fun readAppended(size: Long): AppendedData
 
+    /**
+     * Adds what [readAppended] read, which must start where this log's indexed bytes end (or its unfinished
+     * last line starts); records grow, are added, and the last may be replaced.
+     */
     abstract fun append(data: AppendedData)
 
     /** The first [recordCount] records, for reading on other threads. Call on the thread that owns the log. */

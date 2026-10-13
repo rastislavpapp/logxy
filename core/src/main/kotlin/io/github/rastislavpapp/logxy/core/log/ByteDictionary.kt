@@ -12,6 +12,7 @@ class ByteDictionary {
 
     val size get() = keys.size
 
+    /** The id of `bytes[from, to)`, adding it (as a copy) with the next free id if it is new. */
     fun idOf(bytes: ByteArray, from: Int, to: Int): Int {
         val hash = hash(bytes, from, to)
         var slot = hash and (table.size - 1)
@@ -39,11 +40,13 @@ class ByteDictionary {
         }
     }
 
+    /** The bytes of [id]; the dictionary's own array, not to be changed. */
     fun key(id: Int): ByteArray = keys[id]
 
     /** The id in [target] of each of this dictionary's keys, by id here; adds the keys [target] lacks. */
     fun idsIn(target: ByteDictionary): IntArray = IntArray(size) { id -> keys[id].let { target.idOf(it, 0, it.size) } }
 
+    /** The bytes of [id] decoded as UTF-8, decoded once and kept. */
     fun text(id: Int): String = texts[id] ?: String(keys[id], Charsets.UTF_8).also { texts[id] = it }
 
     private fun rehash() {
