@@ -22,7 +22,7 @@ _Avoid_: index, line
 
 **Parser**:
 A saved description of how to split a file's lines into records and fields. Each is of one parser kind (pattern, regex, JSON, …); built-in parsers ship with the app and are tried on every file opened.
-_Avoid_: format (the code's name for it, `LogFormat`), layout
+_Avoid_: format, layout
 
 **Shown log**:
 The records of one load as the user sees them: all of them, or a filter's result. It ends when the session reloads or closes.

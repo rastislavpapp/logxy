@@ -8,16 +8,16 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
-class PatternFormatTest {
+class CompiledPatternTest {
 
     private fun matches(pattern: String, line: String): Boolean {
         val bytes = line.toByteArray()
-        return PatternFormat(pattern).newParser().match(bytes, 0, bytes.size)
+        return CompiledPattern(pattern).newMatcher().match(bytes, 0, bytes.size)
     }
 
     @Test
     fun `schema follows the conversions`() {
-        val schema = PatternFormat("%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %-5p %c{1} %X{user} - %m%n").schema
+        val schema = CompiledPattern("%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %-5p %c{1} %X{user} - %m%n").schema
         assertEquals(listOf("Timestamp", "Thread", "Level", "Logger", "user", "Message"), schema.fields.map { it.name })
         assertEquals(
             listOf(ColumnType.TIMESTAMP, ColumnType.DICT, ColumnType.LEVEL, ColumnType.DICT, ColumnType.SPAN, ColumnType.SPAN),
@@ -28,10 +28,10 @@ class PatternFormatTest {
 
     @Test
     fun `only a message at the end runs to the record end`() {
-        val atEnd = PatternFormat("%d{HH:mm:ss.SSS} [%t] %-5p - %m%n").schema.fields
+        val atEnd = CompiledPattern("%d{HH:mm:ss.SSS} [%t] %-5p - %m%n").schema.fields
         assertTrue(atEnd.single { it.role == Role.MESSAGE }.toRecordEnd)
         assertFalse(atEnd.single { it.role == Role.THREAD }.toRecordEnd)
-        val inside = PatternFormat("%d{HH:mm:ss.SSS} %m [%t]%n").schema.fields
+        val inside = CompiledPattern("%d{HH:mm:ss.SSS} %m [%t]%n").schema.fields
         assertFalse(inside.single { it.role == Role.MESSAGE }.toRecordEnd)
     }
 
@@ -53,16 +53,16 @@ class PatternFormatTest {
 
     @Test
     fun `invalid patterns are reported`() {
-        assertFailsWith<IllegalArgumentException> { PatternFormat("%d %foo %m") }
-        assertFailsWith<IllegalArgumentException> { PatternFormat("%t%c - %m") }
-        assertFailsWith<IllegalArgumentException> { PatternFormat("%d{HH:mm %m") }
+        assertFailsWith<IllegalArgumentException> { CompiledPattern("%d %foo %m") }
+        assertFailsWith<IllegalArgumentException> { CompiledPattern("%t%c - %m") }
+        assertFailsWith<IllegalArgumentException> { CompiledPattern("%d{HH:mm %m") }
     }
 
     @Test
     fun `each MDC map gets a column, numbered if there are several`() {
-        val one = PatternFormat("%d{HH:mm:ss.SSS} %X{user} %X - %m%n").schema.fields.map { it.name }
+        val one = CompiledPattern("%d{HH:mm:ss.SSS} %X{user} %X - %m%n").schema.fields.map { it.name }
         assertEquals(listOf("Timestamp", "user", "MDC", "Message"), one)
-        val two = PatternFormat("%d{HH:mm:ss.SSS} %X [%t] %X{a,b} - %m%n").schema.fields.map { it.name }
+        val two = CompiledPattern("%d{HH:mm:ss.SSS} %X [%t] %X{a,b} - %m%n").schema.fields.map { it.name }
         assertEquals(listOf("Timestamp", "MDC[0]", "Thread", "MDC[1]", "Message"), two)
     }
 }

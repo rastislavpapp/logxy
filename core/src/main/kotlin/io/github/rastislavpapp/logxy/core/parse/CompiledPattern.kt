@@ -14,7 +14,7 @@ import java.time.ZoneId
  * matched byte by byte (no regex). A field's value ends where the next literal starts; the message
  * runs to the end of the record, including continuation lines such as stack traces.
  */
-class PatternFormat(val pattern: String, private val zone: ZoneId = ZoneId.systemDefault()) : RecordFormat() {
+class CompiledPattern(val pattern: String, private val zone: ZoneId = ZoneId.systemDefault()) : CompiledParser() {
 
     private enum class Kind { TIMESTAMP, LEVEL, DICT, SPAN, MESSAGE }
 
@@ -55,7 +55,7 @@ class PatternFormat(val pattern: String, private val zone: ZoneId = ZoneId.syste
 
     override fun formatTimestamp(field: Int, nanos: Long) = timestamps.getValue(field).format(nanos)
 
-    override fun newParser(): RecordParser = Parser()
+    override fun newMatcher(): LineMatcher = Matcher()
 
     /** Appends the tokens of [pattern]; returns false once `%n` ends the first line. */
     private fun compile(pattern: String, literal: StringBuilder): Boolean {
@@ -174,7 +174,7 @@ class PatternFormat(val pattern: String, private val zone: ZoneId = ZoneId.syste
         }
     }
 
-    private inner class Parser : RecordParser {
+    private inner class Matcher : LineMatcher {
         private val timestampParsers = arrayOfNulls<TimestampParser>(fields.size).also { parsers ->
             timestamps.forEach { (field, format) -> parsers[field] = format.newParser() }
         }

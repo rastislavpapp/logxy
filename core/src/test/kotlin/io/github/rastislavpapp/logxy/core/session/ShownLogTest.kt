@@ -7,7 +7,7 @@ import io.github.rastislavpapp.logxy.core.log.ParsedLog
 import io.github.rastislavpapp.logxy.core.log.Records
 import io.github.rastislavpapp.logxy.core.log.Schema
 import io.github.rastislavpapp.logxy.core.merge.MergedLog
-import io.github.rastislavpapp.logxy.core.parse.PatternFormat
+import io.github.rastislavpapp.logxy.core.parse.CompiledPattern
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
@@ -126,11 +126,11 @@ class ShownLogTest {
         assertEquals(CopyResult.FileChanged, runBlocking { shown.copyColumn(0) })
     }
 
-    private val format = PatternFormat("%d{yyyy-MM-dd HH:mm:ss.SSS} %-5p %c - %m%n", ZoneOffset.UTC)
+    private val parser = CompiledPattern("%d{yyyy-MM-dd HH:mm:ss.SSS} %-5p %c - %m%n", ZoneOffset.UTC)
 
     private fun parse(name: String, content: String): ParsedLog {
         val file = Files.writeString(dir.resolve(name), content)
-        return runBlocking { ParsedLog.build(file, format, IndexProgress()) }
+        return runBlocking { ParsedLog.build(file, parser, IndexProgress()) }
     }
 
     private fun Records.field(name: String) = schema.fields.indexOfFirst { it.name == name }
@@ -150,7 +150,7 @@ class ShownLogTest {
     @Test
     fun `copies the records there were while more are appended`() {
         val file = Files.writeString(dir.resolve("live.log"), (1..1000).joinToString("") { "2026-10-01 10:00:01.000 INFO  a.A - m$it\n" })
-        runBlocking { ParsedLog.build(file, format, IndexProgress()) }.use { log ->
+        runBlocking { ParsedLog.build(file, parser, IndexProgress()) }.use { log ->
             val shown = ShownLog(SingleLoad(log))
             val result = runBlocking {
                 // Runs up to reading on another thread, as from the UI thread.

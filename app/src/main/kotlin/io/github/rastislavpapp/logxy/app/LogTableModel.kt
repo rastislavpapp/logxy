@@ -120,7 +120,7 @@ class LogTableModel(val shown: ShownLog) : AbstractTableModel(), RowWindow {
         return values(record)[field]
     }
 
-    /** Canonical level of the record shown in [row], if the format has levels. */
+    /** Canonical level of the record shown in [row], if the parser has levels. */
     fun level(row: Int): Level? = shown.level(recordAt(row))
 
     private fun values(record: Int): Array<String> {

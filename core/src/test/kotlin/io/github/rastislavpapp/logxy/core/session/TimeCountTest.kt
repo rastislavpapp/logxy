@@ -2,7 +2,7 @@ package io.github.rastislavpapp.logxy.core.session
 
 import io.github.rastislavpapp.logxy.core.index.IndexProgress
 import io.github.rastislavpapp.logxy.core.log.ParsedLog
-import io.github.rastislavpapp.logxy.core.parse.PatternFormat
+import io.github.rastislavpapp.logxy.core.parse.CompiledPattern
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Files
@@ -17,7 +17,7 @@ class TimeCountTest {
     @TempDir
     lateinit var dir: Path
 
-    private val format = PatternFormat("%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %-5p %c - %m%n", ZoneOffset.UTC)
+    private val parser = CompiledPattern("%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %-5p %c - %m%n", ZoneOffset.UTC)
 
     private fun TimeHistogram.total() = (firstBin..lastBin).sumOf { bin -> (0..<TimeHistogram.CATEGORIES).sumOf { count(it, bin) } }
 
@@ -27,7 +27,7 @@ class TimeCountTest {
             for (i in 0..<1000) append("2026-10-01 08:%02d:%02d.000 [t] ${if (i % 10 == 0) "ERROR" else "INFO "} a.B - m\n".format(i / 60, i % 60))
         }
         val file = Files.writeString(dir.resolve("count.log"), content)
-        runBlocking { ParsedLog.build(file, format, IndexProgress()) }.use { log ->
+        runBlocking { ParsedLog.build(file, parser, IndexProgress()) }.use { log ->
             val from = log.timestampNanos(0)
             val to = log.timestampNanos(999)
             val partials = ArrayList<TimeHistogram>()

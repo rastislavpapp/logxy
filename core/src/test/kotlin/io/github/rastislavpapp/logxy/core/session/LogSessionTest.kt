@@ -10,7 +10,7 @@ import io.github.rastislavpapp.logxy.core.filter.TextCondition
 import io.github.rastislavpapp.logxy.core.filter.TextOp
 import io.github.rastislavpapp.logxy.core.log.Level
 import io.github.rastislavpapp.logxy.core.log.LevelMapping
-import io.github.rastislavpapp.logxy.core.parse.LogFormat
+import io.github.rastislavpapp.logxy.core.parse.Parser
 import io.github.rastislavpapp.logxy.core.query.Query
 import io.github.rastislavpapp.logxy.core.query.QueryException
 import io.github.rastislavpapp.logxy.core.query.QueryOp
@@ -89,8 +89,8 @@ class LogSessionTest {
         var onShownEnded = {}
         override fun shownEnded() = onShownEnded()
         override fun notMergeable(paths: List<Path>) { notMergeable.complete(paths) }
-        var formatChanged = 0
-        override fun formatChanged() { formatChanged++ }
+        var parserChanged = 0
+        override fun parserChanged() { parserChanged++ }
         override fun recordsGrew(changed: IntArray) {}
         val fieldsShown = Channel<Unit>(Channel.UNLIMITED)
         override fun fieldsShown() { fieldsShown.trySend(Unit) }
@@ -158,23 +158,23 @@ class LogSessionTest {
     }
 
     @Test
-    fun `a merge uses the formats chosen for its files and detects the others`() = runBlocking {
+    fun `a merge uses the parsers chosen for its files and detects the others`() = runBlocking {
         val a = Files.writeString(dir.resolve("a.log"), lines(10))
         val b = Files.writeString(dir.resolve("b.log"), lines(10))
-        val pattern = LogFormat.Pattern("Mine", "%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %-5p %c - %m%n")
+        val pattern = Parser.Pattern("Mine", "%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %-5p %c - %m%n")
         val recorder = Recorder()
         val session = withContext(ui) { LogSession(listOf(a, b), scope, NoSettings, recorder, chosen = listOf(null, pattern)).also { it.start() } }
         val shown = withTimeout(10_000) { recorder.loads.receive() }
         withContext(ui) {
-            assertEquals(listOf(null, pattern), session.chosenFormats)
-            assertEquals(listOf(LogFormat.BUILT_IN[0], pattern), session.formats)
+            assertEquals(listOf(null, pattern), session.chosenParsers)
+            assertEquals(listOf(Parser.BUILT_IN[0], pattern), session.parsers)
             assertEquals(20, shown.size)
-            session.useFormats(listOf(pattern, null))
+            session.useParsers(listOf(pattern, null))
         }
         withTimeout(10_000) { recorder.loads.receive() }
         withContext(ui) {
-            assertEquals(listOf(pattern, null), session.chosenFormats)
-            assertEquals(listOf(pattern, LogFormat.BUILT_IN[0]), session.formats)
+            assertEquals(listOf(pattern, null), session.chosenParsers)
+            assertEquals(listOf(pattern, Parser.BUILT_IN[0]), session.parsers)
             session.dispose()
         }
     }
@@ -622,12 +622,12 @@ class LogSessionTest {
         withContext(ui) { session.dispose() }
     }
 
-    private val mine = LogFormat.Pattern("Mine", "%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %-5p %c - %m%n")
+    private val mine = Parser.Pattern("Mine", "%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %-5p %c - %m%n")
 
     // Without the logger, its name becomes part of the message.
-    private val edited = LogFormat.Pattern("Mine", "%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %-5p %m%n")
+    private val edited = Parser.Pattern("Mine", "%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %-5p %m%n")
 
-    private suspend fun openWith(settings: SettingsStore, file: Path, recorder: Recorder, chosen: LogFormat?): Pair<LogSession, ShownLog> {
+    private suspend fun openWith(settings: SettingsStore, file: Path, recorder: Recorder, chosen: Parser?): Pair<LogSession, ShownLog> {
         val session = withContext(ui) { LogSession(listOf(file), scope, settings, recorder, chosen = listOf(chosen)).also { it.start() } }
         return session to withTimeout(10_000) { recorder.loads.receive() }
     }
@@ -635,14 +635,14 @@ class LogSessionTest {
     @Test
     fun `a saved parser renamed only changes the name shown`() = runBlocking {
         val file = Files.writeString(dir.resolve("renamed.log"), lines(10))
-        val settings = ChangingSettings(Settings(formats = listOf(mine)))
+        val settings = ChangingSettings(Settings(parsers = listOf(mine)))
         val recorder = Recorder()
         val (session, shown) = openWith(settings, file, recorder, chosen = mine)
-        val announced = withContext(ui) { recorder.formatChanged }
-        withContext(ui) { settings.change(Settings(formats = listOf(mine.copy(name = "Ours")))) }
+        val announced = withContext(ui) { recorder.parserChanged }
+        withContext(ui) { settings.change(Settings(parsers = listOf(mine.copy(name = "Ours")))) }
         withContext(ui) {
-            assertEquals("Ours", session.chosenFormat?.name)
-            assertEquals(announced + 1, recorder.formatChanged)
+            assertEquals("Ours", session.chosenParser?.name)
+            assertEquals(announced + 1, recorder.parserChanged)
             assertFalse(shown.ended)
         }
         assertEquals(null, withTimeoutOrNull(500) { recorder.loads.receive() })
@@ -652,14 +652,14 @@ class LogSessionTest {
     @Test
     fun `a saved parser edited reads the files again`() = runBlocking {
         val file = Files.writeString(dir.resolve("edited.log"), lines(10))
-        val settings = ChangingSettings(Settings(formats = listOf(mine)))
+        val settings = ChangingSettings(Settings(parsers = listOf(mine)))
         val recorder = Recorder()
         val (session, shown) = openWith(settings, file, recorder, chosen = mine)
-        withContext(ui) { settings.change(Settings(formats = listOf(edited))) }
+        withContext(ui) { settings.change(Settings(parsers = listOf(edited))) }
         withTimeout(10_000) { recorder.loads.receive() }
         withContext(ui) {
             assertTrue(shown.ended)
-            assertEquals(edited, session.chosenFormat)
+            assertEquals(edited, session.chosenParser)
             assertEquals("app.L - message 0", session.records!!.fieldText(0, 3))
             session.dispose()
         }
@@ -668,16 +668,16 @@ class LogSessionTest {
     @Test
     fun `a saved parser that detection chose reads the files again when edited`() = runBlocking {
         val file = Files.writeString(dir.resolve("detected.log"), lines(10))
-        val settings = ChangingSettings(Settings(formats = listOf(mine)))
+        val settings = ChangingSettings(Settings(parsers = listOf(mine)))
         val recorder = Recorder()
         val (session, shown) = openWith(settings, file, recorder, chosen = null)
-        assertEquals(mine, withContext(ui) { session.format })
-        withContext(ui) { settings.change(Settings(formats = listOf(edited))) }
+        assertEquals(mine, withContext(ui) { session.parser })
+        withContext(ui) { settings.change(Settings(parsers = listOf(edited))) }
         withTimeout(10_000) { recorder.loads.receive() }
         withContext(ui) {
             assertTrue(shown.ended)
-            assertEquals(null, session.chosenFormat)
-            assertEquals(edited, session.format)
+            assertEquals(null, session.chosenParser)
+            assertEquals(edited, session.parser)
             assertEquals("app.L - message 0", session.records!!.fieldText(0, 3))
             session.dispose()
         }
@@ -759,7 +759,7 @@ class LogSessionTest {
         val file = Files.writeString(dir.resolve("other.log"), "plain text\n".repeat(20))
         val recorder = Recorder()
         val session = withContext(ui) { LogSession(file, scope, NoSettings, recorder) }
-        withContext(ui) { session.useFormat(LogFormat.BUILT_IN.first()) }
+        withContext(ui) { session.useParser(Parser.BUILT_IN.first()) }
         val title = withTimeout(10_000) { recorder.problem.await() }
         assertTrue("does not match" in title, title)
     }
@@ -770,7 +770,7 @@ class LogSessionTest {
         val other = Files.writeString(dir.resolve("other.log"), "plain text\n".repeat(20))
         val recorder = Recorder()
         withContext(ui) {
-            LogSession(files + listOf(other), scope, NoSettings, recorder, chosen = List(4) { null } + LogFormat.BUILT_IN.first()).start()
+            LogSession(files + listOf(other), scope, NoSettings, recorder, chosen = List(4) { null } + Parser.BUILT_IN.first()).start()
         }
         val title = withTimeout(10_000) { recorder.problem.await() }
         assertTrue(title.startsWith("other.log does not match"), title)

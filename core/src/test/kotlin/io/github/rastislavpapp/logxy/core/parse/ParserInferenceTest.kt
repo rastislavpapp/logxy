@@ -4,18 +4,18 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 
-class FormatInferenceTest {
+class ParserInferenceTest {
 
-    private fun infer(text: String) = FormatInference.infer(text.trimIndent().lines().map { it.toByteArray() })
+    private fun infer(text: String) = ParserInference.infer(text.trimIndent().lines().map { it.toByteArray() })
 
-    private fun pattern(text: String) = (infer(text) as LogFormat.Pattern).pattern
+    private fun pattern(text: String) = (infer(text) as Parser.Pattern).pattern
 
-    /** Field name to value of each line that starts a record, as the inferred format reads it. */
+    /** Field name to value of each line that starts a record, as the inferred parser reads it. */
     private fun read(text: String): List<Map<String, String>> {
         val lines = text.trimIndent().lines().map { it.toByteArray() }
-        val compiled = FormatInference.infer(lines)!!.compile()!!
+        val compiled = ParserInference.infer(lines)!!.compile()!!
         val names = compiled.schema.fields.map { it.name }
-        return FormatPreview.preview(compiled, lines).mapNotNull { line -> line.values?.let { names.zip(it).toMap() } }
+        return ParserPreview.preview(compiled, lines).mapNotNull { line -> line.values?.let { names.zip(it).toMap() } }
     }
 
     @Test
@@ -142,20 +142,20 @@ class FormatInferenceTest {
 
     @Test
     fun `JSON lines with keys of their own`() {
-        val format = infer("""
+        val parser = infer("""
             {"when":"2026-10-01T08:00:00.001Z","lvl":"info","text":"Started the application","svc":"api","src":"com.example.App"}
             {"when":"2026-10-01T08:00:00.002Z","lvl":"error","text":"Failed to connect to the database","svc":"api","src":"com.example.Db"}
-        """) as LogFormat.Json
-        assertEquals("JSON lines: when, lvl, text, src", format.name)
-        assertEquals(listOf("when"), format.keys.timestamp.take(1))
-        assertEquals(listOf("lvl"), format.keys.level.take(1))
-        assertEquals(listOf("text"), format.keys.message.take(1))
-        assertEquals(listOf("src"), format.keys.logger.take(1))
+        """) as Parser.Json
+        assertEquals("JSON lines: when, lvl, text, src", parser.name)
+        assertEquals(listOf("when"), parser.keys.timestamp.take(1))
+        assertEquals(listOf("lvl"), parser.keys.level.take(1))
+        assertEquals(listOf("text"), parser.keys.message.take(1))
+        assertEquals(listOf("src"), parser.keys.logger.take(1))
     }
 
     @Test
     fun `JSON lines with the usual keys`() {
-        assertEquals(LogFormat.Json("JSON lines"), infer("""
+        assertEquals(Parser.Json("JSON lines"), infer("""
             {"@timestamp":"2026-10-01T08:00:00.001Z","level":"INFO","message":"Started"}
             {"time":1759305600123,"level":30,"msg":"pino"}
         """))

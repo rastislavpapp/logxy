@@ -10,10 +10,10 @@ import java.time.format.DateTimeFormatter
 
 /**
  * logfmt lines, see [Logfmt]. The keys in [keys] fill the usual fields; every other key becomes a field read
- * from the line on demand. Timestamps as in [JsonFormat]. Lines that are no logfmt (a panic, a stack trace)
+ * from the line on demand. Timestamps as in [CompiledJson]. Lines that are no logfmt (a panic, a stack trace)
  * continue the record before them.
  */
-class LogfmtFormat(val keys: RoleKeys = RoleKeys.LOGFMT, private val zone: ZoneId = ZoneId.systemDefault()) : RecordFormat() {
+class CompiledLogfmt(val keys: RoleKeys = RoleKeys.LOGFMT, private val zone: ZoneId = ZoneId.systemDefault()) : CompiledParser() {
 
     private val roles = RoleFields(keys)
 
@@ -26,9 +26,9 @@ class LogfmtFormat(val keys: RoleKeys = RoleKeys.LOGFMT, private val zone: ZoneI
     override fun formatTimestamp(field: Int, nanos: Long): String =
         displayFormat.format(Instant.ofEpochSecond(Math.floorDiv(nanos, NANOS), Math.floorMod(nanos, NANOS)))
 
-    override fun newParser(): RecordParser = Parser()
+    override fun newMatcher(): LineMatcher = Matcher()
 
-    private inner class Parser : RecordParser {
+    private inner class Matcher : LineMatcher {
         private var count = 0
         private var keyFrom = IntArray(16)
         private var keyTo = IntArray(16)

@@ -7,7 +7,7 @@ import io.github.rastislavpapp.logxy.core.log.Columns
 import io.github.rastislavpapp.logxy.core.log.LevelMapping
 import io.github.rastislavpapp.logxy.core.log.ParsedLog
 import io.github.rastislavpapp.logxy.core.log.Schema
-import io.github.rastislavpapp.logxy.core.parse.RecordFormat
+import io.github.rastislavpapp.logxy.core.parse.CompiledParser
 import io.github.rastislavpapp.logxy.core.readFully
 import java.nio.ByteBuffer
 
@@ -89,12 +89,12 @@ internal class ParsedSnapshot(
     private val first: IntArray,
     private val texts: Array<List<String>?>,
     override val levels: LevelMapping,
-    private val format: RecordFormat,
+    private val parser: CompiledParser,
 ) : RecordSnapshot(schema, count, end, channels) {
 
     override fun dictionaryTexts(field: Int) = texts[field]!!
 
-    override fun formatTimestamp(field: Int, nanos: Long) = format.formatTimestamp(field, nanos)
+    override fun formatTimestamp(field: Int, nanos: Long) = parser.formatTimestamp(field, nanos)
 
     /** The segment holding [record]: the last one starting at or before it that is not empty. */
     private fun segmentOf(record: Int): Int {
@@ -113,7 +113,7 @@ internal class ParsedSnapshot(
         require(record in 0..<count) { "Record $record, count $count" }
         val segment = segmentOf(record)
         val end = if (record + 1 < count) recordStart(record + 1) else end
-        return ParsedLog.fieldText(schema, segments[segment], record - first[segment], field, format, { texts[field]!![it] }) { start ->
+        return ParsedLog.fieldText(schema, segments[segment], record - first[segment], field, parser, { texts[field]!![it] }) { start ->
             readBytes(start, minOf(end - start, Int.MAX_VALUE / 2L).toInt())
         }
     }

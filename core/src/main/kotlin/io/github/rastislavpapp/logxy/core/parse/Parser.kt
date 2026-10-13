@@ -12,19 +12,19 @@ import java.nio.file.Path
 import java.nio.file.StandardOpenOption
 
 /** A saved description of how to read a log: raw lines, a pattern layout, a regex, or JSON lines. */
-sealed interface LogFormat {
+sealed interface Parser {
     val name: String
 
     val kind: Kind
 
     /** Compiled form, or null for [Raw]. Throws IllegalArgumentException for an invalid layout. */
-    fun compile(): RecordFormat?
+    fun compile(): CompiledParser?
 
     /** This parser under another name; [Raw] keeps its own. */
-    fun withName(name: String): LogFormat
+    fun withName(name: String): Parser
 
     /** Whether [other] reads files the same way, whatever its name. */
-    fun sameDefinition(other: LogFormat): Boolean = other.withName(name) == this
+    fun sameDefinition(other: Parser): Boolean = other.withName(name) == this
 
     /** The definition as settings properties, without the name and the kind. */
     fun properties(): Map<String, String> = emptyMap()
@@ -32,31 +32,31 @@ sealed interface LogFormat {
     /**
      * A kind of parser: what its settings store as the type, and how to read one back.
      *
-     * A new kind needs: a variant here whose companion is its Kind, listed in [KINDS]; its [RecordFormat];
+     * A new kind needs: a variant here whose companion is its Kind, listed in [KINDS]; its [CompiledParser];
      * a line in the Parsers page's `kindChoices`; a [BUILT_IN] entry if it is detected by default (then the
-     * built-in names in `SettingsTest` and a detection test in `LogFormatTest`); a `tools generate` flag for
+     * built-in names in `SettingsTest` and a detection test in `ParserTest`); a `tools generate` flag for
      * test files and the benchmark.
      */
     abstract class Kind(val type: String) {
         /** The parser named [name] whose other [properties] are given; null if they are incomplete. */
-        abstract fun read(name: String, properties: (String) -> String?): LogFormat?
+        abstract fun read(name: String, properties: (String) -> String?): Parser?
     }
 
     /** No parser: one record per line, the line its only field. */
-    data object Raw : LogFormat {
+    data object Raw : Parser {
         override val name = "Raw text"
         override val kind = object : Kind("raw") {
             override fun read(name: String, properties: (String) -> String?) = Raw
         }
 
-        override fun compile(): RecordFormat? = null
+        override fun compile(): CompiledParser? = null
         override fun withName(name: String) = this
     }
 
-    /** A log4j / logback pattern layout, e.g. `%d [%t] %-5p %c - %m%n`; see [PatternFormat]. */
-    data class Pattern(override val name: String, val pattern: String) : LogFormat {
+    /** A log4j / logback pattern layout, e.g. `%d [%t] %-5p %c - %m%n`; see [CompiledPattern]. */
+    data class Pattern(override val name: String, val pattern: String) : Parser {
         override val kind get() = Companion
-        override fun compile() = PatternFormat(pattern)
+        override fun compile() = CompiledPattern(pattern)
         override fun withName(name: String) = copy(name = name)
         override fun properties() = mapOf("layout" to pattern)
 
@@ -66,10 +66,10 @@ sealed interface LogFormat {
         }
     }
 
-    /** A regex whose named groups are the fields, with [timestampPattern] for the timestamp group; see [RegexFormat]. */
-    data class Regex(override val name: String, val regex: String, val timestampPattern: String) : LogFormat {
+    /** A regex whose named groups are the fields, with [timestampPattern] for the timestamp group; see [CompiledRegex]. */
+    data class Regex(override val name: String, val regex: String, val timestampPattern: String) : Parser {
         override val kind get() = Companion
-        override fun compile() = RegexFormat(regex, timestampPattern)
+        override fun compile() = CompiledRegex(regex, timestampPattern)
         override fun withName(name: String) = copy(name = name)
         override fun properties() = mapOf("layout" to regex, "timestamp" to timestampPattern)
 
@@ -83,10 +83,10 @@ sealed interface LogFormat {
         }
     }
 
-    /** JSON lines, with [keys] naming the keys that fill the usual fields; see [JsonFormat]. */
-    data class Json(override val name: String, val keys: RoleKeys = RoleKeys()) : LogFormat {
+    /** JSON lines, with [keys] naming the keys that fill the usual fields; see [CompiledJson]. */
+    data class Json(override val name: String, val keys: RoleKeys = RoleKeys()) : Parser {
         override val kind get() = Companion
-        override fun compile() = JsonFormat(keys)
+        override fun compile() = CompiledJson(keys)
         override fun withName(name: String) = copy(name = name)
         override fun properties() = keys.properties("keys.")
 
@@ -96,10 +96,10 @@ sealed interface LogFormat {
         }
     }
 
-    /** logfmt lines (`key=value` pairs), with [keys] naming the keys that fill the usual fields; see [LogfmtFormat]. */
-    data class Logfmt(override val name: String, val keys: RoleKeys = RoleKeys.LOGFMT) : LogFormat {
+    /** logfmt lines (`key=value` pairs), with [keys] naming the keys that fill the usual fields; see [CompiledLogfmt]. */
+    data class Logfmt(override val name: String, val keys: RoleKeys = RoleKeys.LOGFMT) : Parser {
         override val kind get() = Companion
-        override fun compile() = LogfmtFormat(keys)
+        override fun compile() = CompiledLogfmt(keys)
         override fun withName(name: String) = copy(name = name)
         override fun properties() = keys.properties("keys.")
 
@@ -110,10 +110,10 @@ sealed interface LogFormat {
         }
     }
 
-    /** Web server access logs, common or combined layout; nothing to configure. See [AccessLogFormat]. */
-    data class AccessLog(override val name: String) : LogFormat {
+    /** Web server access logs, common or combined layout; nothing to configure. See [CompiledAccessLog]. */
+    data class AccessLog(override val name: String) : Parser {
         override val kind get() = Companion
-        override fun compile() = AccessLogFormat()
+        override fun compile() = CompiledAccessLog()
         override fun withName(name: String) = copy(name = name)
 
         /** Stored as type `access-log`, with no other properties. */
@@ -127,7 +127,7 @@ sealed interface LogFormat {
         val KINDS: List<Kind> by lazy { listOf(Raw.kind, Pattern, Regex, Json, Logfmt, AccessLog) }
 
         /** The most common layouts; others are guessed from the file. */
-        val BUILT_IN: List<LogFormat> = listOf(
+        val BUILT_IN: List<Parser> = listOf(
             Pattern("date [thread] LEVEL logger - message", "%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %-5p %c - %m%n"),
             Pattern("time [thread] LEVEL logger - message", "%d{HH:mm:ss.SSS} [%thread] %-5level %logger - %msg%n"),
             Pattern("Spring Boot 3", "%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} %5p %pid --- [%t] %-40.40logger{39} : %m%n"),
@@ -137,27 +137,27 @@ sealed interface LogFormat {
             Json("JSON lines"),
         )
 
-        private class Scored(val format: LogFormat, val matches: Int, val preferred: Boolean, val fields: Int, val guessed: Boolean)
+        private class Scored(val parser: Parser, val matches: Int, val preferred: Boolean, val fields: Int, val guessed: Boolean)
 
         private const val SAMPLE_LINES = 1000
 
         private data class Detection(
-            val path: Path, val size: Long, val modified: Long, val preferred: List<LogFormat>, val builtIn: List<LogFormat>,
+            val path: Path, val size: Long, val modified: Long, val preferred: List<Parser>, val builtIn: List<Parser>,
         )
 
         /** Recent results, so the open dialog's checks are not repeated when the files open. */
-        private val detected = object : LinkedHashMap<Detection, LogFormat>(16, 0.75f, true) {
-            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Detection, LogFormat>) = size > 512
+        private val detected = object : LinkedHashMap<Detection, Parser>(16, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Detection, Parser>) = size > 512
         }
 
         /**
-         * The candidate that matches most of the file's first lines: the user's own formats ([preferred]),
+         * The candidate that matches most of the file's first lines: the user's own parsers ([preferred]),
          * the [builtIn] ones the user kept, and one guessed from the lines. On a tie one of [preferred], then
          * the one with more fields, being more specific, then a built-in one over the guess. [Raw] if none
          * matches at least 5% of the lines that do not look like continuations (a single record may be
          * followed by a huge stack trace or dump).
          */
-        fun detect(path: Path, preferred: List<LogFormat> = emptyList(), builtIn: List<LogFormat> = BUILT_IN): LogFormat {
+        fun detect(path: Path, preferred: List<Parser> = emptyList(), builtIn: List<Parser> = BUILT_IN): Parser {
             val key = Detection(
                 path.toAbsolutePath().normalize(), Files.size(path), Files.getLastModifiedTime(path).toMillis(), preferred, builtIn,
             )
@@ -165,21 +165,21 @@ sealed interface LogFormat {
             return detectFresh(path, preferred, builtIn).also { synchronized(detected) { detected[key] = it } }
         }
 
-        private fun detectFresh(path: Path, preferred: List<LogFormat>, builtIn: List<LogFormat>): LogFormat {
-            val sample = FormatPreview.sample(path, SAMPLE_LINES, skipEmpty = true)
+        private fun detectFresh(path: Path, preferred: List<Parser>, builtIn: List<Parser>): Parser {
+            val sample = ParserPreview.sample(path, SAMPLE_LINES, skipEmpty = true)
             if (sample.isEmpty()) return Raw
-            val realLines = sample.count { !FormatCheck.looksLikeContinuation(it, 0, it.size) }
-            val guess = FormatInference.infer(sample)
-            // Guessed JSON keys refine the built-in JSON format, which reads the same lines.
+            val realLines = sample.count { !ParserCheck.looksLikeContinuation(it, 0, it.size) }
+            val guess = ParserInference.infer(sample)
+            // Guessed JSON keys refine the built-in JSON parser, which reads the same lines.
             val kept = if (guess is Json) builtIn.filter { it !is Json } else builtIn
             val scored = (preferred + kept + listOfNotNull(guess)).mapNotNull { candidate ->
                 val compiled = runCatching { candidate.compile() }.getOrNull() ?: return@mapNotNull null
-                val parser = compiled.newParser()
-                val matches = sample.count { parser.match(it, 0, it.size) }
+                val matcher = compiled.newMatcher()
+                val matches = sample.count { matcher.match(it, 0, it.size) }
                 Scored(candidate, matches, candidate in preferred, compiled.schema.fields.size, guessed = candidate === guess)
             }
             val best = scored.maxWithOrNull(compareBy({ it.matches }, { it.preferred }, { it.fields }, { !it.guessed })) ?: return Raw
-            return if (best.matches > 0 && best.matches * 20 >= realLines) best.format else Raw
+            return if (best.matches > 0 && best.matches * 20 >= realLines) best.parser else Raw
         }
     }
 }
@@ -188,10 +188,10 @@ sealed interface LogFormat {
 private const val MISMATCH_CHECK_BYTES = 4L * 1024 * 1024
 
 /**
- * Why this format cannot read [path], judged by the start of the file as opening it does; null if it can, if
+ * Why this parser cannot read [path], judged by the start of the file as opening it does; null if it can, if
  * it is raw text, or if the first few MB do not tell.
  */
-fun LogFormat.mismatch(path: Path): String? {
+fun Parser.mismatch(path: Path): String? {
     val compiled = try {
         compile() ?: return null
     } catch (e: IllegalArgumentException) {
@@ -199,16 +199,16 @@ fun LogFormat.mismatch(path: Path): String? {
     }
     return FileChannel.open(path, StandardOpenOption.READ).use { channel ->
         try {
-            FormatCheck.check(channel, channel.size(), compiled.newParser(), MISMATCH_CHECK_BYTES)
+            ParserCheck.check(channel, channel.size(), compiled.newMatcher(), MISMATCH_CHECK_BYTES)
             null
-        } catch (e: FormatMismatchException) {
+        } catch (e: ParserMismatchException) {
             e.message
         }
     }
 }
 
-/** Indexes [path] as [format]. */
-suspend fun LogFormat.open(
+/** Indexes [path] with this parser. */
+suspend fun Parser.open(
     path: Path,
     progress: IndexProgress = IndexProgress(),
     levels: LevelMapping = LevelMapping.DEFAULT,

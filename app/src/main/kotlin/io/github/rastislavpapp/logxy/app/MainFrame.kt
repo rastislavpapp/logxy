@@ -18,7 +18,7 @@ import io.github.rastislavpapp.logxy.core.open.SessionArgs
 import io.github.rastislavpapp.logxy.core.open.SessionFiles
 import io.github.rastislavpapp.logxy.core.open.TabAction
 import io.github.rastislavpapp.logxy.core.open.TabPlan
-import io.github.rastislavpapp.logxy.core.parse.LogFormat
+import io.github.rastislavpapp.logxy.core.parse.Parser
 import net.miginfocom.swing.MigLayout
 import java.awt.BasicStroke
 import java.awt.BorderLayout
@@ -331,19 +331,19 @@ class MainFrame : JFrame("logxy") {
             is Decision.Ask -> askHowToOpen(decision.files, decision.inSubfolders, current) ?: return
         }
         if (answer.remember) AppSettings.updateOrShowError(this, AppSettings.current.copy(openMode = answer.mode, includeSubfolders = answer.includeSubfolders))
-        open(answer.mode, answer.files, answer.formats, current)
+        open(answer.mode, answer.files, answer.parsers, current)
     }
 
     /**
-     * Opens [files] (read with [formats]) in [mode], merged with [current] if the mode says so, selecting the tab
+     * Opens [files] (read with [parsers]) in [mode], merged with [current] if the mode says so, selecting the tab
      * that shows them already if there is one.
      */
-    private fun open(mode: OpenMode, files: List<Path>, formats: List<LogFormat?>, current: LogTab?) {
+    private fun open(mode: OpenMode, files: List<Path>, parsers: List<Parser?>, current: LogTab?) {
         // By the tab, not the selected index: tabs may have opened or closed while the user was asked.
         val index = current?.let(tabs::indexOfComponent)?.takeIf { it >= 0 }
         if (index == null && (mode == OpenMode.MERGE_INTO_CURRENT || mode == OpenMode.MERGE_WITH_CURRENT_IN_NEW)) return
         // Files can go between finding them and the user's answer.
-        val openable = files.zip(formats).filter { (file, _) -> checkOpenable(file) }
+        val openable = files.zip(parsers).filter { (file, _) -> checkOpenable(file) }
         perform(TabPlan.open(mode, openable.map { it.first }, openable.map { it.second }, openSessions(), index))
     }
 
@@ -360,7 +360,7 @@ class MainFrame : JFrame("logxy") {
         (0..<tabs.tabCount).map { i ->
             val tab = tabs.getComponentAt(i) as LogTab
             // Extracted files by their zip or compressed file, as the next app extracts them anew.
-            OpenSession(tab.paths.map { (originOf(it) ?: it).toString() }, tab.chosenFormats, tab.filter)
+            OpenSession(tab.paths.map { (originOf(it) ?: it).toString() }, tab.chosenParsers, tab.filter)
         },
         tabs.selectedIndex,
     )
@@ -385,7 +385,7 @@ class MainFrame : JFrame("logxy") {
     /** Opens a tab for each of [restored]'s sessions with its parsers and filter, its paths read with [path], then selects one. */
     private fun openRestored(restored: Reopen, path: (String) -> Path) {
         val sessions = restored.sessions.map { session ->
-            val openable = session.paths.map(path).zip(session.formats).filter { (file, _) -> checkOpenable(file) }
+            val openable = session.paths.map(path).zip(session.parsers).filter { (file, _) -> checkOpenable(file) }
             SessionFiles(openable.map { it.first }, openable.map { it.second }, session.filter)
         }
         perform(TabPlan.reopen(sessions, openSessions(), restored.selected))
@@ -444,7 +444,7 @@ class MainFrame : JFrame("logxy") {
     fun openEach(paths: List<Path>) = open(OpenMode.TABS, paths, paths.map { null }, current = null)
 
     private fun openSessions() = (0..<tabs.tabCount).map { i ->
-        (tabs.getComponentAt(i) as LogTab).let { SessionFiles(it.paths, it.chosenFormats, it.filter) }
+        (tabs.getComponentAt(i) as LogTab).let { SessionFiles(it.paths, it.chosenParsers, it.filter) }
     }
 
     private fun perform(actions: List<TabAction>) = actions.forEach { action ->
@@ -460,7 +460,7 @@ class MainFrame : JFrame("logxy") {
     }
 
     private fun insertTab(index: Int, session: SessionFiles) {
-        val tab = LogTab(session.paths, ::openFiles, ::openEach, session.filter, ::originOf, session.formats) { updateStatus() }
+        val tab = LogTab(session.paths, ::openFiles, ::openEach, session.filter, ::originOf, session.parsers) { updateStatus() }
         tabs.insertTab(tab.title, if (tab.isMerged) Icons.merged else Icons.logFile, tab, tab.description, index)
         tabs.selectedIndex = index
         cards.show(center, CARD_TABS)

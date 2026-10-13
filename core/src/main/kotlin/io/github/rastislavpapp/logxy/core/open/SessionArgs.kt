@@ -3,7 +3,7 @@ package io.github.rastislavpapp.logxy.core.open
 import io.github.rastislavpapp.logxy.core.config.SavedFilter
 import io.github.rastislavpapp.logxy.core.config.Settings
 import io.github.rastislavpapp.logxy.core.log.Level
-import io.github.rastislavpapp.logxy.core.parse.LogFormat
+import io.github.rastislavpapp.logxy.core.parse.Parser
 import java.io.StringReader
 import java.io.StringWriter
 import java.util.Base64
@@ -11,9 +11,9 @@ import java.util.Properties
 
 /**
  * A session to open: its [paths] (extracted files by their zip or compressed file, as written by
- * `ArchiveOrigin`), the parser for each ([formats], null to detect it) and its [filter].
+ * `ArchiveOrigin`), the parser for each ([parsers], null to detect it) and its [filter].
  */
-data class OpenSession(val paths: List<String>, val formats: List<LogFormat?>, val filter: SavedFilter?)
+data class OpenSession(val paths: List<String>, val parsers: List<Parser?>, val filter: SavedFilter?)
 
 /** The sessions to open again, and the index of the one to select. */
 data class Reopen(val sessions: List<OpenSession>, val selected: Int)
@@ -38,9 +38,9 @@ object SessionArgs {
             session.filter?.minimumLevel?.let { add(LEVEL_ARG); add(it.name) }
             // Encoded, as Windows command lines do not reliably keep the quotes queries are full of.
             session.filter?.query?.takeIf { it.isNotBlank() }?.let { add(QUERY_ARG); add(encode(it)) }
-            if (session.formats.any { it != null }) {
+            if (session.parsers.any { it != null }) {
                 val properties = Properties()
-                session.formats.forEachIndexed { i, format -> if (format != null) Settings.writeFormat(properties, "${i + 1}.", format) }
+                session.parsers.forEachIndexed { i, parser -> if (parser != null) Settings.writeParser(properties, "${i + 1}.", parser) }
                 add(PARSERS_ARG)
                 add(encode(StringWriter().also { properties.store(it, null) }.toString()))
             }
@@ -51,9 +51,9 @@ object SessionArgs {
     /** The sessions in [args] written by [write]; null if they are not, e.g. paths given on the command line. */
     fun read(args: List<String>): Reopen? {
         if (args.firstOrNull() != SESSION_ARG) return null
-        class Group(val paths: MutableList<String> = ArrayList(), var level: Level? = null, var query: String = "", var formats: List<LogFormat?>? = null) {
+        class Group(val paths: MutableList<String> = ArrayList(), var level: Level? = null, var query: String = "", var parsers: List<Parser?>? = null) {
             fun session() = OpenSession(
-                paths, formats ?: paths.map { null }, SavedFilter("", level, query).takeIf { it.minimumLevel != null || it.query.isNotBlank() },
+                paths, parsers ?: paths.map { null }, SavedFilter("", level, query).takeIf { it.minimumLevel != null || it.query.isNotBlank() },
             )
         }
         val groups = ArrayList<Group>()
@@ -66,7 +66,7 @@ object SessionArgs {
             QUERY_ARG -> groups.last().query = decode(value()).orEmpty()
             PARSERS_ARG -> groups.last().let { group ->
                 val properties = Properties().apply { load(StringReader(decode(value()).orEmpty())) }
-                group.formats = group.paths.indices.map { Settings.readFormat(properties, "${it + 1}.") }
+                group.parsers = group.paths.indices.map { Settings.readParser(properties, "${it + 1}.") }
             }
             SELECT_ARG -> selected = value().toIntOrNull() ?: 0
             else -> groups.last().paths.add(arg)

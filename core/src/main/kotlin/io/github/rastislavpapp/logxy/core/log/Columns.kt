@@ -4,7 +4,7 @@ import io.github.rastislavpapp.logxy.core.index.ByteChunkList
 import io.github.rastislavpapp.logxy.core.index.IntChunkList
 import io.github.rastislavpapp.logxy.core.index.LongChunkList
 import io.github.rastislavpapp.logxy.core.parse.MdcMap
-import io.github.rastislavpapp.logxy.core.parse.RecordFormat
+import io.github.rastislavpapp.logxy.core.parse.CompiledParser
 
 /**
  * Field values of consecutive records, one primitive list per field. While a segment is being
@@ -85,7 +85,7 @@ internal class Columns(val schema: Schema) {
         present[field] = true
     }
 
-    /** A value of a field the format declares DICT, stored as a span if the log made it one, see [ParsedLog]. */
+    /** A value of a field the parser declares DICT, stored as a span if the log made it one, see [ParsedLog]. */
     fun setText(field: Int, source: ByteArray, lineFrom: Int, from: Int, to: Int) {
         if (schema.fields[field].type == ColumnType.SPAN) setSpan(field, from - lineFrom, to - from) else setDict(field, source, from, to)
     }
@@ -145,15 +145,15 @@ internal class Columns(val schema: Schema) {
      * Display text of a TIMESTAMP, LEVEL or DICT value of [record], "" if absent; ids are looked up in
      * [dictionary]. Null for SPAN fields, whose text is in the file.
      */
-    fun valueText(field: Int, record: Int, format: RecordFormat, dictionary: ByteDictionary?): String? =
-        valueText(field, record, format) { dictionary!!.text(it) }
+    fun valueText(field: Int, record: Int, parser: CompiledParser, dictionary: ByteDictionary?): String? =
+        valueText(field, record, parser) { dictionary!!.text(it) }
 
     /** Like the other [valueText], with dictionary texts by id from [dictionaryText]. */
-    inline fun valueText(field: Int, record: Int, format: RecordFormat, dictionaryText: (Int) -> String): String? =
+    inline fun valueText(field: Int, record: Int, parser: CompiledParser, dictionaryText: (Int) -> String): String? =
         when (schema.fields[field].type) {
             ColumnType.TIMESTAMP -> {
                 val nanos = longs[field]!![record]
-                if (nanos == ABSENT_TIMESTAMP) "" else format.formatTimestamp(field, nanos)
+                if (nanos == ABSENT_TIMESTAMP) "" else parser.formatTimestamp(field, nanos)
             }
             ColumnType.LEVEL -> {
                 val id = bytes[field]!![record].toInt() and 0xFF

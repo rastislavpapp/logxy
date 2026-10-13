@@ -18,7 +18,7 @@ private const val USAGE = """Usage:
                                         14:20 and an error spike at 19:40
   benchmark <file> [--iterations N]     compare line-indexing strategies on a file
   parse <file> [--iterations N] [--pattern LAYOUT]
-                                        measure parsing with the detected format, or the given pattern layout
+                                        measure parsing with the detected parser, or the given pattern layout
   filter <file>                         measure typical filters on the parsed file
   merge <file> <file>... [--iterations N] [--read-channels N]
                                         measure merging files and filtering the merged view

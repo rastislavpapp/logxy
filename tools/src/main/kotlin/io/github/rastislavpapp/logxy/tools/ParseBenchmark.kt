@@ -2,17 +2,17 @@ package io.github.rastislavpapp.logxy.tools
 
 import io.github.rastislavpapp.logxy.core.formatByteSize
 import io.github.rastislavpapp.logxy.core.log.ParsedLog
-import io.github.rastislavpapp.logxy.core.parse.LogFormat
+import io.github.rastislavpapp.logxy.core.parse.Parser
 import kotlinx.coroutines.runBlocking
 import java.nio.file.Files
 import java.nio.file.Path
 
-/** Measures parsing [file] with [pattern] or the detected format, plus the heap the result holds. */
+/** Measures parsing [file] with [pattern] or the detected parser, plus the heap the result holds. */
 fun benchmarkParsing(file: Path, iterations: Int, pattern: String? = null) {
-    val format = pattern?.let { LogFormat.Pattern(it, it) } ?: LogFormat.detect(file)
-    val compiled = format.compile() ?: error("No format detected for $file")
+    val parser = pattern?.let { Parser.Pattern(it, it) } ?: Parser.detect(file)
+    val compiled = parser.compile() ?: error("No parser detected for $file")
     val size = Files.size(file)
-    println("File: $file (${formatByteSize(size)}), format: ${format.name}\n")
+    println("File: $file (${formatByteSize(size)}), parser: ${parser.name}\n")
     var log: ParsedLog? = null
     repeat(iterations) { i ->
         log?.close()

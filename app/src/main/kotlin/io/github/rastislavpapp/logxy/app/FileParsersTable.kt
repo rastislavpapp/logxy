@@ -1,6 +1,6 @@
 package io.github.rastislavpapp.logxy.app
 
-import io.github.rastislavpapp.logxy.core.parse.LogFormat
+import io.github.rastislavpapp.logxy.core.parse.Parser
 import io.github.rastislavpapp.logxy.core.parse.mismatch
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -44,12 +44,12 @@ class FileParsersTable(
     private val files: List<Path>,
     private val names: List<String>,
     private val descriptions: List<String>,
-    initial: List<LogFormat?> = emptyList(),
+    initial: List<Parser?> = emptyList(),
     private val excludable: Boolean = false,
     private val onChange: () -> Unit = {},
 ) {
-    private val parsers: List<LogFormat?> = listOf(null) + AppSettings.current.knownFormats
-    private val chosen = HashMap<Path, LogFormat?>().apply { files.forEachIndexed { i, file -> put(file, initial.getOrNull(i)) } }
+    private val parsers: List<Parser?> = listOf(null) + AppSettings.current.knownParsers
+    private val chosen = HashMap<Path, Parser?>().apply { files.forEachIndexed { i, file -> put(file, initial.getOrNull(i)) } }
     private val fileColumn = if (excludable) 1 else 0
     private val parserColumn = fileColumn + 1
     private val excluded = HashSet<Path>()
@@ -69,7 +69,7 @@ class FileParsersTable(
     private val fitting = HashSet<Path>()
 
     /** The parser detection picked, for Auto-detect files. */
-    private val detected = HashMap<Path, LogFormat>()
+    private val detected = HashMap<Path, Parser>()
 
     // Always there, so that showing a warning does not resize the dialog.
     private val warning = JLabel(" ").apply { horizontalAlignment = SwingConstants.LEADING }
@@ -80,7 +80,7 @@ class FileParsersTable(
         add(warning)
     }
 
-    /** The files listed, e.g. without those in subfolders; [formats] are theirs. */
+    /** The files listed, e.g. without those in subfolders; [chosenParsers] are theirs. */
     var shown: List<Path> = files
         set(value) {
             field = value
@@ -91,7 +91,7 @@ class FileParsersTable(
     val included: List<Path> get() = shown.filter { it !in excluded }
 
     /** The parser chosen for each of [included], null where it is detected. */
-    val formats: List<LogFormat?> get() = included.map { chosen[it] }
+    val chosenParsers: List<Parser?> get() = included.map { chosen[it] }
 
     /** Every file included was checked and fits its parser, so they can be opened. */
     val allFit: Boolean get() = included.isNotEmpty() && included.all { it in fitting }
@@ -140,8 +140,8 @@ class FileParsersTable(
                     val file = shown[row]
                     foreground = if (file in excluded) UIManager.getColor("Label.disabledForeground") else null
                     super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column)
-                    val format = value as LogFormat?
-                    text = ((if (format == null) detected[file]?.let { "Auto: ${it.name}" } else null) ?: parserName(format)) + "  ⌄"
+                    val parser = value as Parser?
+                    text = ((if (parser == null) detected[file]?.let { "Auto: ${it.name}" } else null) ?: parserName(parser)) + "  ⌄"
                     icon = when {
                         file in problems -> Icons.warning
                         file in fitting -> Icons.fits
@@ -177,14 +177,14 @@ class FileParsersTable(
         fitting.remove(file)
         detected.remove(file)
         val chosen = chosen[file]
-        val preferred = AppSettings.current.formats
-        val builtIn = AppSettings.current.builtInFormats
+        val preferred = AppSettings.current.parsers
+        val builtIn = AppSettings.current.builtInParsers
         checks[file] = scope.launch {
-            var found: LogFormat? = null
+            var found: Parser? = null
             val problem = withContext(Dispatchers.IO) {
                 try {
-                    val format = chosen ?: LogFormat.detect(file, preferred, builtIn).also { found = it }
-                    format.mismatch(file)
+                    val parser = chosen ?: Parser.detect(file, preferred, builtIn).also { found = it }
+                    parser.mismatch(file)
                 } catch (e: IOException) {
                     e.message ?: e.javaClass.simpleName
                 }
@@ -233,10 +233,10 @@ class FileParsersTable(
     private fun chooseForAll() {
         stopEditing()
         val listed = listedParsers()
-        val items = parsers.map { format ->
-            PopupItem(parserName(format), selected = listed.size == 1 && listed.single() == format) {
+        val items = parsers.map { parser ->
+            PopupItem(parserName(parser), selected = listed.size == 1 && listed.single() == parser) {
                 shown.forEach {
-                    chosen[it] = format
+                    chosen[it] = parser
                     check(it)
                 }
                 changed()
@@ -247,7 +247,7 @@ class FileParsersTable(
     }
 
     /** The parsers of the listed files, each once; null is Auto-detect. */
-    private fun listedParsers(): List<LogFormat?> = shown.map { chosen[it] }.distinct()
+    private fun listedParsers(): List<Parser?> = shown.map { chosen[it] }.distinct()
 
     private inner class FilesModel : AbstractTableModel() {
         override fun getRowCount() = shown.size
@@ -277,7 +277,7 @@ class FileParsersTable(
                 return
             }
             if (chosen[file] == value) return
-            chosen[file] = value as LogFormat?
+            chosen[file] = value as Parser?
             check(file)
             // Later: setValueAt runs while the editor is still being removed.
             SwingUtilities.invokeLater { changed() }
@@ -304,13 +304,13 @@ class FileParsersTable(
 
     private class ParserRenderer : DefaultListCellRenderer() {
         override fun getListCellRendererComponent(list: JList<*>?, value: Any?, index: Int, isSelected: Boolean, cellHasFocus: Boolean): Component =
-            super.getListCellRendererComponent(list, parserName(value as LogFormat?), index, isSelected, cellHasFocus)
+            super.getListCellRendererComponent(list, parserName(value as Parser?), index, isSelected, cellHasFocus)
     }
 
     private companion object {
         const val CELL_PADDING = 24
 
-        fun parserName(format: LogFormat?) = format?.name ?: "Auto-detect"
+        fun parserName(parser: Parser?) = parser?.name ?: "Auto-detect"
 
         /** [text] as a tooltip keeping its line breaks. */
         fun htmlLines(text: String) = "<html>" + text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br>") + "</html>"

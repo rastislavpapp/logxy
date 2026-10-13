@@ -3,7 +3,6 @@ package io.github.rastislavpapp.logxy.core.parse
 import io.github.rastislavpapp.logxy.core.log.ColumnType
 import io.github.rastislavpapp.logxy.core.log.Columns
 import io.github.rastislavpapp.logxy.core.log.Field
-import io.github.rastislavpapp.logxy.core.log.Role
 import io.github.rastislavpapp.logxy.core.log.Schema
 import java.time.DateTimeException
 import java.time.Instant
@@ -20,7 +19,7 @@ import java.time.format.DateTimeFormatter
  * by their size). Nested objects and arrays are shown as written. Lines that are no JSON object become
  * records with only a message.
  */
-class JsonFormat(val keys: RoleKeys = RoleKeys(), private val zone: ZoneId = ZoneId.systemDefault()) : RecordFormat() {
+class CompiledJson(val keys: RoleKeys = RoleKeys(), private val zone: ZoneId = ZoneId.systemDefault()) : CompiledParser() {
 
     private val roles = RoleFields(keys)
 
@@ -37,9 +36,9 @@ class JsonFormat(val keys: RoleKeys = RoleKeys(), private val zone: ZoneId = Zon
 
     override fun detailText(bytes: ByteArray, from: Int, to: Int): String? = Json.pretty(bytes, from, to)
 
-    override fun newParser(): RecordParser = Parser()
+    override fun newMatcher(): LineMatcher = Matcher()
 
-    private inner class Parser : RecordParser {
+    private inner class Matcher : LineMatcher {
         private var count = 0
         private var keyFrom = IntArray(16)
         private var keyTo = IntArray(16)

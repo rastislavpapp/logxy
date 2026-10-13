@@ -5,7 +5,7 @@ import io.github.rastislavpapp.logxy.core.config.SavedFilter
 import io.github.rastislavpapp.logxy.core.log.ColumnType
 import io.github.rastislavpapp.logxy.core.log.Level
 import io.github.rastislavpapp.logxy.core.log.Role
-import io.github.rastislavpapp.logxy.core.parse.LogFormat
+import io.github.rastislavpapp.logxy.core.parse.Parser
 import io.github.rastislavpapp.logxy.core.query.Highlighter
 import io.github.rastislavpapp.logxy.core.query.Query
 import io.github.rastislavpapp.logxy.core.query.QueryException
@@ -81,12 +81,12 @@ class LogTab(
     filter: SavedFilter? = null,
     private val origin: (Path) -> ArchiveOrigin? = { null },
     /** The parser chosen for each of [paths], null (or missing) to detect it. */
-    formats: List<LogFormat?> = emptyList(),
+    parsers: List<Parser?> = emptyList(),
     private val onStatusChanged: () -> Unit,
 ) : JPanel(BorderLayout()) {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Swing)
-    private val session = LogSession(paths, scope, AppSettings, Listener(), origin, formats)
+    private val session = LogSession(paths, scope, AppSettings, Listener(), origin, parsers)
 
     /** The files shown; for a merge, without those that turned out to have no timestamps. */
     val paths: List<Path> get() = session.paths
@@ -97,7 +97,7 @@ class LogTab(
     val isMerged get() = session.isMerged
 
     /** The parser chosen for each of [paths], null where it is detected. */
-    val chosenFormats: List<LogFormat?> get() = session.chosenFormats
+    val chosenParsers: List<Parser?> get() = session.chosenParsers
 
     /** Short names of [paths], as the merge's source column shows them. */
     val sourceNames: List<String> get() = session.sourceNames
@@ -187,24 +187,24 @@ class LogTab(
     init {
         add(filterBar, BorderLayout.NORTH)
         add(content, BorderLayout.CENTER)
-        showFormat()
+        showParser()
         filter?.let(filterBar::load)
         session.start()
     }
 
-    /** Auto, raw text, the user's formats (editable), the built-in ones; plus the format in use if it is none of those. */
+    /** Auto, raw text, the user's parsers (editable), the built-in ones; plus the parser in use if it is none of those. */
     private fun showParsers() {
         if (isMerged) return showMergedParsers()
-        val chosen = session.chosenFormat
-        val known = AppSettings.current.knownFormats
+        val chosen = session.chosenParser
+        val known = AppSettings.current.knownParsers
         val items = buildList {
-            add(PopupItem(autoLabel(), selected = chosen == null) { session.useFormat(null) })
-            (if (chosen == null || chosen in known) known else known + chosen).forEachIndexed { i, format ->
-                add(parserItem(format, selected = format == chosen, first = i == 0) { session.useFormat(format) })
+            add(PopupItem(autoLabel(), selected = chosen == null) { session.useParser(null) })
+            (if (chosen == null || chosen in known) known else known + chosen).forEachIndexed { i, parser ->
+                add(parserItem(parser, selected = parser == chosen, first = i == 0) { session.useParser(parser) })
             }
-            add(PopupItem("Edit Parsers", Icons.settings, separatorBefore = true) { editParsers(chosen ?: session.format) })
-            // A guessed format is none of the known ones; saving it makes it one the user can correct.
-            val detected = session.format.takeIf { chosen == null && session.formatDetected && it !in known }
+            add(PopupItem("Edit Parsers", Icons.settings, separatorBefore = true) { editParsers(chosen ?: session.parser) })
+            // A guessed parser is none of the known ones; saving it makes it one the user can correct.
+            val detected = session.parser.takeIf { chosen == null && session.parserDetected && it !in known }
             if (detected != null) add(PopupItem("Save Detected Parser…") { editParsers(detected, adopt = true) })
         }
         showPopupList(parserButton, items)
@@ -215,33 +215,33 @@ class LogTab(
      * the table of files and their parsers, also checked when the files' parsers differ.
      */
     private fun showMergedParsers() {
-        val chosen = session.chosenFormats
+        val chosen = session.chosenParsers
         val mixed = chosen.distinct().size > 1
         // The parser of all files when not mixed; null is Auto-detect.
         val same = chosen.first()
         val items = buildList {
-            val auto = if (session.formatDetected) "Auto: per file" else "Auto-detect"
-            add(PopupItem(auto, selected = !mixed && same == null) { session.useFormats(chosen.map { null }) })
-            AppSettings.current.knownFormats.forEachIndexed { i, format ->
-                add(parserItem(format, selected = !mixed && same == format, first = i == 0) { session.useFormats(chosen.map { format }) })
+            val auto = if (session.parserDetected) "Auto: per file" else "Auto-detect"
+            add(PopupItem(auto, selected = !mixed && same == null) { session.useParsers(chosen.map { null }) })
+            AppSettings.current.knownParsers.forEachIndexed { i, parser ->
+                add(parserItem(parser, selected = !mixed && same == parser, first = i == 0) { session.useParsers(chosen.map { parser }) })
             }
             add(PopupItem("Choose Parser per File", selected = mixed, separatorBefore = true) { chooseParserPerFile() })
-            add(PopupItem("Edit Parsers", Icons.settings) { editParsers(session.format) })
+            add(PopupItem("Edit Parsers", Icons.settings) { editParsers(session.parser) })
         }
         showPopupList(parserButton, items)
     }
 
     /** A parser menu entry; the user's own parsers can be edited from it. */
-    private fun parserItem(format: LogFormat, selected: Boolean, first: Boolean, onPick: () -> Unit): PopupItem {
-        val tools = if (format in AppSettings.current.formats) listOf(PopupTool(Icons.advanced, "Edit this parser") { editParsers(format) }) else emptyList()
-        return PopupItem(format.name, selected = selected, separatorBefore = first, tools = tools, action = onPick)
+    private fun parserItem(parser: Parser, selected: Boolean, first: Boolean, onPick: () -> Unit): PopupItem {
+        val tools = if (parser in AppSettings.current.parsers) listOf(PopupTool(Icons.advanced, "Edit this parser") { editParsers(parser) }) else emptyList()
+        return PopupItem(parser.name, selected = selected, separatorBefore = first, tools = tools, action = onPick)
     }
 
     private fun chooseParserPerFile() {
         val descriptions = paths.map { (origin(it) ?: it).toString() }
-        val dialog = FileParsersDialog(SwingUtilities.getWindowAncestor(this), paths, sourceNames, descriptions, session.chosenFormats)
+        val dialog = FileParsersDialog(SwingUtilities.getWindowAncestor(this), paths, sourceNames, descriptions, session.chosenParsers)
         dialog.isVisible = true
-        session.useFormats(dialog.formats ?: return)
+        session.useParsers(dialog.chosenParsers ?: return)
     }
 
     /** Checks for the columns to show; the menu stays open while they are toggled. */
@@ -386,26 +386,26 @@ class LogTab(
         model?.hiddenColumns = names
     }
 
-    private fun autoLabel() = if (session.formatDetected) "Auto: ${session.format.name}" else "Auto-detect"
+    private fun autoLabel() = if (session.parserDetected) "Auto: ${session.parser.name}" else "Auto-detect"
 
-    private fun editParsers(select: LogFormat, adopt: Boolean = false) {
+    private fun editParsers(select: Parser, adopt: Boolean = false) {
         val dialog = PreferencesDialog(
             SwingUtilities.getWindowAncestor(this), PreferencesDialog.Section.PARSERS, path, select, offerUse = !isMerged,
             adopt = select.takeIf { adopt },
         )
         dialog.isVisible = true
-        session.useFormat(dialog.formatToUse ?: return)
+        session.useParser(dialog.parserToUse ?: return)
     }
 
-    /** Shows the format in use on the parser button. */
-    private fun showFormat() {
+    /** Shows the parser in use on the parser button. */
+    private fun showParser() {
         parserButton.text = when {
             isMerged -> when {
-                session.chosenFormats.any { it != null } -> "Per file"
-                session.formatDetected -> "Auto: per file"
+                session.chosenParsers.any { it != null } -> "Per file"
+                session.parserDetected -> "Auto: per file"
                 else -> "Auto-detect"
             }
-            else -> session.chosenFormat?.name ?: autoLabel()
+            else -> session.chosenParser?.name ?: autoLabel()
         }
     }
 
@@ -798,7 +798,7 @@ class LogTab(
             onStatusChanged()
         }
 
-        override fun formatChanged() = showFormat()
+        override fun parserChanged() = showParser()
 
         override fun fieldsShown() {
             val model = model ?: return

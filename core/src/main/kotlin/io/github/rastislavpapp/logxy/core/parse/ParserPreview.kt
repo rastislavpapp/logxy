@@ -5,7 +5,7 @@ import java.nio.channels.FileChannel
 import java.nio.file.Path
 import java.nio.file.StandardOpenOption
 
-/** How one line of a file reads with a format; for trying out a format while editing it. */
+/** How one line of a file reads with a parser; for trying out a parser while editing it. */
 class PreviewLine(
     val text: String,
     /** Field values if the line starts a record, else null. */
@@ -15,7 +15,7 @@ class PreviewLine(
 )
 
 /** Reads a file's first lines the way a parser would, for detection and for previewing a parser while editing it. */
-object FormatPreview {
+object ParserPreview {
 
     private const val SAMPLE_BYTES = 256 * 1024
 
@@ -32,22 +32,22 @@ object FormatPreview {
         }
 
     /**
-     * Each of [lines] as [format] reads it on its own: the field values of a line that starts a record, or
+     * Each of [lines] as [parser] reads it on its own: the field values of a line that starts a record, or
      * whether a line that does not looks like a continuation. Continuation lines are not joined to a record.
      */
-    fun preview(format: RecordFormat, lines: List<ByteArray>): List<PreviewLine> {
-        val parser = format.newParser()
-        val fields = format.schema.fields
+    fun preview(parser: CompiledParser, lines: List<ByteArray>): List<PreviewLine> {
+        val matcher = parser.newMatcher()
+        val fields = parser.schema.fields
         return lines.map { line ->
             val text = String(line, Charsets.UTF_8)
-            if (!parser.match(line, 0, line.size)) {
-                return@map PreviewLine(text, null, FormatCheck.looksLikeContinuation(line, 0, line.size))
+            if (!matcher.match(line, 0, line.size)) {
+                return@map PreviewLine(text, null, ParserCheck.looksLikeContinuation(line, 0, line.size))
             }
-            val columns = Columns(format.schema)
+            val columns = Columns(parser.schema)
             columns.beginRecord(0)
-            parser.write(columns)
+            matcher.write(columns)
             val values = fields.indices.map { field ->
-                columns.valueText(field, 0, format, columns.dictionaries[field]) ?: run {
+                columns.valueText(field, 0, parser, columns.dictionaries[field]) ?: run {
                     val start = columns.ints[field]!![0]
                     when (val length = columns.spanLength(field, 0)) {
                         Columns.ABSENT_LENGTH -> ""

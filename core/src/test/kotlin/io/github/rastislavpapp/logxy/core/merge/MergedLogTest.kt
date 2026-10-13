@@ -12,7 +12,7 @@ import io.github.rastislavpapp.logxy.core.log.Level
 import io.github.rastislavpapp.logxy.core.log.ParsedLog
 import io.github.rastislavpapp.logxy.core.log.Role
 import io.github.rastislavpapp.logxy.core.log.Schema
-import io.github.rastislavpapp.logxy.core.parse.PatternFormat
+import io.github.rastislavpapp.logxy.core.parse.CompiledPattern
 import java.nio.file.Files
 import io.github.rastislavpapp.logxy.core.archive.ZipSpool
 import java.nio.file.Path
@@ -29,12 +29,12 @@ class MergedLogTest {
     @TempDir
     lateinit var dir: Path
 
-    private val withThread = PatternFormat("%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %-5p %c - %m%n", ZoneOffset.UTC)
-    private val withoutThread = PatternFormat("%d{yyyy-MM-dd HH:mm:ss.SSS} %-5p %c - %m%n", ZoneOffset.UTC)
+    private val withThread = CompiledPattern("%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %-5p %c - %m%n", ZoneOffset.UTC)
+    private val withoutThread = CompiledPattern("%d{yyyy-MM-dd HH:mm:ss.SSS} %-5p %c - %m%n", ZoneOffset.UTC)
 
-    private fun parse(name: String, format: PatternFormat, content: String): ParsedLog {
+    private fun parse(name: String, parser: CompiledPattern, content: String): ParsedLog {
         val file = Files.writeString(dir.resolve(name), content.trimIndent() + "\n")
-        return runBlocking { ParsedLog.build(file, format, IndexProgress()) }
+        return runBlocking { ParsedLog.build(file, parser, IndexProgress()) }
     }
 
     private fun merge(vararg parts: ParsedLog) = runBlocking { MergedLog.build(parts.toList()) }
@@ -168,7 +168,7 @@ class MergedLogTest {
 
     @Test
     fun `a part needs a timestamp`() {
-        val raw = parse("raw.log", PatternFormat("%m%n"), "just text")
+        val raw = parse("raw.log", CompiledPattern("%m%n"), "just text")
         val failure = runCatching { merge(fileA, raw) }.exceptionOrNull()
         assertFalse(failure == null)
     }
@@ -188,7 +188,7 @@ class MergedLogTest {
 
     @Test
     fun `MDC keys of several files share columns`() {
-        val mdc = PatternFormat("%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %-5p %c %X - %m%n", ZoneOffset.UTC)
+        val mdc = CompiledPattern("%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %-5p %c %X - %m%n", ZoneOffset.UTC)
         val a = parse("mdc-a.log", mdc, "2026-10-01 10:00:01.000 [main] INFO  app.A {tenant=acme, user=1} - A1")
         val b = parse("mdc-b.log", mdc, "2026-10-01 10:00:02.000 [main] INFO  app.B {tenant=globex} - B1")
         merge(a, b).use { log ->

@@ -7,7 +7,7 @@ import io.github.rastislavpapp.logxy.core.filter.TextCondition
 import io.github.rastislavpapp.logxy.core.filter.TextOp
 import io.github.rastislavpapp.logxy.core.index.IndexOptions
 import io.github.rastislavpapp.logxy.core.index.IndexProgress
-import io.github.rastislavpapp.logxy.core.parse.AccessLogFormat
+import io.github.rastislavpapp.logxy.core.parse.CompiledAccessLog
 import java.nio.file.Files
 import java.nio.file.Path
 import java.time.ZoneOffset
@@ -23,7 +23,7 @@ class AccessLogTest {
 
     private fun parse(content: String, options: IndexOptions = IndexOptions()): ParsedLog {
         val file = Files.writeString(dir.resolve("access-${content.hashCode()}-${options.hashCode()}.log"), content)
-        return runBlocking { ParsedLog.build(file, AccessLogFormat(ZoneOffset.UTC), IndexProgress(), options) }
+        return runBlocking { ParsedLog.build(file, CompiledAccessLog(ZoneOffset.UTC), IndexProgress(), options) }
     }
 
     private fun ParsedLog.column(name: String) = schema.fields.indexOfFirst { it.name == name }.let { field ->
@@ -74,20 +74,20 @@ class AccessLogTest {
     fun `lines cut short start no record`() {
         val text = sample.lines().first()
         val line = text.toByteArray()
-        val parser = AccessLogFormat().newParser()
+        val matcher = CompiledAccessLog().newMatcher()
         // Only cuts within or right after the size (a common line) and the whole line are records; others must be
         // rejected, not fail.
-        val accepted = (0..line.size).filter { parser.match(line, 0, it) }
+        val accepted = (0..line.size).filter { matcher.match(line, 0, it) }
         val size = text.indexOf(" 512 ") + 1
         assertEquals(listOf(size + 1, size + 2, size + 3, size + 4, line.size), accepted)
     }
 
     @Test
     fun `trailing spaces end a line`() {
-        val parser = AccessLogFormat().newParser()
+        val matcher = CompiledAccessLog().newMatcher()
         for (line in listOf("""192.0.2.1 - - [13/Oct/2026:08:00:00 +0000] "GET / HTTP/1.1" 200 5 """, """192.0.2.1 - - [13/Oct/2026:08:00:00 +0000] "GET / HTTP/1.1" 200 5 "-" "-"  """)) {
             val bytes = line.toByteArray()
-            assertEquals(true, parser.match(bytes, 0, bytes.size), line)
+            assertEquals(true, matcher.match(bytes, 0, bytes.size), line)
         }
     }
 
