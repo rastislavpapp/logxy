@@ -47,7 +47,7 @@ internal class MergedSchema(parts: List<Schema>) {
     fun partField(part: Int, field: Int): Int = partFields[part][field]
 
     private fun sameKind(a: ColumnType, b: ColumnType) =
-        a == b || (a == ColumnType.DICT || a == ColumnType.SPAN) && (b == ColumnType.DICT || b == ColumnType.SPAN)
+        a == b || ((a == ColumnType.DICT || a == ColumnType.SPAN) && (b == ColumnType.DICT || b == ColumnType.SPAN))
 
     private fun uniqueName(name: String, fields: List<Field>): String =
         (sequenceOf(name) + generateSequence(2) { it + 1 }.map { "$name $it" })

@@ -262,13 +262,12 @@ internal object Json {
         var count = 0
         var valid = true
         fun next() {
-            out.write((if (count++ > 0) {
-                COMMA
-            } else if (isObject) {
-                OPEN_OBJECT
-            } else {
-                OPEN_ARRAY
-            }).toInt())
+            val separator = when {
+                count++ > 0 -> COMMA
+                isObject -> OPEN_OBJECT
+                else -> OPEN_ARRAY
+            }
+            out.write(separator.toInt())
             out.write('\n'.code)
             repeat(depth + 1) { out.write(INDENT) }
         }

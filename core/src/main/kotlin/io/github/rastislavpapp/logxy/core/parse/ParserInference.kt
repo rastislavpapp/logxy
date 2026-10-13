@@ -109,7 +109,7 @@ internal object ParserInference {
         fun end(line: ByteArray): Int {
             if (!Bytes.startsWith(line, 0, line.size, prefix)) return -1
             val end = parser.parse(line, prefix.length, line.size)
-            if (end < 0 || end < line.size && isDigit(line[end])) return -1
+            if (end < 0 || (end < line.size && isDigit(line[end]))) return -1
             if (unixDigits > 0 && end - prefix.length != unixDigits) return -1
             if (prefix.isEmpty()) return end
             return if (end < line.size && line[end] == ']'.code.toByte()) end + 1 else -1
