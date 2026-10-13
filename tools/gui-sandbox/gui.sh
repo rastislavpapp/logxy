@@ -1,7 +1,17 @@
 #!/usr/bin/env bash
 # Runs the app on a virtual X display inside a container so it never touches the host desktop.
-# Usage: gui.sh build | start [file...] | shot [name] | click X Y | dclick X Y | rclick X Y | move X Y
-#        | type TEXT | key KEYS... | windows | exec CMD... | logs | stop
+# Usage: gui.sh COMMAND
+#   start [path...]    (re)start the app on files or folders anywhere on the host; builds the image on first use
+#   shot [name]        screenshot to out/NAME.png (default: shot) and print its path
+#   click X Y          left click at screen coordinates read off a screenshot; also dclick, rclick, move
+#   type TEXT          type into the focused component
+#   key KEYS...        xdotool key names, one press each: ctrl+f Return Escape Page_Down shift+Tab
+#   windows            visible windows with position and size
+#   logs               the app's stdout and stderr
+#   exec CMD...        run a command inside the container
+#   build | stop       build the image | stop and remove the sandbox
+# Environment: GUI_ENGINE (podman or docker), GUI_SIZE (default 1600x1000), GUI_OUT (default out/),
+# JAVA_TOOL_OPTIONS (passed to the app, e.g. -Xmx64m).
 set -euo pipefail
 
 name=logxy-gui
@@ -72,5 +82,5 @@ case "${1:-}" in
   exec)   shift; in_box "$@" ;;
   logs)   cat "$out/app.log" ;;
   stop)   "$engine" rm -f "$name" >/dev/null && echo stopped ;;
-  *) sed -n '3,4p' "$0"; exit 1 ;;
+  *) sed -n '3,14p' "$0" | cut -c3-; exit 1 ;;
 esac
