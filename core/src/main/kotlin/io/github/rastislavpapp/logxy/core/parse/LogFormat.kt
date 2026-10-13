@@ -29,7 +29,14 @@ sealed interface LogFormat {
     /** The definition as settings properties, without the name and the kind. */
     fun properties(): Map<String, String> = emptyMap()
 
-    /** A kind of parser: what its settings store as the type, and how to read one back. */
+    /**
+     * A kind of parser: what its settings store as the type, and how to read one back.
+     *
+     * A new kind needs: a variant here whose companion is its Kind, listed in [KINDS]; its [RecordFormat];
+     * a line in the Parsers page's `kindChoices`; a [BUILT_IN] entry if it is detected by default (then the
+     * built-in names in `SettingsTest` and a detection test in `LogFormatTest`); a `tools generate` flag for
+     * test files and the benchmark.
+     */
     abstract class Kind(val type: String) {
         /** The parser named [name] whose other [properties] are given; null if they are incomplete. */
         abstract fun read(name: String, properties: (String) -> String?): LogFormat?
