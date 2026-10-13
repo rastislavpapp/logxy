@@ -27,6 +27,10 @@ object SessionArgs {
     private const val QUERY_ARG = "--query"
     private const val PARSERS_ARG = "--parsers"
 
+    /**
+     * Arguments that make the next start reopen [sessions], each with its filter and chosen parsers, and select
+     * the tab at [selected] (-1 for none); [read] reads them back.
+     */
     fun write(sessions: List<OpenSession>, selected: Int): List<String> = buildList {
         for (session in sessions) {
             add(SESSION_ARG)

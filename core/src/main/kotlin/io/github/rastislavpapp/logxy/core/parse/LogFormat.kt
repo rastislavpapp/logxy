@@ -42,6 +42,7 @@ sealed interface LogFormat {
         abstract fun read(name: String, properties: (String) -> String?): LogFormat?
     }
 
+    /** No parser: one record per line, the line its only field. */
     data object Raw : LogFormat {
         override val name = "Raw text"
         override val kind = object : Kind("raw") {
@@ -52,24 +53,29 @@ sealed interface LogFormat {
         override fun withName(name: String) = this
     }
 
+    /** A log4j / logback pattern layout, e.g. `%d [%t] %-5p %c - %m%n`; see [PatternFormat]. */
     data class Pattern(override val name: String, val pattern: String) : LogFormat {
         override val kind get() = Companion
         override fun compile() = PatternFormat(pattern)
         override fun withName(name: String) = copy(name = name)
         override fun properties() = mapOf("layout" to pattern)
 
+        /** Stored as type `pattern`, with the layout under `layout`. */
         companion object : Kind("pattern") {
             override fun read(name: String, properties: (String) -> String?) = properties("layout")?.let { Pattern(name, it) }
         }
     }
 
+    /** A regex whose named groups are the fields, with [timestampPattern] for the timestamp group; see [RegexFormat]. */
     data class Regex(override val name: String, val regex: String, val timestampPattern: String) : LogFormat {
         override val kind get() = Companion
         override fun compile() = RegexFormat(regex, timestampPattern)
         override fun withName(name: String) = copy(name = name)
         override fun properties() = mapOf("layout" to regex, "timestamp" to timestampPattern)
 
+        /** Stored as type `regex`, with the regex under `layout` and the timestamp pattern under `timestamp`. */
         companion object : Kind("regex") {
+            /** The timestamp pattern of a regex parser that does not name one. */
             const val DEFAULT_TIMESTAMP = "yyyy-MM-dd HH:mm:ss.SSS"
 
             override fun read(name: String, properties: (String) -> String?) =
@@ -77,34 +83,40 @@ sealed interface LogFormat {
         }
     }
 
+    /** JSON lines, with [keys] naming the keys that fill the usual fields; see [JsonFormat]. */
     data class Json(override val name: String, val keys: RoleKeys = RoleKeys()) : LogFormat {
         override val kind get() = Companion
         override fun compile() = JsonFormat(keys)
         override fun withName(name: String) = copy(name = name)
         override fun properties() = keys.properties("keys.")
 
+        /** Stored as type `json`, with the keys of each role under `keys.<role>`; missing roles keep the defaults. */
         companion object : Kind("json") {
             override fun read(name: String, properties: (String) -> String?) = Json(name, RoleKeys.read(properties, "keys.", RoleKeys()))
         }
     }
 
+    /** logfmt lines (`key=value` pairs), with [keys] naming the keys that fill the usual fields; see [LogfmtFormat]. */
     data class Logfmt(override val name: String, val keys: RoleKeys = RoleKeys.LOGFMT) : LogFormat {
         override val kind get() = Companion
         override fun compile() = LogfmtFormat(keys)
         override fun withName(name: String) = copy(name = name)
         override fun properties() = keys.properties("keys.")
 
+        /** Stored as type `logfmt`, with the keys of each role under `keys.<role>`; missing roles keep the logfmt defaults. */
         companion object : Kind("logfmt") {
             override fun read(name: String, properties: (String) -> String?) =
                 Logfmt(name, RoleKeys.read(properties, "keys.", RoleKeys.LOGFMT))
         }
     }
 
+    /** Web server access logs, common or combined layout; nothing to configure. See [AccessLogFormat]. */
     data class AccessLog(override val name: String) : LogFormat {
         override val kind get() = Companion
         override fun compile() = AccessLogFormat()
         override fun withName(name: String) = copy(name = name)
 
+        /** Stored as type `access-log`, with no other properties. */
         companion object : Kind("access-log") {
             override fun read(name: String, properties: (String) -> String?) = AccessLog(name)
         }

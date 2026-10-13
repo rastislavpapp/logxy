@@ -8,6 +8,7 @@ abstract class RecordFormat {
 
     abstract val schema: Schema
 
+    /** A new parser, for one thread; parsers are stateful, the format is not. */
     internal abstract fun newParser(): RecordParser
 
     /** Display text of a TIMESTAMP field's value, in the log's own layout. */

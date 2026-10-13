@@ -38,11 +38,13 @@ class TimestampFormat(pattern: String, private val zone: ZoneId = ZoneId.systemD
         DateTimeFormatter.ofPattern(javaPattern, Locale.ENGLISH).withZone(zone)
     private val layout: List<Element>? = if (unixUnit != null) null else fixedLayout(this.pattern)
 
+    /** Epoch [nanos] written in this layout, in [zone]; a UNIX layout writes the number in its unit. */
     fun format(nanos: Long): String {
         if (unixUnit != null) return (nanos / unixUnit).toString()
         return formatter!!.format(Instant.ofEpochSecond(Math.floorDiv(nanos, NANOS), Math.floorMod(nanos, NANOS)))
     }
 
+    /** A parser for one thread: byte-level for epoch numbers and fixed-width numeric layouts, java.time otherwise (slower). */
     internal fun newParser(): TimestampParser = when {
         unixUnit != null -> UnixParser(unixUnit)
         layout != null -> FixedParser(layout, zone)

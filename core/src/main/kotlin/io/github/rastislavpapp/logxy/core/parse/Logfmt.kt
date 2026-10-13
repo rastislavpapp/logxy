@@ -14,6 +14,7 @@ internal object Logfmt {
     const val QUOTE = '"'.code.toByte()
     private const val BACKSLASH = '\\'.code.toByte()
 
+    /** Whether [b] separates pairs: a space or a tab. */
     fun isSpace(b: Byte) = b == SPACE || b == TAB
 
     /**

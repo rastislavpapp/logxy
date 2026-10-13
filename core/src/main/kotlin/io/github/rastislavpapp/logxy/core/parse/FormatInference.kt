@@ -16,6 +16,7 @@ internal object FormatInference {
     /** Tokens of a line looked at for its columns; the message comes before this many. */
     private const val MAX_TOKENS = 32
 
+    /** A parser guessed from the [sample] lines: JSON lines with the keys they use, else a pattern layout; null if neither fits. */
     fun infer(sample: List<ByteArray>): LogFormat? {
         val lines = sample.filter { !FormatCheck.looksLikeContinuation(it, 0, it.size) }
         if (lines.isEmpty()) return null

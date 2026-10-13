@@ -11,6 +11,7 @@ data class SessionFiles(val paths: List<Path>, val formats: List<LogFormat?>, va
 
 /** A change to the tabs, applied in order; [index]es are of the tabs as they are when it applies. */
 sealed interface TabAction {
+    /** Selects the existing tab at [index], e.g. one that already shows the files being opened. */
     data class Select(val index: Int) : TabAction
 
     /** A new tab at the end, selected. */
