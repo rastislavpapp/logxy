@@ -2,6 +2,7 @@ package io.github.rastislavpapp.logxy.core.open
 
 import io.github.rastislavpapp.logxy.core.config.OpenMode
 import io.github.rastislavpapp.logxy.core.merge.MergedLog
+import kotlinx.coroutines.runBlocking
 import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.test.Test
@@ -18,7 +19,7 @@ class OpenPlanTest {
         dir.resolve(name).also { Files.createDirectories(it.parent) }.also { Files.writeString(it, "one\n") }
 
     @Test
-    fun `a link and its target dropped together open one file`() {
+    fun `a link and its target dropped together open one file`() = runBlocking {
         val target = write("a.log")
         val link = dir.resolve("link.log")
         // Windows creates links only with a privilege.

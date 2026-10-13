@@ -11,8 +11,11 @@ import javax.swing.JPanel
 import javax.swing.JProgressBar
 import javax.swing.Timer
 
-/** How far unzipping or decompressing got, with a Cancel button that calls [onCancel]. [text] and [fraction] may be set from any thread. */
-internal class ExtractDialog(owner: Window, private val onCancel: () -> Unit) :
+/**
+ * How far opening files got, such as unzipping them, with a Cancel button that calls [onCancel]; an [indeterminate]
+ * bar for work of unknown size. [text] and [fraction] may be set from any thread.
+ */
+internal class ExtractDialog(owner: Window, indeterminate: Boolean = false, private val onCancel: () -> Unit) :
     JDialog(owner, "Opening Files", ModalityType.APPLICATION_MODAL) {
 
     @Volatile
@@ -22,7 +25,7 @@ internal class ExtractDialog(owner: Window, private val onCancel: () -> Unit) :
     var fraction = 0.0
 
     private val label = JLabel(" ")
-    private val bar = JProgressBar(0, 1000)
+    private val bar = JProgressBar(0, 1000).apply { isIndeterminate = indeterminate }
     private val timer = Timer(100) {
         label.text = text
         bar.value = (fraction * 1000).toInt()

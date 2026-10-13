@@ -2,6 +2,9 @@ package io.github.rastislavpapp.logxy.core
 
 import io.github.rastislavpapp.logxy.core.archive.CompressedSpool
 import io.github.rastislavpapp.logxy.core.archive.ZipSpool
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.job
 import java.io.IOException
 import java.nio.file.FileVisitOption
 import java.nio.file.FileVisitResult
@@ -19,24 +22,35 @@ object LogFolders {
      * The files in [folder] and, if [recursive], its subfolders, sorted by path. Leaves out hidden files
      * and folders (such as `.git`), empty files and binary files, except zips and .gz or .zst files.
      * Unreadable folders are skipped. Of the paths to one file, through links, keeps only the first.
+     * Tells [onFound] how many files it found so far; stops at the next file once cancelled.
      */
-    fun files(folder: Path, recursive: Boolean = true): List<Path> {
+    suspend fun files(folder: Path, recursive: Boolean = true, onFound: (count: Int) -> Unit = {}): List<Path> {
+        val job = currentCoroutineContext().job
         val found = ArrayList<Path>()
         // Following links, as logs are often links, e.g. Kubernetes' /var/log/containers; loops end in visitFileFailed.
         val options = setOf(FileVisitOption.FOLLOW_LINKS)
         Files.walkFileTree(folder, options, if (recursive) Int.MAX_VALUE else 1, object : SimpleFileVisitor<Path>() {
-            override fun preVisitDirectory(dir: Path, attrs: BasicFileAttributes) =
-                if (dir != folder && isHidden(dir)) FileVisitResult.SKIP_SUBTREE else FileVisitResult.CONTINUE
+            override fun preVisitDirectory(dir: Path, attrs: BasicFileAttributes): FileVisitResult {
+                job.ensureActive()
+                return if (dir != folder && isHidden(dir)) FileVisitResult.SKIP_SUBTREE else FileVisitResult.CONTINUE
+            }
 
             override fun visitFile(file: Path, attrs: BasicFileAttributes): FileVisitResult {
-                if (attrs.isRegularFile && attrs.size() > 0 && !isHidden(file) && isOpenable(file)) found.add(file)
+                job.ensureActive()
+                if (attrs.isRegularFile && attrs.size() > 0 && !isHidden(file) && isOpenable(file)) {
+                    found.add(file)
+                    onFound(found.size)
+                }
                 return FileVisitResult.CONTINUE
             }
 
             override fun visitFileFailed(file: Path, exc: IOException) = FileVisitResult.CONTINUE
         })
         // A link and its target are one log, which would otherwise show each record twice.
-        return found.sorted().distinctBy { file -> runCatching { file.toRealPath() }.getOrDefault(file) }
+        return found.sorted().distinctBy { file ->
+            job.ensureActive()
+            runCatching { file.toRealPath() }.getOrDefault(file)
+        }
     }
 
     private fun isHidden(path: Path) = path.fileName.toString().startsWith(".") || runCatching { Files.isHidden(path) }.getOrDefault(false)

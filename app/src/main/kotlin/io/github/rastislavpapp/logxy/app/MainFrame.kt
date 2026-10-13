@@ -9,6 +9,7 @@ import io.github.rastislavpapp.logxy.core.config.OpenMode
 import io.github.rastislavpapp.logxy.core.config.Settings
 import io.github.rastislavpapp.logxy.core.merge.MergedLog
 import io.github.rastislavpapp.logxy.core.open.Decision
+import io.github.rastislavpapp.logxy.core.open.Found
 import io.github.rastislavpapp.logxy.core.open.FoundFile
 import io.github.rastislavpapp.logxy.core.open.OpenPlan
 import io.github.rastislavpapp.logxy.core.open.OpenSession
@@ -31,6 +32,7 @@ import java.awt.event.KeyEvent
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import java.io.File
+import java.nio.file.Files
 import java.nio.file.Path
 import java.text.NumberFormat
 import java.util.function.IntConsumer
@@ -58,10 +60,16 @@ import javax.swing.SwingConstants
 import javax.swing.Timer
 import javax.swing.UIManager
 import javax.swing.WindowConstants
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.swing.Swing
 
@@ -82,6 +90,9 @@ class MainFrame : JFrame("logxy") {
     private val fileSlot = Slot()
     private var lastDirectory: File? = AppState[AppState.LAST_DIRECTORY]?.let(::File)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Swing)
+
+    /** The latest of [openFiles], which the next one waits for. */
+    private var opening: Job? = null
 
     /** Where opened zip files are extracted to; made when the first one is opened. */
     private val spoolCreation = lazy { ZipSpool.forThisProcess(Settings.cacheDirectory()) }
@@ -234,17 +245,48 @@ class MainFrame : JFrame("logxy") {
      * and tabs of their own.
      */
     fun openFiles(paths: List<Path>) {
-        val found = OpenPlan.find(paths)
-        found.problems.forEach { (path, problem) -> tellCannotOpen(path, problem) }
-        val archives = found.files.map { it.path }.filter(::isArchive)
-        if (archives.isEmpty()) {
-            tellNothingIn(found.empty)
-            return openFound(found.files)
+        val previous = opening
+        // Undispatched, so plain files open at once. An open that comes while folders are walked waits for it,
+        // so tabs open in the order asked.
+        opening = scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            previous?.join()
+            val found = find(paths) ?: return@launch
+            found.problems.forEach { (path, problem) -> tellCannotOpen(path, problem) }
+            val archives = found.files.map { it.path }.filter(::isArchive)
+            if (archives.isEmpty()) {
+                tellNothingIn(found.empty)
+                return@launch openFound(found.files)
+            }
+            extractThen(archives) { files ->
+                tellLeftOut(archives)
+                tellNothingIn(found.empty + archives.filter { files[it].isNullOrEmpty() })
+                openFound(found.files.flatMap { item -> files[item.path]?.map { FoundFile(it, item.inSubfolder) } ?: listOf(item) })
+            }
         }
-        extractThen(archives) { files ->
-            tellLeftOut(archives)
-            tellNothingIn(found.empty + archives.filter { files[it].isNullOrEmpty() })
-            openFound(found.files.flatMap { item -> files[item.path]?.map { FoundFile(it, item.inSubfolder) } ?: listOf(item) })
+    }
+
+    /**
+     * The files of [paths], with folders walked off the UI thread and a dialog telling how many files
+     * were found if it takes a while; null if the user cancels.
+     */
+    private suspend fun CoroutineScope.find(paths: List<Path>): Found? {
+        if (paths.none { Files.isDirectory(it) }) return OpenPlan.find(paths)
+        lateinit var walk: Deferred<Found>
+        var finished = false
+        val dialog = ExtractDialog(this@MainFrame, indeterminate = true) { walk.cancel() }
+        walk = async(Dispatchers.IO) {
+            OpenPlan.find(paths) { folder, count -> dialog.text = "Looking for logs in $folder… ($count found)" }
+        }
+        Timer(EXTRACT_DIALOG_DELAY_MILLIS) { if (!finished) dialog.isVisible = true }.apply { isRepeats = false }.start()
+        return try {
+            walk.await()
+        } catch (e: CancellationException) {
+            // Only the walk was cancelled, by the user; not the open.
+            currentCoroutineContext().ensureActive()
+            null
+        } finally {
+            finished = true
+            dialog.dispose()
         }
     }
 
