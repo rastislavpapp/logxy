@@ -82,6 +82,22 @@ class LogFormatTest {
     }
 
     @Test
+    fun `detects Python's default logging layout`() {
+        val file = Files.writeString(dir.resolve("app.py.log"), """
+            2026-10-13 10:00:00,123 - app.db - WARNING - slow query
+            2026-10-13 10:00:00,456 - app.web - CRITICAL - down
+            Traceback (most recent call last):
+              File "app.py", line 1, in <module>
+            2026-10-13 10:00:01,002 - root - INFO - ok
+        """.trimIndent())
+        val format = LogFormat.detect(file)
+        assertEquals("Python logging", format.name)
+        val preview = FormatPreview.preview(format.compile()!!, Files.readAllLines(file).map { it.toByteArray() })
+        assertEquals(listOf("2026-10-13 10:00:00,123", "app.db", "WARNING", "slow query"), preview[0].values)
+        assertEquals(null, preview[2].values)
+    }
+
+    @Test
     fun `preview shows fields of matching lines`() {
         val lines = listOf("2026-10-01 08:00:00.001 [main] INFO  a.B - hello", "\tat x.Y(Y.java:1)", "nonsense")
             .map { it.toByteArray() }

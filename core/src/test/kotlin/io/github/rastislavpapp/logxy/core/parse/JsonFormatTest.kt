@@ -1,5 +1,7 @@
 package io.github.rastislavpapp.logxy.core.parse
 
+import io.github.rastislavpapp.logxy.core.log.Level
+import io.github.rastislavpapp.logxy.core.log.LevelMapping
 import java.nio.file.Files
 import java.nio.file.Path
 import java.time.Instant
@@ -130,6 +132,40 @@ class JsonFormatTest {
         assertEquals("2026-10-01 08:00:00.123", values[names.indexOf("Timestamp")])
         assertEquals("a.B", values[names.indexOf("Logger")])
         assertEquals(null to false, preview[1].values to preview[1].continuation)
+    }
+
+    @Test
+    fun `reads Docker, Serilog and GELF records with the default keys`() {
+        val format = JsonFormat(zone = ZoneOffset.UTC)
+        val names = format.schema.fields.map { it.name }
+        fun read(line: String, field: String) =
+            FormatPreview.preview(format, listOf(line.toByteArray()))[0].values!![names.indexOf(field)]
+
+        val docker = """{"log":"Started\n","stream":"stdout","time":"2026-10-01T08:00:00.123456789Z"}"""
+        assertEquals("Started\n", read(docker, "Message"))
+        assertEquals("2026-10-01 08:00:00.123", read(docker, "Timestamp"))
+
+        val serilog = """{"@t":"2026-10-01T08:00:00.123Z","@mt":"{User} logged in","@m":"\"alice\" logged in","@l":"Warning","@x":"System.Exception: boom","User":"alice"}"""
+        assertEquals("\"alice\" logged in", read(serilog, "Message"))
+        assertEquals("2026-10-01 08:00:00.123", read(serilog, "Timestamp"))
+        assertEquals("Warning", read(serilog, "Level"))
+        assertEquals("System.Exception: boom", read(serilog, "Exception"))
+        assertEquals("{User} logged in", read("""{"@t":"2026-10-01T08:00:00Z","@mt":"{User} logged in"}""", "Message"))
+
+        val gelf = """{"version":"1.1","host":"web-1","short_message":"Failed","full_message":"Failed\nat x","timestamp":1790841600.1234,"level":3}"""
+        assertEquals("Failed", read(gelf, "Message"))
+        assertEquals("Failed\nat x", read(gelf, "Exception"))
+        assertEquals("2026-10-01 08:00:00.123", read(gelf, "Timestamp"))
+        assertEquals("3", read(gelf, "Level"))
+    }
+
+    @Test
+    fun `GELF levels are syslog severities`() {
+        val levels = LevelMapping.DEFAULT
+        assertEquals(
+            listOf(Level.FATAL, Level.FATAL, Level.FATAL, Level.ERROR, Level.WARN, Level.INFO, Level.INFO, Level.DEBUG),
+            (0..7).map { levels.of(it.toString()) },
+        )
     }
 
     @Test
