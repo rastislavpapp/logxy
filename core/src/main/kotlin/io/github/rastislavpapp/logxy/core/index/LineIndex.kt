@@ -99,7 +99,6 @@ class LineIndex private constructor(
         return String(bytes, 0, length, Charsets.UTF_8)
     }
 
-    /** File offset where [line] starts. */
     fun lineStart(line: Int): Long = starts[line]
 
     /** Offset just past the line, including its terminator. */

@@ -144,7 +144,6 @@ internal object Json {
         return if (length == out.size) out else out.copyOf(length)
     }
 
-    /** [decode]d as a String. */
     fun text(bytes: ByteArray, from: Int, to: Int): String = String(decode(bytes, from, to), Charsets.UTF_8)
 
     /**
