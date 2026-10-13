@@ -24,7 +24,8 @@ fun showAbout(owner: Component) {
         add(JLabel("logxy").apply { putClientProperty(FlatClientProperties.STYLE_CLASS, "h1") })
         add(JLabel(appVersion?.let { "Version $it" } ?: "Development build").apply { foreground = muted })
         add(JLabel("Fast desktop viewer for large log files."), "gaptop 8")
-        add(JLabel("Java ${System.getProperty("java.version")}, ${System.getProperty("java.vendor")}").apply { foreground = muted })
+        val java = "Java ${System.getProperty("java.version")}, ${System.getProperty("java.vendor")}"
+        add(JLabel(java).apply { foreground = muted })
         add(JButton(PROJECT_URL.removePrefix("https://")).apply {
             putClientProperty(FlatClientProperties.BUTTON_TYPE, FlatClientProperties.BUTTON_TYPE_BORDERLESS)
             foreground = UIManager.getColor("Component.linkColor")

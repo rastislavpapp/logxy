@@ -102,11 +102,20 @@ class LogTab(
     /** Short names of [paths], as the merge's source column shows them. */
     val sourceNames: List<String> get() = session.sourceNames
 
-    /** Short name for the tab: the file name, or the merged files' names; files from archives go by the container's name. */
+    /**
+     * Short name for the tab: the file name, or the merged files' names; files from archives go by the container's
+     * name.
+     */
     val title: String
         get() {
-            if (!isMerged) return origin(path)?.let { if (it.entry.isEmpty()) "${it.container.fileName}" else "${it.container.fileName}/${path.fileName}" } ?: path.fileName.toString()
-            val names = paths.zip(sourceNames) { p, name -> origin(p)?.container?.fileName?.toString() ?: name }.distinct()
+            if (!isMerged) {
+                val origin = origin(path) ?: return path.fileName.toString()
+                val container = origin.container.fileName
+                return if (origin.entry.isEmpty()) "$container" else "$container/${path.fileName}"
+            }
+            val names = paths
+                .zip(sourceNames) { p, name -> origin(p)?.container?.fileName?.toString() ?: name }
+                .distinct()
             val all = names.joinToString(" + ")
             return if (all.length <= MAX_TITLE_CHARS) all else "${names.first()} + ${names.size - 1} more"
         }
@@ -117,20 +126,25 @@ class LogTab(
     private val detail = LogDetailArea()
     private val filterBar = FilterBar(::applyFilter)
     private val findBar = FindBar(::searchFor) { forward -> find(forward) }
-    private val patterns = PatternsPanel(scope, { session.patternCounts() }, { session.patternProgress }, filterBar::addRules)
+    private val patterns =
+        PatternsPanel(scope, { session.patternCounts() }, { session.patternProgress }, filterBar::addRules)
 
     /** Below the table: the selected record, or the message patterns of the shown rows. */
     private val bottomTabs = JTabbedPane().apply {
-        addTab("Detail", JScrollPane(detail, ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED, ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER))
+        val vertical = ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED
+        addTab("Detail", JScrollPane(detail, vertical, ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER))
         addTab("Patterns", patterns)
         if (AppState[AppState.BOTTOM_TAB] == BOTTOM_TAB_PATTERNS) selectedComponent = patterns
-        addChangeListener { AppState[AppState.BOTTOM_TAB] = if (selectedComponent === patterns) BOTTOM_TAB_PATTERNS else null }
+        addChangeListener {
+            AppState[AppState.BOTTOM_TAB] = if (selectedComponent === patterns) BOTTOM_TAB_PATTERNS else null
+        }
     }
     private val followButton = accentToggle(Icons.follow, "Follow (tail)").apply {
         addActionListener { session.follow = isSelected }
     }
     private val reloadButton = toolBarButton(Icons.refresh, "Reload the file (F5)") { session.reload() }
-    private val parserButton = dropDownButton("Parser: how lines are split into columns", maxWidth = 280) { showParsers() }
+    private val parserButton =
+        dropDownButton("Parser: how lines are split into columns", maxWidth = 280) { showParsers() }
     private val columnsButton = toolBarButton(DropDownIcon(Icons.columns), "Columns to show") { showColumns() }.apply {
         isEnabled = false
     }
@@ -155,7 +169,10 @@ class LogTab(
     /** What the status bar shows for this file. */
     val status: SessionStatus get() = session.status
 
-    /** Nanoseconds from the first selected row's timestamp to the last's; null unless two rows with timestamps are selected. */
+    /**
+     * Nanoseconds from the first selected row's timestamp to the last's; null unless two rows with timestamps are
+     * selected.
+     */
     val selectionSpan: Long?
         get() {
             val model = model ?: return null
@@ -192,7 +209,10 @@ class LogTab(
         session.start()
     }
 
-    /** Auto, raw text, the user's parsers (editable), the built-in ones; plus the parser in use if it is none of those. */
+    /**
+     * Auto, raw text, the user's parsers (editable), the built-in ones; plus the parser in use if it is none of
+     * those.
+     */
     private fun showParsers() {
         if (isMerged) return showMergedParsers()
         val chosen = session.chosenParser
@@ -202,7 +222,9 @@ class LogTab(
             (if (chosen == null || chosen in known) known else known + chosen).forEachIndexed { i, parser ->
                 add(parserItem(parser, selected = parser == chosen, first = i == 0) { session.useParser(parser) })
             }
-            add(PopupItem("Edit Parsers", Icons.settings, separatorBefore = true) { editParsers(chosen ?: session.parser) })
+            add(PopupItem("Edit Parsers", Icons.settings, separatorBefore = true) {
+                editParsers(chosen ?: session.parser)
+            })
             // A guessed parser is none of the known ones; saving it makes it one the user can correct.
             val detected = session.parser.takeIf { chosen == null && session.parserDetected && it !in known }
             if (detected != null) add(PopupItem("Save Detected Parser…") { editParsers(detected, adopt = true) })
@@ -223,7 +245,9 @@ class LogTab(
             val auto = if (session.parserDetected) "Auto: per file" else "Auto-detect"
             add(PopupItem(auto, selected = !mixed && same == null) { session.useParsers(chosen.map { null }) })
             AppSettings.current.knownParsers.forEachIndexed { i, parser ->
-                add(parserItem(parser, selected = !mixed && same == parser, first = i == 0) { session.useParsers(chosen.map { parser }) })
+                add(parserItem(parser, selected = !mixed && same == parser, first = i == 0) {
+                    session.useParsers(chosen.map { parser })
+                })
             }
             add(PopupItem("Choose Parser per File", selected = mixed, separatorBefore = true) { chooseParserPerFile() })
             add(PopupItem("Edit Parsers", Icons.settings) { editParsers(session.parser) })
@@ -233,13 +257,18 @@ class LogTab(
 
     /** A parser menu entry; the user's own parsers can be edited from it. */
     private fun parserItem(parser: Parser, selected: Boolean, first: Boolean, onPick: () -> Unit): PopupItem {
-        val tools = if (parser in AppSettings.current.parsers) listOf(PopupTool(Icons.advanced, "Edit this parser") { editParsers(parser) }) else emptyList()
+        val tools = if (parser in AppSettings.current.parsers) {
+            listOf(PopupTool(Icons.advanced, "Edit this parser") { editParsers(parser) })
+        } else {
+            emptyList()
+        }
         return PopupItem(parser.name, selected = selected, separatorBefore = first, tools = tools, action = onPick)
     }
 
     private fun chooseParserPerFile() {
         val descriptions = paths.map { (origin(it) ?: it).toString() }
-        val dialog = FileParsersDialog(SwingUtilities.getWindowAncestor(this), paths, sourceNames, descriptions, session.chosenParsers)
+        val window = SwingUtilities.getWindowAncestor(this)
+        val dialog = FileParsersDialog(window, paths, sourceNames, descriptions, session.chosenParsers)
         dialog.isVisible = true
         session.useParsers(dialog.chosenParsers ?: return)
     }
@@ -314,7 +343,8 @@ class LogTab(
         }
     }
 
-    private fun copy(text: String) = Toolkit.getDefaultToolkit().systemClipboard.setContents(StringSelection(text), null)
+    private fun copy(text: String) =
+        Toolkit.getDefaultToolkit().systemClipboard.setContents(StringSelection(text), null)
 
     /** The right-click menu of a cell: show only records with that value, or all but them. */
     private fun showCellMenu(table: LogTable, row: Int, column: Int, x: Int, y: Int) {
@@ -329,8 +359,11 @@ class LogTab(
         val escaped = firstLine.take(MAX_RULE_CHARS).replace("\\", "\\\\").replace("*", "\\*").replace("?", "\\?")
         // A long or multi-line value, such as a message with its stack trace, is matched by its start.
         val pattern = if (firstLine.length > MAX_RULE_CHARS || firstLine.length < value.length) "$escaped*" else escaped
-        fun rule(op: QueryOp) =
-            if (level != null) Query.Rule(field.name, op, level.name, bare = true) else Query.Rule(field.name, op, pattern)
+        fun rule(op: QueryOp) = if (level != null) {
+            Query.Rule(field.name, op, level.name, bare = true)
+        } else {
+            Query.Rule(field.name, op, pattern)
+        }
         val popup = JPopupMenu()
         popup.add(JMenuItem("Copy Cell Value").apply {
             addActionListener { copy(shown.fieldText(model.recordAt(row), fieldIndex)) }
@@ -338,7 +371,10 @@ class LogTab(
         // Within a selection of several rows, the menu also copies from all of them.
         if (table.isRowSelected(row) && table.selectedRowCount > 1) {
             popup.add(JMenuItem("Copy Selected Rows").apply {
-                addActionListener { table.transferHandler.exportToClipboard(table, Toolkit.getDefaultToolkit().systemClipboard, TransferHandler.COPY) }
+                addActionListener {
+                    val clipboard = Toolkit.getDefaultToolkit().systemClipboard
+                    table.transferHandler.exportToClipboard(table, clipboard, TransferHandler.COPY)
+                }
             })
             popup.add(JMenuItem("Copy Column “${field.name}”").apply {
                 addActionListener {
@@ -349,7 +385,8 @@ class LogTab(
         }
         popup.addSeparator()
         fun add(rule: Query.Rule) {
-            val text = QueryPrinter.print(rule).let { if (it.length > MAX_MENU_CHARS) it.take(MAX_MENU_CHARS - 1) + "…" else it }
+            val printed = QueryPrinter.print(rule)
+            val text = if (printed.length > MAX_MENU_CHARS) printed.take(MAX_MENU_CHARS - 1) + "…" else printed
             popup.add(JMenuItem(text, Icons.filter).apply {
                 addActionListener { filterBar.addRule(rule) }
             })
@@ -357,7 +394,8 @@ class LogTab(
         // `== ""` is a placeholder that filters nothing; `!= ""` keeps records with a value.
         if (value.isNotEmpty()) add(rule(QueryOp.EQUALS))
         add(rule(QueryOp.NOT_EQUALS))
-        val template = if (field.role == Role.MESSAGE && shown.schema.hasPatterns()) session.templateOf(model.recordAt(row)) else null
+        val hasTemplate = field.role == Role.MESSAGE && shown.schema.hasPatterns()
+        val template = if (hasTemplate) session.templateOf(model.recordAt(row)) else null
         if (template != null) {
             popup.addSeparator()
             add(Query.Rule(Query.PATTERN_FIELD, QueryOp.EQUALS, template))
@@ -391,7 +429,11 @@ class LogTab(
 
     private fun editParsers(select: Parser, adopt: Boolean = false) {
         val dialog = PreferencesDialog(
-            SwingUtilities.getWindowAncestor(this), PreferencesDialog.Section.PARSERS, path, select, offerUse = !isMerged,
+            SwingUtilities.getWindowAncestor(this),
+            PreferencesDialog.Section.PARSERS,
+            path,
+            select,
+            offerUse = !isMerged,
             adopt = select.takeIf { adopt },
         )
         dialog.isVisible = true
@@ -454,7 +496,8 @@ class LogTab(
     private fun showTable(shown: ShownLog) {
         val model = LogTableModel(shown)
         // Columns hidden before stay hidden, unless that would hide them all (the file changed meanwhile).
-        model.hiddenColumns = hiddenColumns.takeIf { hidden -> model.columnChoices.any { it.name !in hidden } }.orEmpty()
+        val leavesSome = model.columnChoices.any { it.name !in hiddenColumns }
+        model.hiddenColumns = if (leavesSome) hiddenColumns else emptySet()
         val table = LogTable(model)
         columnsButton.isEnabled = true
         table.addMouseListener(object : MouseAdapter() {
@@ -523,8 +566,10 @@ class LogTab(
         content.add(split, BorderLayout.CENTER)
         content.validate()
         content.repaint()
-        split.setDividerLocation(AppState[AppState.DETAIL_DIVIDER]?.toDoubleOrNull()?.coerceIn(0.1, 0.95) ?: 0.75)
-        // Remembered as a proportion, so it fits any window size; saved once dragging stops, as each save writes a file.
+        val remembered = AppState[AppState.DETAIL_DIVIDER]?.toDoubleOrNull()
+        split.setDividerLocation(remembered?.coerceIn(0.1, 0.95) ?: 0.75)
+        // Remembered as a proportion, so it fits any window size; saved once dragging stops, as each save writes a
+        // file.
         var proportion = ""
         val saveDivider = Timer(300) { AppState[AppState.DETAIL_DIVIDER] = proportion }.apply { isRepeats = false }
         split.addPropertyChangeListener(JSplitPane.DIVIDER_LOCATION_PROPERTY) {
@@ -539,7 +584,8 @@ class LogTab(
     }
 
     private fun showDetail(model: LogTableModel, row: Int) {
-        detail.show(if (row < 0 || row >= model.rowCount) "" else model.shown.recordText(model.recordAt(row), MAX_DETAIL_BYTES))
+        val inRange = row >= 0 && row < model.rowCount
+        detail.show(if (inRange) model.shown.recordText(model.recordAt(row), MAX_DETAIL_BYTES) else "")
         // A long record, e.g. with a stack trace, shows where the find bar's text is.
         detail.caretPosition = detail.firstFound
     }
@@ -580,12 +626,15 @@ class LogTab(
         val model = model ?: return
         val table = table ?: return
         val scrollPane = scrollPane ?: return
-        val selected = (model.windowStart + table.selectedRow).takeIf { table.selectedRow >= 0 && it < oldSize }?.let(recordBefore)
+        val selectedRow = model.windowStart + table.selectedRow
+        val selected = if (table.selectedRow >= 0 && selectedRow < oldSize) recordBefore(selectedRow) else null
         val top = scrollPane.firstVisibleRow.takeIf { it < oldSize }?.let(recordBefore)
         model.rowsReplaced()
         scrollPane.rowsReplaced()
         patterns.refresh()
-        val selectedIndex = selected?.let { record -> model.indexOfRecord(record).takeIf { it >= 0 && model.recordAtIndex(it) == record } }
+        val selectedIndex = selected?.let { record ->
+            model.indexOfRecord(record).takeIf { it >= 0 && model.recordAtIndex(it) == record }
+        }
         if (!session.follow) {
             if (keepView && top != null) {
                 scrollPane.scrollToRow(maxOf(0, model.indexOfRecord(top)))
@@ -679,7 +728,8 @@ class LogTab(
         val lead = table?.selectionModel?.leadSelectionIndex ?: -1
         val selected = if (model != null && lead in 0..<model.rowCount) model.recordAt(lead) else -1
         val shown = model?.shown
-        findBar.showCount(if (shown != null && selected >= 0) shown.foundPosition(selected) else 0, shown?.foundCount ?: 0)
+        val position = if (shown != null && selected >= 0) shown.foundPosition(selected) else 0
+        findBar.showCount(position, shown?.foundCount ?: 0)
     }
 
     /** Marks the times of the selected rows on the histogram, or of the top row in view if none is selected. */
@@ -763,7 +813,8 @@ class LogTab(
         override fun doLayout() {
             base.setBounds(0, 0, width, height)
             val size = floating.preferredSize
-            floating.setBounds(maxOf(0, width - size.width - FLOATING_RIGHT_GAP), FLOATING_TOP_GAP, minOf(size.width, width), size.height)
+            val x = maxOf(0, width - size.width - FLOATING_RIGHT_GAP)
+            floating.setBounds(x, FLOATING_TOP_GAP, minOf(size.width, width), size.height)
         }
 
         override fun getPreferredSize(): Dimension = base.preferredSize

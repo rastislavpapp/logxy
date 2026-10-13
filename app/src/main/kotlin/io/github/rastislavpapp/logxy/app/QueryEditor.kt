@@ -116,7 +116,8 @@ class QueryEditor(private val onApply: () -> Unit) : JPanel(MigLayout("insets 0,
 
     fun setFields(fields: List<Field>) {
         val query = query(includeEmpty = true)
-        // Rows without values only stand in for conditions: start them over on the new fields (Line, not Message, for raw text).
+        // Rows without values only stand in for conditions: start them over on the new fields (Line, not Message, for
+        // raw text).
         val blank = query(includeEmpty = false).items.isEmpty()
         this.fields = fields
         setQuery(if (blank) Query.EMPTY else query)
@@ -198,8 +199,10 @@ class QueryEditor(private val onApply: () -> Unit) : JPanel(MigLayout("insets 0,
         private val footer = JPanel(MigLayout("insets 0", "[][]push")).apply {
             isOpaque = false
             // wmin pref: the buttons must never shrink into "Conditi…".
-            add(toolBarButton(Icons.add, "Add a condition${if (isRoot) "" else " to this group"}", focusable = true) { addItem(group = false) }, "wmin pref")
-            add(toolBarButton(null, "Add a group of conditions, matching all, any or none of them", "( )", focusable = true) { addItem(group = true) }, "wmin pref")
+            val addCondition = if (isRoot) "Add a condition" else "Add a condition to this group"
+            add(toolBarButton(Icons.add, addCondition, focusable = true) { addItem(group = false) }, "wmin pref")
+            val addGroup = "Add a group of conditions, matching all, any or none of them"
+            add(toolBarButton(null, addGroup, "( )", focusable = true) { addItem(group = true) }, "wmin pref")
         }
         private val items = JPanel(MigLayout("insets 0, wrap 1, gapy 2, fillx", "[grow, fill]"))
 
@@ -223,7 +226,8 @@ class QueryEditor(private val onApply: () -> Unit) : JPanel(MigLayout("insets 0,
             try {
                 g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
                 g2.color = UIManager.getColor("Component.borderColor")
-                // Strokes are centred on the path: without the half pixel, the left edge at x = 0 is half outside and fades or vanishes when scaled.
+                // Strokes are centred on the path: without the half pixel, the left edge at x = 0 is half outside and
+                // fades or vanishes when scaled.
                 g2.translate(0.5, 0.5)
                 val top = header.y + header.height / 2
                 val right = width - 1
@@ -254,7 +258,8 @@ class QueryEditor(private val onApply: () -> Unit) : JPanel(MigLayout("insets 0,
 
         fun isEmpty() = items.componentCount == 0
 
-        // The top level keeps one condition, so its only one has no ×; hidden still takes its space, keeping rows aligned.
+        // The top level keeps one condition, so its only one has no ×; hidden still takes its space, keeping rows
+        // aligned.
         fun updateRemovable() {
             val single = isRoot && items.componentCount == 1
             items.components.forEach { (it as? RuleView)?.remove?.isVisible = !single }
@@ -340,7 +345,13 @@ class QueryEditor(private val onApply: () -> Unit) : JPanel(MigLayout("insets 0,
             field.selectedItem = known ?: rule.field
             field.addActionListener { fieldChanged() }
             op.renderer = object : DefaultListCellRenderer() {
-                override fun getListCellRendererComponent(list: JList<*>?, value: Any?, index: Int, isSelected: Boolean, hasFocus: Boolean): Component =
+                override fun getListCellRendererComponent(
+                    list: JList<*>?,
+                    value: Any?,
+                    index: Int,
+                    isSelected: Boolean,
+                    hasFocus: Boolean,
+                ): Component =
                     super.getListCellRendererComponent(list, (value as? RuleOp)?.label, index, isSelected, hasFocus)
             }
             op.addActionListener { opChanged() }
@@ -348,7 +359,9 @@ class QueryEditor(private val onApply: () -> Unit) : JPanel(MigLayout("insets 0,
             add(field)
             add(op)
             add(text, "wmin 60")
-            add(toolBarButton(null, "Create a group from this condition", "( )", focusable = true) { group.wrapInGroup(this) })
+            add(toolBarButton(null, "Create a group from this condition", "( )", focusable = true) {
+                group.wrapInGroup(this)
+            })
             add(remove)
             load(rule)
         }
@@ -399,7 +412,8 @@ class QueryEditor(private val onApply: () -> Unit) : JPanel(MigLayout("insets 0,
                 "The message with its variable parts (numbers, ids, …) written as {}"
             } else {
                 when (selected) {
-                    RuleOp.MATCHES, RuleOp.NOT_MATCHES -> "Regular expression, found anywhere; ignores case unless it starts with (?-i)"
+                    RuleOp.MATCHES, RuleOp.NOT_MATCHES ->
+                        "Regular expression, found anywhere; ignores case unless it starts with (?-i)"
                     in RuleOp.TIME -> "e.g. 2026-10-09 08:30:00.000, 2026-10-09 or 08:30"
                     in RuleOp.NUMBER -> "A number, e.g. 500, -1.5 or 2e3; records whose value is no number are left out"
                     else -> "* matches any text, ? one character"
@@ -412,6 +426,8 @@ class QueryEditor(private val onApply: () -> Unit) : JPanel(MigLayout("insets 0,
             val rule = if (original.negated) original.copy(op = opposite(original.op), negated = false) else original
             val type = fieldType()
             val levelName = Level.entries.firstOrNull { it.name.equals(rule.value, ignoreCase = true) }
+            val bareLevel = type == ColumnType.LEVEL && rule.bare && levelName != null
+            val negated = rule.op == QueryOp.NOT_EQUALS || rule.op == QueryOp.NOT_EQUALS_CASE
             val (ruleOp, value) = when {
                 rule.op.comparison && type == ColumnType.LEVEL -> when (rule.op) {
                     QueryOp.AT_LEAST -> RuleOp.LEVEL_AT_LEAST
@@ -431,14 +447,14 @@ class QueryEditor(private val onApply: () -> Unit) : JPanel(MigLayout("insets 0,
                     QueryOp.AT_MOST -> RuleOp.TIME_TO
                     else -> RuleOp.TIME_BEFORE
                 } to rule.value
-                type == ColumnType.LEVEL && rule.bare && levelName != null && rule.op == QueryOp.EQUALS -> RuleOp.LEVEL_IS to rule.value
-                type == ColumnType.LEVEL && rule.bare && levelName != null && rule.op == QueryOp.NOT_EQUALS -> RuleOp.LEVEL_IS_NOT to rule.value
-                isPattern() -> (if (rule.op == QueryOp.NOT_EQUALS || rule.op == QueryOp.NOT_EQUALS_CASE) RuleOp.IS_NOT else RuleOp.IS) to rule.value
+                bareLevel && rule.op == QueryOp.EQUALS -> RuleOp.LEVEL_IS to rule.value
+                bareLevel && rule.op == QueryOp.NOT_EQUALS -> RuleOp.LEVEL_IS_NOT to rule.value
+                isPattern() -> (if (negated) RuleOp.IS_NOT else RuleOp.IS) to rule.value
                 rule.op == QueryOp.MATCHES -> RuleOp.MATCHES to rule.value
                 rule.op == QueryOp.NOT_MATCHES -> RuleOp.NOT_MATCHES to rule.value
                 // An empty value is a placeholder; show it as the default "contains".
                 rule.value.isEmpty() && rule.op == QueryOp.EQUALS -> RuleOp.CONTAINS to ""
-                else -> globShape(rule.value, negated = rule.op == QueryOp.NOT_EQUALS || rule.op == QueryOp.NOT_EQUALS_CASE)
+                else -> globShape(rule.value, negated)
             }
             case.isSelected = rule.op == QueryOp.EQUALS_CASE || rule.op == QueryOp.NOT_EQUALS_CASE
             if (levelName != null) level.selectedItem = levelName
@@ -467,7 +483,8 @@ class QueryEditor(private val onApply: () -> Unit) : JPanel(MigLayout("insets 0,
             return when {
                 n >= 2 && starAt(0) && starAt(n - 1) && noStars(1, n - 1) ->
                     (if (negated) RuleOp.NOT_CONTAINS else RuleOp.CONTAINS) to pattern.substring(1, n - 1)
-                !negated && n >= 1 && starAt(n - 1) && noStars(0, n - 1) -> RuleOp.STARTS_WITH to pattern.substring(0, n - 1)
+                !negated && n >= 1 && starAt(n - 1) && noStars(0, n - 1) ->
+                    RuleOp.STARTS_WITH to pattern.substring(0, n - 1)
                 !negated && n >= 1 && starAt(0) && noStars(1, n) -> RuleOp.ENDS_WITH to pattern.substring(1)
                 else -> (if (negated) RuleOp.IS_NOT else RuleOp.IS) to pattern
             }
@@ -487,7 +504,8 @@ class QueryEditor(private val onApply: () -> Unit) : JPanel(MigLayout("insets 0,
             // An empty row reads as `field == ""`, a placeholder that filters nothing.
             if (notEmpty) return Query.Rule(name, notEquals, "")
             if (value.isEmpty() && !selected.usesLevel) {
-                val placeholderOp = if (selected == RuleOp.MATCHES || selected == RuleOp.NOT_MATCHES) QueryOp.MATCHES else equals
+                val regex = selected == RuleOp.MATCHES || selected == RuleOp.NOT_MATCHES
+                val placeholderOp = if (regex) QueryOp.MATCHES else equals
                 return Query.Rule(name, placeholderOp, "")
             }
             val (queryOp, queryValue, bare) = when (selected) {

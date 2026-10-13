@@ -55,7 +55,10 @@ class ParsersPage(
 
     /** A parser kind as the kind selector offers it, with the settings shown for it. */
     private class KindChoice(val label: String, val kind: Parser.Kind, val settings: List<Setting>) {
-        fun parser(name: String): Parser? = settings.associate { it.key to it.field.text }.let { values -> kind.read(name) { values[it] } }
+        fun parser(name: String): Parser? {
+            val values = settings.associate { it.key to it.field.text }
+            return kind.read(name) { values[it] }
+        }
 
         override fun toString() = label
     }
@@ -164,7 +167,10 @@ class ParsersPage(
             nameField.text = parser?.name.orEmpty()
             kindBox.selectedItem = choices.firstOrNull { it.kind == parser?.kind } ?: choices.first()
             val properties = parser?.properties().orEmpty()
-            for (choice in choices) choice.settings.forEach { it.show(if (choice.kind == parser?.kind) properties else emptyMap()) }
+            for (choice in choices) {
+                val shown = if (choice.kind == parser?.kind) properties else emptyMap()
+                choice.settings.forEach { it.show(shown) }
+            }
             val editable = entry != null && !entry.builtIn
             deleteButton.isEnabled = entry != null
             (listOf(nameField, kindBox) + settings().map { it.field }).forEach { it.isEnabled = editable }
@@ -177,7 +183,8 @@ class ParsersPage(
 
     private fun kindChanged() {
         if (loadingEditor) return
-        // Carry over what the new kind shares with the one edited so far (the layout); role keys have defaults per kind.
+        // Carry over what the new kind shares with the one edited so far (the layout); role keys have defaults per
+        // kind.
         val properties = selected()?.parser?.properties().orEmpty()
         loadingEditor = true
         try {
@@ -287,7 +294,8 @@ class ParsersPage(
 
     private fun copyOf(parser: Parser): Parser = named(parser, uniqueName("${parser.name} copy"))
 
-    private fun named(parser: Parser, name: String): Parser = if (parser == Parser.Raw) newParser() else parser.withName(name)
+    private fun named(parser: Parser, name: String): Parser =
+        if (parser == Parser.Raw) newParser() else parser.withName(name)
 
     private fun userParsers() = (0..<entries.size).map { entries[it] }.filterNot { it.builtIn }.map { it.parser }
 
@@ -310,7 +318,8 @@ class ParsersPage(
 
     override fun applyTo(settings: Settings): Settings {
         val kept = builtIns()
-        return settings.copy(parsers = userParsers(), deletedBuiltIns = Parser.BUILT_IN.filter { it !in kept }.map { it.name }.toSet())
+        val deleted = Parser.BUILT_IN.filter { it !in kept }.map { it.name }.toSet()
+        return settings.copy(parsers = userParsers(), deletedBuiltIns = deleted)
     }
 
     private companion object {
@@ -319,7 +328,10 @@ class ParsersPage(
             KindChoice("log4j / logback pattern", Parser.Pattern, listOf(Setting("Layout:", "layout", ""))),
             KindChoice(
                 "Regex with named groups", Parser.Regex,
-                listOf(Setting("Layout:", "layout", ""), Setting("Timestamp:", "timestamp", Parser.Regex.DEFAULT_TIMESTAMP)),
+                listOf(
+                    Setting("Layout:", "layout", ""),
+                    Setting("Timestamp:", "timestamp", Parser.Regex.DEFAULT_TIMESTAMP),
+                ),
             ),
             KindChoice("JSON lines", Parser.Json, roleKeys(RoleKeys())),
             KindChoice("logfmt (key=value)", Parser.Logfmt, roleKeys(RoleKeys.LOGFMT)),

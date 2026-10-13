@@ -18,7 +18,13 @@ class OpeningPage : PreferencesPage("Opening Files", Icons.open) {
     private val modeLabel = JLabel("Open files:")
     private val mode = JComboBox(OpenMode.entries.toTypedArray()).apply {
         renderer = object : DefaultListCellRenderer() {
-            override fun getListCellRendererComponent(list: JList<*>?, value: Any?, index: Int, isSelected: Boolean, cellHasFocus: Boolean): Component =
+            override fun getListCellRendererComponent(
+                list: JList<*>?,
+                value: Any?,
+                index: Int,
+                isSelected: Boolean,
+                cellHasFocus: Boolean,
+            ): Component =
                 super.getListCellRendererComponent(list, label(value as OpenMode), index, isSelected, cellHasFocus)
         }
     }

@@ -49,7 +49,9 @@ class FileParsersTable(
     private val onChange: () -> Unit = {},
 ) {
     private val parsers: List<Parser?> = listOf(null) + AppSettings.current.knownParsers
-    private val chosen = HashMap<Path, Parser?>().apply { files.forEachIndexed { i, file -> put(file, initial.getOrNull(i)) } }
+    private val chosen = HashMap<Path, Parser?>().apply {
+        files.forEachIndexed { i, file -> put(file, initial.getOrNull(i)) }
+    }
     private val fileColumn = if (excludable) 1 else 0
     private val parserColumn = fileColumn + 1
     private val excluded = HashSet<Path>()
@@ -100,7 +102,9 @@ class FileParsersTable(
     val notReady: String?
         get() = when {
             included.isEmpty() -> "No files to open"
-            included.any { it in problems } -> "A file does not match its parser" + if (excludable) "; choose another or leave the file out" else ""
+            included.any { it in problems } && excludable ->
+                "A file does not match its parser; choose another or leave the file out"
+            included.any { it in problems } -> "A file does not match its parser"
             !allFit -> "Checking the files"
             else -> null
         }
@@ -124,8 +128,8 @@ class FileParsersTable(
             }
             columnModel.getColumn(parserColumn).preferredWidth = parserWidth()
             columnModel.getColumn(parserColumn).headerRenderer = ParserHeader()
-            columnModel.getColumn(parserColumn).cellEditor = DefaultCellEditor(JComboBox(parsers.toTypedArray()).apply { renderer = ParserRenderer() })
-                .apply { clickCountToStart = 1 }
+            val combo = JComboBox(parsers.toTypedArray()).apply { renderer = ParserRenderer() }
+            columnModel.getColumn(parserColumn).cellEditor = DefaultCellEditor(combo).apply { clickCountToStart = 1 }
             if (excludable) {
                 columnModel.getColumn(0).apply {
                     val width = tableHeader.getFontMetrics(tableHeader.font).stringWidth("Open") + 16
@@ -141,14 +145,19 @@ class FileParsersTable(
                     foreground = if (file in excluded) UIManager.getColor("Label.disabledForeground") else null
                     super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column)
                     val parser = value as Parser?
-                    text = ((if (parser == null) detected[file]?.let { "Auto: ${it.name}" } else null) ?: parserName(parser)) + "  ⌄"
+                    val auto = if (parser == null) detected[file]?.let { "Auto: ${it.name}" } else null
+                    text = (auto ?: parserName(parser)) + "  ⌄"
                     icon = when {
                         file in problems -> Icons.warning
                         file in fitting -> Icons.fits
                         else -> null
                     }
                     horizontalTextPosition = LEADING
-                    toolTipText = problems[file]?.let(::htmlLines) ?: if (file in fitting) "The parser fits the start of the file" else "Checking"
+                    toolTipText = when {
+                        file in problems -> htmlLines(problems.getValue(file))
+                        file in fitting -> "The parser fits the start of the file"
+                        else -> "Checking"
+                    }
                     return this
                 }
             }
@@ -160,7 +169,8 @@ class FileParsersTable(
         })
         fun height(rows: Int) = table.tableHeader.preferredSize.height + table.rowHeight * rows + 4
         val width = (0..<table.columnCount).sumOf { table.columnModel.getColumn(it).preferredWidth }
-        scrollPane.preferredSize = Dimension(width + scrollPane.verticalScrollBar.preferredSize.width + 4, height(files.size.coerceIn(3, 12)))
+        val scrollBar = scrollPane.verticalScrollBar.preferredSize.width
+        scrollPane.preferredSize = Dimension(width + scrollBar + 4, height(files.size.coerceIn(3, 12)))
         scrollPane.minimumSize = Dimension(0, height(3))
         files.forEach(::check)
     }
@@ -170,7 +180,10 @@ class FileParsersTable(
         scope.cancel()
     }
 
-    /** Checks [file] against its parser off the UI thread: the chosen one, or for Auto-detect the one detection picks. */
+    /**
+     * Checks [file] against its parser off the UI thread: the chosen one, or for Auto-detect the one detection
+     * picks.
+     */
     private fun check(file: Path) {
         checks.remove(file)?.cancel()
         problems.remove(file)
@@ -220,8 +233,12 @@ class FileParsersTable(
         val mismatched = included.filter { it in problems }
         warning.icon = if (mismatched.isEmpty()) null else Icons.warning
         warning.text = when {
-            mismatched.size == 1 -> "${names[files.indexOf(mismatched.single())]}: its first entries do not look like its parser expects."
-            mismatched.size > 1 -> "${mismatched.size} files: their first entries do not look like their parsers expect."
+            mismatched.size == 1 -> {
+                val name = names[files.indexOf(mismatched.single())]
+                "$name: its first entries do not look like its parser expects."
+            }
+            mismatched.size > 1 ->
+                "${mismatched.size} files: their first entries do not look like their parsers expect."
             included.any { it in checks } -> "Checking the files…"
             else -> " "
         }
@@ -257,7 +274,8 @@ class FileParsersTable(
             parserColumn -> "Parser"
             else -> "Open"
         }
-        override fun getColumnClass(column: Int): Class<*> = if (column < fileColumn) Boolean::class.javaObjectType else Any::class.java
+        override fun getColumnClass(column: Int): Class<*> =
+            if (column < fileColumn) Boolean::class.javaObjectType else Any::class.java
         override fun isCellEditable(row: Int, column: Int) = column != fileColumn
 
         override fun getValueAt(row: Int, column: Int): Any? {
@@ -295,7 +313,8 @@ class FileParsersTable(
             table: JTable, value: Any?, isSelected: Boolean, hasFocus: Boolean, row: Int, column: Int,
         ): Component {
             val listed = listedParsers()
-            headerCombo.model = DefaultComboBoxModel(arrayOf(if (listed.size == 1) parserName(listed.single()) else "Mixed"))
+            val label = if (listed.size == 1) parserName(listed.single()) else "Mixed"
+            headerCombo.model = DefaultComboBoxModel(arrayOf(label))
             headerCombo.isVisible = files.size > 1
             panel.background = table.tableHeader.background
             return panel
@@ -303,7 +322,13 @@ class FileParsersTable(
     }
 
     private class ParserRenderer : DefaultListCellRenderer() {
-        override fun getListCellRendererComponent(list: JList<*>?, value: Any?, index: Int, isSelected: Boolean, cellHasFocus: Boolean): Component =
+        override fun getListCellRendererComponent(
+            list: JList<*>?,
+            value: Any?,
+            index: Int,
+            isSelected: Boolean,
+            cellHasFocus: Boolean,
+        ): Component =
             super.getListCellRendererComponent(list, parserName(value as Parser?), index, isSelected, cellHasFocus)
     }
 
@@ -313,6 +338,9 @@ class FileParsersTable(
         fun parserName(parser: Parser?) = parser?.name ?: "Auto-detect"
 
         /** [text] as a tooltip keeping its line breaks. */
-        fun htmlLines(text: String) = "<html>" + text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br>") + "</html>"
+        fun htmlLines(text: String): String {
+            val escaped = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            return "<html>" + escaped.replace("\n", "<br>") + "</html>"
+        }
     }
 }

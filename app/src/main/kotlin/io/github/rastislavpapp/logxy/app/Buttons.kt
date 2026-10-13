@@ -13,7 +13,13 @@ import javax.swing.text.DocumentFilter
 import javax.swing.text.DocumentFilter.FilterBypass
 
 /** A flat button, as in a toolbar; not focusable unless [focusable], so clicking it leaves the focus where it was. */
-fun toolBarButton(icon: Icon?, tooltip: String, text: String = "", focusable: Boolean = false, action: (JButton) -> Unit) =
+fun toolBarButton(
+    icon: Icon?,
+    tooltip: String,
+    text: String = "",
+    focusable: Boolean = false,
+    action: (JButton) -> Unit,
+) =
     JButton(text, icon).apply {
         toolTipText = tooltip
         flat(focusable)

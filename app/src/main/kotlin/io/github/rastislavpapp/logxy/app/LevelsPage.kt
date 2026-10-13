@@ -85,7 +85,11 @@ class LevelsPage : PreferencesPage("Log Levels", Icons.levels) {
         override fun getValueAt(row: Int, column: Int): Any = if (column == 0) rows[row].name else rows[row].level
 
         override fun setValueAt(value: Any?, row: Int, column: Int) {
-            if (column == 0) rows[row].name = (value as String?).orEmpty() else rows[row].level = value as? Level ?: return
+            if (column == 0) {
+                rows[row].name = (value as String?).orEmpty()
+            } else {
+                rows[row].level = value as? Level ?: return
+            }
             fireTableCellUpdated(row, column)
         }
     }

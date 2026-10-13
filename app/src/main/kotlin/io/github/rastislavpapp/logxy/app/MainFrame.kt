@@ -117,7 +117,8 @@ class MainFrame : JFrame("logxy") {
         rootPane.putClientProperty(FlatClientProperties.TITLE_BAR_SHOW_TITLE, false)
 
         tabs.tabLayoutPolicy = JTabbedPane.SCROLL_TAB_LAYOUT
-        // Like IntelliJ's editor tabs: a darker strip, the selected tab in the content's color (joined to it), accent underline.
+        // Like IntelliJ's editor tabs: a darker strip, the selected tab in the content's color (joined to it), accent
+        // underline.
         tabs.putClientProperty(
             "FlatLaf.style",
             "tabHeight: 36; tabInsets: 4,14,4,10; showContentSeparator: true; " +
@@ -127,7 +128,8 @@ class MainFrame : JFrame("logxy") {
         )
         tabs.isOpaque = true
         tabs.putClientProperty(FlatClientProperties.TABBED_PANE_TAB_CLOSABLE, true)
-        tabs.putClientProperty(FlatClientProperties.TABBED_PANE_TAB_CLOSE_TOOLTIPTEXT, "Close (${keyText(KeyEvent.VK_W, shortcut)})")
+        val closeTooltip = "Close (${keyText(KeyEvent.VK_W, shortcut)})"
+        tabs.putClientProperty(FlatClientProperties.TABBED_PANE_TAB_CLOSE_TOOLTIPTEXT, closeTooltip)
         tabs.putClientProperty(FlatClientProperties.TABBED_PANE_TAB_CLOSE_CALLBACK, IntConsumer { closeTab(it) })
         tabs.addChangeListener {
             fileSlot.show(selectedTab()?.fileControls)
@@ -156,19 +158,26 @@ class MainFrame : JFrame("logxy") {
     private fun selectedTab() = tabs.selectedComponent as LogTab?
 
     private fun keyText(key: Int, modifiers: Int = 0) = KeyStroke.getKeyStroke(key, modifiers).toString()
-        .replace("pressed ", "").replace("ctrl", "Ctrl").replace("shift", "Shift").replace("meta", "⌘").replace(" ", "+")
+        .replace("pressed ", "")
+        .replace("ctrl", "Ctrl")
+        .replace("shift", "Shift")
+        .replace("meta", "⌘")
+        .replace(" ", "+")
 
-    private fun menuItem(text: String, icon: Icon?, key: Int?, modifiers: Int = 0, action: () -> Unit) = JMenuItem(text, icon).apply {
-        if (key != null) accelerator = KeyStroke.getKeyStroke(key, modifiers)
-        addActionListener { action() }
-    }
+    private fun menuItem(text: String, icon: Icon?, key: Int?, modifiers: Int = 0, action: () -> Unit) =
+        JMenuItem(text, icon).apply {
+            if (key != null) accelerator = KeyStroke.getKeyStroke(key, modifiers)
+            addActionListener { action() }
+        }
 
     private fun createMenuBar() = JMenuBar().apply {
         add(JMenu("File").apply {
             mnemonic = KeyEvent.VK_F
             add(menuItem("Open", Icons.open, KeyEvent.VK_O, shortcut) { chooseAndOpenFiles() })
             add(menuItem("Reload", Icons.refresh, KeyEvent.VK_F5) { selectedTab()?.reloadFile() })
-            add(menuItem("Close Tab", Icons.close, KeyEvent.VK_W, shortcut) { if (tabs.selectedIndex >= 0) closeTab(tabs.selectedIndex) })
+            add(menuItem("Close Tab", Icons.close, KeyEvent.VK_W, shortcut) {
+                if (tabs.selectedIndex >= 0) closeTab(tabs.selectedIndex)
+            })
             addSeparator()
             add(menuItem("Preferences", Icons.settings, KeyEvent.VK_S, shortcut or InputEvent.ALT_DOWN_MASK) {
                 PreferencesDialog(this@MainFrame, previewFile = selectedTab()?.path).isVisible = true
@@ -180,9 +189,13 @@ class MainFrame : JFrame("logxy") {
             mnemonic = KeyEvent.VK_E
             add(menuItem("Find", Icons.get("general/search"), KeyEvent.VK_F, shortcut) { selectedTab()?.showFind() })
             add(menuItem("Find Next", null, KeyEvent.VK_F3) { selectedTab()?.findNext(forward = true) })
-            add(menuItem("Find Previous", null, KeyEvent.VK_F3, InputEvent.SHIFT_DOWN_MASK) { selectedTab()?.findNext(forward = false) })
+            add(menuItem("Find Previous", null, KeyEvent.VK_F3, InputEvent.SHIFT_DOWN_MASK) {
+                selectedTab()?.findNext(forward = false)
+            })
             addSeparator()
-            add(menuItem("Edit Filter", Icons.filter, KeyEvent.VK_F, shortcut or InputEvent.SHIFT_DOWN_MASK) { selectedTab()?.focusFilter() })
+            add(menuItem("Edit Filter", Icons.filter, KeyEvent.VK_F, shortcut or InputEvent.SHIFT_DOWN_MASK) {
+                selectedTab()?.focusFilter()
+            })
         })
         add(JMenu("View").apply {
             mnemonic = KeyEvent.VK_V
@@ -191,7 +204,8 @@ class MainFrame : JFrame("logxy") {
                 toolTipText = "Menu and toolbar inside the window title, IntelliJ-style (applies after a restart)"
                 addActionListener {
                     AppState[AppState.TITLE_BAR] = isSelected.toString()
-                    JOptionPane.showMessageDialog(this@MainFrame, "The title bar changes when logxy is started again.", "Title Bar", JOptionPane.INFORMATION_MESSAGE)
+                    val message = "The title bar changes when logxy is started again."
+                    JOptionPane.showMessageDialog(this@MainFrame, message, "Title Bar", JOptionPane.INFORMATION_MESSAGE)
                 }
             })
         })
@@ -216,10 +230,11 @@ class MainFrame : JFrame("logxy") {
     private fun themeMenu() = JMenu("Theme").apply {
         icon = Icons.theme
         val group = ButtonGroup()
-        fun item(theme: ThemeInfo) = JRadioButtonMenuItem(theme.name, theme.className == Themes.current.className).apply {
-            group.add(this)
-            addActionListener { Themes.switchTo(theme) }
-        }
+        fun item(theme: ThemeInfo) =
+            JRadioButtonMenuItem(theme.name, theme.className == Themes.current.className).apply {
+                group.add(this)
+                addActionListener { Themes.switchTo(theme) }
+            }
         Themes.CORE.forEach { add(item(it)) }
         addSeparator()
         add(JMenu("More Dark Themes").apply { Themes.INTELLIJ.filter { it.dark }.forEach { add(item(it)) } })
@@ -263,7 +278,9 @@ class MainFrame : JFrame("logxy") {
             extractThen(archives) { files ->
                 tellLeftOut(archives)
                 tellNothingIn(found.empty + archives.filter { files[it].isNullOrEmpty() })
-                openFound(found.files.flatMap { item -> files[item.path]?.map { FoundFile(it, item.inSubfolder) } ?: listOf(item) })
+                openFound(found.files.flatMap { item ->
+                    files[item.path]?.map { FoundFile(it, item.inSubfolder) } ?: listOf(item)
+                })
             }.join()
         }
     }
@@ -282,7 +299,7 @@ class MainFrame : JFrame("logxy") {
         }
         tell(paths.first { Files.isDirectory(it) }, 0)
         walk = async(Dispatchers.IO) { OpenPlan.find(paths, ::tell) }
-        Timer(PROGRESS_DIALOG_DELAY_MILLIS) { if (!finished) dialog.isVisible = true }.apply { isRepeats = false }.start()
+        showLater(dialog) { finished }
         return try {
             walk.await()
         } catch (e: CancellationException) {
@@ -303,12 +320,16 @@ class MainFrame : JFrame("logxy") {
         val text = archives.mapNotNull { archive ->
             val left = spool.leftOutOf(archive).ifEmpty { return@mapNotNull null }
             val lines = left.take(MAX_LEFT_OUT_SHOWN).map { "    ${it.entry}: ${it.reason}" }
-            val more = if (left.size > MAX_LEFT_OUT_SHOWN) listOf("    …and ${left.size - MAX_LEFT_OUT_SHOWN} more") else emptyList()
+            val hidden = left.size - MAX_LEFT_OUT_SHOWN
+            val more = if (hidden > 0) listOf("    …and $hidden more") else emptyList()
             (listOf("$archive") + lines + more).joinToString("\n")
         }
         if (text.isEmpty()) return
         JOptionPane.showMessageDialog(
-            this, "These files are not opened:\n\n${text.joinToString("\n\n")}", "Files Left Out", JOptionPane.WARNING_MESSAGE,
+            this,
+            "These files are not opened:\n\n${text.joinToString("\n\n")}",
+            "Files Left Out",
+            JOptionPane.WARNING_MESSAGE,
         )
     }
 
@@ -326,13 +347,21 @@ class MainFrame : JFrame("logxy") {
     private fun openFound(found: List<FoundFile>) {
         val current = selectedTab()
         val settings = AppSettings.current
-        val answer = when (val decision = OpenPlan.decide(found, current?.paths, settings.openMode, settings.includeSubfolders)) {
+        val decision = OpenPlan.decide(found, current?.paths, settings.openMode, settings.includeSubfolders)
+        val answer = when (decision) {
             Decision.Nothing -> return
             is Decision.OpenOne -> return open(OpenMode.TABS, listOf(decision.path), listOf(null), current = null)
-            is Decision.Open -> OpenAnswer(decision.mode, decision.files, decision.files.map { null }, settings.includeSubfolders, remember = false)
+            is Decision.Open -> {
+                val parsers = decision.files.map { null }
+                OpenAnswer(decision.mode, decision.files, parsers, settings.includeSubfolders, remember = false)
+            }
             is Decision.Ask -> askHowToOpen(decision.files, decision.inSubfolders, current) ?: return
         }
-        if (answer.remember) AppSettings.updateOrShowError(this, AppSettings.current.copy(openMode = answer.mode, includeSubfolders = answer.includeSubfolders))
+        if (answer.remember) {
+            val remembered =
+                AppSettings.current.copy(openMode = answer.mode, includeSubfolders = answer.includeSubfolders)
+            AppSettings.updateOrShowError(this, remembered)
+        }
         open(answer.mode, answer.files, answer.parsers, current)
     }
 
@@ -367,24 +396,34 @@ class MainFrame : JFrame("logxy") {
         tabs.selectedIndex,
     )
 
-    /** Opens files given on the command line, or the tabs from [tabArgs]: each file group in a tab, merged if several. */
+    /**
+     * Opens files given on the command line, or the tabs from [tabArgs]: each file group in a tab, merged if
+     * several.
+     */
     fun openArgs(args: List<String>) {
         val reopen = SessionArgs.read(args) ?: return openFiles(args.map { Path.of(it) })
         val args = reopen.sessions.flatMap { it.paths }
         val zips = args.mapNotNull(ZipSpool::parseOrigin).map { it.zip }
         // Decompressed files are saved as their .gz or .zst, and decompressed again.
-        val compressed = args.filter { ZipSpool.parseOrigin(it) == null }.map { Path.of(it).toAbsolutePath().normalize() }
+        val compressed = args
+            .filter { ZipSpool.parseOrigin(it) == null }
+            .map { Path.of(it).toAbsolutePath().normalize() }
             .filter { CompressedSpool.formatOf(it) != null }
         val archives = (zips + compressed).distinct()
         if (archives.isEmpty()) return openRestored(reopen) { Path.of(it) }
         extractThen(archives) { files ->
             openRestored(reopen) { arg ->
-                ZipSpool.parseOrigin(arg)?.let(spool::extractedFile) ?: Path.of(arg).let { files[it.toAbsolutePath().normalize()]?.singleOrNull() ?: it }
+                ZipSpool.parseOrigin(arg)?.let(spool::extractedFile)?.let { return@openRestored it }
+                val path = Path.of(arg)
+                files[path.toAbsolutePath().normalize()]?.singleOrNull() ?: path
             }
         }
     }
 
-    /** Opens a tab for each of [restored]'s sessions with its parsers and filter, its paths read with [path], then selects one. */
+    /**
+     * Opens a tab for each of [restored]'s sessions with its parsers and filter, its paths read with [path], then
+     * selects one.
+     */
     private fun openRestored(restored: Reopen, path: (String) -> Path) {
         val sessions = restored.sessions.map { session ->
             val openable = session.paths.map(path).zip(session.parsers).filter { (file, _) -> checkOpenable(file) }
@@ -430,16 +469,25 @@ class MainFrame : JFrame("logxy") {
             // Only once finished: the timer fires while the message is open and would show the progress dialog over it.
             error?.let { e ->
                 JOptionPane.showMessageDialog(
-                    this@MainFrame, "$failure:\n${e.message ?: e.javaClass.simpleName}", "Cannot Open File", JOptionPane.ERROR_MESSAGE,
+                    this@MainFrame,
+                    "$failure:\n${e.message ?: e.javaClass.simpleName}",
+                    "Cannot Open File",
+                    JOptionPane.ERROR_MESSAGE,
                 )
                 return@launch
             }
             then(files)
         }
-        // Quick ones finish before the dialog would only flash.
         // Not job.isActive: the job is still running while [then] asks how to open the files.
-        Timer(PROGRESS_DIALOG_DELAY_MILLIS) { if (!finished) dialog.isVisible = true }.apply { isRepeats = false }.start()
+        showLater(dialog) { finished }
         return job
+    }
+
+    /** Shows [dialog] after a moment unless [finished] by then: quick work finishes before it would only flash. */
+    private fun showLater(dialog: OpeningProgressDialog, finished: () -> Boolean) {
+        val timer = Timer(PROGRESS_DIALOG_DELAY_MILLIS) { if (!finished()) dialog.isVisible = true }
+        timer.isRepeats = false
+        timer.start()
     }
 
     /** Opens each of [paths] in a tab of its own. */
@@ -462,7 +510,9 @@ class MainFrame : JFrame("logxy") {
     }
 
     private fun insertTab(index: Int, session: SessionFiles) {
-        val tab = LogTab(session.paths, ::openFiles, ::openEach, session.filter, ::originOf, session.parsers) { updateStatus() }
+        val tab = LogTab(session.paths, ::openFiles, ::openEach, session.filter, ::originOf, session.parsers) {
+            updateStatus()
+        }
         tabs.insertTab(tab.title, if (tab.isMerged) Icons.merged else Icons.logFile, tab, tab.description, index)
         tabs.selectedIndex = index
         cards.show(center, CARD_TABS)
@@ -517,7 +567,9 @@ class MainFrame : JFrame("logxy") {
         popup.addSeparator()
         popup.add(JMenuItem(if (tab.isMerged) "Copy Paths" else "Copy Path", Icons.copy).apply {
             // Extracted files by their zip or compressed file, as the tab's tooltip names them.
-            addActionListener { Toolkit.getDefaultToolkit().systemClipboard.setContents(StringSelection(tab.description), null) }
+            addActionListener {
+                Toolkit.getDefaultToolkit().systemClipboard.setContents(StringSelection(tab.description), null)
+            }
         })
         popup.show(tabs, e.x, e.y)
     }
@@ -538,13 +590,19 @@ class MainFrame : JFrame("logxy") {
         } else {
             val status = tab.status
             val numbers = NumberFormat.getIntegerInstance()
-            val location = if (tab.isMerged) tab.sourceNames.joinToString(", ") else (originOf(tab.path) ?: tab.path).toString()
-            statusBar.add(JLabel(location).apply { toolTipText = "<html>" + tab.description.replace("\n", "<br>") + "</html>" }, "growx, wmin 0")
+            val location = if (tab.isMerged) {
+                tab.sourceNames.joinToString(", ")
+            } else {
+                (originOf(tab.path) ?: tab.path).toString()
+            }
+            val locationTooltip = "<html>" + tab.description.replace("\n", "<br>") + "</html>"
+            statusBar.add(JLabel(location).apply { toolTipText = locationTooltip }, "growx, wmin 0")
             fun segment(component: JComponent) {
                 statusBar.add(JSeparator(SwingConstants.VERTICAL), "growy, gap 10 10")
                 statusBar.add(component)
             }
-            status.message?.let { segment(JLabel(it).apply { foreground = UIManager.getColor("Label.disabledForeground") }) }
+            fun muted(text: String) = JLabel(text).apply { foreground = UIManager.getColor("Label.disabledForeground") }
+            status.message?.let { segment(muted(it)) }
             if (status.records != null) {
                 val unit = status.unit + if (status.records == 1) "" else "s"
                 val text = when {
@@ -582,7 +640,7 @@ class MainFrame : JFrame("logxy") {
                     }
                 })
             }
-            status.indexMillis?.let { segment(JLabel("indexed in ${numbers.format(it)} ms").apply { foreground = UIManager.getColor("Label.disabledForeground") }) }
+            status.indexMillis?.let { segment(muted("indexed in ${numbers.format(it)} ms")) }
         }
         statusBar.revalidate()
         statusBar.repaint()

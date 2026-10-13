@@ -33,7 +33,8 @@ object AppSettings : SettingsStore {
         update(settings)
         true
     } catch (e: Exception) {
-        JOptionPane.showMessageDialog(parent, "Cannot write $path:\n${e.message}", "Cannot Save", JOptionPane.ERROR_MESSAGE)
+        val message = "Cannot write $path:\n${e.message}"
+        JOptionPane.showMessageDialog(parent, message, "Cannot Save", JOptionPane.ERROR_MESSAGE)
         false
     }
 

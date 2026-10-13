@@ -49,7 +49,8 @@ class MemoryPage : PreferencesPage("Memory", Icons.memory) {
         add(JLabel("GB"))
     }
 
-    override fun applyTo(settings: Settings) = settings.copy(maxMemory = if (custom.isSelected) "${gigabytes.value}g" else null)
+    override fun applyTo(settings: Settings) =
+        settings.copy(maxMemory = if (custom.isSelected) "${gigabytes.value}g" else null)
 
     /** Whole gigabytes for a saved limit such as `8g` or `6144m`, at least 1. */
     private fun gigabytesOf(limit: String): Int {
