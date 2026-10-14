@@ -17,11 +17,15 @@ private const val USAGE = """Usage:
                                         a night batch, slowly growing warnings, an incident with a restart gap at
                                         14:20 and an error spike at 19:40
   benchmark <file> [--iterations N]     compare line-indexing strategies on a file
-  parse <file> [--iterations N] [--pattern LAYOUT]
-                                        measure parsing with the detected parser, or the given pattern layout
-  filter <file> [--iterations N]        measure typical filters on the parsed file, best and median of N first runs
-  merge <file> <file>... [--iterations N] [--read-channels N]
+  parse <file>... [--iterations N] [--forks N] [--pattern LAYOUT]
+                                        measure parsing one file with the detected parser, or the given pattern
+                                        layout; several files one by one and at once
+  filter <file> [--iterations N] [--forks N]
+                                        measure typical filters, counting patterns and times on the parsed file
+  merge <file> <file>... [--iterations N] [--forks N] [--read-channels N]
                                         measure merging files and filtering the merged view
+                                        parse, filter and merge time N runs (after uncounted ones) in each of
+                                        --forks JVMs (default 1) and show the spread between runs, or JVMs
   simulate <file> [--rate N] [--rotate-at SIZE] [--mdc] [--json] [--rabbitmq]
                                         append lines like a running application (N per second, default 20),
                                         optionally rotating file -> file.1 -> ... at SIZE; Ctrl+C stops
@@ -35,6 +39,7 @@ fun main(args: Array<String>) {
     }
     fun flag(name: String) = "--$name" in args
     fun option(name: String): String? = args.indexOf("--$name").takeIf { it >= 0 }?.let { args.getOrNull(it + 1) }
+    fun runs(iterations: Int) = Runs(option("iterations")?.toInt() ?: iterations, option("forks")?.toInt() ?: 1)
 
     when (positional.firstOrNull()) {
         "generate" if positional.size == 3 ->
@@ -50,16 +55,12 @@ fun main(args: Array<String>) {
             )
         "benchmark" if positional.size == 2 ->
             benchmarkIndexing(Path.of(positional[1]), option("iterations")?.toInt() ?: 5)
-        "parse" if positional.size == 2 ->
-            benchmarkParsing(Path.of(positional[1]), option("iterations")?.toInt() ?: 3, option("pattern"))
+        "parse" if positional.size >= 2 ->
+            benchmarkParsing(positional.drop(1).map { Path.of(it) }, runs(3), option("pattern"))
         "filter" if positional.size == 2 ->
-            benchmarkFiltering(Path.of(positional[1]), option("iterations")?.toInt() ?: 5)
+            benchmarkFiltering(Path.of(positional[1]), runs(5))
         "merge" if positional.size >= 3 ->
-            benchmarkMerging(
-                positional.drop(1).map { Path.of(it) },
-                option("iterations")?.toInt() ?: 3,
-                option("read-channels")?.toInt(),
-            )
+            benchmarkMerging(positional.drop(1).map { Path.of(it) }, runs(3), option("read-channels")?.toInt())
         "simulate" if positional.size == 2 ->
             simulateLogging(
                 Path.of(positional[1]),

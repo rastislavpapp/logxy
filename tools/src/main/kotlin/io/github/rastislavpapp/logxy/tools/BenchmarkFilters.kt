@@ -35,3 +35,12 @@ val benchmarkFilters: List<Pair<String, Filter>> = listOf(
     "search regex 'com\\.example\\.\\w+\\.api\\.' in records" to
         RecordTextCondition(TextOp.MATCHES, "com\\.example\\.\\w+\\.api\\.", ignoreCase = true),
 )
+
+/**
+ * Typical filters on the merged view of generated logs, by name: `tools merge` times them, and the baseline check
+ * records each as `merge: filter <name>`.
+ */
+val mergedBenchmarkFilters: List<Pair<String, Filter>> = listOf(
+    "level >= WARN" to warn,
+    "message contains 'timeout'" to TextCondition("Message", TextOp.EQUALS, "*timeout*"),
+)
