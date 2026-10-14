@@ -32,5 +32,7 @@ tasks.register<Test>("benchmark") {
     maxHeapSize = "8g"
     outputs.upToDateWhen { false }
     providers.gradleProperty("baselineTolerance").orNull?.let { systemProperty("baseline.tolerance", it) }
+    // The comparison table is the result, so it shows also with -q, as AGENTS.md runs it.
     testLogging.showStandardStreams = true
+    testLogging.quiet.showStandardStreams = true
 }
