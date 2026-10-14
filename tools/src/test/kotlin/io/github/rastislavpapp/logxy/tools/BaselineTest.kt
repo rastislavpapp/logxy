@@ -106,10 +106,17 @@ private fun load(file: Path): Properties? =
 private fun Properties.matches(machine: Map<String, String>) =
     machine.all { (key, value) -> getProperty(key) in setOf(null, value) }
 
+/**
+ * Whether the baseline was recorded with [FORKS] JVMs per row. A check may still compare with one recorded
+ * differently, e.g. a quick `-PbenchmarkForks=1`, but its rows are noisier then.
+ */
+private fun Properties.sameForks() = getProperty("forks") == FORKS.toString()
+
 private fun save(file: Path, machine: Map<String, String>, results: Map<String, Timings>, kept: Properties? = null) {
     val props = Properties()
     kept?.let { props.putAll(it) }
     props["setup"] = SETUP
+    props["forks"] = FORKS.toString()
     props.putAll(machine)
     for ((name, times) in results) props.putIfAbsent(name, "%.4f".format(Locale.ROOT, times.best))
     val comment = if (file == BASELINE_FILE) {
@@ -122,16 +129,16 @@ private fun save(file: Path, machine: Map<String, String>, results: Map<String, 
 }
 
 /**
- * Set by `-PbaselineRecord`: measures and writes the rows the baseline lacks into it (all of them if its setup
- * changed) instead of comparing. It writes the committed baseline when that was saved on this machine or is
- * missing, the local one otherwise.
+ * Set by `-PbaselineRecord`: measures and writes the rows the baseline lacks into it (all of them if its setup or
+ * its JVMs per row changed) instead of comparing. It writes the committed baseline when that was saved on this
+ * machine or is missing, the local one otherwise.
  */
 private val RECORD = System.getProperty("baseline.record") != null
 
 private fun recordBaseline(committed: Properties?, local: Properties?, machine: Map<String, String>) {
     val file = if (committed == null || committed.matches(machine)) BASELINE_FILE else LOCAL_BASELINE_FILE
     val saved = if (file == BASELINE_FILE) committed else local
-    val kept = saved?.takeIf { it.getProperty("setup") == SETUP && it.matches(machine) }
+    val kept = saved?.takeIf { it.getProperty("setup") == SETUP && it.sameForks() && it.matches(machine) }
     val results = measureAll()
     val added = results.keys.filter { kept?.getProperty(it) == null }
     save(file, machine, results, kept)
@@ -172,6 +179,9 @@ class BaselineTest {
             "`./gradlew :tools:benchmark -PbaselineRecord`."
         assertEquals(SETUP, saved.getProperty("setup"), message)
         println("Comparing with $file")
+        if (!saved.sameForks()) {
+            println("The baseline was recorded with ${saved.getProperty("forks")} JVMs per row, this run uses $FORKS.")
+        }
         val tolerance = TOLERANCE / 100
         val results = measureAll()
         println()
