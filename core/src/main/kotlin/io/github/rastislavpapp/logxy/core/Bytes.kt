@@ -29,6 +29,31 @@ internal object Bytes {
         return -1
     }
 
+    /**
+     * As [indexOf], folding ASCII case: [needle] must be ASCII lower case already, and matches its letters in
+     * either case.
+     */
+    fun indexOfIgnoreAsciiCase(bytes: ByteArray, needle: ByteArray, from: Int, to: Int): Int {
+        if (needle.isEmpty()) return from
+        val first = needle[0]
+        val firstUpper = upperAscii(first)
+        for (i in from..to - needle.size) {
+            val b = bytes[i]
+            if ((b == first || b == firstUpper) && regionMatchesIgnoreAsciiCase(bytes, i, needle)) return i
+        }
+        return -1
+    }
+
+    /** Whether `bytes` at [at] holds the ASCII lower-case [needle] in any ASCII case; the caller checks bounds. */
+    fun regionMatchesIgnoreAsciiCase(bytes: ByteArray, at: Int, needle: ByteArray): Boolean {
+        for (i in needle.indices) if (lowerAscii(bytes[at + i]) != needle[i]) return false
+        return true
+    }
+
+    fun lowerAscii(b: Byte): Byte = if (b in UPPER_A..UPPER_Z) (b + CASE_OFFSET).toByte() else b
+
+    private fun upperAscii(b: Byte): Byte = if (b in LOWER_A..LOWER_Z) (b - CASE_OFFSET).toByte() else b
+
     /** Last position of [needle] in `bytes[from, to)`, or -1; an empty needle is found at [to]. */
     fun lastIndexOf(bytes: ByteArray, needle: ByteArray, from: Int, to: Int): Int {
         if (needle.isEmpty()) return to
@@ -114,4 +139,9 @@ internal object Bytes {
     private const val DOT = '.'.code.toByte()
     private const val ZERO = '0'.code.toByte()
     private const val NINE = '9'.code.toByte()
+    private const val UPPER_A = 'A'.code.toByte()
+    private const val UPPER_Z = 'Z'.code.toByte()
+    private const val LOWER_A = 'a'.code.toByte()
+    private const val LOWER_Z = 'z'.code.toByte()
+    private const val CASE_OFFSET = 'a' - 'A'
 }

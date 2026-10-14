@@ -69,6 +69,9 @@ class FilterEngineTest {
             assertEquals(emptyList(), find(TextSearch("Db.java:4*")))
             assertEquals(listOf(4), find(TextSearch("tick", wholeWords = true)))
             assertEquals(emptyList(), find(TextSearch("tic", wholeWords = true)))
+            assertEquals(listOf(2), find(TextSearch("sqlexception", wholeWords = true)))
+            assertEquals(emptyList(), find(TextSearch("SQLExcept", wholeWords = true)))
+            assertEquals(emptyList(), find(TextSearch("timeout", wholeWords = true, matchCase = true)))
             assertEquals(listOf(3), find(TextSearch("worker-\\d] WARN", regex = true)))
             assertFailsWith<QueryException> { TextSearch("(", regex = true).condition() }
         }
@@ -156,6 +159,12 @@ class FilterEngineTest {
             val neither = message(TextOp.NOT_MATCHES, "slow|timeout", ignoreCase = true)
             assertEquals(listOf(0, 1, 2, 4), engine.rows(neither))
             assertEquals(listOf(3), engine.rows(message(TextOp.MATCHES, "/orders$")))
+            // Regexes whose fixed text a byte search looks for first.
+            assertEquals(listOf(5), engine.rows(message(TextOp.MATCHES, "timeout calling \\w+", ignoreCase = true)))
+            assertEquals(listOf(), engine.rows(message(TextOp.MATCHES, "timeout after \\d+ ms", ignoreCase = true)))
+            assertEquals(listOf(0, 1, 2, 3, 4, 5), engine.rows(message(TextOp.NOT_MATCHES, "never \\d+ here")))
+            assertEquals(listOf(5), engine.rows(message(TextOp.MATCHES, "calling (?-i)BILLING", ignoreCase = true)))
+            assertEquals(listOf(), engine.rows(message(TextOp.MATCHES, "calling (?-i)billing", ignoreCase = true)))
         }
         val file = Files.writeString(dir.resolve("stars.log"), "a*b\naxb\n")
         runBlocking { LineIndex.build(file) }.use { log ->

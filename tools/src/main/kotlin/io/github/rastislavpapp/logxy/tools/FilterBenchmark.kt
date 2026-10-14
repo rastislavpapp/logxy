@@ -10,6 +10,7 @@ import io.github.rastislavpapp.logxy.core.formatByteSize
 import io.github.rastislavpapp.logxy.core.log.Level
 import io.github.rastislavpapp.logxy.core.log.ParsedLog
 import io.github.rastislavpapp.logxy.core.parse.Parser
+import io.github.rastislavpapp.logxy.core.query.TextSearch
 import kotlinx.coroutines.runBlocking
 import java.nio.file.Files
 import java.nio.file.Path
@@ -36,7 +37,13 @@ fun benchmarkFiltering(file: Path) {
         "not (level >= WARN) or thread = main" to
             Filter.Or(listOf(Filter.Not(warn), TextCondition("Thread", TextOp.EQUALS, "main"))),
         "message matches regex 'order \\d{6}:'" to TextCondition("Message", TextOp.MATCHES, "order \\d{6}:"),
+        "message matches 'timeout after \\d+ ms', any case" to
+            TextCondition("Message", TextOp.MATCHES, "timeout after \\d+ ms", ignoreCase = true),
         "search 'timeout' in whole records" to RecordTextCondition(TextOp.EQUALS, "*timeout*", ignoreCase = true),
+        "search whole word 'timeout' in whole records" to TextSearch("timeout", wholeWords = true).condition(),
+        // Its fixed text is in every record, so the byte search only adds to the regex.
+        "search regex 'com\\.example\\.\\w+\\.api\\.' in records" to
+            RecordTextCondition(TextOp.MATCHES, "com\\.example\\.\\w+\\.api\\.", ignoreCase = true),
     )
     log.use {
         val engine = FilterEngine(log)
