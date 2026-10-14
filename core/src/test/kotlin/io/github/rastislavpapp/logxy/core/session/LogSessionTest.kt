@@ -1,6 +1,7 @@
 package io.github.rastislavpapp.logxy.core.session
 
 import io.github.rastislavpapp.logxy.core.config.Settings
+import io.github.rastislavpapp.logxy.core.filter.ChunkListener
 import io.github.rastislavpapp.logxy.core.filter.Filter
 import io.github.rastislavpapp.logxy.core.filter.FilterResult
 import io.github.rastislavpapp.logxy.core.filter.LevelCondition
@@ -448,17 +449,229 @@ class LogSessionTest {
                 searchedFrom += from
                 if (!searchFails) return prepared
                 return object : PreparedFilter by prepared {
-                    override suspend fun run(): FilterResult = throw IllegalStateException("Disk on fire")
+                    override suspend fun run(onChunk: ChunkListener?): FilterResult =
+                        throw IllegalStateException("Disk on fire")
                 }
             }
             val gate = gate
             return object : PreparedFilter by prepared {
-                override suspend fun run(): FilterResult {
+                override suspend fun run(onChunk: ChunkListener?): FilterResult {
                     gate.await()
-                    return prepared.run()
+                    return prepared.run(onChunk)
                 }
             }
         }
+    }
+
+    /**
+     * Stands in for the engine's search over all records: reports the chunks the test gives with [chunk] and the
+     * result with [finish]. Searches of appended records are the engine's own.
+     */
+    private class Scripted(private val engine: RecordFilter, private val search: Filter) : RecordFilter by engine {
+        private val listener = CompletableDeferred<ChunkListener?>()
+        private val result = CompletableDeferred<IntArray>()
+        var recordCount = 0
+
+        override fun prepare(filter: Filter, from: Int): PreparedFilter {
+            val prepared = engine.prepare(filter, from)
+            if (from > 0 || !(filter == search || (filter is Filter.And && search in filter.parts))) return prepared
+            return object : PreparedFilter by prepared {
+                override val progress = 0.5
+
+                override suspend fun run(onChunk: ChunkListener?): FilterResult {
+                    listener.complete(onChunk)
+                    val rows = result.await()
+                    return FilterResult(rows, 0, recordCount, Files.size(file))
+                }
+            }
+        }
+
+        lateinit var file: Path
+
+        /** Reports the matches among the records `[first, end)` from a thread of its own, as the engine does. */
+        suspend fun chunk(first: Int, end: Int, vararg records: Int) {
+            val onChunk = listener.await() ?: error("The search reports no chunks")
+            Thread { onChunk.chunkDone(first, end, records) }.apply { start() }.join()
+        }
+
+        /** Ends the search with all [records] found. */
+        fun finish(vararg records: Int) {
+            result.complete(records)
+        }
+    }
+
+    private suspend fun openScripted(file: Path, search: TextSearch): Triple<LogSession, ShownLog, Scripted> {
+        var scripted: Scripted? = null
+        val recorder = Recorder()
+        val session = withContext(ui) {
+            LogSession(listOf(file), scope, NoSettings, recorder, { null }, emptyList()) { loaded ->
+                Scripted(loaded.newFilter(), search.condition()).also {
+                    it.file = file
+                    scripted = it
+                }
+            }.also { it.start() }
+        }
+        val shown = withTimeout(10_000) { recorder.loads.receive() }
+        val engine = scripted!!
+        engine.recordCount = withContext(ui) { session.records!!.recordCount }
+        return Triple(session, shown, engine)
+    }
+
+    /** Runs [check] on the UI thread until it holds: the session handles a chunk reported on another thread there. */
+    private suspend fun awaitUi(check: () -> Boolean) = withTimeout(10_000) {
+        while (!withContext(ui) { check() }) delay(10)
+    }
+
+    /** [count] lines from number [first] on, whose records are one second apart. */
+    private fun secondLines(count: Int, first: Int = 0) = buildString {
+        for (i in first..<first + count) {
+            append("2026-10-01 08:%02d:%02d.000 [main] INFO  app.L - message %d\n".format(i / 60, i % 60, i))
+        }
+    }
+
+    /** Matches of the histogram [of] in the records `[first, last]`, by their times. */
+    private fun ShownLog.inHistogram(of: TimeHistogram, first: Int, last: Int): Int {
+        val from = timestamp(first)!!
+        val to = timestamp(last)!! + 1
+        return (of.firstBin..of.lastBin).filter { of.binStart(it) in from..<to }.sumOf { bin ->
+            (0..<TimeHistogram.CATEGORIES).sumOf { of.count(it, bin) }
+        }
+    }
+
+    @Test
+    fun `a search reports matches chunk by chunk and never skips one that is not decided`() = runBlocking {
+        val file = Files.writeString(dir.resolve("chunks.log"), secondLines(100))
+        val search = TextSearch("message")
+        val (session, shown, scripted) = openScripted(file, search)
+        withContext(ui) { session.search(search) }
+        // The last chunk arrives first.
+        scripted.chunk(80, 100, 85)
+        awaitUi { shown.foundCount == 1 }
+        withContext(ui) {
+            assertTrue(shown.isSearching)
+            assertEquals(0, shown.foundPosition(85), "records before it are not searched")
+            assertEquals(NOT_YET_FOUND, shown.nextFound(10, forward = true, inclusive = false))
+        }
+        scripted.chunk(0, 40, 5, 7)
+        awaitUi { shown.foundCount == 3 }
+        withContext(ui) {
+            assertEquals(1, shown.foundPosition(5))
+            assertEquals(0, shown.foundPosition(85))
+            // The first match from the current record on is certain, as nothing between can match.
+            assertEquals(5, shown.nextFound(3, forward = true, inclusive = true))
+            assertEquals(7, shown.nextFound(5, forward = true, inclusive = false))
+            // Records 40 to 79 may hold a match between 7 and 85.
+            assertEquals(NOT_YET_FOUND, shown.nextFound(7, forward = true, inclusive = false))
+            assertEquals(NOT_YET_FOUND, shown.nextFound(85, forward = false, inclusive = false))
+        }
+        scripted.chunk(40, 80, 50)
+        awaitUi { shown.foundCount == 4 }
+        withContext(ui) {
+            assertEquals(50, shown.nextFound(7, forward = true, inclusive = false))
+            assertEquals(4, shown.foundPosition(85))
+        }
+        scripted.finish(5, 7, 50, 85)
+        awaitUi { !shown.isSearching }
+        withContext(ui) {
+            assertEquals(4, shown.foundCount)
+            assertEquals(50, shown.nextFound(7, forward = true, inclusive = false))
+        }
+    }
+
+    @Test
+    fun `next and previous wrap around only once nothing can still match`() = runBlocking {
+        val file = Files.writeString(dir.resolve("wrap.log"), secondLines(100))
+        val search = TextSearch("message")
+        val (session, shown, scripted) = openScripted(file, search)
+        withContext(ui) { session.search(search) }
+        scripted.chunk(80, 100, 85)
+        scripted.chunk(0, 40)
+        awaitUi { shown.foundCount == 1 }
+        withContext(ui) {
+            // Records 40 to 79 are undecided: a match there would come before 85 after wrapping.
+            assertEquals(NOT_YET_FOUND, shown.nextFound(85, forward = true, inclusive = false))
+            assertEquals(NOT_YET_FOUND, shown.nextFound(85, forward = false, inclusive = false))
+            // Wrapping backwards from the start, nothing after 85 is left to match.
+            assertEquals(85, shown.nextFound(10, forward = false, inclusive = false))
+        }
+        scripted.chunk(40, 80, 60)
+        awaitUi { shown.foundCount == 2 }
+        withContext(ui) {
+            assertEquals(60, shown.nextFound(85, forward = true, inclusive = false))
+            assertEquals(85, shown.nextFound(10, forward = false, inclusive = false))
+            assertEquals(85, shown.nextFound(60, forward = true, inclusive = false))
+        }
+    }
+
+    @Test
+    fun `a search that is nowhere else found wraps to its only match`() = runBlocking {
+        val file = Files.writeString(dir.resolve("only.log"), secondLines(100))
+        val search = TextSearch("message")
+        val (session, shown, scripted) = openScripted(file, search)
+        withContext(ui) { session.search(search) }
+        scripted.chunk(0, 50, 20)
+        scripted.chunk(50, 100)
+        awaitUi { shown.foundCount == 1 && shown.foundPosition(20) == 1 }
+        withContext(ui) {
+            assertEquals(20, shown.nextFound(20, forward = true, inclusive = false))
+            assertEquals(20, shown.nextFound(70, forward = true, inclusive = false))
+            assertEquals(20, shown.nextFound(70, forward = false, inclusive = false))
+        }
+    }
+
+    @Test
+    fun `the found histogram fills in with the chunks and stays when the search ends`() = runBlocking {
+        val file = Files.writeString(dir.resolve("found-histogram.log"), secondLines(100))
+        val search = TextSearch("message")
+        val (session, shown, scripted) = openScripted(file, search)
+        withContext(ui) { session.search(search) }
+        assertEquals(null, withContext(ui) { session.foundHistogram?.takeIf { !it.isEmpty } })
+        scripted.chunk(80, 100, 85, 86, 90)
+        awaitUi { session.foundHistogram?.isEmpty == false }
+        withContext(ui) {
+            val histogram = session.foundHistogram!!
+            assertEquals(3, shown.inHistogram(histogram, 80, 99))
+            assertEquals(0, shown.inHistogram(histogram, 0, 79))
+        }
+        scripted.chunk(0, 40, 5)
+        awaitUi { session.foundHistogram?.let { shown.inHistogram(it, 0, 39) } == 1 }
+        scripted.finish(5, 85, 86, 90)
+        awaitUi { !shown.isSearching }
+        withContext(ui) { assertEquals(4, shown.inHistogram(session.foundHistogram!!, 0, 99)) }
+        // A new search clears it at once.
+        withContext(ui) {
+            session.search(TextSearch("nothing"))
+            assertEquals(null, session.foundHistogram?.takeIf { !it.isEmpty })
+        }
+    }
+
+    @Test
+    fun `a search that reports no chunks still gets its histogram`() = runBlocking {
+        val file = Files.writeString(dir.resolve("all-at-once.log"), secondLines(100))
+        val search = TextSearch("message")
+        val (session, shown, scripted) = openScripted(file, search)
+        withContext(ui) { session.search(search) }
+        scripted.finish(3, 4, 99)
+        awaitUi { !shown.isSearching && session.foundHistogram?.isEmpty == false }
+        withContext(ui) { assertEquals(3, shown.inHistogram(session.foundHistogram!!, 0, 99)) }
+    }
+
+    @Test
+    fun `the found histogram follows appended records`() = runBlocking {
+        val file = Files.writeString(dir.resolve("follow-histogram.log"), secondLines(100))
+        val search = TextSearch("message 1")
+        val (session, shown) = open(file, Recorder())
+        withContext(ui) { session.search(search) }
+        awaitFound(session, listOf(file), null, search)
+        // Messages 1 and 10 to 19.
+        awaitUi { session.foundHistogram?.let { shown.inHistogram(it, 0, 99) } == 11 }
+        append(file, secondLines(100, first = 100))
+        val expected = awaitFound(session, listOf(file), null, search)
+        awaitUi { session.foundHistogram?.let { shown.inHistogram(it, 0, 199) } == expected.size }
+        // The last record is searched again with what is appended: its match must not be counted twice.
+        append(file, secondLines(100, first = 200))
+        val more = awaitFound(session, listOf(file), null, search)
+        awaitUi { session.foundHistogram?.let { shown.inHistogram(it, 0, 299) } == more.size }
     }
 
     private suspend fun openRecording(file: Path, search: TextSearch): Triple<LogSession, ShownLog, Recording> {

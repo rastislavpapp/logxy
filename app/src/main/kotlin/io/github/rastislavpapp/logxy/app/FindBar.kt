@@ -128,16 +128,16 @@ class FindBar(
     }
 
     /**
-     * Shows how many records match: [total], null while searching (then [progress], from 0 to 1, if known);
-     * [current] is the position among them of the selected record, from 1, or 0 if it is none.
+     * Shows how many records match: [total]. While searching, which [progress] (from 0 to 1) says, or null [total]
+     * does, [total] is how many were found so far, null if not known. [current] is the position among them of the
+     * selected record, from 1, or 0 if it is none (or, while searching, not final yet).
      */
     fun showCount(current: Int, total: Int?, progress: Double? = null) {
         showError(null)
         val numbers = NumberFormat.getIntegerInstance()
         count.text = when {
             input.text.isEmpty() -> ""
-            total == null && progress != null && progress > 0 -> "Searching ${(progress * 100).toInt()} %"
-            total == null -> "Searching…"
+            total == null || progress != null -> searchingText(current, total, progress, numbers)
             total == 0 -> "No matches"
             current > 0 -> "${numbers.format(current)} of ${numbers.format(total)}"
             total == 1 -> "1 match"
@@ -145,6 +145,17 @@ class FindBar(
         }
         count.foreground = UIManager.getColor("Label.foreground")
         showCountLine()
+    }
+
+    /** What the count says while searching: [total] is what was found so far, null if unknown. */
+    private fun searchingText(current: Int, total: Int?, progress: Double?, numbers: NumberFormat): String {
+        val percent = progress?.takeIf { it > 0 }?.let { "${(it * 100).toInt()} %" }
+        return when {
+            total == null || total == 0 -> if (percent != null) "Searching $percent" else "Searching…"
+            current > 0 -> "${numbers.format(current)} of ${numbers.format(total)}+"
+            percent != null -> "${numbers.format(total)} so far · $percent"
+            else -> "${numbers.format(total)} so far"
+        }
     }
 
     private fun showCountLine() {

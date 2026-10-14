@@ -1,6 +1,7 @@
 package io.github.rastislavpapp.logxy.core.merge
 
 import io.github.rastislavpapp.logxy.core.Bytes
+import io.github.rastislavpapp.logxy.core.filter.ChunkListener
 import io.github.rastislavpapp.logxy.core.filter.Condition
 import io.github.rastislavpapp.logxy.core.filter.Filter
 import io.github.rastislavpapp.logxy.core.filter.FilterEngine
@@ -48,7 +49,8 @@ class MergedFilter(private val log: MergedLog) : RecordFilter {
         }
         val weights = merged.map { it.toDouble() / maxOf(1, merged.sum()) }
         return object : PreparedFilter {
-            override suspend fun run(): FilterResult {
+            // The parts' records are not the merge's: nothing is reported before the result.
+            override suspend fun run(onChunk: ChunkListener?): FilterResult {
                 val results = coroutineScope { evaluations.map { async { it.run() } }.awaitAll() }
                 val rows = withContext(Dispatchers.Default) {
                     toPositions(results.map { it.rows }, merged, start, count)
