@@ -44,7 +44,7 @@ private const val MERGE_FILES = 8
 private const val MERGE_FILE_SIZE = 64L shl 20
 private const val APPEND_SIZE = 64L shl 10
 private const val RUNS = 5
-private const val SETUP = "main=1g seed=1; merge=8x64m seeds=2..9; best of 5"
+private const val SETUP = "main=1g seed=1; merge=8x64m seeds=2..9; best of 5; filters in rounds after a warm-up"
 
 /** Results below this are mostly noise, so they may vary by this much on top of the tolerance. */
 private const val NOISE_SECONDS = 0.01
@@ -57,7 +57,7 @@ private fun measureAll(): Map<String, Double> {
     val results = LinkedHashMap<String, Double>()
     fun record(name: String, seconds: Double) {
         results[name] = seconds
-        println("%-40s %7.3f s".format(name, seconds))
+        println("%-56s %7.3f s".format(name, seconds))
     }
 
     val main = dataFile("main.log", MAIN_SIZE, 1)
@@ -70,22 +70,19 @@ private fun measureAll(): Map<String, Double> {
         log = runBlocking { ParsedLog.build(main, parser) }
     })
     log!!.use { parsed ->
-        val error = LevelCondition.atLeast("Level", Level.ERROR)
-        val filters = listOf(
-            "filter level >= WARN" to LevelCondition.atLeast("Level", Level.WARN),
-            "filter thread = main" to TextCondition("Thread", TextOp.EQUALS, "main"),
-            "filter message contains 'timeout'" to TextCondition("Message", TextOp.EQUALS, "*timeout*"),
-            "filter ERROR and logger prefix" to
-                Filter.And(listOf(error, TextCondition("Logger", TextOp.EQUALS, "com.example.order*"))),
-            "filter message regex" to TextCondition("Message", TextOp.MATCHES, "order \\d{6}:"),
-            // The query bar's regexes always ignore case.
-            "filter message regex, any case" to
-                TextCondition("Message", TextOp.MATCHES, "timeout after \\d+ ms", ignoreCase = true),
-        )
-        for ((name, filter) in filters) {
-            // A new engine each time, as it caches what it computed.
-            record(name, best { runBlocking { FilterEngine(parsed).prepare(filter).run() } })
+        // Round by round over all filters, after an uncounted round: run one by one, a filter got code the JIT
+        // compiled for the filters before it, and its best time swung by up to 2x between runs. The shared code
+        // makes some filters a little slower, but steady.
+        val times = benchmarkFilters.map { DoubleArray(RUNS) }
+        for (round in 0..RUNS) {
+            for ((f, named) in benchmarkFilters.withIndex()) {
+                // A new engine each time, as it caches what it computed.
+                val started = System.nanoTime()
+                runBlocking { FilterEngine(parsed).prepare(named.second).run() }
+                if (round > 0) times[f][round - 1] = (System.nanoTime() - started) / 1e9
+            }
         }
+        for ((f, named) in benchmarkFilters.withIndex()) record("filter ${named.first}", times[f].min())
         // New engines find the templates anew; a used one only counts.
         record("patterns: count all", best {
             runBlocking { FilterEngine(parsed).countPatterns(null, parsed.recordCount) }
@@ -220,9 +217,29 @@ private fun save(file: Path, machine: Map<String, String>, results: Map<String, 
     props["setup"] = SETUP
     props.putAll(machine)
     for ((name, seconds) in results) props.putIfAbsent(name, "%.4f".format(Locale.ROOT, seconds))
-    Files.newBufferedWriter(file).use {
-        props.store(it, "Benchmark baseline of this machine, best times in seconds; delete it to record again.")
+    val comment = if (file == BASELINE_FILE) {
+        "Benchmark baseline, best times in seconds. Other machines record their own in $LOCAL_BASELINE_FILE."
+    } else {
+        "Benchmark baseline of this machine, best times in seconds; delete it to record again."
     }
+    Files.newBufferedWriter(file).use { props.store(it, comment) }
+}
+
+/**
+ * Set by `-PbaselineRecord`: measures and writes the rows the baseline lacks into it (all of them if its setup
+ * changed) instead of comparing. It writes the committed baseline when that was saved on this machine or is
+ * missing, the local one otherwise.
+ */
+private val RECORD = System.getProperty("baseline.record") != null
+
+private fun recordBaseline(committed: Properties?, local: Properties?, machine: Map<String, String>) {
+    val file = if (committed == null || committed.matches(machine)) BASELINE_FILE else LOCAL_BASELINE_FILE
+    val saved = if (file == BASELINE_FILE) committed else local
+    val kept = saved?.takeIf { it.getProperty("setup") == SETUP && it.matches(machine) }
+    val results = measureAll()
+    val added = results.keys.filter { kept?.getProperty(it) == null }
+    save(file, machine, results, kept)
+    println("\nRecorded in $file: ${added.joinToString().ifEmpty { "nothing, every row has a baseline" }}")
 }
 
 /** Allowed slowdown in percent. */
@@ -241,6 +258,10 @@ class BaselineTest {
         val machine = machine()
         val committed = load(BASELINE_FILE)
         val local = load(LOCAL_BASELINE_FILE)
+        if (RECORD) {
+            recordBaseline(committed, local, machine)
+            return
+        }
         val (file, saved) = when {
             committed != null && committed.matches(machine) -> BASELINE_FILE to committed
             local != null && local.getProperty("setup") == SETUP && local.matches(machine) ->
@@ -251,17 +272,20 @@ class BaselineTest {
                 return
             }
         }
-        val message = "The baseline in $file was saved for a different benchmark setup."
+        val message = "The baseline in $file was saved for a different benchmark setup; record it again with " +
+            "`./gradlew :tools:benchmark -PbaselineRecord`."
         assertEquals(SETUP, saved.getProperty("setup"), message)
         println("Comparing with $file")
         val tolerance = TOLERANCE / 100
         val results = measureAll()
         println()
         val slower = ArrayList<String>()
+        val missing = ArrayList<String>()
         for ((name, seconds) in results) {
             val before = saved.getProperty(name)?.toDouble()
             if (before == null) {
-                println("%-40s no baseline".format(name))
+                println("%-56s no baseline".format(name))
+                missing += name
                 continue
             }
             val limit = before * (1 + tolerance) + NOISE_SECONDS
@@ -274,13 +298,15 @@ class BaselineTest {
                 seconds < before * (1 - tolerance) - NOISE_SECONDS -> "faster"
                 else -> "ok"
             }
-            println("%-40s %7.3f s  baseline %7.3f s  %+6.1f%%  %s".format(name, seconds, before, change, verdict))
+            println("%-56s %7.3f s  baseline %7.3f s  %+6.1f%%  %s".format(name, seconds, before, change, verdict))
         }
         // Measurements added since the local baseline was recorded join it, so they are checked from now on.
-        if (file == LOCAL_BASELINE_FILE && results.keys.any { saved.getProperty(it) == null }) {
-            save(file, machine, results, saved)
-        }
+        // The committed one changes only on purpose: a row it lacks would otherwise go unchecked unnoticed.
+        if (file == LOCAL_BASELINE_FILE && missing.isNotEmpty()) save(file, machine, results, saved)
         val report = "Slower than the baseline by more than %.0f%%:\n%s".format(TOLERANCE, slower.joinToString("\n"))
         assertTrue(slower.isEmpty(), report)
+        val unrecorded = "No baseline in $file for: ${missing.joinToString()}; " +
+            "record them with `./gradlew :tools:benchmark -PbaselineRecord`."
+        assertTrue(file == LOCAL_BASELINE_FILE || missing.isEmpty(), unrecorded)
     }
 }

@@ -5,7 +5,7 @@ Issues and specs for this repo live as GitHub issues. Use the `gh` CLI for all o
 ## Conventions
 
 - **Create an issue**: `gh issue create --title "..." --body "..."`. Use a heredoc for multi-line bodies.
-- **Read an issue**: `gh issue view <number> --comments`, filtering comments by `jq` and also fetching labels.
+- **Read an issue**: one call for title, labels, body and comments (`--comments` alone prints no title): `gh issue view <number> --json number,title,labels,body,comments --jq '"#\(.number) \(.title) [\([.labels[].name] | join(","))]\n\n\(.body)\n\n\([.comments[].body] | join("\n\n---\n\n"))"'`
 - **Overview of issues**: `gh issue list --state open --limit 100 --json number,title,labels --jq '.[] | "#\(.number) [\([.labels[].name]|join(","))] \(.title)"'`, one line each. Start here: issues carry long plans in their comments, and the full listing below runs to 100 KB.
 - **List issues**: `gh issue list --state open --json number,title,body,labels,comments --jq '[.[] | {number, title, body, labels: [.labels[].name], comments: [.comments[].body]}]'` with appropriate `--label` and `--state` filters.
 - **Comment on an issue**: `gh issue comment <number> --body "..."`
