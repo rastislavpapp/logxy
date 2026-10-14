@@ -80,7 +80,6 @@ private const val CARD_PLACEHOLDER = "placeholder"
 private const val CARD_TABS = "tabs"
 private const val LIVE_COLOR = "Actions.Green"
 private const val FOLLOW_COLOR = "Component.accentColor"
-private const val MAX_LEFT_OUT_SHOWN = 15
 private const val OPENING_TITLE = "Opening Files"
 
 class MainFrame : JFrame("logxy") {
@@ -317,27 +316,22 @@ class MainFrame : JFrame("logxy") {
     /** Tells the user which files of the zips among [archives] are not opened, and why. */
     private fun tellLeftOut(archives: List<Path>) {
         if (!spoolCreation.isInitialized()) return
-        val text = archives.mapNotNull { archive ->
-            val left = spool.leftOutOf(archive).ifEmpty { return@mapNotNull null }
-            val lines = left.take(MAX_LEFT_OUT_SHOWN).map { "    ${it.entry}: ${it.reason}" }
-            val hidden = left.size - MAX_LEFT_OUT_SHOWN
-            val more = if (hidden > 0) listOf("    …and $hidden more") else emptyList()
-            (listOf("$archive") + lines + more).joinToString("\n")
+        val rows = archives.flatMap { archive ->
+            spool.leftOutOf(archive).map { listOf("$archive", it.entry, it.reason) }
         }
-        if (text.isEmpty()) return
-        JOptionPane.showMessageDialog(
-            this,
-            "These files are not opened:\n\n${text.joinToString("\n\n")}",
-            "Files Left Out",
-            JOptionPane.WARNING_MESSAGE,
-        )
+        if (rows.isEmpty()) return
+        TableNoticeDialog(
+            this, "Files Left Out", UIManager.getIcon("OptionPane.warningIcon"), "These files are not opened:",
+            listOf("Archive", "File", "Reason"), rows, "files-left-out",
+        ).isVisible = true
     }
 
     private fun tellNothingIn(folders: List<Path>) {
         if (folders.isEmpty()) return
-        JOptionPane.showMessageDialog(
-            this, "No log files in:\n${folders.joinToString("\n")}", "Nothing to Open", JOptionPane.INFORMATION_MESSAGE,
-        )
+        TableNoticeDialog(
+            this, "Nothing to Open", UIManager.getIcon("OptionPane.informationIcon"), "No log files in:",
+            listOf("Folder"), folders.map { listOf("$it") }, "nothing-to-open",
+        ).isVisible = true
     }
 
     /**
