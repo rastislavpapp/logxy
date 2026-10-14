@@ -12,14 +12,14 @@ Fast desktop log viewer (Kotlin, Swing, FlatLaf, Gradle).
 - **Length follows the content**: one line by default, more when the contract needs it (units, threading, nullability, edge cases, the reason for a non-obvious approach).
 - **KDoc** where the name and signature leave something out: the contract, an edge case, the reason. In `core`, the API the app builds on, look for that on every class and non-private function; where the name and signature already say it all, leave the KDoc out.
 - Match the style of the surrounding code.
-- `./gradlew build` runs detekt (`config/detekt.yml`) and fails on any finding. `./gradlew detekt --auto-correct` fixes whitespace, imports and braces; a line over 120 characters needs restructuring (a `val`, a `when`, one argument per line only as a last resort), not just wrapping.
+- `./gradlew build` runs detekt and fails on any finding; `./gradlew detekt --auto-correct` fixes the formatting ones. Readability rules beyond detekt, checked in review: `CODING_STANDARDS.md`.
 
 ## Rules
 
 - `core` must not depend on `java.awt` / `javax.swing`.
 - Prefer primitive arrays over boxed collections or per-row objects for anything that scales with file size.
 - Declare all dependency and plugin versions in `gradle/libs.versions.toml`. Do not add dependencies without a clear reason.
-- Speed is the top goal: after a change to parsing, indexing, filtering or merging, run `./gradlew -q :tools:benchmark`. If it fails, find the cause.
+- Speed is the top goal: after a change to parsing, indexing, filtering or merging, run `./gradlew -q :tools:benchmark`. If it fails, find the cause. Single runs vary by about 15%: before chasing a slower row, run it on `main` too (`git stash`).
 - Make code edits with the Edit / Write tools only, never through shell or Python pipelines (`sed`, `python - <<EOF`, ...): each layer eats a level of backslashes, so `\n` escapes in string literals become real line breaks, and `sed -i` rewrites line endings.
 
 ## Trying the app
