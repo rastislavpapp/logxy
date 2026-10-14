@@ -239,11 +239,11 @@ class FilterEngine(private val log: LogData, private val maxCacheBytes: Long = D
             // The leaf decides its chunks' records: those it computes, with the cached ones, and those it only reads
             // from the cache (or that no candidates are left in), right away.
             val starts = if (anyNeeded) chunkStarts(need) else emptyList()
-            val report = onChunk?.let { listener ->
-                { first: Int, computed: LongArray? ->
-                    reportChunk(listener, first) { w -> (computed?.get(w) ?: 0L) or (cached(w) and candidates[w]) }
-                }
+            fun decided(first: Int, computed: LongArray?) {
+                if (onChunk == null) return
+                reportChunk(onChunk, first) { w -> (computed?.get(w) ?: 0L) or (cached(w) and candidates[w]) }
             }
+            val report = if (onChunk == null) null else ::decided
             if (report != null) {
                 for (first in 0..<words step chunkWords) if (first !in starts) report(first, null)
             }

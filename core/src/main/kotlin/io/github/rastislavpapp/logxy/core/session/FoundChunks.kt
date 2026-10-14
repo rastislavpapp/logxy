@@ -24,7 +24,10 @@ internal class FoundChunks(private val recordCount: Int) {
     fun add(first: Int, end: Int, records: IntArray) {
         chunks[first] = Chunk(first, end, records)
         size += records.size
-        while (true) chunks[decidedUntil]?.let { decidedUntil = it.end } ?: break
+        while (true) {
+            val next = chunks[decidedUntil] ?: break
+            decidedUntil = next.end
+        }
     }
 
     /** 1-based position of [record] among all matches, 0 if it is not one or its position is not final yet. */
@@ -47,7 +50,7 @@ internal class FoundChunks(private val recordCount: Int) {
      * certain when every chunk between [current] and it is decided.
      */
     fun next(current: Int, forward: Boolean, inclusive: Boolean): Int {
-        val start = chunks.floorEntry(current)?.value?.takeIf { current < it.end } ?: return NOT_YET_FOUND
+        val start = chunkAt(current) ?: return NOT_YET_FOUND
         val index = lowerBound(start.records, if (forward == inclusive) current else current + 1)
         val here = if (forward) index else index - 1
         if (here in start.records.indices) return start.records[here]
@@ -57,8 +60,7 @@ internal class FoundChunks(private val recordCount: Int) {
             if (chunk.records.isNotEmpty()) return edge(chunk, forward)
         }
         // Past the end: wrap to the far end and on to the chunk of [current], whose other side is left.
-        chunk = (if (forward) chunks[0] else chunks.lowerEntry(recordCount)?.value?.takeIf { it.end == recordCount })
-            ?: return NOT_YET_FOUND
+        chunk = (if (forward) chunks[0] else chunkAt(recordCount - 1)) ?: return NOT_YET_FOUND
         while (true) {
             if (chunk.records.isNotEmpty()) return edge(chunk, forward)
             if (chunk === start) return -1
@@ -68,8 +70,14 @@ internal class FoundChunks(private val recordCount: Int) {
 
     private fun isLast(chunk: Chunk, forward: Boolean) = if (forward) chunk.end >= recordCount else chunk.first == 0
 
+    /** The chunk decided that holds [record]; null if it is not decided yet. */
+    private fun chunkAt(record: Int): Chunk? {
+        val chunk = chunks.floorEntry(record)?.value ?: return null
+        return if (record < chunk.end) chunk else null
+    }
+
     private fun neighbour(chunk: Chunk, forward: Boolean): Chunk? =
-        if (forward) chunks[chunk.end] else chunks.lowerEntry(chunk.first)?.value?.takeIf { it.end == chunk.first }
+        if (forward) chunks[chunk.end] else chunkAt(chunk.first - 1)
 
     private fun edge(chunk: Chunk, forward: Boolean) = if (forward) chunk.records.first() else chunk.records.last()
 
