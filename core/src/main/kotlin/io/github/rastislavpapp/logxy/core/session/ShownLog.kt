@@ -383,7 +383,8 @@ class ShownLog internal constructor(private val loaded: LoadedLog) {
 
     /** The found records from record [from] on, once the search is done. */
     internal fun foundFrom(from: Int): IntArray {
-        val start = found.indexOf(from).let { if (it < 0) found.size else it }
+        val index = found.indexOf(from)
+        val start = if (index < 0) found.size else index
         return found.array().copyOfRange(start, found.size)
     }
 

@@ -149,7 +149,7 @@ class FindBar(
 
     /** What the count says while searching: [total] is what was found so far, null if unknown. */
     private fun searchingText(current: Int, total: Int?, progress: Double?, numbers: NumberFormat): String {
-        val percent = progress?.takeIf { it > 0 }?.let { "${(it * 100).toInt()} %" }
+        val percent = if (progress != null && progress > 0) "${(progress * 100).toInt()} %" else null
         return when {
             total == null || total == 0 -> if (percent != null) "Searching $percent" else "Searching…"
             current > 0 -> "${numbers.format(current)} of ${numbers.format(total)}+"

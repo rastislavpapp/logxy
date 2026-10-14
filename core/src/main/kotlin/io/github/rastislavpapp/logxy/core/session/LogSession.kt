@@ -820,9 +820,10 @@ class LogSession internal constructor(
         foundChunked = true
         val histogram = foundHistogram
         if (counted != null && histogram != null) {
-            // Rows the shown rows lack are not counted: those were counted too, so count what is left.
+            // Records the shown log lacks must not count, but [counted] has them: count the rest again.
             val times = foundTimes
-            histogram.addAll(if (matches.size == reported || times == null) counted else times.countRecords(matches))
+            val recounted = if (matches.size != reported) times?.countRecords(matches) else null
+            histogram.addAll(recounted ?: counted)
         }
         listener.foundChanged()
     }
