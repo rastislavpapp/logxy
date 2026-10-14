@@ -25,6 +25,9 @@ internal class TextMatcher(condition: TextCondition) {
         Pattern.compile(condition.value, caseFlags())
     }
 
+    /** Text every match of the regex contains, searched on the bytes first; null for wildcard patterns. */
+    private val required = if (glob == null) RequiredText.of(condition.value, ignoreCase) else null
+
     private fun caseFlags() = if (ignoreCase) Pattern.CASE_INSENSITIVE or Pattern.UNICODE_CASE else 0
 
     /** What an absent value counts as: only negated conditions accept it. */
@@ -41,8 +44,11 @@ internal class TextMatcher(condition: TextCondition) {
 
     /** As [matches] on the UTF-8 text `bytes[from, to)`, without decoding it when the pattern allows. */
     fun matches(bytes: ByteArray, from: Int, to: Int): Boolean {
-        val segments = segments ?: return matches(String(bytes, from, to - from, Charsets.UTF_8))
-        return globMatches(segments, bytes, from, to) != negated
+        val segments = segments
+        if (segments != null) return globMatches(segments, bytes, from, to) != negated
+        // Without the required text no match is possible, so the decoding and the regex can be skipped.
+        if (required != null && !required.foundIn(bytes, from, to)) return negated
+        return matches(String(bytes, from, to - from, Charsets.UTF_8))
     }
 
     private fun globMatches(segments: List<ByteArray>, bytes: ByteArray, from: Int, to: Int): Boolean {
@@ -73,29 +79,20 @@ internal class TextMatcher(condition: TextCondition) {
         return true
     }
 
-    private fun indexOf(bytes: ByteArray, needle: ByteArray, from: Int, to: Int): Int {
-        if (!ignoreCase) return Bytes.indexOf(bytes, needle, from, to)
-        if (needle.isEmpty()) return from
-        for (i in from..to - needle.size) {
-            if (regionMatches(bytes, i, needle)) return i
-        }
-        return -1
+    private fun indexOf(bytes: ByteArray, needle: ByteArray, from: Int, to: Int): Int = if (ignoreCase) {
+        Bytes.indexOfIgnoreAsciiCase(bytes, needle, from, to)
+    } else {
+        Bytes.indexOf(bytes, needle, from, to)
     }
 
     private fun regionMatches(bytes: ByteArray, at: Int, needle: ByteArray): Boolean {
-        if (ignoreCase) {
-            for (i in needle.indices) if (lower(bytes[at + i]) != needle[i]) return false
-        } else {
-            for (i in needle.indices) if (bytes[at + i] != needle[i]) return false
-        }
-        return true
+        if (ignoreCase) return Bytes.regionMatchesIgnoreAsciiCase(bytes, at, needle)
+        return Bytes.regionMatches(bytes, at, at + needle.size, needle)
     }
 
     private fun lowerInPlace(bytes: ByteArray) {
-        for (i in bytes.indices) bytes[i] = lower(bytes[i])
+        for (i in bytes.indices) bytes[i] = Bytes.lowerAscii(bytes[i])
     }
-
-    private fun lower(b: Byte): Byte = if (b in 'A'.code.toByte()..'Z'.code.toByte()) (b + 32).toByte() else b
 }
 
 /**

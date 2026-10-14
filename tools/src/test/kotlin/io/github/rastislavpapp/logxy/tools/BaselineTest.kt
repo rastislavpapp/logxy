@@ -78,6 +78,9 @@ private fun measureAll(): Map<String, Double> {
             "filter ERROR and logger prefix" to
                 Filter.And(listOf(error, TextCondition("Logger", TextOp.EQUALS, "com.example.order*"))),
             "filter message regex" to TextCondition("Message", TextOp.MATCHES, "order \\d{6}:"),
+            // The query bar's regexes always ignore case.
+            "filter message regex, any case" to
+                TextCondition("Message", TextOp.MATCHES, "timeout after \\d+ ms", ignoreCase = true),
         )
         for ((name, filter) in filters) {
             // A new engine each time, as it caches what it computed.
