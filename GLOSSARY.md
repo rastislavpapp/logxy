@@ -27,3 +27,7 @@ _Avoid_: format, layout
 **Shown log**:
 The records of one load as the user sees them: all of them, or a filter's result. It ends when the session reloads or closes.
 _Avoid_: view, shown rows, filtered rows
+
+**Selection**:
+The rows the user marked in a shown log. It ends with the shown log, except that the record at its lead stays selected when the next shown log still shows it.
+_Avoid_: selected lines, marked rows
