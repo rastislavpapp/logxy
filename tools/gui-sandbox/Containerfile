@@ -2,7 +2,7 @@ FROM docker.io/library/eclipse-temurin:25-jdk
 
 RUN apt-get update \
  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-      xvfb xdotool imagemagick x11-utils openbox \
+      xvfb xdotool xclip imagemagick x11-utils openbox \
       libxext6 libxrender1 libxtst6 libxi6 libfreetype6 fontconfig fonts-dejavu-core \
  && rm -rf /var/lib/apt/lists/*
 

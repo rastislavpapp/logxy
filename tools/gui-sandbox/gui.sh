@@ -6,6 +6,7 @@
 #   click X Y          left click at screen coordinates read off a screenshot; also dclick, rclick, move
 #   type TEXT          type into the focused component
 #   key KEYS...        xdotool key names, one press each: ctrl+f Return Escape Page_Down shift+Tab
+#   clip               the clipboard's size in bytes, its first line and its last
 #   windows            visible windows with position and size
 #   logs               the app's stdout and stderr
 #   exec CMD...        run a command inside the container
@@ -82,9 +83,11 @@ case "${1:-}" in
   move)   in_box xdotool mousemove "$2" "$3" ;;
   type)   in_box xdotool type --delay 30 "$2" ;;
   key)    shift; in_box xdotool key --delay 50 "$@" ;;
+  clip)   in_box bash -c 'timeout 60 xclip -o -selection clipboard > /tmp/clip || exit 1
+            echo "$(wc -c < /tmp/clip) bytes"; head -1 /tmp/clip | cut -c1-200; tail -1 /tmp/clip | cut -c1-200' ;;
   windows) in_box bash -c 'for w in $(xdotool search --onlyvisible --name .); do echo "$w $(xdotool getwindowname $w)"; xdotool getwindowgeometry $w | tail -2; done' ;;
   exec)   shift; in_box "$@" ;;
   logs)   cat "$out/app.log" ;;
   stop)   "$engine" rm -f "$name" >/dev/null && echo stopped ;;
-  *) sed -n '3,14p' "$0" | cut -c3-; exit 1 ;;
+  *) sed -n '3,15p' "$0" | cut -c3-; exit 1 ;;
 esac

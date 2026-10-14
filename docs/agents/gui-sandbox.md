@@ -17,5 +17,7 @@
 - **Coordinates** are screen coordinates from the latest full shot. In a crop, add its X and Y to a position read off it. Dialogs and popups open at varying places, so take a shot after opening one before clicking inside it.
 - **Regions** at the default 1600x1000 screen with the main window unmoved: the status bar is about `200 875 1200 25`, the table's first rows `200 340 1200 200`. Confirm against a full shot once per session; the layout changes with the file's columns.
 - **Context menus**: `rclick X Y` opens the table's menu on a cell (copy value, filter by it).
+- **Dialogs**: progress dialogs open after 300 ms, so a shot right after the action is too early. While a modal dialog is open, input to the main window is swallowed. `windows` lists the open dialogs. To catch a short-lived one, chain the action and shots in one `exec` (`xdotool key ctrl+c; sleep 0.4; import -window root /out/x.png`).
+- **Clipboard**: `clip` shows what a copy put there (byte count, first and last line). Pasting a large copy into a field takes seconds.
 - **Keys** are xdotool names: `Page_Down`, `Return`, `Escape`, `ctrl+f`, `ctrl+space` (toggles the selection of the focused row).
 - **Shot names**: reuse a few names (`a1`, `a2`, …) per scenario; `out/` is git-ignored and grows with every name.

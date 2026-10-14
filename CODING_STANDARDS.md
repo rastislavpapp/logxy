@@ -2,6 +2,10 @@
 
 Checked in review, against the diff. Formatting and line length are detekt's (`config/detekt.yml`); these are the judgement calls it cannot make.
 
+## Domain terms
+
+Names, KDoc and comments in the diff use the terms `GLOSSARY.md` defines, never the words its _Avoid_ lists name (e.g. "shown rows" for the shown log). Older code that still uses an avoided word is no precedent.
+
 ## Dense lines
 
 A line does one thing a reader can name. Under 120 characters a line can still pack too much; split it when it stacks:

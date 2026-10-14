@@ -11,7 +11,6 @@ Fast desktop log viewer (Kotlin, Swing, FlatLaf, Gradle).
 - **Comments carry what the code cannot show**: why it is done this way, constraints, contracts, tricky algorithms.
 - **Length follows the content**: one line by default, more when the contract needs it (units, threading, nullability, edge cases, the reason for a non-obvious approach).
 - **KDoc** where the name and signature leave something out: the contract, an edge case, the reason. In `core`, the API the app builds on, look for that on every class and non-private function; where the name and signature already say it all, leave the KDoc out.
-- Match the style of the surrounding code.
 - `./gradlew build` runs detekt and fails on any finding; `./gradlew detekt --auto-correct` fixes the formatting ones. Readability rules beyond detekt, checked in review: `CODING_STANDARDS.md`.
 
 ## Rules
