@@ -807,7 +807,7 @@ class LogSessionTest {
         val (session, shown) = open(file, Recorder())
         val result = withContext(ui) {
             // Runs up to reading on another thread, then the reload closes the files under it.
-            val copy = async(start = CoroutineStart.UNDISPATCHED) { shown.copyColumn(4) }
+            val copy = async(start = CoroutineStart.UNDISPATCHED) { shown.copyColumn(4, limit = Long.MAX_VALUE).run() }
             session.reload()
             copy.await()
         }

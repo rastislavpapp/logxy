@@ -2,6 +2,7 @@ package io.github.rastislavpapp.logxy.app
 
 import io.github.rastislavpapp.logxy.core.archive.ArchiveOrigin
 import io.github.rastislavpapp.logxy.core.config.SavedFilter
+import io.github.rastislavpapp.logxy.core.formatByteSize
 import io.github.rastislavpapp.logxy.core.log.ColumnType
 import io.github.rastislavpapp.logxy.core.log.Level
 import io.github.rastislavpapp.logxy.core.log.Role
@@ -15,11 +16,17 @@ import io.github.rastislavpapp.logxy.core.query.TextSearch
 import io.github.rastislavpapp.logxy.core.query.TimeLiteral
 import io.github.rastislavpapp.logxy.core.session.CopyResult
 import io.github.rastislavpapp.logxy.core.session.LogSession
+import io.github.rastislavpapp.logxy.core.session.MAX_COPY_BYTES
+import io.github.rastislavpapp.logxy.core.session.PreparedCopy
+import io.github.rastislavpapp.logxy.core.session.RowRanges
 import io.github.rastislavpapp.logxy.core.session.SessionListener
 import io.github.rastislavpapp.logxy.core.session.SessionStatus
 import io.github.rastislavpapp.logxy.core.session.ShownLog
+import io.github.rastislavpapp.logxy.core.session.copyLimit
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
@@ -31,10 +38,14 @@ import java.awt.Container
 import java.awt.Dimension
 import java.awt.Toolkit
 import java.awt.datatransfer.StringSelection
+import java.awt.event.ActionEvent
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import java.nio.file.Path
+import java.text.NumberFormat
 import java.time.ZoneId
+import javax.swing.AbstractAction
+import javax.swing.Action
 import javax.swing.JCheckBoxMenuItem
 import javax.swing.JComponent
 import javax.swing.JLabel
@@ -325,22 +336,77 @@ class LogTab(
             toolTipText = "The whole value of “${field.name}” of every shown row, one row per line"
             addActionListener {
                 val shown = model.shown
-                copyColumn { shown.copyColumn(shown.schema.fields.indexOf(field)) }
+                copyColumn(shown.copyColumn(shown.schema.fields.indexOf(field), copyLimit()))
             }
         })
         popup.show(header, x, y)
     }
 
-    /** Copies the column [read] gives; reading many values may take a while. Closing the tab cancels it. */
-    private fun copyColumn(read: suspend () -> CopyResult) {
-        scope.launch {
-            val message = when (val result = read()) {
-                is CopyResult.Copied -> return@launch copy(result.text)
-                CopyResult.FileChanged -> "The file changed while copying; copy the column again."
-                is CopyResult.Failed -> "Cannot copy the column: ${result.message}"
-            }
-            JOptionPane.showMessageDialog(this@LogTab, message, "Copy Column", JOptionPane.ERROR_MESSAGE)
+    /** Copies the selected rows as their records are written in the file. */
+    private fun copySelectedRows() {
+        val model = model ?: return
+        val rows = selectedRows()
+        if (rows.isEmpty()) return
+        val count = NumberFormat.getIntegerInstance().format(rows.count)
+        runCopy("Copy Rows", "Copying $count rows…", "rows", model.shown.copyRows(rows, copyLimit())) {
+            "The $count selected rows take ${formatByteSize(it.bytes)} in the file"
         }
+    }
+
+    private fun copyColumn(prepared: PreparedCopy) = runCopy("Copy Column", "Copying the column…", "column", prepared) {
+        "The column takes more than ${formatByteSize(copyLimit())}"
+    }
+
+    /**
+     * Runs [prepared] off the UI thread, with a progress dialog saying [text] if it takes a while, and puts what it
+     * copied on the clipboard. Cancel copies nothing, and so does closing the tab. [tooLarge] says why a copy of
+     * the [what] was refused.
+     */
+    private fun runCopy(
+        title: String,
+        text: String,
+        what: String,
+        prepared: PreparedCopy,
+        tooLarge: (CopyResult.TooLarge) -> String,
+    ) {
+        val window = SwingUtilities.getWindowAncestor(this) ?: return
+        lateinit var job: Job
+        var finished = false
+        val dialog = ProgressDialog(window, title, progress = { prepared.progress }) { job.cancel() }
+        dialog.text = text
+        // Undispatched: the dialog is disposed even if the tab closes before the copy would have started.
+        job = scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            val result = try {
+                prepared.run()
+            } finally {
+                finished = true
+                dialog.dispose()
+            }
+            val message = when (result) {
+                is CopyResult.Copied -> return@launch copy(result.text)
+                is CopyResult.TooLarge -> refusal(tooLarge(result))
+                CopyResult.FileChanged -> "The file changed while copying; copy the $what again."
+                is CopyResult.Failed -> "Cannot copy the $what: ${result.message}"
+            }
+            JOptionPane.showMessageDialog(this@LogTab, message, title, JOptionPane.ERROR_MESSAGE)
+        }
+        dialog.showLater { finished }
+    }
+
+    /** Why a copy was refused: [reason], the limit, and whether more memory would raise it. */
+    private fun refusal(reason: String): String {
+        val limit = copyLimit()
+        val more = if (limit < MAX_COPY_BYTES) " Give logxy more memory in Preferences › Memory to copy more." else ""
+        return "$reason; at most ${formatByteSize(limit)} can be copied.$more"
+    }
+
+    /** The selected rows, of all shown rows. */
+    private fun selectedRows(): RowRanges {
+        val rows = RowRanges()
+        val model = model ?: return rows
+        val table = table ?: return rows
+        for (row in table.selectedRows) rows.add(model.windowStart + row, model.windowStart + row + 1)
+        return rows
     }
 
     private fun copy(text: String) =
@@ -371,16 +437,10 @@ class LogTab(
         // Within a selection of several rows, the menu also copies from all of them.
         if (table.isRowSelected(row) && table.selectedRowCount > 1) {
             popup.add(JMenuItem("Copy Selected Rows").apply {
-                addActionListener {
-                    val clipboard = Toolkit.getDefaultToolkit().systemClipboard
-                    table.transferHandler.exportToClipboard(table, clipboard, TransferHandler.COPY)
-                }
+                addActionListener { copySelectedRows() }
             })
             popup.add(JMenuItem("Copy Column “${field.name}”").apply {
-                addActionListener {
-                    val records = table.selectedRows.map(model::recordAt).toIntArray()
-                    copyColumn { shown.copyColumn(fieldIndex, records) }
-                }
+                addActionListener { copyColumn(shown.copyColumn(fieldIndex, copyLimit(), selectedRows())) }
             })
         }
         popup.addSeparator()
@@ -520,8 +580,11 @@ class LogTab(
                 if (e.isPopupTrigger && column >= 0) showHeaderMenu(table.tableHeader, column, e.x, e.y)
             }
         })
-        // Copying rows gives the records as written; file drops on the table still open files.
-        table.transferHandler = FileDropHandler(openFiles, RecordCopyHandler(model))
+        table.transferHandler = FileDropHandler(openFiles)
+        // Copying many rows takes a while: it runs off the UI thread rather than through the transfer handler.
+        table.actionMap.put(TransferHandler.getCopyAction().getValue(Action.NAME), object : AbstractAction() {
+            override fun actionPerformed(e: ActionEvent) = copySelectedRows()
+        })
         val scrollPane = VirtualScrollPane(table, model)
         scrollPane.onFollowChanged = { session.follow = it }
         scrollPane.resumeFollowAtEnd = { session.isLive }

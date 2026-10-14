@@ -47,6 +47,7 @@ class ShownLogTest {
         override fun firstRecordFrom(part: Int, record: Int) = throw UnsupportedOperationException()
         override fun templateOf(record: Int) = throw UnsupportedOperationException()
         override fun fieldReader(field: Int, records: IntArray?, count: Int) = throw UnsupportedOperationException()
+        override fun sourceReader() = throw UnsupportedOperationException()
         override fun append(part: Int, data: AppendedData) = throw UnsupportedOperationException()
         override suspend fun settle() = throw UnsupportedOperationException()
     }
@@ -123,7 +124,8 @@ class ShownLogTest {
         assertEquals("", shown.sourceText(0))
         assertEquals(listOf(""), shown.rowValues(0, 100).toList())
         assertEquals(null, shown.timestamp(0))
-        assertEquals(CopyResult.FileChanged, runBlocking { shown.copyColumn(0) })
+        assertEquals(CopyResult.FileChanged, runBlocking { shown.copyColumn(0, limit = 100).run() })
+        assertEquals(CopyResult.FileChanged, runBlocking { shown.copyRows(RowRanges(), limit = 100).run() })
     }
 
     private val parser = CompiledPattern("%d{yyyy-MM-dd HH:mm:ss.SSS} %-5p %c - %m%n", ZoneOffset.UTC)
@@ -136,18 +138,95 @@ class ShownLogTest {
     private fun Records.field(name: String) = schema.fields.indexOfFirst { it.name == name }
 
     @Test
-    fun `copies a column of the rows shown or of given records`() {
+    fun `copies a column of the rows shown or of given rows`() {
         val content = "2026-10-01 10:00:01.000 INFO  a.A - one\n" +
             "2026-10-01 10:00:02.000 WARN  a.B - two\nat x.y\n" +
-            "2026-10-01 10:00:03.000 INFO  a.A - three\n"
+            "2026-10-01 10:00:03.000 DEBUG a.A - three\n"
         parse("a.log", content).use { log ->
             val shown = ShownLog(SingleLoad(log))
-            val message = log.field("Message")
-            assertEquals(CopyResult.Copied("one\ntwo\nat x.y\nthree\n"), runBlocking { shown.copyColumn(message) })
+            val message = shown.copyColumn(log.field("Message"), limit = 1000)
+            assertEquals(CopyResult.Copied("one\ntwo\nat x.y\nthree\n"), runBlocking { message.run() })
+            assertEquals(1.0, message.progress)
             shown.showRows(intArrayOf(0, 2))
-            assertEquals(CopyResult.Copied("a.A\na.A\n"), runBlocking { shown.copyColumn(log.field("Logger")) })
-            val level = runBlocking { shown.copyColumn(log.field("Level"), intArrayOf(1)) }
-            assertEquals(CopyResult.Copied("WARN\n"), level)
+            val logger = runBlocking { shown.copyColumn(log.field("Logger"), limit = 1000).run() }
+            assertEquals(CopyResult.Copied("a.A\na.A\n"), logger)
+            val level = runBlocking { shown.copyColumn(log.field("Level"), limit = 1000, rows(1..1)).run() }
+            assertEquals(CopyResult.Copied("DEBUG\n"), level)
+        }
+    }
+
+    @Test
+    fun `stops copying a column once it takes more than the limit`() {
+        val content = (1..100).joinToString("") { "2026-10-01 10:00:01.000 INFO  a.A - m${it % 10}\n" }
+        parse("a.log", content).use { log ->
+            val shown = ShownLog(SingleLoad(log))
+            // Each value is "m" and a digit, and a line end.
+            val result = runBlocking { shown.copyColumn(log.field("Message"), limit = 299).run() }
+            assertEquals(CopyResult.TooLarge(rows = 100, bytes = 300), result)
+            val fits = runBlocking { shown.copyColumn(log.field("Message"), limit = 300).run() }
+            assertTrue(fits is CopyResult.Copied)
+        }
+    }
+
+    private fun rows(vararg ranges: IntRange) = RowRanges().apply { ranges.forEach { add(it.first, it.last + 1) } }
+
+    @Test
+    fun `copies rows as written in the file, shown or filtered`() {
+        val content = "2026-10-01 10:00:01.000 INFO  a.A - one\n" +
+            "2026-10-01 10:00:02.000 WARN  a.B - two\nat x.y\n" +
+            "2026-10-01 10:00:03.000 INFO  a.A - three\n" +
+            "2026-10-01 10:00:04.000 INFO  a.A - four"
+        parse("a.log", content).use { log ->
+            val shown = ShownLog(SingleLoad(log))
+            val copy = shown.copyRows(rows(1..1, 3..3), limit = 1000)
+            // The last line has no line end in the file; the copy ends it.
+            val expected = "2026-10-01 10:00:02.000 WARN  a.B - two\nat x.y\n2026-10-01 10:00:04.000 INFO  a.A - four\n"
+            assertEquals(CopyResult.Copied(expected), runBlocking { copy.run() })
+            assertEquals(1.0, copy.progress)
+            shown.showRows(intArrayOf(0, 2, 3))
+            val filtered = runBlocking { shown.copyRows(rows(0..1), limit = 1000).run() }
+            val both = "2026-10-01 10:00:01.000 INFO  a.A - one\n2026-10-01 10:00:03.000 INFO  a.A - three\n"
+            assertEquals(CopyResult.Copied(both), filtered)
+        }
+    }
+
+    @Test
+    fun `refuses rows larger than the limit without reading them`() {
+        val content = (1..100).joinToString("") { "2026-10-01 10:00:01.000 INFO  a.A - m${it % 10}\n" }
+        parse("a.log", content).use { log ->
+            val shown = ShownLog(SingleLoad(log))
+            val lineBytes = 39L
+            val copy = shown.copyRows(rows(0..9, 50..59), limit = 20 * lineBytes - 1)
+            // Closed: reading would fail, so the answer must come from the index alone.
+            log.close()
+            assertEquals(CopyResult.TooLarge(rows = 20, bytes = 20 * lineBytes), runBlocking { copy.run() })
+        }
+    }
+
+    @Test
+    fun `copies merged rows in merged order`() {
+        val a = parse("a.log", "2026-10-01 10:00:01.000 INFO  a.A - A1\n2026-10-01 10:00:03.000 INFO  a.A - A2\n")
+        val b = parse("b.log", "2026-10-01 10:00:02.000 WARN  b.B - B1\n")
+        val merged = runBlocking { MergedLog.build(listOf(a, b)) }
+        a.use {
+            b.use {
+                val shown = ShownLog(MergedLoad(merged))
+                val result = runBlocking { shown.copyRows(rows(0..2), limit = 1000).run() }
+                val expected = "2026-10-01 10:00:01.000 INFO  a.A - A1\n2026-10-01 10:00:02.000 WARN  b.B - B1\n" +
+                    "2026-10-01 10:00:03.000 INFO  a.A - A2\n"
+                assertEquals(CopyResult.Copied(expected), result)
+            }
+        }
+    }
+
+    @Test
+    fun `a copy of rows tells that the file changed when the load ended meanwhile`() {
+        parse("a.log", "2026-10-01 10:00:01.000 INFO  a.A - one\n").use { log ->
+            val shown = ShownLog(SingleLoad(log))
+            val copy = shown.copyRows(rows(0..0), limit = 1000)
+            shown.end()
+            log.close()
+            assertEquals(CopyResult.FileChanged, runBlocking { copy.run() })
         }
     }
 
@@ -159,7 +238,9 @@ class ShownLogTest {
             val shown = ShownLog(SingleLoad(log))
             val result = runBlocking {
                 // Runs up to reading on another thread, as from the UI thread.
-                val copy = async(start = CoroutineStart.UNDISPATCHED) { shown.copyColumn(log.field("Message")) }
+                val copy = async(start = CoroutineStart.UNDISPATCHED) {
+                    shown.copyColumn(log.field("Message"), limit = Long.MAX_VALUE).run()
+                }
                 Files.writeString(file, "more\n2026-10-01 10:00:02.000 INFO  a.A - m1001\n", StandardOpenOption.APPEND)
                 log.append(log.readAppended(Files.size(file)))
                 copy.await()
@@ -176,9 +257,9 @@ class ShownLogTest {
         a.use {
             b.use {
                 val shown = ShownLog(MergedLoad(merged))
-                val messages = runBlocking { shown.copyColumn(merged.field("Message")) }
+                val messages = runBlocking { shown.copyColumn(merged.field("Message"), limit = 1000).run() }
                 assertEquals(CopyResult.Copied("A1\nB1\nA2\n"), messages)
-                val sources = runBlocking { shown.copyColumn(merged.field("Source"), intArrayOf(1, 2)) }
+                val sources = runBlocking { shown.copyColumn(merged.field("Source"), limit = 1000, rows(1..2)).run() }
                 assertEquals(CopyResult.Copied("b.log\na.log\n"), sources)
             }
         }

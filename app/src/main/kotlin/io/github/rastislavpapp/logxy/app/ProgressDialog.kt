@@ -11,13 +11,22 @@ import javax.swing.JPanel
 import javax.swing.JProgressBar
 import javax.swing.Timer
 
+/** Work quicker than this shows no dialog. */
+private const val SHOW_DELAY_MILLIS = 300
+
 /**
- * Shows the slow steps of opening files: looking for logs in folders, unzipping, decompressing. [text] says
- * what is being done and [fraction] how far it got; both may be set from any thread. An [indeterminate] bar
- * is for work of unknown size, such as walking a folder. Cancel and closing the dialog call [onCancel].
+ * Shows the progress of slow work, such as opening files or copying many rows. [text] says what is being done and
+ * [fraction] how far it got; both may be set from any thread, or [progress] read instead of [fraction]. An
+ * [indeterminate] bar is for work of unknown size, such as walking a folder. Cancel and closing the dialog call
+ * [onCancel].
  */
-internal class OpeningProgressDialog(owner: Window, indeterminate: Boolean = false, private val onCancel: () -> Unit) :
-    JDialog(owner, "Opening Files", ModalityType.APPLICATION_MODAL) {
+internal class ProgressDialog(
+    owner: Window,
+    title: String,
+    indeterminate: Boolean = false,
+    private val progress: (() -> Double)? = null,
+    private val onCancel: () -> Unit,
+) : JDialog(owner, title, ModalityType.APPLICATION_MODAL) {
 
     @Volatile
     var text = " "
@@ -29,7 +38,7 @@ internal class OpeningProgressDialog(owner: Window, indeterminate: Boolean = fal
     private val bar = JProgressBar(0, 1000).apply { isIndeterminate = indeterminate }
     private val timer = Timer(100) {
         label.text = text
-        bar.value = (fraction * 1000).toInt()
+        bar.value = ((progress?.invoke() ?: fraction) * 1000).toInt()
     }
 
     init {
@@ -44,6 +53,13 @@ internal class OpeningProgressDialog(owner: Window, indeterminate: Boolean = fal
         })
         pack()
         setLocationRelativeTo(owner)
+        timer.start()
+    }
+
+    /** Shows the dialog after a moment unless the work is [finished] by then: quick work would only make it flash. */
+    fun showLater(finished: () -> Boolean) {
+        val timer = Timer(SHOW_DELAY_MILLIS) { if (!finished()) isVisible = true }
+        timer.isRepeats = false
         timer.start()
     }
 
