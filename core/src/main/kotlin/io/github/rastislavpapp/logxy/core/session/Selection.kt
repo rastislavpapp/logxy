@@ -1,9 +1,9 @@
 package io.github.rastislavpapp.logxy.core.session
 
 /**
- * The rows the user marked in a shown log, by their row among all shown rows, not among those a table holds at
- * once. Edits follow Swing's `ListSelectionModel`: [anchor] is where the last edit started and [lead] where it
- * ended, both -1 if none. Not thread-safe.
+ * The rows the user marked in a shown log, by their row in the shown log, not among those a table holds at once
+ * (see [TableWindow]). Edits follow Swing's `ListSelectionModel`: [anchor] is where the last edit started and
+ * [lead] where it ended, both -1 if none. Not thread-safe.
  */
 class Selection {
 
@@ -42,6 +42,21 @@ class Selection {
 
     /** Selects the rows from the anchor to [row], and nothing else; without an anchor, [row] alone. */
     fun extendTo(row: Int) = select(if (anchor >= 0) anchor else row, row)
+
+    /**
+     * Selects the rows from the anchor to [row] if the anchor is selected, else deselects them; other rows stay
+     * as they are, as with Ctrl+Shift+click. Without an anchor, adds [row].
+     */
+    fun extendKeepingOthers(row: Int) {
+        if (anchor < 0) return add(row, row)
+        if (anchor in rows) add(anchor, row) else remove(anchor, row)
+    }
+
+    /** The first selected row of [window], as its index there; -1 if none is. */
+    fun minIn(window: TableWindow): Int = window.indexOf(rows.firstIn(window.start, window.end))
+
+    /** The last selected row of [window], as its index there; -1 if none is. */
+    fun maxIn(window: TableWindow): Int = window.indexOf(rows.lastIn(window.start, window.end))
 
     /** Selects the first [size] rows, those shown now: rows shown later are not selected. Anchor and lead stay. */
     fun selectAll(size: Int) {

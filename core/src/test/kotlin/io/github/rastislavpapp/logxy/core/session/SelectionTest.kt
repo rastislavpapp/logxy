@@ -23,6 +23,44 @@ class SelectionTest {
     }
 
     @Test
+    fun `an anchor just above the table's window is outside it, and extending still starts there`() {
+        val selection = Selection()
+        val window = TableWindow(1000, 2000)
+        selection.select(999, 999)
+        assertEquals(-1, window.indexOf(selection.anchor))
+        // Shift-click on the window's row 500, from below the anchor and past the window's end.
+        selection.extendTo(window.rowAt(500))
+        assertEquals(listOf(999..<1501), selection.ranges())
+        assertEquals(0, selection.minIn(window))
+        assertEquals(500, selection.maxIn(window))
+        selection.extendTo(2500)
+        assertEquals(999, selection.maxIn(window))
+        assertEquals(-1, selection.minIn(TableWindow(3000, 4000)))
+    }
+
+    @Test
+    fun `extending while keeping other rows follows the anchor's state`() {
+        val selection = Selection()
+        selection.select(0, 4)
+        selection.add(10, 10)
+        // Ctrl+Shift+click from a selected anchor adds the rows up to the click.
+        selection.extendKeepingOthers(12)
+        assertEquals(listOf(0..<5, 10..<13), selection.ranges())
+        // From an anchor that is not selected, it deselects them.
+        selection.remove(3, 3)
+        selection.extendKeepingOthers(1)
+        assertEquals(listOf(0..<1, 4..<5, 10..<13), selection.ranges())
+    }
+
+    @Test
+    fun `rows shown after select all are not selected`() {
+        val selection = Selection()
+        selection.selectAll(100)
+        selection.insert(100, 50)
+        assertEquals(listOf(0..<100), selection.ranges())
+    }
+
+    @Test
     fun `extending without an anchor selects the row alone`() {
         val selection = Selection()
         selection.extendTo(7)

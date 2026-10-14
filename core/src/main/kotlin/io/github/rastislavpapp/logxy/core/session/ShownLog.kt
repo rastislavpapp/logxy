@@ -166,7 +166,7 @@ class ShownLog internal constructor(private val loaded: LoadedLog) {
      */
     fun copyRows(rows: RowRanges, limit: Long): PreparedCopy {
         if (ended) return EndedCopy
-        require(rows.max < size) { "Row ${rows.max}, size $size" }
+        requireShown(rows)
         val ranges = rows.copy()
         val first = maxOf(0, ranges.min)
         // A filter's rows array may change later: the part the rows cover is copied now.
@@ -181,14 +181,21 @@ class ShownLog internal constructor(private val loaded: LoadedLog) {
     fun copyColumn(field: Int, limit: Long, rows: RowRanges? = null): PreparedCopy {
         if (ended) return EndedCopy
         // The records are resolved here, on the owner thread, and read through snapshots on another.
-        val records = if (rows == null) this.rows?.let { it.array().copyOf(it.size) } else recordsOf(rows)
+        val shown = this.rows
+        val records = when {
+            rows != null -> recordsOf(rows)
+            shown != null -> shown.array().copyOf(shown.size)
+            else -> null
+        }
         val count = records?.size ?: size
         return ColumnCopy(loaded.fieldReader(field, records, count), count, limit)
     }
 
+    private fun requireShown(rows: RowRanges) = require(rows.max < size) { "Row ${rows.max}, size $size" }
+
     /** The records of [rows], in order. */
     private fun recordsOf(rows: RowRanges): IntArray {
-        require(rows.max < size) { "Row ${rows.max}, size $size" }
+        requireShown(rows)
         val records = IntArray(rows.count)
         var i = 0
         val shown = this.rows?.array()
@@ -268,7 +275,8 @@ class ShownLog internal constructor(private val loaded: LoadedLog) {
             }
             if (bytes > limit) return@readOff CopyResult.TooLarge(ranges.count, bytes)
             // Each character takes at least a byte; a line end may be added after each part's last record.
-            val text = StringBuilder((bytes + ranges.rangeCount).coerceAtMost(Int.MAX_VALUE - 8L).toInt())
+            val capacity = minOf(bytes + ranges.rangeCount, Int.MAX_VALUE - 8L)
+            val text = StringBuilder(capacity.toInt())
             forEachRun { from, to ->
                 reader.spans(from, to) { part, start, end -> append(part, start, end, text, job) }
             }

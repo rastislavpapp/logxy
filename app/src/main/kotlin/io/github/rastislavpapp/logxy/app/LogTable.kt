@@ -39,7 +39,7 @@ fun levelColor(level: Level?, default: Color): Color = when (level) {
 /** Table of log records; the last column always fills the viewport and long values are cut. */
 class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
 
-    private val rowSelection = ShownRowSelection(logModel)
+    private val rowSelection = WindowSelectionModel(logModel)
 
     /** Column widths by name, kept when columns are hidden or shown; not of the last column, which fills the rest. */
     private val widths = HashMap<Any, Int>()
@@ -68,16 +68,16 @@ class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
         updateLook()
     }
 
-    /** The selected rows, of all shown rows, not only of those the table holds. */
+    /** The selected rows of the shown log, not only of those the table holds. */
     val selection: Selection get() = rowSelection.selection
 
-    // Selects all shown rows, not only those the table holds.
+    // Selects all rows of the shown log, not only those the table holds.
     override fun selectAll() = rowSelection.selectAll()
 
     // Extending goes from the anchor wherever it is; outside the rows the table holds, JTable would not see it.
     override fun changeSelection(rowIndex: Int, columnIndex: Int, toggle: Boolean, extend: Boolean) {
-        if (!extend || toggle) return super.changeSelection(rowIndex, columnIndex, toggle, extend)
-        rowSelection.extendTo(rowIndex)
+        if (!extend) return super.changeSelection(rowIndex, columnIndex, toggle, extend)
+        if (toggle) rowSelection.extendKeepingOthers(rowIndex) else rowSelection.extendTo(rowIndex)
         columnModel.selectionModel.setSelectionInterval(columnIndex, columnIndex)
         if (autoscrolls) scrollRectToVisible(getCellRect(rowIndex, columnIndex, false))
     }

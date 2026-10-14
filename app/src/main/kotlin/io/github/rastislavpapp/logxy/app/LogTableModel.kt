@@ -73,6 +73,9 @@ class LogTableModel(val shown: ShownLog) : AbstractTableModel(), RowWindow {
     /** The record at [index] of all shown rows. */
     fun recordAtIndex(index: Int): Int = shown.recordAt(index)
 
+    /** The record at [index] of all shown rows; null if there is no row there, e.g. -1 for none. */
+    fun recordAtIndexOrNull(index: Int): Int? = if (index in 0..<totalRowCount) recordAtIndex(index) else null
+
     /** Position of [record] among the shown rows, or of the first shown record after it; -1 if none. */
     fun indexOfRecord(record: Int): Int = shown.rowOf(record)
 
