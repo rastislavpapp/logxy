@@ -89,13 +89,11 @@ private fun parseParts(files: List<Path>, options: IndexOptions): List<LogData> 
 
 /** The `merge` rows: merging, [mergedBenchmarkFilters] by name, and counting on the merged log. */
 val mergeRows = listOf(
-    BenchmarkRow(MergeBenchmark::class.java, "merge") { "merge: merge files" },
-    BenchmarkRow(MergedFilterBenchmark::class.java, "run") {
-        "merge: filter ${it.getParam(MergedFilterBenchmark::filter.name)}"
-    },
-    BenchmarkRow(MergeBenchmark::class.java, "countPatterns") { "merge: count patterns" },
-    BenchmarkRow(MergeBenchmark::class.java, "countTimes") { "merge: count times" },
-    BenchmarkRow(MergeBenchmark::class.java, "countTimesOfEveryOtherRow") { "merge: count times of every other row" },
+    BenchmarkRow(MergeBenchmark::class.java, "merge", "merge: merge files"),
+    BenchmarkRow(MergedFilterBenchmark::class.java, "run", "merge: filter ", MergedFilterBenchmark::filter.name),
+    BenchmarkRow(MergeBenchmark::class.java, "countPatterns", "merge: count patterns"),
+    BenchmarkRow(MergeBenchmark::class.java, "countTimes", "merge: count times"),
+    BenchmarkRow(MergeBenchmark::class.java, "countTimesOfEveryOtherRow", "merge: count times of every other row"),
 )
 
 /** Parameters of [MergeBenchmark] and [MergedFilterBenchmark]. */
@@ -105,12 +103,16 @@ fun mergeParams(files: List<Path>, readChannels: Int? = null): Map<String, List<
     MergedFilterBenchmark::filter.name to mergedBenchmarkFilters.keys.toList(),
 )
 
-/** Measures [mergeRows] on [files], then the heap a merge adds. [readChannels] is per file. */
-fun benchmarkMerging(files: List<Path>, runs: Runs, readChannels: Int?) {
+/**
+ * Measures [mergeRows] on [files], then the heap a merge adds. [readChannels] is per file; [only] measures just the
+ * row of that name.
+ */
+fun benchmarkMerging(files: List<Path>, runs: Runs, readChannels: Int?, only: String? = null) {
     val options = indexOptions(readChannels)
     println("read channels per file: ${options.readChannels}\n")
     printHeader(runs)
-    measure(mergeRows, mergeParams(files, readChannels), runs, ::printRow)
+    measureOrList(mergeRows, mergeParams(files, readChannels), runs, only)
+    if (only != null) return
     val parts = parseParts(files, options)
     val before = usedHeap()
     val log = runBlocking { MergedLog.build(parts) }

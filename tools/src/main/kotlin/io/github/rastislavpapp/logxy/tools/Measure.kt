@@ -6,7 +6,6 @@ package io.github.rastislavpapp.logxy.tools
 import io.github.rastislavpapp.logxy.core.parse.CompiledParser
 import io.github.rastislavpapp.logxy.core.parse.Parser
 import org.openjdk.jmh.annotations.Mode
-import org.openjdk.jmh.infra.BenchmarkParams
 import org.openjdk.jmh.results.RunResult
 import org.openjdk.jmh.runner.Runner
 import org.openjdk.jmh.runner.options.OptionsBuilder
@@ -22,27 +21,36 @@ const val WARMUPS = 3
 class Runs(val iterations: Int, val forks: Int)
 
 /**
- * A JMH benchmark method, [method] of [type], and the name of its row in the results; [name] gets the parameters,
- * so a method measured once per value of a parameter makes one row per value.
+ * A JMH benchmark method, [method] of [type], and the [name] of its row in the results. With [param], the method is
+ * measured once per value of that parameter, each a row named [name] followed by the value.
  */
-class BenchmarkRow(type: Class<*>, method: String, val name: (BenchmarkParams) -> String) {
+class BenchmarkRow(type: Class<*>, method: String, val name: String, val param: String? = null) {
     val id = "${type.name}.$method"
+
+    /** The rows this one makes, by name, with the value of [param] each is measured with. */
+    fun named(params: Map<String, List<String>>): List<Pair<String, String?>> {
+        if (param == null) return listOf(name to null)
+        return params.getValue(param).map { value -> "$name$value" to value }
+    }
 }
 
 /**
- * Measures [rows] with JMH, one row after another, and gives each to [report] as it is done. One run is one call
- * (single shot): what is measured is a whole parse or filter, long enough to time alone. Every row runs in JVMs of
- * its own, forked with this one's `java.home`, classpath and JVM arguments. [params] go to every benchmark that
- * declares them, by name.
+ * Measures [rows] with JMH, one row after another, and gives each to [report] as it is done; with [only], just the
+ * row of that name, and none if no row has it. One run is one call (single shot): what is measured is a whole parse
+ * or filter, long enough to time alone. Every row runs in JVMs of its own, forked with this one's `java.home`,
+ * classpath and JVM arguments. [params] go to every benchmark that declares them, by name.
  */
 fun measure(
     rows: List<BenchmarkRow>,
     params: Map<String, List<String>>,
     runs: Runs,
     report: (String, Timings) -> Unit,
+    only: String? = null,
 ): Map<String, Timings> {
     val times = LinkedHashMap<String, Timings>()
     for (row in rows) {
+        val selected = row.named(params).filter { (name, _) -> only == null || name == only }
+        if (selected.isEmpty()) continue
         val options = OptionsBuilder()
             .include("^${Pattern.quote(row.id)}$")
             .mode(Mode.SingleShotTime)
@@ -52,20 +60,28 @@ fun measure(
             .forks(runs.forks)
             .shouldFailOnError(true)
             .verbosity(VerboseMode.SILENT)
-        for ((name, values) in params) options.param(name, *values.toTypedArray())
-        // JMH orders the runs by parameter text; the rows keep the order of the given values.
-        val results = Runner(options.build()).run().sortedBy { result ->
-            params.entries.fold(0) { order, (name, values) ->
-                order * (values.size + 1) + values.indexOf(result.params.getParam(name)) + 1
-            }
+        for ((name, values) in params) {
+            val measured = if (name == row.param) selected.map { it.second } else values
+            options.param(name, *measured.toTypedArray())
         }
-        for (result in results) {
-            val name = row.name(result.params)
-            times[name] = Timings(scoresPerFork(result))
+        val results = Runner(options.build()).run().associateBy { result ->
+            row.param?.let { result.params.getParam(it) }
+        }
+        // JMH orders the runs by parameter text; the rows keep the order of the given values.
+        for ((name, value) in selected) {
+            times[name] = Timings(scoresPerFork(results.getValue(value)))
             report(name, times.getValue(name))
         }
     }
     return times
+}
+
+/** As [measure], printing each row, for a `tools` command; fails with the row names if [only] names none of them. */
+fun measureOrList(rows: List<BenchmarkRow>, params: Map<String, List<String>>, runs: Runs, only: String?) {
+    val times = measure(rows, params, runs, ::printRow, only)
+    if (times.isNotEmpty()) return
+    val names = rows.flatMap { row -> row.named(params).map { it.first } }
+    error("No row named \"$only\"; the rows are:\n${names.joinToString("\n")}")
 }
 
 /** The measured runs of each forked JVM, in seconds. */
@@ -85,9 +101,16 @@ fun printHeader(runs: Runs) {
     }
 }
 
+/** With several JVMs, also each one's best in ms, which tells one slow JVM from a slow row. */
 fun printRow(name: String, times: Timings) {
     val spread = times.spread * 100
-    println("%-58s best %7.3f s  median %7.3f s  spread %+5.0f%%".format(name, times.best, times.median, spread))
+    val line = "%-58s best %7.3f s  median %7.3f s  spread %+5.0f%%".format(name, times.best, times.median, spread)
+    if (times.jvms.size == 1) {
+        println(line)
+        return
+    }
+    val bests = times.jvms.joinToString(" ") { "%.0f".format(it.min() * 1000) }
+    println("$line  JVM bests: $bests ms")
 }
 
 /**

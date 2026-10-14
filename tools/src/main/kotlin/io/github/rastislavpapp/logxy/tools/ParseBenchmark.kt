@@ -103,12 +103,12 @@ fun paths(joined: String): List<Path> = joined.split(File.pathSeparator).map { P
 fun parse(file: Path): ParsedLog = runBlocking { ParsedLog.build(file, parserFor(file).compileFor(file)) }
 
 /** The `parse` row of one file. */
-val parseFileRows = listOf(BenchmarkRow(ParseBenchmark::class.java, "parseFile") { "parse file" })
+val parseFileRows = listOf(BenchmarkRow(ParseBenchmark::class.java, "parseFile", "parse file"))
 
 /** The `parse` rows of several files. */
 val parseFilesRows = listOf(
-    BenchmarkRow(ParseFilesBenchmark::class.java, "oneByOne") { "parse files one by one" },
-    BenchmarkRow(ParseFilesBenchmark::class.java, "atOnce") { "parse files at once" },
+    BenchmarkRow(ParseFilesBenchmark::class.java, "oneByOne", "parse files one by one"),
+    BenchmarkRow(ParseFilesBenchmark::class.java, "atOnce", "parse files at once"),
 )
 
 /** Parameters of [ParseBenchmark]. */
@@ -123,18 +123,18 @@ fun parseFilesParams(files: List<Path>): Map<String, List<String>> =
 
 /**
  * Measures parsing [files]: one file with [pattern] or the detected parser, plus the heap the result holds; several
- * one by one and at once.
+ * one by one and at once. [only] measures just the row of that name.
  */
-fun benchmarkParsing(files: List<Path>, runs: Runs, pattern: String? = null) {
+fun benchmarkParsing(files: List<Path>, runs: Runs, pattern: String? = null, only: String? = null) {
     val single = files.singleOrNull()
     require(single != null || pattern == null) { "--pattern applies to one file" }
     printHeader(runs)
     if (single == null) {
-        measure(parseFilesRows, parseFilesParams(files), runs, ::printRow)
+        measureOrList(parseFilesRows, parseFilesParams(files), runs, only)
         return
     }
-    measure(parseFileRows, parseFileParams(single, pattern), runs, ::printRow)
-    printHeap(single, pattern)
+    measureOrList(parseFileRows, parseFileParams(single, pattern), runs, only)
+    if (only == null) printHeap(single, pattern)
 }
 
 private fun printHeap(file: Path, pattern: String?) {
