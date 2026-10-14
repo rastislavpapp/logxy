@@ -17,15 +17,16 @@ private const val USAGE = """Usage:
                                         a night batch, slowly growing warnings, an incident with a restart gap at
                                         14:20 and an error spike at 19:40
   benchmark <file> [--iterations N]     compare line-indexing strategies on a file
-  parse <file>... [--iterations N] [--forks N] [--pattern LAYOUT]
+  parse <file>... [--iterations N] [--forks N] [--only ROW] [--pattern LAYOUT]
                                         measure parsing one file with the detected parser, or the given pattern
                                         layout (one file only); several files one by one and at once
-  filter <file> [--iterations N] [--forks N]
+  filter <file> [--iterations N] [--forks N] [--only ROW]
                                         measure typical filters, counting patterns and times on the parsed file
-  merge <file> <file>... [--iterations N] [--forks N] [--read-channels N]
-                                        measure merging files and filtering the merged view
+  merge <file> <file>... [--iterations N] [--forks N] [--only ROW] [--read-channels N]
+                                        measure merging files and filtering the merged log
                                         parse, filter and merge time N runs (after uncounted ones) in each of
-                                        --forks JVMs (default 1) and show the spread between runs, or JVMs
+                                        --forks JVMs (default 1) and show the spread between runs, or JVMs;
+                                        --only measures one row by its name, e.g. "filter message regex"
   simulate <file> [--rate N] [--rotate-at SIZE] [--mdc] [--json] [--rabbitmq]
                                         append lines like a running application (N per second, default 20),
                                         optionally rotating file -> file.1 -> ... at SIZE; Ctrl+C stops
@@ -60,11 +61,13 @@ fun main(args: Array<String>) {
         "benchmark" if positional.size == 2 ->
             benchmarkIndexing(Path.of(positional[1]), option("iterations")?.toInt() ?: 5)
         "parse" if positional.size >= 2 ->
-            benchmarkParsing(positional.drop(1).map { Path.of(it) }, runs(3), option("pattern"))
+            benchmarkParsing(positional.drop(1).map { Path.of(it) }, runs(3), option("pattern"), option("only"))
         "filter" if positional.size == 2 ->
-            benchmarkFiltering(Path.of(positional[1]), runs(5))
-        "merge" if positional.size >= 3 ->
-            benchmarkMerging(positional.drop(1).map { Path.of(it) }, runs(3), option("read-channels")?.toInt())
+            benchmarkFiltering(Path.of(positional[1]), runs(5), option("only"))
+        "merge" if positional.size >= 3 -> {
+            val files = positional.drop(1).map { Path.of(it) }
+            benchmarkMerging(files, runs(3), option("read-channels")?.toInt(), option("only"))
+        }
         "simulate" if positional.size == 2 ->
             simulateLogging(
                 Path.of(positional[1]),

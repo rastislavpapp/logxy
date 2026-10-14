@@ -1,0 +1,34 @@
+# Benchmarks: a slow or noisy row
+
+The baseline check (`./gradlew -q :tools:benchmark`) and `tools parse|filter|merge` run the same JMH benchmarks. Each row runs in JVMs of its own. The check compares the median of each JVM's best run with `tools/benchmark-baseline.properties`.
+
+## Tell a slow row from a slow JVM
+
+Measure the row alone in many JVMs; the names are the ones the check prints:
+
+```sh
+./gradlew -q :tools:run --args="filter build/benchmark/main.log --forks 16 --only \"filter message regex\""
+```
+
+`JVM bests` lists each JVM's best in ms. When all JVMs are slower, the code got slower. When a few JVMs sit apart from the rest for the whole run, the JIT settled differently in them: compare one of those with a fast one (below). #55 is such a case.
+
+## Compare a slow and a fast JVM
+
+Run JMH directly, so each fork can get its own JVM arguments:
+
+```sh
+./gradlew -q :tools:installDist
+java -Xmx8g --sun-misc-unsafe-memory-access=allow --enable-native-access=ALL-UNNAMED \
+  -cp 'tools/build/install/tools/lib/*' org.openjdk.jmh.Main 'FilterBenchmark.run' \
+  -p file=build/benchmark/main.log -p "filter=message regex" -bm ss -wi 3 -i 5 -f 16 -tu ms \
+  -jvmArgsAppend "-XX:StartFlightRecording=settings=profile,filename=/tmp/jfr/%p.jfr"
+```
+
+- **Benchmark names**: the classes in `tools/src/main/kotlin/.../tools/*Benchmark.kt`; the `-p` names are their `@Param` fields.
+- **JFR, one recording per fork**: `%p` is the pid, so the recordings sort in fork order. JMH also starts short helper JVMs whose recordings last 0 s; skip those. Compare `jfr view hot-methods <file>` of a slow and a fast fork. `jfr print --json --events jdk.ExecutionSample` gives each frame's type (`Inlined`, `JIT compiled`), which shows the compilation a hot loop ended up in.
+- **`-XX:+PrintCompilation`**: its lines interleave with JMH's `Iteration` lines. Split the output at `# Fork:` and take each fork's last `-i` values matching `ms/op`.
+- **Testing a JIT hypothesis**: add `-XX:CompileCommand=quiet -XX:CompileCommand=dontinline,<class>::<method>` (or another compile command) to `-jvmArgsAppend`, then count the slow forks again.
+
+## Recording the baseline
+
+`-PbaselineRecord` adds the rows the baseline lacks. When `SETUP` or the JVMs per row (`-PbenchmarkForks`) changed, it records every row again.

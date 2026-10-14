@@ -90,11 +90,11 @@ open class PatternBenchmark {
 
 /** The `filter` rows: [benchmarkFilters] by name, patterns and count times. */
 val filterRows = listOf(
-    BenchmarkRow(FilterBenchmark::class.java, "run") { "filter ${it.getParam(FilterBenchmark::filter.name)}" },
-    BenchmarkRow(PatternBenchmark::class.java, "countPatterns") { "patterns: count all" },
-    BenchmarkRow(PatternBenchmark::class.java, "countPatternsAgain") { "patterns: count all again" },
-    BenchmarkRow(PatternBenchmark::class.java, "hideMostCommonPattern") { "filter hide most common pattern" },
-    BenchmarkRow(PatternBenchmark::class.java, "countTimes") { "count times" },
+    BenchmarkRow(FilterBenchmark::class.java, "run", "filter ", FilterBenchmark::filter.name),
+    BenchmarkRow(PatternBenchmark::class.java, "countPatterns", "patterns: count all"),
+    BenchmarkRow(PatternBenchmark::class.java, "countPatternsAgain", "patterns: count all again"),
+    BenchmarkRow(PatternBenchmark::class.java, "hideMostCommonPattern", "filter hide most common pattern"),
+    BenchmarkRow(PatternBenchmark::class.java, "countTimes", "count times"),
 )
 
 /** Parameters of [FilterBenchmark] and [PatternBenchmark], whose `file` parameters share the name. */
@@ -103,11 +103,15 @@ fun filterParams(file: Path): Map<String, List<String>> = mapOf(
     FilterBenchmark::filter.name to benchmarkFilters.keys.toList(),
 )
 
-/** Measures [filterRows] on [file], then shows a cached run of each filter and what it finds. */
-fun benchmarkFiltering(file: Path, runs: Runs) {
+/**
+ * Measures [filterRows] on [file], then shows a cached run of each filter and what it finds. [only] measures just
+ * the row of that name.
+ */
+fun benchmarkFiltering(file: Path, runs: Runs, only: String? = null) {
     println("File: $file (${formatByteSize(Files.size(file))})\n")
     printHeader(runs)
-    measure(filterRows, filterParams(file), runs, ::printRow)
+    measureOrList(filterRows, filterParams(file), runs, only)
+    if (only != null) return
     println()
     parse(file).use { log ->
         for ((name, condition) in benchmarkFilters) {

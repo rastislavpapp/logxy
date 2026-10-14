@@ -74,8 +74,7 @@ open class FollowBenchmark {
 }
 
 /** The `follow` row; it has no `tools` command. */
-val followRows =
-    listOf(BenchmarkRow(FollowBenchmark::class.java, "filterAppended") { "follow: filter appended records" })
+val followRows = listOf(BenchmarkRow(FollowBenchmark::class.java, "filterAppended", "follow: filter appended records"))
 
 /** Parameters of [FollowBenchmark]. */
 fun followParams(file: Path, appended: Path): Map<String, List<String>> = mapOf(
