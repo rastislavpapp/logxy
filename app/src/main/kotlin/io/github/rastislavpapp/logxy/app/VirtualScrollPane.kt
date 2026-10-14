@@ -8,7 +8,6 @@ import java.awt.event.KeyAdapter
 import java.awt.event.KeyEvent
 import java.awt.event.MouseWheelEvent
 import javax.swing.AbstractAction
-import javax.swing.DefaultListSelectionModel
 import javax.swing.JComponent
 import javax.swing.JPanel
 import javax.swing.JScrollBar
@@ -186,34 +185,9 @@ class VirtualScrollPane(private val table: JTable, private val window: RowWindow
         val delta = newStart - window.windowStart
         if (delta == 0) return
         val viewY = viewport.viewPosition.y - delta * table.rowHeight
-        shiftSelection(delta)
+        // The selection is kept in rows of the whole list (ShownRowSelection), so it stays as it is.
         window.windowStart = newStart
         setViewY(viewY)
-    }
-
-    // Keeps the same rows selected after the window moves by `delta` rows; rows leaving the window are deselected.
-    private fun shiftSelection(delta: Int) {
-        val selection = table.selectionModel as DefaultListSelectionModel
-        val rows = table.rowCount
-        fun shifted(index: Int) = if (index < 0) -1 else (index - delta).coerceIn(0, rows - 1)
-        val anchor = shifted(selection.anchorSelectionIndex)
-        val lead = shifted(selection.leadSelectionIndex)
-        val selected = selection.selectedIndices
-        selection.valueIsAdjusting = true
-        selection.clearSelection()
-        var i = 0
-        while (i < selected.size) {
-            // Re-add contiguous runs as intervals.
-            var j = i
-            while (j + 1 < selected.size && selected[j + 1] == selected[j] + 1) j++
-            val from = maxOf(0, selected[i] - delta)
-            val to = minOf(rows - 1, selected[j] - delta)
-            if (from <= to) selection.addSelectionInterval(from, to)
-            i = j + 1
-        }
-        selection.anchorSelectionIndex = anchor
-        selection.moveLeadSelectionIndex(lead)
-        selection.valueIsAdjusting = false
     }
 
     private fun setViewY(y: Int) {

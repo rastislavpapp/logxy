@@ -4,6 +4,7 @@ import io.github.rastislavpapp.logxy.core.log.ColumnType
 import io.github.rastislavpapp.logxy.core.log.Level
 import io.github.rastislavpapp.logxy.core.log.Role
 import io.github.rastislavpapp.logxy.core.query.Highlighter
+import io.github.rastislavpapp.logxy.core.session.Selection
 import java.awt.Color
 import java.awt.Component
 import java.awt.Font
@@ -11,7 +12,6 @@ import java.awt.Graphics
 import java.awt.Rectangle
 import javax.swing.JLabel
 import javax.swing.JTable
-import javax.swing.ListSelectionModel
 import javax.swing.SwingConstants
 import javax.swing.SwingUtilities
 import javax.swing.UIManager
@@ -39,6 +39,8 @@ fun levelColor(level: Level?, default: Color): Color = when (level) {
 /** Table of log records; the last column always fills the viewport and long values are cut. */
 class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
 
+    private val rowSelection = ShownRowSelection(logModel)
+
     /** Column widths by name, kept when columns are hidden or shown; not of the last column, which fills the rest. */
     private val widths = HashMap<Any, Int>()
 
@@ -60,10 +62,24 @@ class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
         autoResizeMode = AUTO_RESIZE_LAST_COLUMN
         setShowGrid(false)
         fillsViewportHeight = true
-        selectionModel.selectionMode = ListSelectionModel.MULTIPLE_INTERVAL_SELECTION
+        selectionModel = rowSelection
         tableHeader.reorderingAllowed = false
         (tableHeader.defaultRenderer as? JLabel)?.horizontalAlignment = SwingConstants.LEADING
         updateLook()
+    }
+
+    /** The selected rows, of all shown rows, not only of those the table holds. */
+    val selection: Selection get() = rowSelection.selection
+
+    // Selects all shown rows, not only those the table holds.
+    override fun selectAll() = rowSelection.selectAll()
+
+    // Extending goes from the anchor wherever it is; outside the rows the table holds, JTable would not see it.
+    override fun changeSelection(rowIndex: Int, columnIndex: Int, toggle: Boolean, extend: Boolean) {
+        if (!extend || toggle) return super.changeSelection(rowIndex, columnIndex, toggle, extend)
+        rowSelection.extendTo(rowIndex)
+        columnModel.selectionModel.setSelectionInterval(columnIndex, columnIndex)
+        if (autoscrolls) scrollRectToVisible(getCellRect(rowIndex, columnIndex, false))
     }
 
     // JTable spreads spare width over all columns; give it all to the last one, unless the user is

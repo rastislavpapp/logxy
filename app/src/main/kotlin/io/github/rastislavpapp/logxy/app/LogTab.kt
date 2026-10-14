@@ -187,14 +187,17 @@ class LogTab(
     val selectionSpan: Long?
         get() {
             val model = model ?: return null
-            val selection = table?.selectionModel ?: return null
-            val first = selection.minSelectionIndex
-            val last = selection.maxSelectionIndex
-            if (first < 0 || first == last || last >= model.rowCount) return null
-            val start = model.shown.timestamp(model.recordAt(first)) ?: return null
-            val end = model.shown.timestamp(model.recordAt(last)) ?: return null
+            val rows = table?.selection?.rows ?: return null
+            val first = rows.min
+            val last = rows.max
+            if (first < 0 || first == last || last >= model.totalRowCount) return null
+            val start = model.shown.timestamp(model.recordAtIndex(first)) ?: return null
+            val end = model.shown.timestamp(model.recordAtIndex(last)) ?: return null
             return end - start
         }
+
+    /** Number of rows selected, of all shown rows. */
+    val selectedCount: Int get() = table?.selection?.count ?: 0
 
     // The file controls live outside the tab, and are not updated with it while another tab shows its own.
     override fun updateUI() {
@@ -401,13 +404,7 @@ class LogTab(
     }
 
     /** The selected rows, of all shown rows. */
-    private fun selectedRows(): RowRanges {
-        val rows = RowRanges()
-        val model = model ?: return rows
-        val table = table ?: return rows
-        for (row in table.selectedRows) rows.add(model.windowStart + row, model.windowStart + row + 1)
-        return rows
-    }
+    private fun selectedRows(): RowRanges = table?.selection?.rows ?: RowRanges()
 
     private fun copy(text: String) =
         Toolkit.getDefaultToolkit().systemClipboard.setContents(StringSelection(text), null)
@@ -435,7 +432,7 @@ class LogTab(
             addActionListener { copy(shown.fieldText(model.recordAt(row), fieldIndex)) }
         })
         // Within a selection of several rows, the menu also copies from all of them.
-        if (table.isRowSelected(row) && table.selectedRowCount > 1) {
+        if (table.isRowSelected(row) && table.selection.count > 1) {
             popup.add(JMenuItem("Copy Selected Rows").apply {
                 addActionListener { copySelectedRows() }
             })
@@ -601,7 +598,7 @@ class LogTab(
         table.selectionModel.addListSelectionListener { event ->
             showMarkedTimes()
             if (!event.valueIsAdjusting) {
-                showDetail(model, table.selectionModel.leadSelectionIndex)
+                showDetail(model, table.selection.lead)
                 showFoundCount()
                 onStatusChanged()
             }
@@ -646,9 +643,10 @@ class LogTab(
         applyFilter()
     }
 
+    /** Shows the record at [row] of all shown rows, or nothing if there is none. */
     private fun showDetail(model: LogTableModel, row: Int) {
-        val inRange = row >= 0 && row < model.rowCount
-        detail.show(if (inRange) model.shown.recordText(model.recordAt(row), MAX_DETAIL_BYTES) else "")
+        val inRange = row >= 0 && row < model.totalRowCount
+        detail.show(if (inRange) model.shown.recordText(model.recordAtIndex(row), MAX_DETAIL_BYTES) else "")
         // A long record, e.g. with a stack trace, shows where the find bar's text is.
         detail.caretPosition = detail.firstFound
     }
@@ -656,8 +654,8 @@ class LogTab(
     /** Shows [record] again if it is selected; it may have grown, e.g. by a stack trace written after it. */
     private fun refreshDetail(record: Int) {
         val model = model ?: return
-        val row = table?.selectionModel?.leadSelectionIndex ?: return
-        if (row !in 0..<model.rowCount || model.recordAt(row) != record) return
+        val row = table?.selection?.lead ?: return
+        if (row !in 0..<model.totalRowCount || model.recordAtIndex(row) != record) return
         val text = model.shown.recordText(record, MAX_DETAIL_BYTES)
         if (text == detail.text) return
         val caret = detail.caretPosition
@@ -689,8 +687,9 @@ class LogTab(
         val model = model ?: return
         val table = table ?: return
         val scrollPane = scrollPane ?: return
-        val selectedRow = model.windowStart + table.selectedRow
-        val selected = if (table.selectedRow >= 0 && selectedRow < oldSize) recordBefore(selectedRow) else null
+        // The selection ends with the rows shown; only the record at its lead stays selected, if it is still shown.
+        val lead = table.selection.lead
+        val selected = if (lead in table.selection && lead < oldSize) recordBefore(lead) else null
         val top = scrollPane.firstVisibleRow.takeIf { it < oldSize }?.let(recordBefore)
         model.rowsReplaced()
         scrollPane.rowsReplaced()
@@ -774,9 +773,9 @@ class LogTab(
         val table = table ?: return
         val scrollPane = scrollPane ?: return
         if (model.shown.foundCount == 0 || model.totalRowCount == 0) return
-        val lead = table.selectionModel.leadSelectionIndex
-        val selected = lead.takeIf { it in 0..<model.rowCount && table.selectionModel.isSelectedIndex(it) }
-        val current = selected?.let(model::recordAt) ?: model.recordAtIndex(scrollPane.firstVisibleRow)
+        val lead = table.selection.lead
+        val selected = lead.takeIf { it in 0..<model.totalRowCount && it in table.selection }
+        val current = selected?.let(model::recordAtIndex) ?: model.recordAtIndex(scrollPane.firstVisibleRow)
         val record = model.shown.nextFound(current, forward, inclusive || selected == null)
         val index = model.indexOfRecord(record)
         if (index < 0 || model.recordAtIndex(index) != record) return
@@ -788,8 +787,8 @@ class LogTab(
     private fun showFoundCount() {
         val model = model
         if (model?.shown?.isSearching == true) return
-        val lead = table?.selectionModel?.leadSelectionIndex ?: -1
-        val selected = if (model != null && lead in 0..<model.rowCount) model.recordAt(lead) else -1
+        val lead = table?.selection?.lead ?: -1
+        val selected = if (model != null && lead in 0..<model.totalRowCount) model.recordAtIndex(lead) else -1
         val shown = model?.shown
         val position = if (shown != null && selected >= 0) shown.foundPosition(selected) else 0
         findBar.showCount(position, shown?.foundCount ?: 0)
@@ -800,12 +799,12 @@ class LogTab(
         val bar = histogramBar ?: return
         val model = model ?: return
         val scrollPane = scrollPane ?: return
-        val selection = table?.selectionModel ?: return
-        val first = selection.minSelectionIndex
-        val last = selection.maxSelectionIndex
-        bar.markedTimes = if (first >= 0 && last < model.rowCount) {
-            val from = model.shown.timestamp(model.recordAt(first))
-            val to = model.shown.timestamp(model.recordAt(last))
+        val rows = table?.selection?.rows ?: return
+        val first = rows.min
+        val last = rows.max
+        bar.markedTimes = if (first >= 0 && last < model.totalRowCount) {
+            val from = model.shown.timestamp(model.recordAtIndex(first))
+            val to = model.shown.timestamp(model.recordAtIndex(last))
             if (from != null && to != null) minOf(from, to) to maxOf(from, to) else (from ?: to)?.let { it to it }
         } else if (model.totalRowCount > 0) {
             model.shown.timestamp(model.recordAtIndex(scrollPane.firstVisibleRow))?.let { it to it }
