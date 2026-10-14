@@ -2,7 +2,9 @@ package io.github.rastislavpapp.logxy.app
 
 import net.miginfocom.swing.MigLayout
 import java.awt.Window
+import java.awt.event.ActionEvent
 import java.awt.event.KeyEvent
+import javax.swing.AbstractAction
 import javax.swing.Icon
 import javax.swing.JButton
 import javax.swing.JComponent
@@ -30,7 +32,8 @@ class TableNoticeDialog(
 ) : JDialog(owner, title, ModalityType.APPLICATION_MODAL) {
 
     init {
-        val model = object : DefaultTableModel(rows.map { it.toTypedArray() }.toTypedArray(), columns.toTypedArray()) {
+        val data = rows.map { it.toTypedArray() }.toTypedArray()
+        val model = object : DefaultTableModel(data, columns.toTypedArray()) {
             override fun isCellEditable(row: Int, column: Int) = false
         }
         val table = JTable(model).apply { autoCreateRowSorter = true }
@@ -41,6 +44,11 @@ class TableNoticeDialog(
             add(dialogButtons(close), "gaptop para")
         }
         rootPane.defaultButton = close
+        // JTable binds Enter to "next row", which would win over the default button.
+        table.inputMap.put(KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, 0), "close")
+        table.actionMap.put("close", object : AbstractAction() {
+            override fun actionPerformed(e: ActionEvent) = dispose()
+        })
         val escape = KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0)
         rootPane.registerKeyboardAction({ dispose() }, escape, JComponent.WHEN_IN_FOCUSED_WINDOW)
         fitToScreen(SCREEN_FRACTION)
