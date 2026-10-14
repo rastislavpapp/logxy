@@ -49,16 +49,22 @@ fun verdict(seconds: Double, baseline: Double, tolerance: Double, noise: Double)
  * Measures parsing, typical filters, following and merging on fixed-seed generated files, the rows of the `tools`
  * commands. The files are generated into `build/benchmark` once.
  */
-private fun measureAll(): Map<String, RowTimes> {
+private fun measureAll(): Map<String, Timings> {
     val main = dataFile("main.log", MAIN_SIZE, 1)
     val appended = dataFile("appended.log", APPEND_SIZE, 10)
     val parts = (0 until MERGE_FILES).map { dataFile("merge-$it.log", MERGE_FILE_SIZE, 2L + it) }
+    val groups = listOf(
+        parseFileRows to parseFileParams(main),
+        parseFilesRows to parseFilesParams(parts),
+        filterRows to filterParams(main),
+        followRows to followParams(main, appended),
+        mergeRows to mergeParams(parts),
+    )
     val runs = Runs(RUNS, FORKS)
     printHeader(runs)
-    return measure(parseRows(main, parts), parseParams(main, parts), runs, ::printRow) +
-        measure(filterRows, filterParams(main), runs, ::printRow) +
-        measure(followRows, followParams(main, appended), runs, ::printRow) +
-        measure(mergeRows, mergeParams(parts), runs, ::printRow)
+    val results = LinkedHashMap<String, Timings>()
+    for ((rows, params) in groups) results += measure(rows, params, runs, ::printRow)
+    return results
 }
 
 /**
@@ -100,7 +106,7 @@ private fun load(file: Path): Properties? =
 private fun Properties.matches(machine: Map<String, String>) =
     machine.all { (key, value) -> getProperty(key) in setOf(null, value) }
 
-private fun save(file: Path, machine: Map<String, String>, results: Map<String, RowTimes>, kept: Properties? = null) {
+private fun save(file: Path, machine: Map<String, String>, results: Map<String, Timings>, kept: Properties? = null) {
     val props = Properties()
     kept?.let { props.putAll(it) }
     props["setup"] = SETUP

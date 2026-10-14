@@ -37,13 +37,13 @@ open class FilterBenchmark {
     private lateinit var condition: Filter
 
     @Setup
-    fun open() {
+    fun setUp() {
         log = parse(Path.of(file))
-        condition = benchmarkFilters.first { it.first == filter }.second
+        condition = benchmarkFilters.getValue(filter)
     }
 
     @TearDown
-    fun close() = log.close()
+    fun tearDown() = log.close()
 
     @Benchmark
     fun run(): FilterResult = runBlocking { FilterEngine(log).prepare(condition).run() }
@@ -57,19 +57,21 @@ open class PatternBenchmark {
     var file = ""
 
     private lateinit var log: ParsedLog
-    private lateinit var used: FilterEngine
-    private lateinit var hide: Filter
+
+    /** An engine that already found the templates. */
+    private lateinit var usedEngine: FilterEngine
+    private lateinit var hideTopPattern: Filter
 
     @Setup
-    fun open() {
+    fun setUp() {
         log = parse(Path.of(file))
-        used = FilterEngine(log)
-        val top = runBlocking { used.countPatterns(null, log.recordCount) }.templates.first()!!
-        hide = Filter.Not(PatternCondition("Message", setOf(top)))
+        usedEngine = FilterEngine(log)
+        val top = runBlocking { usedEngine.countPatterns(null, log.recordCount) }.templates.first()!!
+        hideTopPattern = Filter.Not(PatternCondition("Message", setOf(top)))
     }
 
     @TearDown
-    fun close() = log.close()
+    fun tearDown() = log.close()
 
     /** A new engine finds the templates anew. */
     @Benchmark
@@ -77,29 +79,29 @@ open class PatternBenchmark {
 
     /** A used engine only counts. */
     @Benchmark
-    fun countPatternsAgain(): PatternCounts = runBlocking { used.countPatterns(null, log.recordCount) }
+    fun countPatternsAgain(): PatternCounts = runBlocking { usedEngine.countPatterns(null, log.recordCount) }
 
     @Benchmark
-    fun hideMostCommonPattern(): FilterResult = runBlocking { FilterEngine(log).prepare(hide).run() }
+    fun hideMostCommonPattern(): FilterResult = runBlocking { FilterEngine(log).prepare(hideTopPattern).run() }
 
     @Benchmark
     fun countTimes(): TimeHistogram = runBlocking { countTimes(log) }
 }
 
-fun parse(file: Path): ParsedLog = runBlocking { ParsedLog.build(file, detect(file)) }
-
 /** The `filter` rows: [benchmarkFilters] by name, patterns and count times. */
 val filterRows = listOf(
-    Row(FilterBenchmark::class.java, "run") { "filter ${it.getParam("filter")}" },
-    Row(PatternBenchmark::class.java, "countPatterns") { "patterns: count all" },
-    Row(PatternBenchmark::class.java, "countPatternsAgain") { "patterns: count all again" },
-    Row(PatternBenchmark::class.java, "hideMostCommonPattern") { "filter hide most common pattern" },
-    Row(PatternBenchmark::class.java, "countTimes") { "count times" },
+    BenchmarkRow(FilterBenchmark::class.java, "run") { "filter ${it.getParam(FilterBenchmark::filter.name)}" },
+    BenchmarkRow(PatternBenchmark::class.java, "countPatterns") { "patterns: count all" },
+    BenchmarkRow(PatternBenchmark::class.java, "countPatternsAgain") { "patterns: count all again" },
+    BenchmarkRow(PatternBenchmark::class.java, "hideMostCommonPattern") { "filter hide most common pattern" },
+    BenchmarkRow(PatternBenchmark::class.java, "countTimes") { "count times" },
 )
 
-/** Parameters of [FilterBenchmark] and [PatternBenchmark]. */
-fun filterParams(file: Path): Map<String, List<String>> =
-    mapOf("file" to listOf(file.toString()), "filter" to benchmarkFilters.map { it.first })
+/** Parameters of [FilterBenchmark] and [PatternBenchmark], whose `file` parameters share the name. */
+fun filterParams(file: Path): Map<String, List<String>> = mapOf(
+    FilterBenchmark::file.name to listOf(file.toString()),
+    FilterBenchmark::filter.name to benchmarkFilters.keys.toList(),
+)
 
 /** Measures [filterRows] on [file], then shows a cached run of each filter and what it finds. */
 fun benchmarkFiltering(file: Path, runs: Runs) {
@@ -114,7 +116,7 @@ fun benchmarkFiltering(file: Path, runs: Runs) {
             val started = System.nanoTime()
             runBlocking { engine.prepare(condition).run() }
             val cached = (System.nanoTime() - started) / 1e9
-            println("%-56s cached %7.3f s  -> %,d records".format("filter $name", cached, records))
+            println("%-58s cached %7.3f s  -> %,d records".format("filter $name", cached, records))
         }
     }
 }

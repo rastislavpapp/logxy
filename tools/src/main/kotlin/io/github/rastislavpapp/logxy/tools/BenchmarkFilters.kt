@@ -15,7 +15,7 @@ private val error = LevelCondition.atLeast("Level", Level.ERROR)
  * Typical filters on a generated log, by name: `tools filter` times them, and the baseline check records each as
  * `filter <name>`, so renaming one drops its saved baseline.
  */
-val benchmarkFilters: List<Pair<String, Filter>> = listOf(
+val benchmarkFilters: Map<String, Filter> = linkedMapOf(
     "level >= WARN" to warn,
     "thread = main" to TextCondition("Thread", TextOp.EQUALS, "main"),
     "message contains 'timeout'" to TextCondition("Message", TextOp.EQUALS, "*timeout*"),
@@ -37,10 +37,10 @@ val benchmarkFilters: List<Pair<String, Filter>> = listOf(
 )
 
 /**
- * Typical filters on the merged view of generated logs, by name: `tools merge` times them, and the baseline check
+ * Typical filters on the merged log of generated logs, by name: `tools merge` times them, and the baseline check
  * records each as `merge: filter <name>`.
  */
-val mergedBenchmarkFilters: List<Pair<String, Filter>> = listOf(
+val mergedBenchmarkFilters: Map<String, Filter> = linkedMapOf(
     "level >= WARN" to warn,
     "message contains 'timeout'" to TextCondition("Message", TextOp.EQUALS, "*timeout*"),
 )

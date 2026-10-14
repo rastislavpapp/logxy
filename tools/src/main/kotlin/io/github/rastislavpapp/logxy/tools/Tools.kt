@@ -19,7 +19,7 @@ private const val USAGE = """Usage:
   benchmark <file> [--iterations N]     compare line-indexing strategies on a file
   parse <file>... [--iterations N] [--forks N] [--pattern LAYOUT]
                                         measure parsing one file with the detected parser, or the given pattern
-                                        layout; several files one by one and at once
+                                        layout (one file only); several files one by one and at once
   filter <file> [--iterations N] [--forks N]
                                         measure typical filters, counting patterns and times on the parsed file
   merge <file> <file>... [--iterations N] [--forks N] [--read-channels N]
@@ -39,7 +39,11 @@ fun main(args: Array<String>) {
     }
     fun flag(name: String) = "--$name" in args
     fun option(name: String): String? = args.indexOf("--$name").takeIf { it >= 0 }?.let { args.getOrNull(it + 1) }
-    fun runs(iterations: Int) = Runs(option("iterations")?.toInt() ?: iterations, option("forks")?.toInt() ?: 1)
+    fun runs(defaultIterations: Int): Runs {
+        val iterations = option("iterations")?.toInt() ?: defaultIterations
+        val forks = option("forks")?.toInt() ?: 1
+        return Runs(iterations, forks)
+    }
 
     when (positional.firstOrNull()) {
         "generate" if positional.size == 3 ->
