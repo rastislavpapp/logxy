@@ -29,8 +29,12 @@ private const val SETUP = "main=1g seed=1; merge=8x64m seeds=2..9; JMH single sh
 /** JVMs per row, set by `-PbenchmarkForks`: a JVM can settle into a slower state for its whole run. */
 private val FORKS = System.getProperty("benchmark.forks")?.toInt() ?: 5
 
-/** Results below this are mostly noise, so they may vary by this much on top of the tolerance. */
-private const val NOISE_SECONDS = 0.01
+/**
+ * Results may vary by this much on top of the tolerance. Measured: in 5 checks back to back on unchanged code on
+ * the baseline machine (2026-10-14), no row moved by more than 13% from the baseline (`filter level >= WARN`,
+ * 6 ms; the next were 9%), so the tolerance alone covers the noise.
+ */
+private const val NOISE_SECONDS = 0.0
 
 enum class Verdict { SLOWER, OK, FASTER }
 
@@ -182,9 +186,14 @@ class BaselineTest {
             }
             // A row whose JVMs disagree by more than the tolerance can pass or fail by chance.
             val noisy = if (times.spread > tolerance) ", noisy" else ""
+            val label = when (verdict) {
+                Verdict.SLOWER -> "SLOWER"
+                Verdict.OK -> "ok"
+                Verdict.FASTER -> "faster"
+            }
             println(
                 "%-58s %7.3f s  baseline %7.3f s  %+6.1f%%  spread %+4.0f%%  %s%s"
-                    .format(name, seconds, before, change, times.spread * 100, verdict.name.lowercase(), noisy),
+                    .format(name, seconds, before, change, times.spread * 100, label, noisy),
             )
         }
         // Measurements added since the local baseline was recorded join it, so they are checked from now on.
