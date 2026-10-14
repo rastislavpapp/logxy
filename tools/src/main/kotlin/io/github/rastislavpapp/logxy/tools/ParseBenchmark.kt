@@ -1,4 +1,4 @@
-// Collecting first keeps garbage from earlier runs out of the timings and heap readings.
+// Collecting first keeps garbage from earlier runs out of the timings.
 @file:Suppress("ExplicitGarbageCollectionCall")
 
 package io.github.rastislavpapp.logxy.tools
@@ -7,7 +7,6 @@ import io.github.rastislavpapp.logxy.core.formatByteSize
 import io.github.rastislavpapp.logxy.core.log.LogData
 import io.github.rastislavpapp.logxy.core.log.ParsedLog
 import io.github.rastislavpapp.logxy.core.parse.CompiledParser
-import io.github.rastislavpapp.logxy.core.parse.Parser
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -25,19 +24,28 @@ import java.io.File
 import java.nio.file.Files
 import java.nio.file.Path
 
-/**
- * Parsing, the `parse` rows: [file] with [pattern] or the detected parser, and [files] (joined by
- * [File.pathSeparator]) one by one and at once. Open so JMH can generate its subclass.
- */
+/** Logs a parse benchmark made, closed before the next run so they don't add up. */
 @State(Scope.Benchmark)
-open class ParseBenchmark {
+abstract class ParsedLogs {
+    protected val held = ArrayList<LogData>()
+
+    @Setup(Level.Iteration)
+    fun closeHeld() {
+        held.forEach { it.close() }
+        held.clear()
+        System.gc()
+    }
+
+    @TearDown
+    fun tearDown() = held.forEach { it.close() }
+}
+
+/** Parsing [file] with the pattern layout [pattern], or the detected parser. Open so JMH can generate its subclass. */
+@State(Scope.Benchmark)
+open class ParseBenchmark : ParsedLogs() {
     @Param("")
     @JvmField
     var file = ""
-
-    @Param("")
-    @JvmField
-    var files = ""
 
     /** A pattern layout; empty for the detected parser. */
     @Param("")
@@ -45,43 +53,44 @@ open class ParseBenchmark {
     var pattern = ""
 
     private lateinit var parser: CompiledParser
-    private val held = ArrayList<LogData>()
 
-    @Setup(Level.Trial)
-    fun compile() {
-        if (file.isEmpty()) return
+    @Setup
+    fun setUp() {
         val path = Path.of(file)
-        val detected = if (pattern.isEmpty()) Parser.detect(path) else Parser.Pattern(pattern, pattern)
-        parser = detected.compile() ?: error("No parser detected for $file")
+        parser = parserFor(path, pattern.ifEmpty { null }).compileFor(path)
     }
-
-    @Setup(Level.Iteration)
-    fun release() {
-        held.forEach { it.close() }
-        held.clear()
-        System.gc()
-    }
-
-    @TearDown(Level.Trial)
-    fun close() = held.forEach { it.close() }
 
     @Benchmark
     fun parseFile(): LogData = runBlocking { ParsedLog.build(Path.of(file), parser) }.also { held += it }
+}
+
+/**
+ * Parsing several [files] (joined by [File.pathSeparator]) with the detected parsers, one by one and at once. Open
+ * so JMH can generate its subclass.
+ */
+@State(Scope.Benchmark)
+open class ParseFilesBenchmark : ParsedLogs() {
+    @Param("")
+    @JvmField
+    var files = ""
 
     @Benchmark
-    fun parseFilesOneByOne(): List<LogData> {
-        for (path in paths(files)) held += runBlocking { ParsedLog.build(path, detect(path)) }
+    fun oneByOne(): List<LogData> {
+        for (path in paths(files)) held += parse(path)
         return held
     }
 
-    /** As a session opens a merge: several files at once, at most one per core. */
+    /** As a session loads a merge: several files at once, at most one per core. */
     @Benchmark
-    fun parseFilesAtOnce(): List<LogData> {
+    fun atOnce(): List<LogData> {
         val permits = Semaphore(Runtime.getRuntime().availableProcessors())
         held += runBlocking {
-            paths(files).map { path ->
-                async(Dispatchers.IO) { permits.withPermit { ParsedLog.build(path, detect(path)) } }
-            }.awaitAll()
+            val parts = paths(files).map { path ->
+                async(Dispatchers.IO) {
+                    permits.withPermit { ParsedLog.build(path, parserFor(path).compileFor(path)) }
+                }
+            }
+            parts.awaitAll()
         }
         return held
     }
@@ -90,25 +99,27 @@ open class ParseBenchmark {
 /** Paths joined by [File.pathSeparator], as a parameter of a benchmark holds them. */
 fun paths(joined: String): List<Path> = joined.split(File.pathSeparator).map { Path.of(it) }
 
-fun detect(file: Path): CompiledParser = Parser.detect(file).compile() ?: error("No parser detected for $file")
+/** [file] parsed with the detected parser. */
+fun parse(file: Path): ParsedLog = runBlocking { ParsedLog.build(file, parserFor(file).compileFor(file)) }
 
-/** The `parse` rows: [file] if given, [files] one by one and at once if given. */
-fun parseRows(file: Path?, files: List<Path>): List<Row> {
-    val rows = ArrayList<Row>()
-    if (file != null) rows += Row(ParseBenchmark::class.java, "parseFile") { "parse file" }
-    if (files.isNotEmpty()) {
-        rows += Row(ParseBenchmark::class.java, "parseFilesOneByOne") { "parse files one by one" }
-        rows += Row(ParseBenchmark::class.java, "parseFilesAtOnce") { "parse files at once" }
-    }
-    return rows
-}
+/** The `parse` row of one file. */
+val parseFileRows = listOf(BenchmarkRow(ParseBenchmark::class.java, "parseFile") { "parse file" })
+
+/** The `parse` rows of several files. */
+val parseFilesRows = listOf(
+    BenchmarkRow(ParseFilesBenchmark::class.java, "oneByOne") { "parse files one by one" },
+    BenchmarkRow(ParseFilesBenchmark::class.java, "atOnce") { "parse files at once" },
+)
 
 /** Parameters of [ParseBenchmark]. */
-fun parseParams(file: Path?, files: List<Path>, pattern: String? = null): Map<String, List<String>> = mapOf(
-    "file" to listOf(file?.toString().orEmpty()),
-    "files" to listOf(files.joinToString(File.pathSeparator)),
-    "pattern" to listOf(pattern.orEmpty()),
+fun parseFileParams(file: Path, pattern: String? = null): Map<String, List<String>> = mapOf(
+    ParseBenchmark::file.name to listOf(file.toString()),
+    ParseBenchmark::pattern.name to listOf(pattern.orEmpty()),
 )
+
+/** Parameters of [ParseFilesBenchmark]. */
+fun parseFilesParams(files: List<Path>): Map<String, List<String>> =
+    mapOf(ParseFilesBenchmark::files.name to listOf(files.joinToString(File.pathSeparator)))
 
 /**
  * Measures parsing [files]: one file with [pattern] or the detected parser, plus the heap the result holds; several
@@ -116,19 +127,21 @@ fun parseParams(file: Path?, files: List<Path>, pattern: String? = null): Map<St
  */
 fun benchmarkParsing(files: List<Path>, runs: Runs, pattern: String? = null) {
     val single = files.singleOrNull()
-    val several = if (single == null) files else emptyList()
+    require(single != null || pattern == null) { "--pattern applies to one file" }
     printHeader(runs)
-    measure(parseRows(single, several), parseParams(single, several, pattern), runs, ::printRow)
-    if (single != null) printHeap(single, pattern)
+    if (single == null) {
+        measure(parseFilesRows, parseFilesParams(files), runs, ::printRow)
+        return
+    }
+    measure(parseFileRows, parseFileParams(single, pattern), runs, ::printRow)
+    printHeap(single, pattern)
 }
 
 private fun printHeap(file: Path, pattern: String?) {
-    val parser = pattern?.let { Parser.Pattern(it, it) } ?: Parser.detect(file)
-    val compiled = parser.compile() ?: error("No parser detected for $file")
+    val parser = parserFor(file, pattern)
+    val compiled = parser.compileFor(file)
     val log = runBlocking { ParsedLog.build(file, compiled) }
-    val runtime = Runtime.getRuntime()
-    System.gc()
-    val heap = runtime.totalMemory() - runtime.freeMemory()
+    val heap = usedHeap()
     println("\nFile: $file (${formatByteSize(Files.size(file))}), parser: ${parser.name}, %,d records"
         .format(log.recordCount))
     val spans = log.schema.fields.filterIndexed { i, field ->

@@ -44,13 +44,14 @@ open class FollowBenchmark {
     private var covered = 0
 
     @Setup
-    fun open() {
+    fun setUp() {
         val source = Path.of(file)
         // Next to the source, as the copy is as large; each JVM gets its own.
         followed = Files.createTempFile(source.toAbsolutePath().parent, "followed-", ".log")
         Files.copy(source, followed, StandardCopyOption.REPLACE_EXISTING)
         bytes = Files.readAllBytes(Path.of(appended))
-        log = runBlocking { ParsedLog.build(followed, detect(source)) }
+        val parser = parserFor(source).compileFor(source)
+        log = runBlocking { ParsedLog.build(followed, parser) }
         engine = FilterEngine(log)
         runBlocking { engine.prepare(filter).run() }
     }
@@ -63,7 +64,7 @@ open class FollowBenchmark {
     }
 
     @TearDown
-    fun close() {
+    fun tearDown() {
         log.close()
         Files.deleteIfExists(followed)
     }
@@ -73,8 +74,11 @@ open class FollowBenchmark {
 }
 
 /** The `follow` row; it has no `tools` command. */
-val followRows = listOf(Row(FollowBenchmark::class.java, "filterAppended") { "follow: filter appended records" })
+val followRows =
+    listOf(BenchmarkRow(FollowBenchmark::class.java, "filterAppended") { "follow: filter appended records" })
 
 /** Parameters of [FollowBenchmark]. */
-fun followParams(file: Path, appended: Path): Map<String, List<String>> =
-    mapOf("file" to listOf(file.toString()), "appended" to listOf(appended.toString()))
+fun followParams(file: Path, appended: Path): Map<String, List<String>> = mapOf(
+    FollowBenchmark::file.name to listOf(file.toString()),
+    FollowBenchmark::appended.name to listOf(appended.toString()),
+)

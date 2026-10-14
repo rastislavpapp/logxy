@@ -1,6 +1,3 @@
-// Collecting first keeps garbage out of the heap readings.
-@file:Suppress("ExplicitGarbageCollectionCall")
-
 package io.github.rastislavpapp.logxy.tools
 
 import io.github.rastislavpapp.logxy.core.filter.Filter
@@ -40,16 +37,17 @@ abstract class MergedFiles {
     protected lateinit var merged: MergedLog
 
     @Setup
-    fun open() {
-        parts = parseParts(paths(files), indexOptions(readChannels.toIntOrNull()))
+    fun setUp() {
+        val options = indexOptions(readChannels.toIntOrNull())
+        parts = parseParts(paths(files), options)
         merged = runBlocking { MergedLog.build(parts) }
     }
 
     @TearDown
-    fun close() = parts.forEach { it.close() }
+    fun tearDown() = parts.forEach { it.close() }
 }
 
-/** Merging and counting on the merged view. Open so JMH can generate its subclass. */
+/** Merging and counting on the merged log. Open so JMH can generate its subclass. */
 @State(Scope.Benchmark)
 open class MergeBenchmark : MergedFiles() {
     /** As for a filter's result: positions to look up. */
@@ -75,7 +73,7 @@ open class MergedFilterBenchmark : MergedFiles() {
     @JvmField
     var filter = ""
 
-    private val condition: Filter by lazy { mergedBenchmarkFilters.first { it.first == filter }.second }
+    private val condition: Filter by lazy { mergedBenchmarkFilters.getValue(filter) }
 
     @Benchmark
     fun run(): FilterResult = runBlocking { MergedFilter(merged).prepare(condition, 0).run() }
@@ -84,23 +82,27 @@ open class MergedFilterBenchmark : MergedFiles() {
 private fun indexOptions(readChannels: Int?): IndexOptions =
     if (readChannels == null) IndexOptions() else IndexOptions().copy(readChannels = readChannels)
 
-private fun parseParts(files: List<Path>, options: IndexOptions): List<LogData> =
-    files.map { runBlocking { ParsedLog.build(it, detect(it), options = options) } }
+private fun parseParts(files: List<Path>, options: IndexOptions): List<LogData> = files.map { file ->
+    val parser = parserFor(file).compileFor(file)
+    runBlocking { ParsedLog.build(file, parser, options = options) }
+}
 
-/** The `merge` rows: merging, [mergedBenchmarkFilters] by name, and counting on the merged view. */
+/** The `merge` rows: merging, [mergedBenchmarkFilters] by name, and counting on the merged log. */
 val mergeRows = listOf(
-    Row(MergeBenchmark::class.java, "merge") { "merge: merge files" },
-    Row(MergedFilterBenchmark::class.java, "run") { "merge: filter ${it.getParam("filter")}" },
-    Row(MergeBenchmark::class.java, "countPatterns") { "merge: count patterns" },
-    Row(MergeBenchmark::class.java, "countTimes") { "merge: count times" },
-    Row(MergeBenchmark::class.java, "countTimesOfEveryOtherRow") { "merge: count times of every other row" },
+    BenchmarkRow(MergeBenchmark::class.java, "merge") { "merge: merge files" },
+    BenchmarkRow(MergedFilterBenchmark::class.java, "run") {
+        "merge: filter ${it.getParam(MergedFilterBenchmark::filter.name)}"
+    },
+    BenchmarkRow(MergeBenchmark::class.java, "countPatterns") { "merge: count patterns" },
+    BenchmarkRow(MergeBenchmark::class.java, "countTimes") { "merge: count times" },
+    BenchmarkRow(MergeBenchmark::class.java, "countTimesOfEveryOtherRow") { "merge: count times of every other row" },
 )
 
 /** Parameters of [MergeBenchmark] and [MergedFilterBenchmark]. */
 fun mergeParams(files: List<Path>, readChannels: Int? = null): Map<String, List<String>> = mapOf(
-    "files" to listOf(files.joinToString(File.pathSeparator)),
-    "readChannels" to listOf(readChannels?.toString().orEmpty()),
-    "filter" to mergedBenchmarkFilters.map { it.first },
+    MergedFiles::files.name to listOf(files.joinToString(File.pathSeparator)),
+    MergedFiles::readChannels.name to listOf(readChannels?.toString().orEmpty()),
+    MergedFilterBenchmark::filter.name to mergedBenchmarkFilters.keys.toList(),
 )
 
 /** Measures [mergeRows] on [files], then the heap a merge adds. [readChannels] is per file. */
@@ -110,12 +112,9 @@ fun benchmarkMerging(files: List<Path>, runs: Runs, readChannels: Int?) {
     printHeader(runs)
     measure(mergeRows, mergeParams(files, readChannels), runs, ::printRow)
     val parts = parseParts(files, options)
-    val runtime = Runtime.getRuntime()
-    System.gc()
-    val before = runtime.totalMemory() - runtime.freeMemory()
+    val before = usedHeap()
     val log = runBlocking { MergedLog.build(parts) }
-    System.gc()
-    val added = runtime.totalMemory() - runtime.freeMemory() - before
+    val added = usedHeap() - before
     println("\nmerged %,d records, heap +%s (%.1f bytes per record)"
         .format(log.recordCount, formatByteSize(added), added.toDouble() / log.recordCount))
     parts.forEach { it.close() }
