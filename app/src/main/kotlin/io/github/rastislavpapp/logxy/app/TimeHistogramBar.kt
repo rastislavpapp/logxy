@@ -24,6 +24,7 @@ import kotlin.math.sqrt
 
 private const val CHART_HEIGHT = 40
 private const val TICK_HEIGHT = 3
+private const val MATCH_STRIP_HEIGHT = 3
 
 /** Pixels per slice of time: wide enough that counts are not mostly noise, narrow enough to look continuous. */
 private const val SLICE_WIDTH = 2
@@ -51,11 +52,15 @@ private val TICK_STEPS = longArrayOf(
  * Shown records over time: their volume as an area, with lines for warnings and errors over it on the same
  * scale, so heights compare truthfully. The scale is the square root, so one spike does not flatten the rest
  * and a burst that is a small share of all records still rises well off the bottom. The selected rows, or the
- * top row in view, are marked.
+ * top row in view, are marked. The records a search found are a strip along the bottom, in every slice with a match;
+ * [found] counts them on bins of their own, which are mapped onto the slices by time.
  * Clicking calls [onJump] with the time there; dragging calls [onRange] with the times covered; the
  * context menu calls [onShowAllTimes] when [hasTimeRange].
  */
-class TimeHistogramBar(private val histogram: () -> TimeHistogram?) : JComponent() {
+class TimeHistogramBar(
+    private val histogram: () -> TimeHistogram?,
+    private val found: () -> TimeHistogram? = { null },
+) : JComponent() {
 
     var onJump: (time: Long) -> Unit = {}
 
@@ -78,10 +83,19 @@ class TimeHistogramBar(private val histogram: () -> TimeHistogram?) : JComponent
     private var selection: IntRange? = null
 
     /** The histogram as painted: [count] slices of [group] bins each, the first starting at bin [first]. */
-    private class Slices(val histogram: TimeHistogram, val first: Int, val group: Int, val count: Int) {
+    private class Slices(
+        val histogram: TimeHistogram,
+        val first: Int,
+        val group: Int,
+        val count: Int,
+        found: TimeHistogram?,
+    ) {
         val totals = IntArray(count)
         val warnings = IntArray(count)
         val errors = IntArray(count)
+
+        /** Matches of the search per slice; null if there is no search. */
+        val matches: IntArray? = found?.let { IntArray(count) }
 
         init {
             for (bin in first..histogram.lastBin) {
@@ -91,6 +105,27 @@ class TimeHistogramBar(private val histogram: () -> TimeHistogram?) : JComponent
                 totals[slice] += histogram.count(TimeHistogram.OTHER, bin)
             }
             for (i in 0..<count) totals[i] += warnings[i] + errors[i]
+            if (found != null && matches != null) addMatches(found, matches)
+        }
+
+        /**
+         * Adds the bins of [found] to [matches] by their times: a bin wider than a slice shares its count among the
+         * slices it covers, at least 1 each.
+         */
+        private fun addMatches(found: TimeHistogram, matches: IntArray) {
+            if (found.isEmpty) return
+            val origin = start(0)
+            val span = (start(1) - origin).coerceAtLeast(1)
+            for (bin in found.firstBin..found.lastBin) {
+                val inBin = (0..<TimeHistogram.CATEGORIES).sumOf { found.count(it, bin) }
+                if (inBin <= 0) continue
+                val from = found.binStart(bin)
+                val first = Math.floorDiv(from - origin, span)
+                val last = Math.floorDiv(from + found.width - 1 - origin, span)
+                if (last < 0 || first >= count) continue
+                val share = ((inBin + last - first) / (last - first + 1)).toInt()
+                for (slice in maxOf(0L, first)..minOf(count - 1L, last)) matches[slice.toInt()] += share
+            }
         }
 
         fun start(slice: Int) = histogram.binStart(first + slice * group)
@@ -165,7 +200,7 @@ class TimeHistogramBar(private val histogram: () -> TimeHistogram?) : JComponent
         var group = 1
         fun count() = histogram.lastBin / group - histogram.firstBin / group + 1
         while (count() > most) group *= 2
-        return Slices(histogram, histogram.firstBin / group * group, group, count())
+        return Slices(histogram, histogram.firstBin / group * group, group, count(), found())
     }
 
     private fun sliceX(slices: Slices, slice: Int) = (slice.toLong() * width / slices.count).toInt()
@@ -189,6 +224,7 @@ class TimeHistogramBar(private val histogram: () -> TimeHistogram?) : JComponent
             // One scale for all, so a line's height means as many records as the area's.
             val peak = sqrt(maxOf(1, slices.totals.max()).toDouble())
             paintVolume(g2, slices, peak)
+            paintMatches(g2, slices)
             paintLine(g2, slices, slices.warnings, peak, UIManager.getColor("Actions.Yellow"))
             paintLine(g2, slices, slices.errors, peak, UIManager.getColor("Actions.Red"))
             paintPeak(g2, slices)
@@ -215,6 +251,19 @@ class TimeHistogramBar(private val histogram: () -> TimeHistogram?) : JComponent
         }
         g2.color = withAlpha(UIManager.getColor("Label.disabledForeground"), 0.3f)
         g2.fill(area)
+    }
+
+    /** A strip along the bottom of the chart in every slice with a match; it adds no height to the bar. */
+    private fun paintMatches(g2: Graphics2D, slices: Slices) {
+        val matches = slices.matches ?: return
+        // The table's color without its alpha, as the strip is thin and sits on the volume.
+        g2.color = Color(FOUND_COLOR.red, FOUND_COLOR.green, FOUND_COLOR.blue)
+        val strip = UIScale.scale(MATCH_STRIP_HEIGHT)
+        for (slice in 0..<slices.count) {
+            if (matches[slice] == 0) continue
+            val x = sliceX(slices, slice)
+            g2.fillRect(x, chartBottom - strip, maxOf(1, sliceX(slices, slice + 1) - x), strip)
+        }
     }
 
     /** [counts] as a line on the volume's square-root scale, which lifts small counts off the bottom. */
@@ -326,6 +375,7 @@ class TimeHistogramBar(private val histogram: () -> TimeHistogram?) : JComponent
             add("%,d records".format(slices.totals[slice]))
             slices.errors[slice].takeIf { it > 0 }?.let { add("%,d errors".format(it)) }
             slices.warnings[slice].takeIf { it > 0 }?.let { add("%,d warnings".format(it)) }
+            slices.matches?.get(slice)?.takeIf { it > 0 }?.let { add("%,d matches".format(it)) }
         }
         val range = "${formatter.format(Instant.ofEpochSecond(0, from))} – " +
             formatter.format(Instant.ofEpochSecond(0, to))

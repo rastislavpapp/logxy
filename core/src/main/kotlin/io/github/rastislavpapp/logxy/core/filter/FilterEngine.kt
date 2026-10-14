@@ -54,10 +54,23 @@ interface RecordFilter {
     val patternProgress: Double
 }
 
+/** Hears of the matches of a finished chunk of records; see [PreparedFilter.run]. */
+fun interface ChunkListener {
+    /**
+     * The records of `[first, end)` are decided: [records] (sorted) are the ones in them that match. Called on any
+     * thread, for several chunks at once.
+     */
+    fun chunkDone(first: Int, end: Int, records: IntArray)
+}
+
 /** A filter ready to run; [run] may be called on any thread. */
 interface PreparedFilter {
-    /** Computes the matching records; cancelling the calling coroutine stops it. */
-    suspend fun run(): FilterResult
+    /**
+     * Computes the matching records; cancelling the calling coroutine stops it. With [onChunk], the matches are
+     * also reported chunk by chunk, in no particular order, as the last condition evaluated finishes them; if that
+     * is not a single condition, or the evaluation merges parts, nothing is reported before the result.
+     */
+    suspend fun run(onChunk: ChunkListener? = null): FilterResult
 
     /** How far [run] got, from 0 to 1; readable from any thread. */
     val progress: Double
@@ -165,16 +178,25 @@ class FilterEngine(private val log: LogData, private val maxCacheBytes: Long = D
             if (snapshot.count % 64 != 0) bits[words - 1] = bits[words - 1] and (1L shl (snapshot.count % 64)) - 1
         }
 
-        override suspend fun run(): FilterResult = withContext(Dispatchers.Default) {
+        override suspend fun run(onChunk: ChunkListener?): FilterResult = withContext(Dispatchers.Default) {
             for (leaf in leaves(root)) leaf.prepare?.invoke()
-            FilterResult(rows(evaluate(root, null)), from, snapshot.count, snapshot.end)
+            FilterResult(rows(evaluate(root, null, onChunk)), from, snapshot.count, snapshot.end)
         }
 
-        /** The records of [candidates] (all if null) that match [node]. */
-        private suspend fun evaluate(node: Node, candidates: LongArray?): LongArray = when (node) {
+        /**
+         * The records of [candidates] (all if null) that match [node]. [onChunk] is for the last node evaluated, if
+         * it is a condition: what it decides is final.
+         */
+        private suspend fun evaluate(
+            node: Node,
+            candidates: LongArray?,
+            onChunk: ChunkListener? = null,
+        ): LongArray = when (node) {
             is AndNode -> {
                 var result = candidates
-                for (part in node.parts) result = evaluate(part, result)
+                for ((i, part) in node.parts.withIndex()) {
+                    result = evaluate(part, result, onChunk.takeIf { i == node.parts.lastIndex })
+                }
                 result ?: all
             }
             is OrNode -> {
@@ -194,10 +216,10 @@ class FilterEngine(private val log: LogData, private val maxCacheBytes: Long = D
                 val inner = evaluate(node.part, candidates)
                 LongArray(words) { base[it] and inner[it].inv() }
             }
-            is Leaf -> leaf(node, candidates ?: all)
+            is Leaf -> leaf(node, candidates ?: all, onChunk)
         }
 
-        private suspend fun leaf(leaf: Leaf, candidates: LongArray): LongArray {
+        private suspend fun leaf(leaf: Leaf, candidates: LongArray, onChunk: ChunkListener?): LongArray {
             val entry = cache[leaf.condition]
             val oldBits = entry?.bits
             val oldCoverage = entry?.coverage
@@ -214,7 +236,18 @@ class FilterEngine(private val log: LogData, private val maxCacheBytes: Long = D
                 if (need[w] != 0L) anyNeeded = true
                 if (need[w] and (if (w == lastWord) lastBit.inv() else -1L) != 0L) cacheable = true
             }
-            val (computed, computedChunks) = if (anyNeeded) compute(leaf, need) else null to 0
+            // The leaf decides its chunks' records: those it computes, with the cached ones, and those it only reads
+            // from the cache (or that no candidates are left in), right away.
+            val starts = if (anyNeeded) chunkStarts(need) else emptyList()
+            val report = onChunk?.let { listener ->
+                { first: Int, computed: LongArray? ->
+                    reportChunk(listener, first) { w -> (computed?.get(w) ?: 0L) or (cached(w) and candidates[w]) }
+                }
+            }
+            if (report != null) {
+                for (first in 0..<words step chunkWords) if (first !in starts) report(first, null)
+            }
+            val (computed, computedChunks) = if (anyNeeded) compute(leaf, need, starts, report) else null to 0
             // Chunks without candidates (cached, or ruled out by other conditions) are done right away.
             if (counted(leaf)) doneChunks.addAndGet((chunkCount - computedChunks).toLong())
             if (computed == null) return LongArray(words) { cached(it) and candidates[it] }
@@ -230,13 +263,37 @@ class FilterEngine(private val log: LogData, private val maxCacheBytes: Long = D
             return computed
         }
 
-        /** The bits of [leaf] for the [need]ed records, and how many chunks that took. */
-        private suspend fun compute(leaf: Leaf, need: LongArray): Pair<LongArray, Int> = coroutineScope {
-            val out = LongArray(words)
-            // Only chunks with records to test, e.g. just the appended ones while tailing.
-            val chunks = (0..<words step chunkWords).filter { first ->
-                (first..<minOf(words, first + chunkWords)).any { need[it] != 0L }
+        /** The first words of the chunks with records to test, e.g. just the appended ones while tailing. */
+        private fun chunkStarts(need: LongArray) = (0..<words step chunkWords).filter { first ->
+            (first..<minOf(words, first + chunkWords)).any { need[it] != 0L }
+        }
+
+        /** Tells [listener] the records of the chunk at word [first], which have the bits [bits] gives per word. */
+        private inline fun reportChunk(listener: ChunkListener, first: Int, bits: (word: Int) -> Long) {
+            val end = minOf(words, first + chunkWords)
+            val records = IntArray((first..<end).sumOf { java.lang.Long.bitCount(bits(it)) })
+            var i = 0
+            for (w in first..<end) {
+                var mask = bits(w)
+                while (mask != 0L) {
+                    records[i++] = w * 64 + java.lang.Long.numberOfTrailingZeros(mask)
+                    mask = mask and (mask - 1)
+                }
             }
+            listener.chunkDone(first * 64, minOf(snapshot.count, end * 64), records)
+        }
+
+        /**
+         * The bits of [leaf] for the [need]ed records in the chunks at [chunks], and how many that took. [report] is
+         * called with a chunk's first word and the bits, once it is computed.
+         */
+        private suspend fun compute(
+            leaf: Leaf,
+            need: LongArray,
+            chunks: List<Int>,
+            report: ((first: Int, computed: LongArray) -> Unit)?,
+        ): Pair<LongArray, Int> = coroutineScope {
+            val out = LongArray(words)
             chunks.mapIndexed { task, first ->
                 async {
                     ensureActive()
@@ -251,6 +308,7 @@ class FilterEngine(private val log: LogData, private val maxCacheBytes: Long = D
                             mask = mask and (mask - 1)
                         }
                     }
+                    report?.invoke(first, out)
                     if (counted(leaf)) doneChunks.incrementAndGet()
                 }
             }.awaitAll()

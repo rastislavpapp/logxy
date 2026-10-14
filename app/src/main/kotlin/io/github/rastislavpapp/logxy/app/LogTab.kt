@@ -17,6 +17,7 @@ import io.github.rastislavpapp.logxy.core.query.TimeLiteral
 import io.github.rastislavpapp.logxy.core.session.CopyResult
 import io.github.rastislavpapp.logxy.core.session.LogSession
 import io.github.rastislavpapp.logxy.core.session.MAX_COPY_BYTES
+import io.github.rastislavpapp.logxy.core.session.NOT_YET_FOUND
 import io.github.rastislavpapp.logxy.core.session.PreparedCopy
 import io.github.rastislavpapp.logxy.core.session.RowRanges
 import io.github.rastislavpapp.logxy.core.session.SessionListener
@@ -594,7 +595,7 @@ class LogTab(
         val timestampField = shown.schema.fields.firstOrNull { it.role == Role.TIMESTAMP }?.name
         scrollPane.onRowsInViewChanged = ::showMarkedTimes
         val histogramBar = timestampField?.let { field ->
-            TimeHistogramBar { session.histogram }.apply {
+            TimeHistogramBar({ session.histogram }, { session.foundHistogram }).apply {
                 onJump = ::jumpToTime
                 onRange = { from, to -> filterBar.setTimeRange(field, timeLiteral(from), timeLiteral(to)) }
                 onShowAllTimes = { filterBar.setTimeRange(field, null, null) }
@@ -739,24 +740,29 @@ class LogTab(
     private fun showFound() {
         val searching = model?.shown?.isSearching == true
         showSearchProgress(searching)
-        if (searching) return
-        val error = session.searchError
-        if (error != null) {
-            pendingFind = null
-            return findBar.showError(error)
+        if (!searching) {
+            val error = session.searchError
+            if (error != null) {
+                pendingFind = null
+                return findBar.showError(error)
+            }
+            showFoundCount()
         }
-        showFoundCount()
+        // While searching, too: what the chunks found so far may settle where to go.
         pendingFind?.let { (forward, inclusive) -> find(forward, inclusive) }
     }
 
-    /** Follows a slow search's progress on the find bar while [searching]. */
+    /** Follows a slow search's progress on the find bar and the histogram while [searching]. */
     private fun showSearchProgress(searching: Boolean) {
         if (searching == (searchTimer != null)) return
         searchTimer?.stop()
         searchTimer = null
         if (!searching) return
         findBar.showCount(0, null)
-        searchTimer = Timer(100) { findBar.showCount(0, null, session.searchProgress) }.apply {
+        searchTimer = Timer(100) {
+            showCount()
+            histogramBar?.repaint()
+        }.apply {
             initialDelay = SEARCH_PROGRESS_DELAY_MILLIS
             start()
         }
@@ -771,18 +777,24 @@ class LogTab(
         if (search == null) return findBar.open()
         pendingFind = null
         val model = model
-        // Not loaded or not searched yet: go there once found.
-        if (model == null || model.shown.isSearching) {
+        // Not loaded yet: go there once it is.
+        if (model == null) {
             pendingFind = forward to inclusive
             return
         }
         val table = table ?: return
         val scrollPane = scrollPane ?: return
-        if (model.shown.foundCount == 0 || model.totalRowCount == 0) return
+        val searching = model.shown.isSearching
+        if ((model.shown.foundCount == 0 && !searching) || model.totalRowCount == 0) return
         val lead = table.selection.lead
         val selected = if (lead in table.selection) model.recordAtIndexOrNull(lead) else null
         val current = selected ?: model.recordAtIndex(scrollPane.firstVisibleRow)
         val record = model.shown.nextFound(current, forward, inclusive || selected == null)
+        // A searched record between here and the match may still hold one: go once the search is sure.
+        if (record == NOT_YET_FOUND) {
+            pendingFind = forward to inclusive
+            return
+        }
         val index = model.indexOfRecord(record)
         if (index < 0 || model.recordAtIndex(index) != record) return
         session.follow = false
@@ -791,13 +803,19 @@ class LogTab(
 
     /** Shows how many records the search found, and which of them is selected. */
     private fun showFoundCount() {
-        val model = model
+        // While searching, the progress timer shows it, after a delay that keeps fast searches from flickering.
         if (model?.shown?.isSearching == true) return
+        showCount()
+    }
+
+    /** Shows the count, so far and with the search's progress while it runs. */
+    private fun showCount() {
+        val shown = model?.shown
         val lead = table?.selection?.lead ?: -1
         val selected = model?.recordAtIndexOrNull(lead) ?: -1
-        val shown = model?.shown
         val position = if (shown != null && selected >= 0) shown.foundPosition(selected) else 0
-        findBar.showCount(position, shown?.foundCount ?: 0)
+        val progress = if (shown?.isSearching == true) session.searchProgress else null
+        findBar.showCount(position, shown?.foundCount ?: 0, progress)
     }
 
     /** Marks the times of the selected rows on the histogram, or of the top row in view if none is selected. */
@@ -943,7 +961,10 @@ class LogTab(
             patterns.refreshSoon()
         }
 
-        override fun foundChanged() = showFound()
+        override fun foundChanged() {
+            showFound()
+            histogramBar?.repaint()
+        }
 
         override fun levelMappingChanged() {
             model?.let { it.fireTableRowsUpdated(0, maxOf(0, it.rowCount - 1)) }

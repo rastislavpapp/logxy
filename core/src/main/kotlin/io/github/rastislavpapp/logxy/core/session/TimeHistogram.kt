@@ -78,7 +78,12 @@ class TimeHistogram(
     }
 
     /** Adds the records counted in [other]. */
-    fun addAll(other: TimeHistogram) {
+    fun addAll(other: TimeHistogram) = merge(other, 1)
+
+    /** Takes away the records counted in [other], which must have been added to this one before. */
+    fun subtractAll(other: TimeHistogram) = merge(other, -1)
+
+    private fun merge(other: TimeHistogram, sign: Int) {
         if (other.isEmpty) return
         // Each of the other's bins must fall into one of these: widen them to a multiple of its width.
         if (width % other.width != 0L) {
@@ -88,9 +93,15 @@ class TimeHistogram(
         for (bin in other.firstBin..other.lastBin) {
             for (category in 0..<CATEGORIES) {
                 val count = other.counts[category][bin]
-                if (count != 0) add(other.binStart(bin), category, count)
+                if (count != 0) add(other.binStart(bin), category, sign * count)
             }
         }
+    }
+
+    /** A histogram with the same bins as this one but no counts, so adding it to this one moves nothing. */
+    fun emptyLike(): TimeHistogram = TimeHistogram(start, start).also {
+        it.start = start
+        it.width = width
     }
 
     /** An independent copy, e.g. to add more counts to while keeping this one as it is. */

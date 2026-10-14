@@ -29,6 +29,9 @@ sealed interface CopyResult {
     data class Failed(val message: String) : CopyResult
 }
 
+/** What [ShownLog.nextFound] gives while the search has not decided the records that may hold the match. */
+const val NOT_YET_FOUND = -2
+
 /** The most a copy may take, whatever the memory. */
 const val MAX_COPY_BYTES = 512L shl 20
 
@@ -63,26 +66,43 @@ class ShownLog internal constructor(private val loaded: LoadedLog) {
     // The records the search found, all of them shown.
     private var found = FilteredRows(IntArray(0))
 
+    // What a search started anew has found so far, while it runs and reports chunk by chunk; null otherwise.
+    private var foundSoFar: FoundChunks? = null
+
     var ended = false
         private set
 
-    /** Whether the search runs over all rows; until it is done, nothing is found. */
+    /**
+     * Whether the search over all rows runs. A search that reports chunk by chunk has found part of the records
+     * meanwhile, see [foundCount]; any other finds nothing until it is done.
+     */
     var isSearching = false
         get() = field && !ended
         private set
 
-    /** Number of records the search found. */
-    val foundCount: Int get() = if (ended) 0 else found.size
+    /** Number of records the search found, so far while it runs. */
+    val foundCount: Int get() = if (ended) 0 else foundSoFar?.size ?: found.size
 
-    /** 1-based position of [record] among the found records, 0 if it is not one. */
-    fun foundPosition(record: Int): Int = if (ended) 0 else found.positionOf(record)
+    /**
+     * 1-based position of [record] among the found records, 0 if it is not one. While the search runs, also 0 until
+     * the position is final, i.e. every record before [record] is searched.
+     */
+    fun foundPosition(record: Int): Int =
+        if (ended) 0 else foundSoFar?.positionOf(record) ?: found.positionOf(record)
 
     /**
      * The found record after [record], or before it unless [forward], wrapping around; with [inclusive],
-     * [record] itself counts. -1 if none is found.
+     * [record] itself counts. -1 if none is found. While the search runs, [NOT_YET_FOUND] if a record that may
+     * hold the match is not searched yet: a match is only given once no match can come between it and [record].
      */
-    fun nextFound(record: Int, forward: Boolean, inclusive: Boolean): Int =
-        if (ended) -1 else found.next(record, forward, inclusive)
+    fun nextFound(record: Int, forward: Boolean, inclusive: Boolean): Int {
+        val partial = foundSoFar
+        return when {
+            ended -> -1
+            partial != null -> partial.next(record, forward, inclusive)
+            else -> found.next(record, forward, inclusive)
+        }
+    }
 
     val schema: Schema get() = records.schema
 
@@ -339,10 +359,32 @@ class ShownLog internal constructor(private val loaded: LoadedLog) {
      */
     internal fun replaceRowsFrom(from: Int, rows: IntArray): Int = this.rows!!.replaceFrom(from, rows)
 
-    /** Shows the records a search over all rows found (sorted), or with null, that it runs and found nothing yet. */
-    internal fun showFound(records: IntArray?) {
-        found = FilteredRows(records ?: IntArray(0))
-        isSearching = records == null
+    /** Shows the records a search over all rows found (sorted); it is done. */
+    internal fun showFound(records: IntArray) {
+        found = FilteredRows(records)
+        foundSoFar = null
+        isSearching = false
+    }
+
+    /**
+     * Shows that a search over the first [recordCount] records runs and found nothing yet; [addFoundChunk] tells
+     * what it finds meanwhile.
+     */
+    internal fun startFound(recordCount: Int) {
+        found = FilteredRows(IntArray(0))
+        foundSoFar = FoundChunks(recordCount)
+        isSearching = true
+    }
+
+    /** Adds the matches [records] (sorted) among the records `[first, end)` to what the running search found. */
+    internal fun addFoundChunk(first: Int, end: Int, records: IntArray) {
+        foundSoFar?.add(first, end, records)
+    }
+
+    /** The found records from record [from] on, once the search is done. */
+    internal fun foundFrom(from: Int): IntArray {
+        val start = found.indexOf(from).let { if (it < 0) found.size else it }
+        return found.array().copyOfRange(start, found.size)
     }
 
     /** Replaces the found records from record [from] on with [records] (sorted, all `>= from`). */

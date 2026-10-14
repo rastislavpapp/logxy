@@ -122,13 +122,21 @@ internal class TimeCount(
         val start = bounds[task]
         val end = bounds[task + 1]
         val rows = rows
-        val origin = loaded.origin
         if (rows == null) {
             for (part in parts.indices) {
                 val reader = Reader(part)
                 for (record in partBounds!![part][task]..<partBounds[part][task + 1]) reader.addTo(histogram, record)
             }
-        } else if (origin == null) {
+        } else {
+            addRows(histogram, rows, start, end)
+        }
+        return histogram
+    }
+
+    /** Counts `rows[start]` until `rows[end]` into [histogram]. */
+    private fun addRows(histogram: TimeHistogram, rows: IntArray, start: Int, end: Int) {
+        val origin = loaded.origin
+        if (origin == null) {
             val reader = Reader(0)
             for (i in start..<end) reader.addTo(histogram, rows[i])
         } else {
@@ -139,8 +147,17 @@ internal class TimeCount(
                 (readers[part] ?: Reader(part).also { readers[part] = it }).addTo(histogram, origin.record(position))
             }
         }
-        return histogram
     }
+
+    /** A histogram without counts, starting out as the ones [run] counts into. */
+    fun emptyHistogram() = newHistogram()
+
+    /**
+     * Counts the times of [records] (records of the load, e.g. a search's matches) apart from the rows this counts,
+     * into [into]. Runs on the calling thread, which may be any.
+     */
+    fun countRecords(records: IntArray, into: TimeHistogram = newHistogram()): TimeHistogram =
+        into.also { addRows(it, records, 0, records.size) }
 
     /** Reads the records of one part; one per task, as cursors are. */
     private inner class Reader(part: Int) {

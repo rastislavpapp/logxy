@@ -4,6 +4,7 @@ import io.github.rastislavpapp.logxy.core.FileActivity
 import io.github.rastislavpapp.logxy.core.FileChange
 import io.github.rastislavpapp.logxy.core.FileSnapshot
 import io.github.rastislavpapp.logxy.core.archive.ArchiveOrigin
+import io.github.rastislavpapp.logxy.core.filter.ChunkListener
 import io.github.rastislavpapp.logxy.core.filter.Filter
 import io.github.rastislavpapp.logxy.core.filter.LevelCondition
 import io.github.rastislavpapp.logxy.core.filter.PreparedFilter
@@ -105,7 +106,10 @@ interface SessionListener {
     /** [LogSession.histogram] changed; while counted anew, it fills up from its earliest times. */
     fun histogramChanged()
 
-    /** The records the search found, or whether it runs ([ShownLog.isSearching]), changed; see [LogSession.search]. */
+    /**
+     * The records the search found, or whether it runs ([ShownLog.isSearching]), changed; see [LogSession.search].
+     * A search started anew calls it for each chunk of records it decides, with [LogSession.foundHistogram] updated.
+     */
     fun foundChanged()
 
     /** [LogSession.follow], keeping the end of the files in view, was turned on or off. */
@@ -236,6 +240,17 @@ class LogSession internal constructor(
     /** Why the search failed, e.g. for lack of memory, so it no longer follows the rows; null if it did not. */
     var searchError: String? = null
         private set
+
+    /**
+     * Times of the found records; null if there is no search or the records have no timestamps. It fills up as a
+     * search reports chunks, moving and widening on its own, unlike [histogram].
+     */
+    var foundHistogram: TimeHistogram? = null
+        private set
+
+    // Counts the times of the matches a running search reports, from the snapshots it searches.
+    private var foundTimes: TimeCount? = null
+    private var foundChunked = false
 
     /** Times of the shown rows; null until they are counted, or if the records have no timestamps. */
     var histogram: TimeHistogram? = null
@@ -723,6 +738,8 @@ class LogSession internal constructor(
             searchJob = null
             searching = null
             searchError = null
+            foundHistogram = null
+            foundTimes = null
         } else if (searchJob?.isActive == true) {
             return
         }
@@ -744,12 +761,24 @@ class LogSession internal constructor(
             foundRecords = 0
             foundBytes = 0L
             searching = evaluation
-            shown.showFound(null)
+            foundChunked = false
+            foundTimes = foundTimeCount(shown)
+            foundHistogram = foundTimes?.emptyHistogram()
+            shown.startFound(records?.recordCount ?: 0)
             listener.foundChanged()
         }
         searchJob = scope.launch {
             val result = try {
-                evaluation.run()
+                coroutineScope {
+                    // Only a search anew shows what it finds meanwhile; the chunks arrive on worker threads.
+                    val times = foundTimes
+                    val onChunk = ChunkListener { first, end, matches ->
+                        // Counted here, on the chunk's own thread: the other threads may all be busy searching.
+                        val counted = times?.countRecords(matches)
+                        launch { foundChunk(shown, first, end, matches, counted) }
+                    }
+                    evaluation.run(onChunk.takeIf { anew })
+                }
             } catch (e: Throwable) {
                 if (e is CancellationException || (e !is Exception && e !is OutOfMemoryError)) throw e
                 // A failed catch-up keeps what was found before.
@@ -759,12 +788,17 @@ class LogSession internal constructor(
                 }
                 searching = null
                 searchJob = null
-                if (anew) shown.clearFound()
+                if (anew) {
+                    shown.clearFound()
+                    foundHistogram = null
+                }
                 listener.foundChanged()
                 return@launch
             }
             val found = shownOnly(result.rows, shown)
+            val countFound = countFoundTimes(shown, from, found, anew)
             if (anew) shown.showFound(found) else shown.replaceFoundFrom(from, found)
+            countFound?.invoke()
             // Records past the shown rows were left out, so they are searched again once shown.
             foundRecords = minOf(result.recordCount, shownRecords())
             foundBytes = minOf(result.indexedSize, shownBytes())
@@ -772,6 +806,65 @@ class LogSession internal constructor(
             searchJob = null
             listener.foundChanged()
             searchShown(anew = false)
+        }
+    }
+
+    /**
+     * Shows the matches [records] among the records `[first, end)`, a chunk the running search decided, with their
+     * times [counted] (null if the records have none).
+     */
+    private fun foundChunk(shown: ShownLog, first: Int, end: Int, records: IntArray, counted: TimeHistogram?) {
+        val reported = records.size
+        val matches = shownOnly(records, shown)
+        shown.addFoundChunk(first, end, matches)
+        foundChunked = true
+        val histogram = foundHistogram
+        if (counted != null && histogram != null) {
+            // Rows the shown rows lack are not counted: those were counted too, so count what is left.
+            val times = foundTimes
+            histogram.addAll(if (matches.size == reported || times == null) counted else times.countRecords(matches))
+        }
+        listener.foundChanged()
+    }
+
+    /**
+     * Counts the times of the found records for [foundHistogram], all of [rows] (sorted) or those given to
+     * [TimeCount.countRecords]; null if the records have no timestamps.
+     */
+    private fun foundTimeCount(shown: ShownLog, rows: IntArray? = null): TimeCount? {
+        val loaded = loaded ?: return null
+        if (loaded.records.schema.indexOf(Role.TIMESTAMP) < 0) return null
+        val (expectedFrom, expectedTo) = expectedTimes(shown)
+        val size = rows?.size ?: 0
+        return TimeCount(loaded, rows, 0, size, size, expectedFrom, expectedTo)
+    }
+
+    /**
+     * Counts the times for [foundHistogram] once the search found [found] (sorted) among the records from [from] on,
+     * on other threads; returns what puts them in. Null if nothing is to be put in: the records have no times, or
+     * the chunks of a search anew counted them already.
+     */
+    private suspend fun countFoundTimes(shown: ShownLog, from: Int, found: IntArray, anew: Boolean): (() -> Unit)? {
+        if (anew && foundChunked) return null
+        if (anew) {
+            val count = foundTimeCount(shown, found) ?: return null
+            val (before, after) = count.run()
+            before.addAll(after)
+            return { foundHistogram = before }
+        }
+        // The records from [from] on are found again: take away what they counted before, and count the new ones.
+        val histogram = foundHistogram ?: return null
+        val count = foundTimeCount(shown) ?: return null
+        val old = shown.foundFrom(from)
+        val gone = histogram.emptyLike()
+        val added = histogram.emptyLike()
+        withContext(Dispatchers.Default) {
+            count.countRecords(old, gone)
+            count.countRecords(found, added)
+        }
+        return {
+            histogram.subtractAll(gone)
+            histogram.addAll(added)
         }
     }
 
@@ -921,6 +1014,8 @@ class LogSession internal constructor(
         searchError = null
         foundRecords = 0
         foundBytes = 0L
+        foundHistogram = null
+        foundTimes = null
         shownFilter = null
         countJob?.cancel()
         countJob = null
