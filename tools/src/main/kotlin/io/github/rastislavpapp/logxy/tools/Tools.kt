@@ -19,7 +19,7 @@ private const val USAGE = """Usage:
   benchmark <file> [--iterations N]     compare line-indexing strategies on a file
   parse <file> [--iterations N] [--pattern LAYOUT]
                                         measure parsing with the detected parser, or the given pattern layout
-  filter <file>                         measure typical filters on the parsed file
+  filter <file> [--iterations N]        measure typical filters on the parsed file, best and median of N first runs
   merge <file> <file>... [--iterations N] [--read-channels N]
                                         measure merging files and filtering the merged view
   simulate <file> [--rate N] [--rotate-at SIZE] [--mdc] [--json] [--rabbitmq]
@@ -52,7 +52,8 @@ fun main(args: Array<String>) {
             benchmarkIndexing(Path.of(positional[1]), option("iterations")?.toInt() ?: 5)
         "parse" if positional.size == 2 ->
             benchmarkParsing(Path.of(positional[1]), option("iterations")?.toInt() ?: 3, option("pattern"))
-        "filter" if positional.size == 2 -> benchmarkFiltering(Path.of(positional[1]))
+        "filter" if positional.size == 2 ->
+            benchmarkFiltering(Path.of(positional[1]), option("iterations")?.toInt() ?: 5)
         "merge" if positional.size >= 3 ->
             benchmarkMerging(
                 positional.drop(1).map { Path.of(it) },
