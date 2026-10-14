@@ -4,20 +4,47 @@ import io.github.rastislavpapp.logxy.core.log.Level
 import io.github.rastislavpapp.logxy.core.log.Records
 import io.github.rastislavpapp.logxy.core.log.Schema
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.job
 import kotlinx.coroutines.withContext
 import java.io.IOException
 
-/** What [ShownLog.copyColumn] got. */
+/** What a [PreparedCopy] got. */
 sealed interface CopyResult {
-    /** The column's values, one line per shown row. */
+    /** The text, one line per row (a record of several lines takes several). */
     data class Copied(val text: String) : CopyResult
+
+    /**
+     * Nothing was copied: the [rows] take [bytes] in the files, more than the copy's limit; a column copy stops
+     * where it went over, so its [bytes] are the characters copied by then.
+     */
+    data class TooLarge(val rows: Int, val bytes: Long) : CopyResult
 
     /** The session reloaded or closed the files while copying. */
     data object FileChanged : CopyResult
 
     data class Failed(val message: String) : CopyResult
+}
+
+/** The most a copy may take, whatever the memory. */
+const val MAX_COPY_BYTES = 512L shl 20
+
+/**
+ * The limit for a copy: [MAX_COPY_BYTES], or less with a heap of [maxMemory] bytes, as the text is held several
+ * times over while it goes to the clipboard.
+ */
+fun copyLimit(maxMemory: Long = Runtime.getRuntime().maxMemory()): Long = minOf(MAX_COPY_BYTES, maxMemory / 4)
+
+/** A copy taken on the session's thread, ready to read on another; see [ShownLog.copyRows]. */
+interface PreparedCopy {
+    /** Reads the text on another thread; cancelling the calling coroutine stops it. */
+    suspend fun run(): CopyResult
+
+    /** How far [run] got, from 0 to 1; readable from any thread. */
+    val progress: Double
 }
 
 /**
@@ -133,30 +160,78 @@ class ShownLog internal constructor(private val loaded: LoadedLog) {
         return minOf(low, size - 1)
     }
 
-    /** Copies [field] of every row, one value per line, reading on another thread. */
-    suspend fun copyColumn(field: Int): CopyResult {
-        if (ended) return CopyResult.FileChanged
-        return copy(field, rows?.let { it.array().copyOf(it.size) }, size)
+    /**
+     * Copies [rows] (below [size]) as their records are written in the files, each starting on a line of its own.
+     * Rows taking more than [limit] bytes there are refused before any is read.
+     */
+    fun copyRows(rows: RowRanges, limit: Long): PreparedCopy {
+        if (ended) return EndedCopy
+        require(rows.max < size) { "Row ${rows.max}, size $size" }
+        val ranges = rows.copy()
+        val first = maxOf(0, ranges.min)
+        // A filter's rows array may change later: the part the rows cover is copied now.
+        val records = this.rows?.array()?.copyOfRange(first, ranges.max + 1)
+        return RowsCopy(ranges, records, first, loaded.sourceReader(), limit)
     }
 
-    /** Copies [field] of [records], one value per line, reading on another thread. */
-    suspend fun copyColumn(field: Int, records: IntArray): CopyResult {
-        if (ended) return CopyResult.FileChanged
-        return copy(field, records, records.size)
+    /**
+     * Copies [field] of [rows] (below [size]), or of every row if null, one value per line. Stops once the text
+     * takes more than [limit] characters.
+     */
+    fun copyColumn(field: Int, limit: Long, rows: RowRanges? = null): PreparedCopy {
+        if (ended) return EndedCopy
+        // The records are resolved here, on the owner thread, and read through snapshots on another.
+        val records = if (rows == null) this.rows?.let { it.array().copyOf(it.size) } else recordsOf(rows)
+        val count = records?.size ?: size
+        return ColumnCopy(loaded.fieldReader(field, records, count), count, limit)
     }
 
-    // The records are resolved here, on the owner thread, and read through snapshots on another.
-    private suspend fun copy(field: Int, records: IntArray?, count: Int): CopyResult {
-        val read = loaded.fieldReader(field, records, count)
-        val result = try {
-            withContext(Dispatchers.IO) {
-                val text = StringBuilder()
-                for (i in 0..<count) {
-                    if (i % CANCEL_CHECK_ROWS == 0) ensureActive()
-                    text.append(read(i)).append('\n')
-                }
-                CopyResult.Copied(text.toString())
+    /** The records of [rows], in order. */
+    private fun recordsOf(rows: RowRanges): IntArray {
+        require(rows.max < size) { "Row ${rows.max}, size $size" }
+        val records = IntArray(rows.count)
+        var i = 0
+        val shown = this.rows?.array()
+        rows.forEachRange { start, end ->
+            if (shown != null) {
+                System.arraycopy(shown, start, records, i, end - start)
+            } else {
+                for (row in start..<end) records[i + row - start] = row
             }
+            i += end - start
+        }
+        return records
+    }
+
+    /** Copies the [count] values [read] gives. */
+    private inner class ColumnCopy(
+        private val read: (Int) -> String,
+        private val count: Int,
+        private val limit: Long,
+    ) : PreparedCopy {
+        @Volatile
+        override var progress = 0.0
+            private set
+
+        override suspend fun run(): CopyResult = readOff {
+            val text = StringBuilder()
+            for (i in 0..<count) {
+                if (i % CANCEL_CHECK_ROWS == 0) {
+                    ensureActive()
+                    progress = i.toDouble() / count
+                }
+                text.append(read(i)).append('\n')
+                if (text.length > limit) return@readOff CopyResult.TooLarge(count, text.length.toLong())
+            }
+            progress = 1.0
+            CopyResult.Copied(text.toString())
+        }
+    }
+
+    /** Reads off the owner thread; the result is [CopyResult.FileChanged] once the load ended meanwhile. */
+    private suspend fun readOff(read: suspend CoroutineScope.() -> CopyResult): CopyResult {
+        val result = try {
+            withContext(Dispatchers.IO, read)
         } catch (e: Exception) {
             if (e is CancellationException) throw e
             // Closing the files under the read fails it.
@@ -165,6 +240,76 @@ class ShownLog internal constructor(private val loaded: LoadedLog) {
             CopyResult.Failed(e.message ?: e.javaClass.simpleName)
         }
         return if (ended) CopyResult.FileChanged else result
+    }
+
+    /**
+     * Copies the records of the rows in [ranges]: the rows themselves, or for a filter's result, [records] from
+     * row [firstRow] on.
+     */
+    private inner class RowsCopy(
+        private val ranges: RowRanges,
+        private val records: IntArray?,
+        private val firstRow: Int,
+        private val reader: SourceReader,
+        private val limit: Long,
+    ) : PreparedCopy {
+        @Volatile
+        override var progress = 0.0
+            private set
+
+        private var bytes = 0L
+        private var done = 0L
+
+        override suspend fun run(): CopyResult = readOff {
+            val job = coroutineContext.job
+            forEachRun { from, to ->
+                job.ensureActive()
+                reader.spans(from, to) { _, start, end -> bytes += end - start }
+            }
+            if (bytes > limit) return@readOff CopyResult.TooLarge(ranges.count, bytes)
+            // Each character takes at least a byte; a line end may be added after each part's last record.
+            val text = StringBuilder((bytes + ranges.rangeCount).coerceAtMost(Int.MAX_VALUE - 8L).toInt())
+            forEachRun { from, to ->
+                reader.spans(from, to) { part, start, end -> append(part, start, end, text, job) }
+            }
+            progress = 1.0
+            CopyResult.Copied(text.toString())
+        }
+
+        /** Calls [run] with each run of the rows' records that follow each other, as records [from] to [to]. */
+        private inline fun forEachRun(run: (from: Int, to: Int) -> Unit) {
+            val records = records ?: return ranges.forEachRange(run)
+            ranges.forEachRange { start, end ->
+                var i = start - firstRow
+                val stop = end - firstRow
+                while (i < stop) {
+                    var next = i + 1
+                    while (next < stop && records[next] == records[next - 1] + 1) next++
+                    run(records[i], records[next - 1] + 1)
+                    i = next
+                }
+            }
+        }
+
+        /** Appends [part]'s bytes from [start] to [end], read a chunk at a time. */
+        private fun append(part: Int, start: Long, end: Long, out: StringBuilder, job: Job) {
+            var position = start
+            var last = NEWLINE
+            while (position < end) {
+                job.ensureActive()
+                val length = minOf(end - position, READ_BYTES.toLong()).toInt()
+                val bytes = reader.read(part, position, length)
+                if (bytes.size < length) throw IOException("The file is shorter than when it was read")
+                val whole = if (position + length == end) length else wholeCharacters(bytes)
+                out.append(String(bytes, 0, whole, Charsets.UTF_8))
+                last = bytes[whole - 1]
+                position += whole
+                done += whole
+                progress = done.toDouble() / this.bytes
+            }
+            // A file's last line may have no line end; the next record must still start on a line of its own.
+            if (last != NEWLINE) out.append('\n')
+        }
     }
 
     /** The rows shown, null for all records, and how many; for passes over them on other threads. */
@@ -213,5 +358,33 @@ class ShownLog internal constructor(private val loaded: LoadedLog) {
         const val UNTIMED_ROWS = 1000
 
         private const val CANCEL_CHECK_ROWS = 4096
+
+        /** Bytes read from a file at once when copying records. */
+        private const val READ_BYTES = 1 shl 20
+
+        private const val NEWLINE = '\n'.code.toByte()
     }
 }
+
+/** What copying from a shown log that already ended gets. */
+private object EndedCopy : PreparedCopy {
+    override suspend fun run() = CopyResult.FileChanged
+    override val progress = 1.0
+}
+
+/** How many of [bytes] (UTF-8) end before a character that does not fit in them. */
+private fun wholeCharacters(bytes: ByteArray): Int {
+    // The last character's first byte: the last byte that is not a continuation byte (10xxxxxx).
+    var first = bytes.size - 1
+    while (first > 0 && bytes.size - first < UTF8_MAX_BYTES && bytes[first].toInt() and 0xC0 == 0x80) first--
+    val lead = bytes[first].toInt() and 0xFF
+    val length = when {
+        lead >= 0xF0 -> 4
+        lead >= 0xE0 -> 3
+        lead >= 0xC0 -> 2
+        else -> 1
+    }
+    return if (first + length <= bytes.size) bytes.size else first
+}
+
+private const val UTF8_MAX_BYTES = 4

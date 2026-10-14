@@ -72,7 +72,6 @@ import javax.swing.JSeparator
 import javax.swing.JTabbedPane
 import javax.swing.KeyStroke
 import javax.swing.SwingConstants
-import javax.swing.Timer
 import javax.swing.UIManager
 import javax.swing.WindowConstants
 
@@ -80,8 +79,8 @@ private const val CARD_PLACEHOLDER = "placeholder"
 private const val CARD_TABS = "tabs"
 private const val LIVE_COLOR = "Actions.Green"
 private const val FOLLOW_COLOR = "Component.accentColor"
-private const val PROGRESS_DIALOG_DELAY_MILLIS = 300
 private const val MAX_LEFT_OUT_SHOWN = 15
+private const val OPENING_TITLE = "Opening Files"
 
 class MainFrame : JFrame("logxy") {
 
@@ -293,13 +292,13 @@ class MainFrame : JFrame("logxy") {
         if (paths.none { Files.isDirectory(it) }) return OpenPlan.find(paths)
         lateinit var walk: Deferred<Found>
         var finished = false
-        val dialog = OpeningProgressDialog(this@MainFrame, indeterminate = true) { walk.cancel() }
+        val dialog = ProgressDialog(this@MainFrame, OPENING_TITLE, indeterminate = true) { walk.cancel() }
         fun tell(folder: Path, count: Int) {
             dialog.text = "Looking for logs in $folder… ($count found)"
         }
         tell(paths.first { Files.isDirectory(it) }, 0)
         walk = async(Dispatchers.IO) { OpenPlan.find(paths, ::tell) }
-        showLater(dialog) { finished }
+        dialog.showLater { finished }
         return try {
             walk.await()
         } catch (e: CancellationException) {
@@ -440,7 +439,7 @@ class MainFrame : JFrame("logxy") {
     private fun extractThen(archives: List<Path>, then: (Map<Path, List<Path>>) -> Unit): Job {
         lateinit var job: Job
         var finished = false
-        val dialog = OpeningProgressDialog(this) { job.cancel() }
+        val dialog = ProgressDialog(this, OPENING_TITLE) { job.cancel() }
         job = scope.launch {
             val files = LinkedHashMap<Path, List<Path>>()
             var failure = ""
@@ -479,15 +478,8 @@ class MainFrame : JFrame("logxy") {
             then(files)
         }
         // Not job.isActive: the job is still running while [then] asks how to open the files.
-        showLater(dialog) { finished }
+        dialog.showLater { finished }
         return job
-    }
-
-    /** Shows [dialog] after a moment unless [finished] by then: quick work finishes before it would only flash. */
-    private fun showLater(dialog: OpeningProgressDialog, finished: () -> Boolean) {
-        val timer = Timer(PROGRESS_DIALOG_DELAY_MILLIS) { if (!finished()) dialog.isVisible = true }
-        timer.isRepeats = false
-        timer.start()
     }
 
     /** Opens each of [paths] in a tab of its own. */

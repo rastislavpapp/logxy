@@ -45,6 +45,9 @@ internal abstract class RecordSnapshot(
         return if (read == length) bytes else bytes.copyOf(read)
     }
 
+    /** [length] bytes of the file from [position], e.g. records as written; fewer if the file ends before. */
+    fun read(position: Long, length: Int): ByteArray = readBytes(position, length)
+
     /** The whole value of [field] in [record], like [io.github.rastislavpapp.logxy.core.log.Records.fieldText]. */
     abstract fun fieldText(record: Int, field: Int): String
 }

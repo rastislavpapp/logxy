@@ -2,6 +2,7 @@ package io.github.rastislavpapp.logxy.core.session
 
 import io.github.rastislavpapp.logxy.core.filter.FilterEngine
 import io.github.rastislavpapp.logxy.core.filter.RecordFilter
+import io.github.rastislavpapp.logxy.core.filter.RecordSnapshot
 import io.github.rastislavpapp.logxy.core.log.AppendedData
 import io.github.rastislavpapp.logxy.core.log.LogData
 import io.github.rastislavpapp.logxy.core.log.Records
@@ -51,11 +52,56 @@ internal interface LoadedLog {
      */
     fun fieldReader(field: Int, records: IntArray?, count: Int): (Int) -> String
 
+    /** Reads the records there are now as written in the files. Created on the owner thread. */
+    fun sourceReader(): SourceReader
+
     /** Applies [data] appended to [part]; returns the record that may have more text now, -1 if none. */
     fun append(part: Int, data: AppendedData): Int
 
     /** Shows what the parts got by [append] since the last time. */
     suspend fun settle(): Appended
+}
+
+/**
+ * Where records are written in the files, and their bytes there, for the records there were when it was created.
+ * Usable on any thread, but by one at a time.
+ */
+internal interface SourceReader {
+    /**
+     * Calls [span] for each run of records [from] to [to] (exclusive) that follow each other in one file, in order:
+     * the run's part, and where it starts and ends there, line ends included. Reads only the index.
+     */
+    fun spans(from: Int, to: Int, span: (part: Int, start: Long, end: Long) -> Unit)
+
+    /** [length] bytes of [part]'s file from [position]; fewer if the file ends before. */
+    fun read(part: Int, position: Long, length: Int): ByteArray
+}
+
+/** A [SourceReader] over the snapshots of the parts; [partOf] and [recordOf] map a record to its part and back. */
+private class SnapshotSourceReader(
+    private val snapshots: List<RecordSnapshot>,
+    private val partOf: (Int) -> Int,
+    private val recordOf: (Int) -> Int,
+) : SourceReader {
+    private val cursors = snapshots.map { it.cursor() }
+
+    override fun spans(from: Int, to: Int, span: (part: Int, start: Long, end: Long) -> Unit) {
+        var first = from
+        while (first < to) {
+            val part = partOf(first)
+            // A single file's records all follow each other: one run, without looking at each.
+            var last = if (snapshots.size == 1) to - 1 else first
+            while (last + 1 < to && partOf(last + 1) == part && recordOf(last + 1) == recordOf(last) + 1) last++
+            val cursor = cursors[part]
+            cursor.moveTo(recordOf(first))
+            val start = cursor.start
+            cursor.moveTo(recordOf(last))
+            span(part, start, cursor.end)
+            first = last + 1
+        }
+    }
+
+    override fun read(part: Int, position: Long, length: Int) = snapshots[part].read(position, length)
 }
 
 /** The records of [parts]: the single one's, or [parts] merged and named by [names]. */
@@ -81,6 +127,8 @@ internal class SingleLoad(private val log: LogData) : LoadedLog {
         if (records == null) return { i -> snapshot.fieldText(i, field) }
         return { i -> snapshot.fieldText(records[i], field) }
     }
+
+    override fun sourceReader(): SourceReader = SnapshotSourceReader(listOf(log.filterSnapshot()), { 0 }, { it })
 
     override fun append(part: Int, data: AppendedData): Int {
         val changed = log.recordCount - 1
@@ -118,6 +166,10 @@ internal class MergedLoad(private val log: MergedLog) : LoadedLog {
         PatternIndex.templateOf(log.parts[log.part(record)].filterSnapshot(), log.record(record))
 
     override fun fieldReader(field: Int, records: IntArray?, count: Int) = log.fieldReader(field, records, count)
+
+    // The merge's lists of parts and records may be read on other threads below the count there was.
+    override fun sourceReader(): SourceReader =
+        SnapshotSourceReader(log.parts.map { it.filterSnapshot() }, log::part, log::record)
 
     override fun append(part: Int, data: AppendedData): Int {
         val merged = log.mergedCount(part)
