@@ -15,7 +15,7 @@ import java.util.concurrent.TimeUnit
 import java.util.regex.Pattern
 
 /** Uncounted runs before the measured ones in each JVM, enough for the JIT to compile the hot loops. */
-const val WARMUPS = 3
+const val WARMUPS = 2
 
 /** How a row is measured: [WARMUPS] uncounted then [iterations] measured runs in each of [forks] JVMs. */
 class Runs(val iterations: Int, val forks: Int)

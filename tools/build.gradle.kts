@@ -41,7 +41,7 @@ tasks.register<Test>("benchmark") {
     jvmArgs(jmhJvmArgs)
     outputs.upToDateWhen { false }
     providers.gradleProperty("baselineTolerance").orNull?.let { systemProperty("baseline.tolerance", it) }
-    // JVMs per row, 5 by default; recording a baseline uses the same.
+    // JVMs per row, 3 by default; recording a baseline uses the same.
     providers.gradleProperty("benchmarkForks").orNull?.let { systemProperty("benchmark.forks", it) }
     // -PbaselineRecord writes the rows the baseline lacks into it instead of comparing.
     if (providers.gradleProperty("baselineRecord").isPresent) systemProperty("baseline.record", "true")

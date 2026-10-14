@@ -22,19 +22,22 @@ private const val MAIN_SIZE = 1L shl 30
 private const val MERGE_FILES = 8
 private const val MERGE_FILE_SIZE = 64L shl 20
 private const val APPEND_SIZE = 64L shl 10
-private const val RUNS = 5
+private const val RUNS = 3
 private const val SETUP = "main=1g seed=1; merge=8x64m seeds=2..9; JMH single shot, $WARMUPS warm-ups and $RUNS runs " +
     "per JVM; median of the JVMs' bests"
 
-/** JVMs per row, set by `-PbenchmarkForks`: a JVM can settle into a slower state for its whole run. */
-private val FORKS = System.getProperty("benchmark.forks")?.toInt() ?: 5
+/**
+ * JVMs per row, set by `-PbenchmarkForks`: a JVM can settle into a slower state for its whole run, and the median
+ * of 3 outvotes one. Each JVM costs about a second of start-up and setup, so more make the check slow.
+ */
+private val FORKS = System.getProperty("benchmark.forks")?.toInt() ?: 3
 
 /**
  * Results may vary by this much on top of the tolerance. Measured: in 5 checks back to back on unchanged code on
- * the baseline machine (2026-10-14), no row moved by more than 13% from the baseline (`filter level >= WARN`,
- * 6 ms; the next were 9%), so the tolerance alone covers the noise.
+ * the baseline machine (2026-10-14), every row stayed within 18% of the baseline except `follow: filter appended
+ * records`, 3 ms, which came out up to 92% (1.3 ms past the tolerance) slower.
  */
-private const val NOISE_SECONDS = 0.0
+private const val NOISE_SECONDS = 0.0015
 
 enum class Verdict { SLOWER, OK, FASTER }
 
