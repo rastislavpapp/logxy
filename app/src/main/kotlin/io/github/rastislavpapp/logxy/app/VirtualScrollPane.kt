@@ -185,7 +185,6 @@ class VirtualScrollPane(private val table: JTable, private val window: RowWindow
         val delta = newStart - window.windowStart
         if (delta == 0) return
         val viewY = viewport.viewPosition.y - delta * table.rowHeight
-        // The selection is kept in rows of the whole list (ShownRowSelection), so it stays as it is.
         window.windowStart = newStart
         setViewY(viewY)
     }

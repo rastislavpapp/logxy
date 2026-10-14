@@ -1,18 +1,19 @@
 package io.github.rastislavpapp.logxy.app
 
 import io.github.rastislavpapp.logxy.core.session.Selection
+import io.github.rastislavpapp.logxy.core.session.TableWindow
 import javax.swing.ListSelectionModel
 import javax.swing.event.EventListenerList
 import javax.swing.event.ListSelectionEvent
 import javax.swing.event.ListSelectionListener
 
 /**
- * The selection model of a table that holds a [window] of the shown rows. The [selection] is kept in rows of all
- * shown rows, so it reaches beyond the window and stays as the window moves; the indices JTable passes and gets
- * here are rows of the window. Anchor and lead outside the window read as -1: JTable takes an anchor of -1 as
- * none, so extending a selection goes through [extendTo] rather than through these indices.
+ * The selection model of a table that holds a [window] of a shown log's rows: it passes JTable's edits on to the
+ * [selection], which is kept in rows of the shown log, so it reaches beyond the window and stays as the window
+ * moves. Indices here are those of the window (see [TableWindow]); extending from an anchor outside it goes
+ * through [extendTo] and [extendKeepingOthers], as JTable cannot see that anchor.
  */
-class ShownRowSelection(private val window: RowWindow) : ListSelectionModel {
+class WindowSelectionModel(private val window: RowWindow) : ListSelectionModel {
 
     val selection = Selection()
 
@@ -20,19 +21,21 @@ class ShownRowSelection(private val window: RowWindow) : ListSelectionModel {
     private var adjusting = false
     private var changedWhileAdjusting = false
 
-    private val start get() = window.windowStart
+    private val rows: TableWindow
+        get() {
+            val start = window.windowStart
+            return TableWindow(start, start + minOf(window.totalRowCount - start, WINDOW_ROWS))
+        }
 
-    /** The row after the window's last. */
-    private val end get() = start + minOf(window.totalRowCount - start, WINDOW_ROWS)
+    private fun row(index: Int) = rows.rowAt(index)
 
-    private fun row(index: Int) = if (index < 0) -1 else start + index
-
-    private fun index(row: Int) = if (row in start..<end) row - start else -1
-
-    /** Selects from the anchor to [index], wherever the anchor is: in the window or not. */
+    /** Selects from the anchor to the row at [index], wherever the anchor is. */
     fun extendTo(index: Int) = change { selection.extendTo(row(index)) }
 
-    /** Selects all shown rows there are now. */
+    /** Like [extendTo], but other rows stay selected; see [Selection.extendKeepingOthers]. */
+    fun extendKeepingOthers(index: Int) = change { selection.extendKeepingOthers(row(index)) }
+
+    /** Selects all rows of the shown log there are now. */
     fun selectAll() = change { selection.selectAll(window.totalRowCount) }
 
     override fun setSelectionInterval(index0: Int, index1: Int) {
@@ -47,17 +50,17 @@ class ShownRowSelection(private val window: RowWindow) : ListSelectionModel {
         if (index0 >= 0 && index1 >= 0) change { selection.remove(row(index0), row(index1)) }
     }
 
-    override fun getMinSelectionIndex() = index(selection.rows.firstIn(start, end))
+    override fun getMinSelectionIndex() = selection.minIn(rows)
 
-    override fun getMaxSelectionIndex() = index(selection.rows.lastIn(start, end))
+    override fun getMaxSelectionIndex() = selection.maxIn(rows)
 
     override fun isSelectedIndex(index: Int) = index >= 0 && row(index) in selection
 
-    override fun getAnchorSelectionIndex() = index(selection.anchor)
+    override fun getAnchorSelectionIndex() = rows.indexOf(selection.anchor)
 
     override fun setAnchorSelectionIndex(index: Int) = change { selection.moveTo(row(index), selection.lead) }
 
-    override fun getLeadSelectionIndex() = index(selection.lead)
+    override fun getLeadSelectionIndex() = rows.indexOf(selection.lead)
 
     override fun setLeadSelectionIndex(index: Int) = change { selection.setLead(row(index)) }
 
@@ -89,18 +92,18 @@ class ShownRowSelection(private val window: RowWindow) : ListSelectionModel {
     override fun removeListSelectionListener(listener: ListSelectionListener) =
         listeners.remove(ListSelectionListener::class.java, listener)
 
-    fun getListSelectionListeners(): Array<ListSelectionListener> =
-        listeners.getListeners(ListSelectionListener::class.java)
-
     private inline fun change(edit: () -> Unit) {
         edit()
         fire()
     }
 
-    // The whole window is reported as changed: the table repaints only what is on screen of it.
+    // The whole window is reported as changed: the table repaints only what is on screen of it. Like Swing's
+    // models, the listener added last hears first.
     private fun fire() {
         changedWhileAdjusting = adjusting
-        val event = ListSelectionEvent(this, 0, maxOf(0, end - start - 1), adjusting)
-        for (listener in getListSelectionListeners().reversed()) listener.valueChanged(event)
+        val rows = rows
+        val event = ListSelectionEvent(this, 0, maxOf(0, rows.end - rows.start - 1), adjusting)
+        val listeners = listeners.getListeners(ListSelectionListener::class.java)
+        for (listener in listeners.reversed()) listener.valueChanged(event)
     }
 }

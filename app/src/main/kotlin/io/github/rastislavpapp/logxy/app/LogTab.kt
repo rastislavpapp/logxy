@@ -196,7 +196,7 @@ class LogTab(
             return end - start
         }
 
-    /** Number of rows selected, of all shown rows. */
+    /** Number of rows selected in the shown log, not only among those the table holds. */
     val selectedCount: Int get() = table?.selection?.count ?: 0
 
     // The file controls live outside the tab, and are not updated with it while another tab shows its own.
@@ -339,7 +339,8 @@ class LogTab(
             toolTipText = "The whole value of “${field.name}” of every shown row, one row per line"
             addActionListener {
                 val shown = model.shown
-                copyColumn(shown.copyColumn(shown.schema.fields.indexOf(field), copyLimit()))
+                val column = shown.schema.fields.indexOf(field)
+                copyColumn(shown.copyColumn(column, copyLimit()))
             }
         })
         popup.show(header, x, y)
@@ -351,23 +352,25 @@ class LogTab(
         val rows = selectedRows()
         if (rows.isEmpty()) return
         val count = NumberFormat.getIntegerInstance().format(rows.count)
-        runCopy("Copy Rows", "Copying $count rows…", "rows", model.shown.copyRows(rows, copyLimit())) {
+        val prepared = model.shown.copyRows(rows, copyLimit())
+        runCopy("Copy Rows", "Copying $count rows…", "rows", prepared) {
             "The $count selected rows take ${formatByteSize(it.bytes)} in the file"
         }
     }
 
     private fun copyColumn(prepared: PreparedCopy) = runCopy("Copy Column", "Copying the column…", "column", prepared) {
-        "The column takes more than ${formatByteSize(copyLimit())}"
+        val rows = NumberFormat.getIntegerInstance().format(it.rows)
+        "The column of $rows rows takes more than ${formatByteSize(copyLimit())}"
     }
 
     /**
-     * Runs [prepared] off the UI thread, with a progress dialog saying [text] if it takes a while, and puts what it
-     * copied on the clipboard. Cancel copies nothing, and so does closing the tab. [tooLarge] says why a copy of
-     * the [what] was refused.
+     * Runs [prepared] off the UI thread, with a progress dialog saying [progressText] if it takes a while, and puts
+     * what it copied on the clipboard. Cancel copies nothing, and so does closing the tab. [tooLarge] says why a copy
+     * of the [what] was refused.
      */
     private fun runCopy(
         title: String,
-        text: String,
+        progressText: String,
         what: String,
         prepared: PreparedCopy,
         tooLarge: (CopyResult.TooLarge) -> String,
@@ -376,7 +379,7 @@ class LogTab(
         lateinit var job: Job
         var finished = false
         val dialog = ProgressDialog(window, title, progress = { prepared.progress }) { job.cancel() }
-        dialog.text = text
+        dialog.text = progressText
         // Undispatched: the dialog is disposed even if the tab closes before the copy would have started.
         job = scope.launch(start = CoroutineStart.UNDISPATCHED) {
             val result = try {
@@ -403,7 +406,7 @@ class LogTab(
         return "$reason; at most ${formatByteSize(limit)} can be copied.$more"
     }
 
-    /** The selected rows, of all shown rows. */
+    /** The selected rows of the shown log. */
     private fun selectedRows(): RowRanges = table?.selection?.rows ?: RowRanges()
 
     private fun copy(text: String) =
@@ -437,7 +440,10 @@ class LogTab(
                 addActionListener { copySelectedRows() }
             })
             popup.add(JMenuItem("Copy Column “${field.name}”").apply {
-                addActionListener { copyColumn(shown.copyColumn(fieldIndex, copyLimit(), selectedRows())) }
+                addActionListener {
+                    val prepared = shown.copyColumn(fieldIndex, copyLimit(), selectedRows())
+                    copyColumn(prepared)
+                }
             })
         }
         popup.addSeparator()
@@ -643,10 +649,10 @@ class LogTab(
         applyFilter()
     }
 
-    /** Shows the record at [row] of all shown rows, or nothing if there is none. */
+    /** Shows the record at [row] of the shown log, or nothing if there is none. */
     private fun showDetail(model: LogTableModel, row: Int) {
-        val inRange = row >= 0 && row < model.totalRowCount
-        detail.show(if (inRange) model.shown.recordText(model.recordAtIndex(row), MAX_DETAIL_BYTES) else "")
+        val record = model.recordAtIndexOrNull(row)
+        detail.show(if (record != null) model.shown.recordText(record, MAX_DETAIL_BYTES) else "")
         // A long record, e.g. with a stack trace, shows where the find bar's text is.
         detail.caretPosition = detail.firstFound
     }
@@ -655,7 +661,7 @@ class LogTab(
     private fun refreshDetail(record: Int) {
         val model = model ?: return
         val row = table?.selection?.lead ?: return
-        if (row !in 0..<model.totalRowCount || model.recordAtIndex(row) != record) return
+        if (model.recordAtIndexOrNull(row) != record) return
         val text = model.shown.recordText(record, MAX_DETAIL_BYTES)
         if (text == detail.text) return
         val caret = detail.caretPosition
@@ -774,8 +780,8 @@ class LogTab(
         val scrollPane = scrollPane ?: return
         if (model.shown.foundCount == 0 || model.totalRowCount == 0) return
         val lead = table.selection.lead
-        val selected = lead.takeIf { it in 0..<model.totalRowCount && it in table.selection }
-        val current = selected?.let(model::recordAtIndex) ?: model.recordAtIndex(scrollPane.firstVisibleRow)
+        val selected = if (lead in table.selection) model.recordAtIndexOrNull(lead) else null
+        val current = selected ?: model.recordAtIndex(scrollPane.firstVisibleRow)
         val record = model.shown.nextFound(current, forward, inclusive || selected == null)
         val index = model.indexOfRecord(record)
         if (index < 0 || model.recordAtIndex(index) != record) return
@@ -788,7 +794,7 @@ class LogTab(
         val model = model
         if (model?.shown?.isSearching == true) return
         val lead = table?.selection?.lead ?: -1
-        val selected = if (model != null && lead in 0..<model.totalRowCount) model.recordAtIndex(lead) else -1
+        val selected = model?.recordAtIndexOrNull(lead) ?: -1
         val shown = model?.shown
         val position = if (shown != null && selected >= 0) shown.foundPosition(selected) else 0
         findBar.showCount(position, shown?.foundCount ?: 0)
