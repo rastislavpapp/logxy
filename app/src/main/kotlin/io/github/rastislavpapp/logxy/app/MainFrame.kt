@@ -7,6 +7,7 @@ import io.github.rastislavpapp.logxy.core.archive.CompressedSpool
 import io.github.rastislavpapp.logxy.core.archive.ZipSpool
 import io.github.rastislavpapp.logxy.core.config.OpenMode
 import io.github.rastislavpapp.logxy.core.config.Settings
+import io.github.rastislavpapp.logxy.core.formatTimeSpan
 import io.github.rastislavpapp.logxy.core.merge.MergedLog
 import io.github.rastislavpapp.logxy.core.open.Decision
 import io.github.rastislavpapp.logxy.core.open.Found
@@ -607,9 +608,12 @@ class MainFrame : JFrame("logxy") {
                     toolTipText = if (filtered) "A filter is active" else null
                 })
             }
-            tab.selectionSpan?.let {
-                segment(JLabel("Selection: ${io.github.rastislavpapp.logxy.core.formatTimeSpan(it)}").apply {
-                    toolTipText = "Time from the first selected row to the last"
+            if (tab.selectedCount > 1) {
+                val span = tab.selectionSpan
+                val rows = "${numbers.format(tab.selectedCount)} rows"
+                val text = if (span == null) rows else "$rows · ${formatTimeSpan(span)}"
+                segment(JLabel("Selection: $text").apply {
+                    toolTipText = if (span == null) "Rows selected" else "Rows selected; time from first to last"
                 })
             }
             status.size?.let { segment(JLabel(io.github.rastislavpapp.logxy.core.formatByteSize(it))) }
