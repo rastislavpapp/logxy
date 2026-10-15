@@ -1,5 +1,6 @@
 package io.github.rastislavpapp.logxy.core.session
 
+import io.github.rastislavpapp.logxy.core.filter.Narrowing
 import io.github.rastislavpapp.logxy.core.log.Level
 import io.github.rastislavpapp.logxy.core.log.Records
 import io.github.rastislavpapp.logxy.core.log.Schema
@@ -100,6 +101,8 @@ class ShownLog internal constructor(private val loaded: LoadedLog) {
         return when {
             ended -> -1
             partial != null -> partial.next(record, forward, inclusive)
+            // The found records are those of the search before, which a narrowing one is about to replace.
+            isSearching -> NOT_YET_FOUND
             else -> found.next(record, forward, inclusive)
         }
     }
@@ -387,6 +390,14 @@ class ShownLog internal constructor(private val loaded: LoadedLog) {
         val start = if (index < 0) found.size else index
         return found.array().copyOfRange(start, found.size)
     }
+
+    /** Keeps the found records but marks that a search over them runs, which replaces them when done. */
+    internal fun markSearching() {
+        isSearching = true
+    }
+
+    /** The found records as a limit for a stricter search, trusted below record [upTo]. */
+    internal fun narrowing(upTo: Int) = Narrowing(found.array(), found.size, upTo)
 
     /** Replaces the found records from record [from] on with [records] (sorted, all `>= from`). */
     internal fun replaceFoundFrom(from: Int, records: IntArray) {

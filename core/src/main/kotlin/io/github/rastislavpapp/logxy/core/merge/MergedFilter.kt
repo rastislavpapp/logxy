@@ -7,6 +7,7 @@ import io.github.rastislavpapp.logxy.core.filter.Filter
 import io.github.rastislavpapp.logxy.core.filter.FilterEngine
 import io.github.rastislavpapp.logxy.core.filter.FilterResult
 import io.github.rastislavpapp.logxy.core.filter.LevelCondition
+import io.github.rastislavpapp.logxy.core.filter.Narrowing
 import io.github.rastislavpapp.logxy.core.filter.NumberCondition
 import io.github.rastislavpapp.logxy.core.filter.PatternCondition
 import io.github.rastislavpapp.logxy.core.filter.PreparedFilter
@@ -38,14 +39,15 @@ class MergedFilter(private val log: MergedLog) : RecordFilter {
         override fun record(row: Int) = log.record(row)
     }
 
-    override fun prepare(filter: Filter, from: Int): PreparedFilter {
+    override fun prepare(filter: Filter, from: Int, within: Narrowing?): PreparedFilter {
         val count = log.recordCount
         val start = from.coerceIn(0, count)
         val indexedSize = log.indexedSize
         // Records a part got but that are not merged yet are left out.
         val merged = IntArray(log.parts.size) { log.mergedCount(it) }
+        val narrowings = within?.let { partNarrowings(it) }
         val evaluations = log.parts.indices.map { part ->
-            engines[part].prepare(partFilter(filter, part), log.firstRecordFrom(part, start))
+            engines[part].prepare(partFilter(filter, part), log.firstRecordFrom(part, start), narrowings?.get(part))
         }
         val weights = merged.map { it.toDouble() / maxOf(1, merged.sum()) }
         return object : PreparedFilter {
@@ -60,6 +62,25 @@ class MergedFilter(private val log: MergedLog) : RecordFilter {
 
             override val progress get() = evaluations.indices.sumOf { evaluations[it].progress * weights[it] }
         }
+    }
+
+    /** [within], whose merged positions are sorted, as one narrowing per part, on the part's own records. */
+    private fun partNarrowings(within: Narrowing): List<Narrowing> {
+        val sizes = IntArray(log.parts.size)
+        for (i in 0..<within.size) {
+            val position = within.records[i]
+            if (position >= within.upTo) break
+            sizes[log.part(position)]++
+        }
+        val records = List(log.parts.size) { IntArray(sizes[it]) }
+        sizes.fill(0)
+        for (i in 0..<within.size) {
+            val position = within.records[i]
+            if (position >= within.upTo) break
+            val part = log.part(position)
+            records[part][sizes[part]++] = log.record(position)
+        }
+        return log.parts.indices.map { Narrowing(records[it], sizes[it], log.firstRecordFrom(it, within.upTo)) }
     }
 
     // The last record of every part may still grow; the earliest of them decides.
