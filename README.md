@@ -1,48 +1,52 @@
 # <img src="app/src/main/resources/logxy.svg" width="40" height="40" align="top" alt=""> logxy
 
-Fast desktop viewer for large log files.
+**A fast desktop viewer for large log files.** It opens a 10 GB log in under two seconds and filters it in under a second, and it can merge several files by time and follow them as they grow.
+
+[![Build](https://github.com/rastislavpapp/logxy/actions/workflows/build.yml/badge.svg)](https://github.com/rastislavpapp/logxy/actions/workflows/build.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Support on Ko-fi](https://img.shields.io/badge/Ko--fi-support%20logxy-FF5E5B?logo=ko-fi&logoColor=white)](https://ko-fi.com/rastislavpapp)
+
+![logxy showing a log filtered to messages containing "timeout"](docs/images/filter.png)
+
+## Features
+
+- **Large files.** Multi-GB logs open in seconds and scroll smoothly.
+- **Structured parsing.** Log4j and logback patterns, Spring Boot's default log output, JSON lines (logstash and ECS style), logfmt, MDC maps (one column per key) and raw text. logxy picks the right parser automatically, and you can define your own with a pattern, a regex or a JSON key mapping.
+- **Filtering.** Combine conditions on any column with AND, OR and NOT, either in a visual editor or as a text expression such as `level >= WARN AND thread == "main*"`. Wildcards, regular expressions, case-sensitive matching, level and time ranges are supported. Save filters for later.
+- **Merging.** Open several files together in one session, interleaved by timestamp, even when each needs a different parser. A Source column tells the files apart.
+- **Following.** Live files are tailed as they grow, including rotation and truncation.
+- **Time histogram.** See where the errors and warnings are, and where your search matches fall, then jump there.
+- **Compressed files and folders.** Open `.zip`, `.gz` and `.zst` files, or a whole folder of logs.
+- **Themes.** Light and dark, with a choice of FlatLaf and IntelliJ themes.
+
+![The Open Files dialog merging a log4j-style file with a JSON-lines file](docs/images/open-files.png)
+
+## Download
+
+Packages with a bundled Java runtime for Windows and Linux are on the [Releases page](https://github.com/rastislavpapp/logxy/releases): unpack and run. The release also contains a plain `logxy.jar` for any system with JDK 25 or newer.
+
+macOS is untested and unsupported. logxy is a Java application, so it may well work there when run from the jar.
 
 ## Build and run
 
-Requires JDK 25. Running the app needs a full JDK with GUI support (e.g. Temurin), not a headless-only runtime such as Fedora's `java-25-openjdk-headless`; point `JAVA_HOME` at it.
-
 ```sh
-./gradlew build                      # build and test (Windows: gradlew.bat)
-java -jar app/build/libs/logxy.jar   # run the fat jar
-./gradlew :app:run                   # run during development
-./gradlew :app:nativeArchive         # app image with bundled runtime, zipped for this OS in app/build/dist
+./gradlew :app:run
 ```
 
-## Releasing
+Needs JDK 25 with GUI support; see [CONTRIBUTING.md](CONTRIBUTING.md) for the setup, tests and benchmarks.
 
-Push an `X.Y.Z` tag on a commit in `main`. The release workflow builds and tests on Windows and Linux, stamps that version on the packages (the code stays at `-SNAPSHOT`; the release passes `-Pversion`) and creates a GitHub release with the jar, the Windows zip and the Linux tarball. Running the workflow by hand does a dry run that publishes nothing.
+## Contributing
 
-```sh
-git tag 0.1.0 && git push origin 0.1.0
-```
+Issues and pull requests are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) first.
 
-Test data and benchmarks:
+## Support
 
-```sh
-./gradlew -q :tools:run --args="generate /path/to/test.log 2g"
-./gradlew -q :tools:run --args="generate /path/to/mdc.log 50m --mdc"
-./gradlew -q :tools:run --args="generate /path/to/app.json 50m --json"
-./gradlew -q :tools:run --args="generate /path/to/rabbit.json 50m --rabbitmq"
-./gradlew -q :tools:run --args="benchmark /path/to/test.log"
-./gradlew -q :tools:run --args="parse /path/to/test.log"
-./gradlew -q :tools:run --args="filter /path/to/test.log"
-./gradlew -q :tools:run --args="simulate /path/to/live.log --rate 50 --rotate-at 1m"
-./gradlew :tools:benchmark                     # JUnit test: fails if parsing, filtering or merging got slower than saved
-```
-
-The benchmark is not part of `./gradlew test`. `-PbaselineTolerance=N` sets the allowed slowdown in percent (default 25). The baseline (`tools/benchmark-baseline.properties`) is machine-specific: on a machine whose CPU or core count differs, the first run records `tools/benchmark-baseline.local.properties` (gitignored) and later runs compare with that; delete it to record again. The times come from fixed-seed files generated into `build/benchmark` on first use (about 1.5 GB).
-
-The logo's source is `app/src/main/resources/logxy.svg`. The packaging icons in `app/src/packaging` are generated from it and committed; after changing the logo, regenerate them from the project root:
-
-```sh
-./gradlew -q :tools:run --args="icons"
-```
+logxy is free and developed in spare time. If it saves you time, you can support its development on [Ko-fi](https://ko-fi.com/rastislavpapp) or through [GitHub Sponsors](https://github.com/sponsors/rastislavpapp). Bug reports and stars help too.
 
 ## AI disclosure
 
-This project is developed with the help of AI coding tools, primarily [Claude Code](https://claude.com/claude-code).
+This project is developed with the help of AI coding tools, primarily [Claude Code](https://claude.com/claude-code). The files for AI agents (`AGENTS.md` and `docs/agents/`) are kept in the repository.
+
+## License
+
+[MIT](LICENSE) © Rastislav Papp
