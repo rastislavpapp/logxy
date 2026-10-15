@@ -758,7 +758,8 @@ class LogTab(
         searchTimer?.stop()
         searchTimer = null
         if (!searching) return
-        findBar.showCount(0, null)
+        // A search narrowing the previous one takes a moment, then its count replaces the old: no flash of "Searching".
+        if (!session.searchNarrows) findBar.showCount(0, null)
         searchTimer = Timer(100) {
             showCount()
             histogramBar?.repaint()

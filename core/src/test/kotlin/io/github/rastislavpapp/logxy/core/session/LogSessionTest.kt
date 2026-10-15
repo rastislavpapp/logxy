@@ -5,6 +5,7 @@ import io.github.rastislavpapp.logxy.core.filter.ChunkListener
 import io.github.rastislavpapp.logxy.core.filter.Filter
 import io.github.rastislavpapp.logxy.core.filter.FilterResult
 import io.github.rastislavpapp.logxy.core.filter.LevelCondition
+import io.github.rastislavpapp.logxy.core.filter.Narrowing
 import io.github.rastislavpapp.logxy.core.filter.PreparedFilter
 import io.github.rastislavpapp.logxy.core.filter.RecordFilter
 import io.github.rastislavpapp.logxy.core.filter.TextCondition
@@ -39,6 +40,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 class LogSessionTest {
@@ -437,20 +439,106 @@ class LogSessionTest {
         }
     }
 
+    @Test
+    fun `a search with more text typed on gives what a fresh search gives`() = runBlocking {
+        val warnOrWorse = LevelCondition.atLeast("Level", Level.WARN)
+        // Typed on, deleted back, and with an option changed, with records appended meanwhile.
+        val steps = listOf(
+            TextSearch("message 1"),
+            TextSearch("message 12"),
+            TextSearch("message 123"),
+            TextSearch("message 12"),
+            TextSearch("message 12", matchCase = true),
+            TextSearch("message 120", matchCase = true),
+            TextSearch("MESSAGE 1203", matchCase = false),
+        )
+        for ((merged, filter) in listOf(false to null, false to warnOrWorse, true to null, true to warnOrWorse)) {
+            val a = Files.writeString(dir.resolve("narrow-a-$merged-${filter != null}.log"), lines(300))
+            val files = if (merged) {
+                listOf(a, Files.writeString(dir.resolve("narrow-b-${filter != null}.log"), lines(200)))
+            } else {
+                listOf(a)
+            }
+            val (session, _) = open(files, Recorder())
+            withContext(ui) { session.applyFilter(if (filter != null) Level.WARN else null, Query.EMPTY) }
+            for (search in steps) {
+                withContext(ui) { session.search(search) }
+                awaitFound(session, files, filter, search)
+                for (file in files) append(file, lines(20))
+            }
+            withContext(ui) { session.dispose() }
+        }
+    }
+
+    @Test
+    fun `text typed on while a search runs narrows it once it is done`() = runBlocking {
+        val file = Files.writeString(dir.resolve("typed-on.log"), lines(1000))
+        val search = TextSearch("message 1")
+        val (session, _, recording) = openRecording(file, search)
+        val gate = CompletableDeferred<Unit>()
+        withContext(ui) {
+            session.applyFilter(null, Query.EMPTY)
+            recording.searchGate = gate
+            session.search(search)
+            session.search(TextSearch("message 12"))
+            session.search(TextSearch("message 123"))
+            assertTrue(session.shown!!.isSearching)
+        }
+        gate.complete(Unit)
+        val typed = TextSearch("message 123")
+        assertEquals(1, awaitFound(session, listOf(file), null, typed).size)
+        withContext(ui) {
+            // Only the first search read all records; the rest looked among what it found.
+            assertEquals(listOf(0), recording.searchedFrom)
+            assertEquals(1, recording.narrowedFrom.size)
+        }
+    }
+
+    @Test
+    fun `typing on keeps the found records shown until the narrowed ones replace them`() = runBlocking {
+        val file = Files.writeString(dir.resolve("kept.log"), lines(1000))
+        val search = TextSearch("message 1")
+        val (session, _, recording) = openRecording(file, search)
+        withContext(ui) {
+            session.applyFilter(null, Query.EMPTY)
+            session.search(search)
+        }
+        val before = awaitFound(session, listOf(file), null, search).size
+        withContext(ui) {
+            session.search(TextSearch("message 12"))
+            assertTrue(session.searchNarrows)
+            assertTrue(session.shown!!.isSearching)
+            assertEquals(before, session.shown!!.foundCount)
+        }
+        assertEquals(11, awaitFound(session, listOf(file), null, TextSearch("message 12")).size)
+        withContext(ui) {
+            assertFalse(session.searchNarrows)
+            assertEquals(1, recording.narrowedFrom.size)
+        }
+    }
+
     /** Records each search prepared and from which record on; filters without the search wait for [gate]. */
     private class Recording(private val engine: RecordFilter, private val search: Filter) : RecordFilter by engine {
         val searchedFrom = ArrayList<Int>()
+
+        /** The limit of each run that only looked among earlier found records. */
+        val narrowedFrom = ArrayList<Int>()
         var gate = CompletableDeferred(Unit)
+        var searchGate = CompletableDeferred(Unit)
         var searchFails = false
 
-        override fun prepare(filter: Filter, from: Int): PreparedFilter {
-            val prepared = engine.prepare(filter, from)
+        override fun prepare(filter: Filter, from: Int, within: Narrowing?): PreparedFilter {
+            val prepared = engine.prepare(filter, from, within)
+            if (within != null) narrowedFrom += within.upTo
             if (filter == search || (filter is Filter.And && search in filter.parts)) {
                 searchedFrom += from
-                if (!searchFails) return prepared
+                val searchGate = searchGate
                 return object : PreparedFilter by prepared {
-                    override suspend fun run(onChunk: ChunkListener?): FilterResult =
-                        throw IllegalStateException("Disk on fire")
+                    override suspend fun run(onChunk: ChunkListener?): FilterResult {
+                        searchGate.await()
+                        if (searchFails) throw IllegalStateException("Disk on fire")
+                        return prepared.run(onChunk)
+                    }
                 }
             }
             val gate = gate
@@ -472,8 +560,8 @@ class LogSessionTest {
         private val result = CompletableDeferred<IntArray>()
         var recordCount = 0
 
-        override fun prepare(filter: Filter, from: Int): PreparedFilter {
-            val prepared = engine.prepare(filter, from)
+        override fun prepare(filter: Filter, from: Int, within: Narrowing?): PreparedFilter {
+            val prepared = engine.prepare(filter, from, within)
             if (from > 0 || !(filter == search || (filter is Filter.And && search in filter.parts))) return prepared
             return object : PreparedFilter by prepared {
                 override val progress = 0.5
@@ -672,6 +760,65 @@ class LogSessionTest {
         append(file, secondLines(100, first = 200))
         val more = awaitFound(session, listOf(file), null, search)
         awaitUi { session.foundHistogram?.let { shown.inHistogram(it, 0, 299) } == more.size }
+    }
+
+    @Test
+    fun `the found histogram counts the narrowed records, with a filter and in a merge`() = runBlocking {
+        for ((merged, level) in listOf(false to Level.INFO, true to null, true to Level.INFO)) {
+            val a = Files.writeString(dir.resolve("narrow-hist-a-$merged-$level.log"), secondLines(100))
+            val files = if (merged) {
+                listOf(a, Files.writeString(dir.resolve("narrow-hist-b-$level.log"), secondLines(100, first = 100)))
+            } else {
+                listOf(a)
+            }
+            val (session, shown) = open(files, Recorder())
+            withContext(ui) {
+                session.applyFilter(level, Query.EMPTY)
+                session.search(TextSearch("message 1"))
+            }
+            awaitFound(session, files, null, TextSearch("message 1"))
+            for (text in listOf("message 12", "message 123")) {
+                val search = TextSearch(text)
+                withContext(ui) { session.search(search) }
+                val expected = awaitFound(session, files, null, search)
+                val last = if (merged) 199 else 99
+                awaitUi { session.foundHistogram?.let { shown.inHistogram(it, 0, last) } == expected.size }
+            }
+            withContext(ui) { session.dispose() }
+        }
+    }
+
+    @Test
+    fun `a narrowing search keeps the found histogram and no match is given until it is done`() = runBlocking {
+        val file = Files.writeString(dir.resolve("narrow-histogram.log"), secondLines(100))
+        val (session, shown) = open(file, Recorder())
+        withContext(ui) { session.search(TextSearch("message 1")) }
+        awaitFound(session, listOf(file), null, TextSearch("message 1"))
+        awaitUi { session.foundHistogram?.let { shown.inHistogram(it, 0, 99) } == 11 }
+        val before = withContext(ui) { session.foundHistogram }
+        withContext(ui) {
+            session.search(TextSearch("message 12"))
+            // The records of the search before stay, but only for show.
+            assertTrue(session.searchNarrows)
+            assertSame(before, session.foundHistogram)
+            assertEquals(11, shown.foundCount)
+            assertEquals(NOT_YET_FOUND, shown.nextFound(0, forward = true, inclusive = true))
+        }
+        awaitUi { !shown.isSearching }
+        withContext(ui) {
+            assertEquals(1, shown.foundCount)
+            assertEquals(12, shown.nextFound(0, forward = true, inclusive = true))
+            assertEquals(1, shown.inHistogram(session.foundHistogram!!, 0, 99))
+        }
+        // The narrowed records are followed on like any: the histogram counts appended matches, once.
+        append(file, secondLines(100, first = 100))
+        val typed = TextSearch("message 12")
+        val expected = awaitFound(session, listOf(file), null, typed)
+        awaitUi { session.foundHistogram?.let { shown.inHistogram(it, 0, 199) } == expected.size }
+        // And typing on again narrows what was found since.
+        withContext(ui) { session.search(TextSearch("message 120")) }
+        val narrowed = awaitFound(session, listOf(file), null, TextSearch("message 120"))
+        awaitUi { session.foundHistogram?.let { shown.inHistogram(it, 0, 199) } == narrowed.size }
     }
 
     private suspend fun openRecording(file: Path, search: TextSearch): Triple<LogSession, ShownLog, Recording> {

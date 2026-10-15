@@ -14,6 +14,14 @@ data class TextSearch(
 ) {
     val isEmpty get() = text.isEmpty()
 
+    /**
+     * Whether this search can only match records that [previous] matches, so it may look among those alone: the
+     * same plain text with more typed after it. A regex or whole words can match elsewhere for more text.
+     */
+    fun narrows(previous: TextSearch): Boolean =
+        !regex && !wholeWords && !previous.regex && !previous.wholeWords && matchCase == previous.matchCase &&
+            previous.text.isNotEmpty() && text.length > previous.text.length && text.startsWith(previous.text)
+
     /** The condition on the records' whole text; throws [QueryException] for an invalid regex. */
     fun condition(): RecordTextCondition {
         // Plain text is matched straight on the bytes, as a wildcard pattern with its own wildcards escaped.

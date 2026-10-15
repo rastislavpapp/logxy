@@ -29,13 +29,19 @@ import java.util.concurrent.atomic.AtomicLong
  */
 class FilterResult(val rows: IntArray, val from: Int, val recordCount: Int, val indexedSize: Long)
 
+/**
+ * Limits a run to records known to be among [records] (sorted, the first [size] count) below [upTo]; from [upTo]
+ * on, all records are tested. For a filter stricter than one whose result is [records].
+ */
+class Narrowing(val records: IntArray, val size: Int, val upTo: Int)
+
 /** Evaluates [Filter]s over [io.github.rastislavpapp.logxy.core.log.Records]. Use it on the thread that owns them. */
 interface RecordFilter {
     /**
-     * Prepares [filter] for the records from [from] on, e.g. only appended ones. Throws
-     * IllegalArgumentException for an invalid regex.
+     * Prepares [filter] for the records from [from] on, e.g. only appended ones, or only those [within] allows.
+     * Throws IllegalArgumentException for an invalid regex.
      */
-    fun prepare(filter: Filter, from: Int = 0): PreparedFilter
+    fun prepare(filter: Filter, from: Int = 0, within: Narrowing? = null): PreparedFilter
 
     /**
      * The first record whose result may differ from a result computed when there were [coveredRecords]
@@ -105,13 +111,13 @@ class FilterEngine(private val log: LogData, private val maxCacheBytes: Long = D
      * Call on the thread that owns the log; the returned evaluation may run on any thread. Throws
      * IllegalArgumentException for an invalid regex.
      */
-    override fun prepare(filter: Filter, from: Int): Evaluation {
+    override fun prepare(filter: Filter, from: Int, within: Narrowing?): Evaluation {
         val snapshot = log.filterSnapshot()
         if (snapshot.levels != cachedLevels) {
             cache.keys.removeIf { it is LevelCondition }
             cachedLevels = snapshot.levels
         }
-        return Evaluation(compile(filter, snapshot), snapshot, from.coerceIn(0, snapshot.count))
+        return Evaluation(compile(filter, snapshot), snapshot, from.coerceIn(0, snapshot.count), within)
     }
 
     // Only the last record of a log grows.
@@ -148,6 +154,7 @@ class FilterEngine(private val log: LogData, private val maxCacheBytes: Long = D
         private val root: Node,
         private val snapshot: RecordSnapshot,
         private val from: Int,
+        within: Narrowing?,
     ) : PreparedFilter {
         private val words = (snapshot.count + 63) / 64
 
@@ -171,11 +178,19 @@ class FilterEngine(private val log: LogData, private val maxCacheBytes: Long = D
             is Leaf -> listOf(node)
         }
 
-        /** The records evaluated: from [from] to the end of the snapshot. */
+        /** The records evaluated: from [from] to the end of the snapshot, below [within]'s limit only its records. */
         private val all = LongArray(words).also { bits ->
-            for (w in from / 64..<words) bits[w] = -1L
-            if (from % 64 != 0) bits[from / 64] = -1L shl (from % 64)
+            val open = within?.upTo?.coerceIn(from, snapshot.count) ?: from
+            for (w in open / 64..<words) bits[w] = -1L
+            if (open % 64 != 0) bits[open / 64] = -1L shl (open % 64)
             if (snapshot.count % 64 != 0) bits[words - 1] = bits[words - 1] and (1L shl (snapshot.count % 64)) - 1
+            if (within != null) {
+                for (i in 0..<within.size) {
+                    val record = within.records[i]
+                    if (record >= open) break
+                    if (record >= from) bits[record ushr 6] = bits[record ushr 6] or (1L shl (record and 63))
+                }
+            }
         }
 
         override suspend fun run(onChunk: ChunkListener?): FilterResult = withContext(Dispatchers.Default) {

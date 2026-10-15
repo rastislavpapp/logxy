@@ -230,6 +230,20 @@ class LogSession internal constructor(
     private var searchJob: Job? = null
     private var searching: PreparedFilter? = null
 
+    // What [searchCondition] is for, and the search whose records the found ones are, once its run is done.
+    private var searchSpec: TextSearch? = null
+    private var foundSpec: TextSearch? = null
+
+    // A search that only narrows the running one, started when that one is done.
+    private var queuedSearch: TextSearch? = null
+
+    /**
+     * Whether the running search only looks among the records of the one before, which takes a moment: the
+     * previous found records are still shown until it is done.
+     */
+    var searchNarrows = false
+        private set
+
     // How much of the records the found records cover, as for the filter result.
     private var foundRecords = 0
     private var foundBytes = 0L
@@ -337,13 +351,38 @@ class LogSession internal constructor(
      * Finds the shown rows that [search] matches into [ShownLog.foundCount] and the like, following the rows as
      * they change, also after a reload; null finds nothing. Throws [QueryException] for an invalid regex, which
      * finds nothing either.
+     *
+     * A search with more text typed after the previous one ([TextSearch.narrows]) only looks among the records
+     * that one found, and keeps showing them meanwhile; if the previous one is still running, it waits for that.
      */
     fun search(search: TextSearch?) {
         try {
+            val previous = searchSpec
+            if (search != null && previous != null) {
+                val running = searchJob?.isActive == true
+                if (running && searchError == null && search == previous) {
+                    queuedSearch = null
+                    return
+                }
+                if (search.narrows(previous)) {
+                    if (running && searchError == null) {
+                        queuedSearch = search
+                        return
+                    }
+                    if (!running && foundSpec == previous && searchError == null) {
+                        searchSpec = search
+                        searchCondition = search.condition()
+                        searchShown(anew = true, narrow = true)
+                        return
+                    }
+                }
+            }
+            searchSpec = search
             searchCondition = search?.condition()
             searchShown(anew = true)
         } catch (e: Exception) {
             if (e !is QueryException && e !is IllegalArgumentException) throw e
+            searchSpec = null
             searchCondition = null
             searchShown(anew = true)
             throw e as? QueryException ?: QueryException(e.message ?: "Invalid search")
@@ -730,16 +769,24 @@ class LogSession internal constructor(
     /**
      * Finds the shown rows that [searchCondition] matches, ANDed with [shownFilter]: [anew] all of them, cancelling
      * a running search, or only those added or changed since the found records. Like [catchUpFilter], a catch-up
-     * never cancels a running search: whichever finishes calls this again, so nothing appended is missed.
+     * never cancels a running search: whichever finishes calls this again, so nothing appended is missed. With
+     * [narrow], the found records are those of a previous search that [searchCondition] only narrows: it looks
+     * among them, and they stay shown until it is done.
      */
-    private fun searchShown(anew: Boolean) {
+    private fun searchShown(anew: Boolean, narrow: Boolean = false) {
         if (anew) {
             searchJob?.cancel()
             searchJob = null
             searching = null
             searchError = null
-            foundHistogram = null
-            foundTimes = null
+            queuedSearch = null
+            searchNarrows = false
+            foundSpec = null
+            // A narrowing search keeps showing the times of the previous one until it counts its own.
+            if (!narrow) {
+                foundHistogram = null
+                foundTimes = null
+            }
         } else if (searchJob?.isActive == true) {
             return
         }
@@ -756,28 +803,41 @@ class LogSession internal constructor(
         // A failed search stops following the rows until the next one.
         if (!anew && (searchError != null || foundBytes >= shownBytes())) return
         val from = if (anew) 0 else engine.changedFrom(foundRecords)
-        val evaluation = engine.prepare(shownFilter?.let { Filter.And(listOf(it, condition)) } ?: condition, from)
+        // The found records were computed for the rows shown now; the last record may have grown since.
+        val within = if (anew && narrow) shown.narrowing(engine.changedFrom(foundRecords)) else null
+        val evaluation = engine.prepare(
+            shownFilter?.let { Filter.And(listOf(it, condition)) } ?: condition,
+            from,
+            within,
+        )
+        val spec = searchSpec
         if (anew) {
-            foundRecords = 0
-            foundBytes = 0L
             searching = evaluation
             foundChunked = false
-            foundTimes = foundTimeCount(shown)
-            foundHistogram = foundTimes?.emptyHistogram()
-            shown.startFound(records?.recordCount ?: 0)
-            listener.foundChanged()
+            if (within == null) {
+                foundRecords = 0
+                foundBytes = 0L
+                foundTimes = foundTimeCount(shown)
+                foundHistogram = foundTimes?.emptyHistogram()
+                shown.startFound(records?.recordCount ?: 0)
+                listener.foundChanged()
+            } else {
+                searchNarrows = true
+                shown.markSearching()
+            }
         }
         searchJob = scope.launch {
             val result = try {
                 coroutineScope {
-                    // Only a search anew shows what it finds meanwhile; the chunks arrive on worker threads.
+                    // Only a search anew shows what it finds meanwhile, unless it narrows the records shown (they stay
+                    // until it is done); the chunks arrive on worker threads.
                     val times = foundTimes
                     val onChunk = ChunkListener { first, end, matches ->
                         // Counted here, on the chunk's own thread: the other threads may all be busy searching.
                         val counted = times?.countRecords(matches)
                         launch { foundChunk(shown, first, end, matches, counted) }
                     }
-                    evaluation.run(onChunk.takeIf { anew })
+                    evaluation.run(onChunk.takeIf { anew && within == null })
                 }
             } catch (e: Throwable) {
                 if (e is CancellationException || (e !is Exception && e !is OutOfMemoryError)) throw e
@@ -788,9 +848,21 @@ class LogSession internal constructor(
                 }
                 searching = null
                 searchJob = null
+                searchNarrows = false
                 if (anew) {
+                    foundRecords = 0
+                    foundBytes = 0L
                     shown.clearFound()
                     foundHistogram = null
+                }
+                // A search typed on meanwhile has nothing to narrow, so it starts from scratch.
+                val queued = queuedSearch
+                if (queued != null) {
+                    queuedSearch = null
+                    searchSpec = queued
+                    searchCondition = queued.condition()
+                    searchShown(anew = true)
+                    return@launch
                 }
                 listener.foundChanged()
                 return@launch
@@ -804,6 +876,17 @@ class LogSession internal constructor(
             foundBytes = minOf(result.indexedSize, shownBytes())
             searching = null
             searchJob = null
+            searchNarrows = false
+            if (anew) foundSpec = spec
+            // A search typed on meanwhile narrows this one's records, which stay unannounced as they are replaced.
+            val queued = queuedSearch
+            if (queued != null && foundSpec == searchSpec) {
+                queuedSearch = null
+                searchSpec = queued
+                searchCondition = queued.condition()
+                searchShown(anew = true, narrow = true)
+                return@launch
+            }
             listener.foundChanged()
             searchShown(anew = false)
         }
@@ -1013,6 +1096,9 @@ class LogSession internal constructor(
         searchJob = null
         searching = null
         searchError = null
+        queuedSearch = null
+        foundSpec = null
+        searchNarrows = false
         foundRecords = 0
         foundBytes = 0L
         foundHistogram = null
