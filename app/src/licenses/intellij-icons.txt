@@ -1,0 +1,9 @@
+IntelliJ Platform icons (com.jetbrains.intellij.platform:icons)
+
+Copyright JetBrains s.r.o. and contributors.
+Licensed under the Apache License, Version 2.0, the same licence as the IntelliJ Platform
+source they come from: https://github.com/JetBrains/intellij-community
+
+Only the new-UI icons (expui/**) are bundled. The text of the Apache License, Version 2.0 is in
+the META-INF/LICENSE files of the Apache-licensed libraries listed in third-party-licenses.html,
+and at https://www.apache.org/licenses/LICENSE-2.0

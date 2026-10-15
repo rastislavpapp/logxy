@@ -2,6 +2,7 @@ plugins {
     id("logxy.kotlin")
     application
     alias(libs.plugins.shadow)
+    alias(libs.plugins.license.report)
 }
 
 dependencies {
@@ -35,6 +36,20 @@ tasks.jar {
     }
 }
 
+// The licences of everything that ships in the jar, for the notices the libraries' licences require us to pass on.
+licenseReport {
+    configurations = arrayOf("runtimeClasspath")
+    renderers = arrayOf(com.github.jk1.license.render.InventoryHtmlReportRenderer("third-party-licenses.html"))
+    filters = arrayOf(com.github.jk1.license.filter.LicenseBundleNormalizer())
+}
+
+// The report plus the licence of the icons, whose POM names none, so the report lists them as Unknown.
+val thirdPartyLicenses = tasks.register<Sync>("thirdPartyLicenses") {
+    from(tasks.named("generateLicenseReport"))
+    from("src/licenses")
+    into(layout.buildDirectory.dir("third-party-licenses"))
+}
+
 // Only the new-UI icons are used; the icons jar holds all of IntelliJ's.
 val intellijIcons = configurations.detachedConfiguration(dependencies.create(libs.intellij.icons.get()))
 
@@ -46,6 +61,7 @@ tasks.shadowJar {
     // A local, so the lambda does not capture the build script, which the configuration cache rejects.
     val archives = objects.newInstance<Services>().archives
     from(intellijIcons.elements.map { jars -> jars.map { archives.zipTree(it) } }) { include("expui/**") }
+    from(thirdPartyLicenses) { into("META-INF/third-party-licenses") }
     exclude("META-INF/*.SF", "META-INF/*.DSA", "META-INF/*.RSA", "module-info.class", "META-INF/versions/*/module-info.class")
     // Duplicates keep the first copy, except files the transformers merge.
     mergeServiceFiles()
@@ -100,6 +116,7 @@ val jpackage = tasks.register<Exec>("jpackage") {
 
 fun AbstractArchiveTask.nativeArchive(extension: String) {
     from(jpackage)
+    from(thirdPartyLicenses) { into("third-party-licenses") }
     archiveFileName = "logxy-$version-$platform.$extension"
     destinationDirectory = layout.buildDirectory.dir("dist")
 }
