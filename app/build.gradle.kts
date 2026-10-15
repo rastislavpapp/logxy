@@ -29,6 +29,11 @@ application {
     applicationDefaultJvmArgs = listOf(nativeAccess)
 }
 
+// As a resource, so it reaches the fat jar ahead of the libraries' META-INF/LICENSE files: the first copy wins there.
+tasks.processResources {
+    from(rootProject.file("LICENSE")) { into("META-INF") }
+}
+
 tasks.jar {
     manifest {
         attributes("Implementation-Title" to "logxy", "Implementation-Version" to version)
@@ -100,6 +105,7 @@ val jpackage = tasks.register<Exec>("jpackage") {
 
 fun AbstractArchiveTask.nativeArchive(extension: String) {
     from(jpackage)
+    from(rootProject.file("LICENSE")) { into("logxy") }
     archiveFileName = "logxy-$version-$platform.$extension"
     destinationDirectory = layout.buildDirectory.dir("dist")
 }
