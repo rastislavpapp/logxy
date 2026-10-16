@@ -1,12 +1,9 @@
 package io.github.rastislavpapp.logxy.app
 
 import java.awt.Taskbar
-import java.lang.invoke.MethodHandles
 import javax.swing.JDialog
 import javax.swing.JFrame
 import javax.swing.SwingUtilities
-
-internal val MAIN_CLASS: String = MethodHandles.lookup().lookupClass().name
 
 fun main(args: Array<String>) {
     Logging.init()

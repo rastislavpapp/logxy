@@ -1,6 +1,7 @@
 package io.github.rastislavpapp.logxy.app
 
 import io.github.rastislavpapp.logxy.core.config.Settings
+import io.github.rastislavpapp.logxy.core.config.VmOptions
 import io.github.rastislavpapp.logxy.core.formatByteSize
 import net.miginfocom.swing.MigLayout
 import javax.swing.ButtonGroup
@@ -9,38 +10,53 @@ import javax.swing.JRadioButton
 import javax.swing.JSpinner
 import javax.swing.SpinnerNumberModel
 import javax.swing.UIManager
+import kotlin.math.roundToInt
 
-/** The most memory logxy may use; it applies only to a newly started JVM. */
+/**
+ * The most memory logxy may use, kept in the launcher's [VmOptions] rather than the [Settings]; it applies only
+ * to a newly started JVM. Without the packaged launcher there is nothing to keep it in, so the page only tells.
+ */
 class MemoryPage : PreferencesPage("Memory", Icons.memory) {
 
-    // The packaged launcher raises the JVM default; see the jpackage task.
+    private val vmOptions = Restart.vmOptions
+
+    // The packaged launcher's defaults raise the JVM's; see the jpackage task.
     private val default = JRadioButton(
-        if (System.getProperty("jpackage.app-path") != null) {
+        if (vmOptions != null) {
             "Default (half of this computer's memory)"
         } else {
             "Java default (a quarter of this computer's memory)"
         },
     )
     private val custom = JRadioButton("Up to")
-    private val gigabytes = JSpinner(SpinnerNumberModel(8, 1, 1024, 1))
+    private val gigabytes = JSpinner(SpinnerNumberModel(8, 1, MAX_GIGABYTES, 1))
 
     init {
-        val saved = AppSettings.current.maxMemory
-        if (saved == null) {
+        val limit = vmOptions?.let { VmOptions.memoryLimit(it.current()) }
+        if (limit == null) {
             default.isSelected = true
         } else {
             custom.isSelected = true
-            gigabytes.value = gigabytesOf(saved)
+            val rounded = (limit.toDouble() / (1L shl 30)).roundToInt()
+            gigabytes.value = rounded.coerceIn(1, MAX_GIGABYTES)
         }
         ButtonGroup().apply {
             add(default)
             add(custom)
         }
-        gigabytes.isEnabled = custom.isSelected
+        default.isEnabled = vmOptions != null
+        custom.isEnabled = vmOptions != null
+        gigabytes.isEnabled = custom.isSelected && vmOptions != null
         custom.addChangeListener { gigabytes.isEnabled = custom.isSelected }
 
-        val hint = "logxy can use up to ${formatByteSize(Runtime.getRuntime().maxMemory())} now. " +
-            "Large logs, and many open at once, need more. A new limit applies after a restart."
+        val now = "logxy can use up to ${formatByteSize(Runtime.getRuntime().maxMemory())} now."
+        val hint = when {
+            vmOptions == null -> "$now Started without its launcher, logxy takes the limit from Java's -Xmx option."
+            !vmOptions.isInstalled() ->
+                "$now It cannot write ${vmOptions.installed}, so a limit set here does not apply. " +
+                    "Move logxy to a folder you can write to."
+            else -> "$now Large logs, and many open at once, need more. A new limit applies after a restart."
+        }
         layout = MigLayout("insets 0", "[]", "[]para[][]")
         add(JLabel(hint).apply { foreground = UIManager.getColor("Label.disabledForeground") }, "wrap")
         add(default, "wrap")
@@ -49,12 +65,16 @@ class MemoryPage : PreferencesPage("Memory", Icons.memory) {
         add(JLabel("GB"))
     }
 
-    override fun applyTo(settings: Settings) =
-        settings.copy(maxMemory = if (custom.isSelected) "${gigabytes.value}g" else null)
+    override fun applyTo(settings: Settings) = settings
 
-    /** Whole gigabytes for a saved limit such as `8g` or `6144m`, at least 1. */
-    private fun gigabytesOf(limit: String): Int {
-        val amount = limit.dropLast(1).toInt()
-        return if (limit.endsWith("g")) amount else maxOf(1, (amount + 512) / 1024)
+    /** The launcher's options with the chosen limit; null without the packaged launcher. */
+    fun options(): List<String>? {
+        val options = vmOptions ?: return null
+        val limit = if (custom.isSelected) gigabytes.value as Int else null
+        return VmOptions.withMemoryLimit(options.current(), limit, options.defaults)
+    }
+
+    private companion object {
+        const val MAX_GIGABYTES = 1024
     }
 }

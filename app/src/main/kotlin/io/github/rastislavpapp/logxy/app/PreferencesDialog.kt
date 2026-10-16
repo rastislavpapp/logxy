@@ -1,11 +1,13 @@
 package io.github.rastislavpapp.logxy.app
 
 import io.github.rastislavpapp.logxy.core.config.Settings
+import io.github.rastislavpapp.logxy.core.config.VmOptions
 import io.github.rastislavpapp.logxy.core.parse.Parser
 import net.miginfocom.swing.MigLayout
 import java.awt.CardLayout
 import java.awt.Component
 import java.awt.Window
+import java.io.IOException
 import java.nio.file.Path
 import javax.swing.BorderFactory
 import javax.swing.DefaultListCellRenderer
@@ -50,7 +52,8 @@ class PreferencesDialog(
         private set
 
     private val parsers = ParsersPage(previewFile, select, adopt)
-    private val pages = listOf(parsers, LevelsPage(), MemoryPage(), OpeningPage())
+    private val memory = MemoryPage()
+    private val pages = listOf(parsers, LevelsPage(), memory, OpeningPage())
     private val cards = CardLayout()
     private val content = JPanel(cards)
     private val heading = JLabel().apply { putClientProperty("FlatLaf.styleClass", "h3") }
@@ -121,19 +124,37 @@ class PreferencesDialog(
             JOptionPane.showMessageDialog(this, problem, "Cannot Save", JOptionPane.ERROR_MESSAGE)
             return false
         }
-        val before = AppSettings.current
-        val settings = pages.fold(before) { settings, page -> page.applyTo(settings) }
+        val settings = pages.fold(AppSettings.current) { settings, page -> page.applyTo(settings) }
         if (!AppSettings.updateOrShowError(this, settings)) return false
-        if (settings.maxMemory != before.maxMemory) {
-            val options = arrayOf("Restart Now", "Later")
-            restartAfterClose = JOptionPane.showOptionDialog(
-                this,
-                "The new memory limit applies when logxy starts again. Restart now? " +
-                    "Open tabs are reopened with their parsers and filters.",
-                "Memory Limit",
-                JOptionPane.DEFAULT_OPTION, JOptionPane.QUESTION_MESSAGE, null, options, options[0],
-            ) == 0
+        return saveMemoryLimit()
+    }
+
+    /** Saves the memory page's limit if it changed, offering a restart to apply it; false if it cannot be saved. */
+    private fun saveMemoryLimit(): Boolean {
+        val vmOptions = Restart.vmOptions ?: return true
+        val options = memory.options()
+        if (options == null || options == vmOptions.current()) return true
+        val installed = try {
+            vmOptions.save(options)
+        } catch (e: IOException) {
+            val message = "Cannot write ${vmOptions.user}:\n${e.message}"
+            JOptionPane.showMessageDialog(this, message, "Cannot Save", JOptionPane.ERROR_MESSAGE)
+            return false
         }
+        if (installed == VmOptions.Install.FAILED) {
+            val message = "logxy cannot write ${vmOptions.installed}, so the new memory limit does not apply. " +
+                "Move logxy to a folder you can write to."
+            JOptionPane.showMessageDialog(this, message, "Memory Limit", JOptionPane.WARNING_MESSAGE)
+            return true
+        }
+        val choices = arrayOf("Restart Now", "Later")
+        restartAfterClose = JOptionPane.showOptionDialog(
+            this,
+            "The new memory limit applies when logxy starts again. Restart now? " +
+                "Open tabs are reopened with their parsers and filters.",
+            "Memory Limit",
+            JOptionPane.DEFAULT_OPTION, JOptionPane.QUESTION_MESSAGE, null, choices, choices[0],
+        ) == 0
         return true
     }
 
