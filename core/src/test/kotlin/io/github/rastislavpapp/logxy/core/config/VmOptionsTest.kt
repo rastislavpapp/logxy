@@ -29,7 +29,7 @@ class VmOptionsTest {
         val options = fresh()
         assertEquals(VmOptions.Install.UNCHANGED, options.install())
         assertEquals(shipped, Files.readString(options.user))
-        assertTrue(options.isInstalled())
+        assertFalse(options.installFailed)
     }
 
     @Test
@@ -37,7 +37,6 @@ class VmOptionsTest {
         val options = fresh()
         Files.createDirectories(options.user.parent)
         Files.writeString(options.user, "-Xmx8g\n")
-        assertFalse(options.isInstalled())
         assertEquals(VmOptions.Install.CHANGED, options.install())
         assertEquals("-Xmx8g\n", Files.readString(options.installed))
         assertEquals(VmOptions.Install.UNCHANGED, options.install())
@@ -48,30 +47,38 @@ class VmOptionsTest {
         val options = fresh()
         assertEquals(VmOptions.Install.CHANGED, options.save(listOf("-Xmx4g")))
         assertEquals(listOf("-Xmx4g"), options.current())
-        assertTrue(options.isInstalled())
+        assertEquals("-Xmx4g\n", Files.readString(options.installed))
+        assertFalse(options.installFailed)
 
         // A file where the app directory should be stands in for one the user cannot write to.
         Files.writeString(dir.resolve("read-only"), "")
         val stuck = VmOptions(dir.resolve("read-only/app/${VmOptions.FILE}"), options.user)
         assertEquals(VmOptions.Install.FAILED, stuck.save(listOf("-Xmx2g")))
         assertEquals(listOf("-Xmx2g"), stuck.current())
-        assertFalse(stuck.isInstalled())
+        assertTrue(stuck.installFailed)
     }
 
     @Test
-    fun `memory limit is read in any unit the JVM takes`() {
-        assertEquals(8L shl 30, VmOptions.memoryLimit(listOf("-Xmx8g")))
-        assertEquals(6144L shl 20, VmOptions.memoryLimit(listOf("-Xmx2g", "-Xmx6144M")))
-        assertEquals(1_000_000L, VmOptions.memoryLimit(listOf("-Xmx1000000")))
+    fun `an edit to the user's file does not count as a failed install`() {
+        val options = fresh()
+        options.install()
+        Files.writeString(options.user, "-Xmx8g\n")
+        assertFalse(options.installFailed)
+    }
+
+    @Test
+    fun `memory limit is read as written`() {
+        assertEquals("8g", VmOptions.memoryLimit(listOf("-Xmx8g")))
+        assertEquals("6144M", VmOptions.memoryLimit(listOf("-Xmx2g", "-Xmx6144M")))
+        assertEquals("8gb", VmOptions.memoryLimit(listOf("-Xmx8gb")))
         assertNull(VmOptions.memoryLimit(listOf("-XX:MaxRAMPercentage=50")))
-        assertNull(VmOptions.memoryLimit(listOf("-Xmx8gb")))
     }
 
     @Test
     fun `setting the memory limit keeps the other options`() {
         val defaults = listOf("-XX:MaxRAMPercentage=50", "-Dshipped=1")
-        val limited = VmOptions.withMemoryLimit(defaults + "-Dmine=1", 8, defaults)
-        assertEquals(listOf("-Dshipped=1", "-Dmine=1", "-Xmx8g"), limited)
+        val limited = VmOptions.withMemoryLimit(defaults + "-Dmine=1", "1024m", defaults)
+        assertEquals(listOf("-Dshipped=1", "-Dmine=1", "-Xmx1024m"), limited)
         assertEquals(
             listOf("-Dshipped=1", "-Dmine=1", "-XX:MaxRAMPercentage=50"),
             VmOptions.withMemoryLimit(limited, null, defaults),

@@ -22,8 +22,12 @@ class VmOptions(val installed: Path, val user: Path) {
     /** The user's options; [defaults] until some are saved. */
     fun current(): List<String> = read(user) ?: defaults
 
-    /** Whether the launcher reads the user's options, so a restart applies them. */
-    fun isInstalled(): Boolean = current() == read(installed)
+    /**
+     * Whether the last [install] could not write [installed], so options saved now do not reach the launcher.
+     * False until an install has tried to write it; an edit to either file since then does not change it.
+     */
+    var installFailed = false
+        private set
 
     /** Saves [options] as the user's, then [install]s them; throws if the user's file cannot be written. */
     fun save(options: List<String>): Install {
@@ -43,12 +47,13 @@ class VmOptions(val installed: Path, val user: Path) {
             write(user, options)
         }
         if (options == read(installed)) return Install.UNCHANGED
-        return try {
+        installFailed = try {
             write(installed, options)
-            Install.CHANGED
+            false
         } catch (_: IOException) {
-            Install.FAILED
+            true
         }
+        return if (installFailed) Install.FAILED else Install.CHANGED
     }
 
     companion object {
@@ -60,25 +65,17 @@ class VmOptions(val installed: Path, val user: Path) {
 
         private const val XMX = "-Xmx"
 
-        /** The `-Xmx` heap limit in [options], in bytes; null if there is none or it cannot be read. */
-        fun memoryLimit(options: List<String>): Long? {
-            val limit = options.lastOrNull { it.startsWith(XMX) } ?: return null
-            val match = Regex("""(\d+)([kmgt]?)""").matchEntire(limit.removePrefix(XMX).lowercase()) ?: return null
-            val (amount, unit) = match.destructured
-            val shift = when (unit) {
-                "k" -> 10
-                "m" -> 20
-                "g" -> 30
-                "t" -> 40
-                else -> 0
-            }
-            return amount.toLong() shl shift
-        }
+        /** What follows `-Xmx` in the last such option in [options], as written (`8g`, `8192m`); null if none. */
+        fun memoryLimit(options: List<String>): String? =
+            options.lastOrNull { it.startsWith(XMX) }?.removePrefix(XMX)
 
-        /** [options] with the heap limit set to [gigabytes], or for null to the one in [defaults]. */
-        fun withMemoryLimit(options: List<String>, gigabytes: Int?, defaults: List<String>): List<String> {
-            val limit = if (gigabytes == null) defaults.filter(::limitsHeap) else listOf("$XMX${gigabytes}g")
-            return options.filterNot(::limitsHeap) + limit
+        /**
+         * [options] with `-Xmx`[limit], unchecked: a value the JVM rejects stops it from starting. For null, the
+         * heap limit from [defaults] instead.
+         */
+        fun withMemoryLimit(options: List<String>, limit: String?, defaults: List<String>): List<String> {
+            val heap = if (limit == null) defaults.filter(::limitsHeap) else listOf("$XMX$limit")
+            return options.filterNot(::limitsHeap) + heap
         }
 
         private fun limitsHeap(option: String) = option.startsWith(XMX) || option.startsWith("-XX:MaxRAMPercentage=")
