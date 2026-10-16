@@ -95,6 +95,22 @@ class ParserInferenceTest {
     }
 
     @Test
+    fun `pipe separated cells of several words or none`() {
+        val text = """
+            2026-09-25T07:50:22,208 | INFO  | features-3-thread-1 | app | app-ws - undefined | AppActivator           |   | Start bundle: app - app-ws (1.2.3)
+            2026-09-25T07:50:23,001 | WARN  | hz.root.HealthMonitor | app | app-ws - 1.0 | Monitor                | abc | Slow | operation
+            2026-09-25T07:50:24,500 | ERROR | features-3-thread-2 | app | other - undefined | AppActivator           |   | Failed to start
+        """
+        val line = read(text)[0]
+        assertEquals("INFO", line["Level"])
+        assertEquals("features-3-thread-1", line["Thread"])
+        assertEquals("Start bundle: app - app-ws (1.2.3)", line["Message"])
+        assertEquals("app-ws - undefined", line["Field 2"])
+        assertEquals("", line["Field 4"])
+        assertEquals("Slow | operation", read(text)[1]["Message"])
+    }
+
+    @Test
     fun `python logging layout`() {
         val text = """
             2026-10-01 08:00:00,123 INFO myapp.server: Listening on 8080
