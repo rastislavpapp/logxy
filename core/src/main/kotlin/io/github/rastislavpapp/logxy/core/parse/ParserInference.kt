@@ -16,6 +16,9 @@ internal object ParserInference {
     /** Tokens of a line looked at for its columns; the message comes before this many. */
     private const val MAX_TOKENS = 32
 
+    /** Separators `|` after the timestamp that make a line delimited: before and after the level, at least. */
+    private const val MIN_SEPARATORS = 2
+
     /**
      * A parser guessed from the [sample] lines: JSON lines with the keys they use, else a pattern layout; null if
      * neither fits.
@@ -127,7 +130,69 @@ internal object ParserInference {
     private fun inferText(lines: List<ByteArray>): Parser? {
         val stamp = findTimestamp(lines)
         val records = if (stamp == null) lines else lines.filter { stamp.end(it) >= 0 }
-        val tokens = records.map { line -> tokenize(line, stamp?.end(line) ?: 0) }
+        val separators = if (stamp == null) 0 else separatorCount(records, stamp)
+        if (stamp != null && separators >= MIN_SEPARATORS) {
+            val cells = records.map { tokenizeCells(it, stamp.end(it), separators) }
+            inferTokens(stamp, records, cells)?.let { return it }
+        }
+        return inferTokens(stamp, records, records.map { line -> tokenize(line, stamp?.end(line) ?: 0) })
+    }
+
+    /**
+     * How many `|` separate the columns of [records] after the timestamp: the most that nearly all have, when the
+     * timestamp is followed by one. Cells between them may hold any number of words, or none.
+     */
+    private fun separatorCount(records: List<ByteArray>, stamp: Stamp): Int {
+        val counts = records.map { line ->
+            var i = stamp.end(line)
+            while (i < line.size && (line[i] == SPACE || line[i] == TAB)) i++
+            if (i < line.size && line[i] == PIPE) line.count(i, PIPE) else 0
+        }.sortedDescending()
+        return counts[(records.size * AGREEMENT).toInt().coerceIn(1, records.size) - 1]
+    }
+
+    private fun ByteArray.count(from: Int, value: Byte): Int {
+        var n = 0
+        for (i in from..<size) if (this[i] == value) n++
+        return n
+    }
+
+    /**
+     * Tokens of a line split at its first [separators] `|`: each cell between them is one word, possibly empty,
+     * between spaces, so cells of any content keep the same shape. The message follows the last separator.
+     */
+    private fun tokenizeCells(line: ByteArray, from: Int, separators: Int): List<Token> {
+        val tokens = ArrayList<Token>()
+        var to = line.size
+        while (to > from && line[to - 1] == '\r'.code.toByte()) to--
+        fun skipSpaces(start: Int): Int {
+            var i = start
+            while (i < to && (line[i] == SPACE || line[i] == TAB)) i++
+            return i
+        }
+        var i = skipSpaces(from)
+        tokens += Token(Kind.SPACE, from, i, " ")
+        if (i >= to || line[i] != PIPE) return tokens
+        tokens += Token(Kind.SEPARATOR, i, i + 1, "|")
+        i++
+        for (n in 1..<separators) {
+            val contentFrom = skipSpaces(i)
+            tokens += Token(Kind.SPACE, i, contentFrom, " ")
+            var pipe = contentFrom
+            while (pipe < to && line[pipe] != PIPE) pipe++
+            var contentTo = pipe
+            while (contentTo > contentFrom && (line[contentTo - 1] == SPACE || line[contentTo - 1] == TAB)) contentTo--
+            tokens += Token(Kind.WORD, contentFrom, contentTo, "w")
+            tokens += Token(Kind.SPACE, contentTo, pipe, " ")
+            if (pipe >= to) return tokens
+            tokens += Token(Kind.SEPARATOR, pipe, pipe + 1, "|")
+            i = pipe + 1
+        }
+        tokens += Token(Kind.SPACE, i, skipSpaces(i), " ")
+        return tokens
+    }
+
+    private fun inferTokens(stamp: Stamp?, records: List<ByteArray>, tokens: List<List<Token>>): Parser? {
         val signatures = tokens.map { line -> line.map { it.signature } }
 
         // The longest run of tokens that nearly all lines share; the message varies, so it ends there or before.
