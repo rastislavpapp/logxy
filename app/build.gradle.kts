@@ -72,6 +72,8 @@ val jpackageInput = tasks.register<Sync>("jpackageInput") {
     from(tasks.shadowJar)
     from(vmOptions)
     from(vmOptions) { rename { "logxy.vmoptions" } }
+    // The JVM picks splash@150pct.gif and the like itself on a scaled screen; `tools splash` renders them.
+    from("src/packaging") { include("splash*.gif") }
     into(layout.buildDirectory.dir("jpackage-input"))
 }
 
@@ -99,6 +101,8 @@ val jpackage = tasks.register<Exec>("jpackage") {
         "--java-options", "-XX:VMOptionsFile=\$APPDIR/logxy.vmoptions",
         "--java-options", "-Dlogxy.vmoptions=\$APPDIR/logxy.vmoptions",
         "--java-options", nativeAccess,
+        // Drawn natively before the JVM loads any class, so something shows at once; it closes with the first window.
+        "--java-options", "-splash:\$APPDIR/splash.gif",
         "--dest", image.get().asFile.path,
     )
     // jpackage refuses to overwrite an existing image.

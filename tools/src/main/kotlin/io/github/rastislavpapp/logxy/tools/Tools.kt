@@ -31,7 +31,9 @@ private const val USAGE = """Usage:
                                         append lines like a running application (N per second, default 20),
                                         optionally rotating file -> file.1 -> ... at SIZE; Ctrl+C stops
   icons                                 render the logo SVG into the packaging PNG and ICO;
-                                        run from the project root after changing the logo"""
+                                        run from the project root after changing the logo
+  splash                                render the launcher's animated splash screen GIFs into packaging;
+                                        run from the project root after changing SplashGif.kt"""
 
 fun main(args: Array<String>) {
     val flags = setOf("--mdc", "--json", "--rabbitmq", "--logfmt", "--access")
@@ -79,6 +81,8 @@ fun main(args: Array<String>) {
             )
         "icons" if positional.size == 1 ->
             generateIcons(Path.of("app/src/main/resources/logxy.svg"), Path.of("app/src/packaging"))
+        "splash" if positional.size == 1 ->
+            generateSplash(Path.of("app/src/main/resources/logxy.svg"), Path.of("app/src/packaging"))
         else -> {
             System.err.println(USAGE)
             exitProcess(2)
