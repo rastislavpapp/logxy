@@ -57,9 +57,27 @@ class CompiledPatternTest {
 
     @Test
     fun `invalid patterns are reported`() {
-        assertFailsWith<IllegalArgumentException> { CompiledPattern("%d %foo %m") }
+        assertFailsWith<IllegalArgumentException> { CompiledPattern("%d % %m") }
         assertFailsWith<IllegalArgumentException> { CompiledPattern("%t%c - %m") }
         assertFailsWith<IllegalArgumentException> { CompiledPattern("%d{HH:mm %m") }
+    }
+
+    @Test
+    fun `function and unknown converters are opaque columns named after the first MDC key or their text`() {
+        val pattern = "%d{ISO8601} | %-5p | %-16t | %X{app.name} | " +
+            "%equals{%X{module.name}}{}{%X{bundle.name}} - %equals{%X{module.version}}{}{%X{bundle.version}} | " +
+            "%-32c{1} | %X{camel.breadcrumbId} | %foo{x} | %replace{%c}{a}{b} | %m%n"
+        val compiled = CompiledPattern(pattern)
+        assertEquals(
+            listOf(
+                "Timestamp", "Level", "Thread", "app.name", "module.name", "module.version", "Logger",
+                "camel.breadcrumbId", "%foo{x}", "%replace{%c}{a}{b}", "Message",
+            ),
+            compiled.schema.fields.map { it.name },
+        )
+        val line = "2026-09-25T07:50:22,208 | INFO  | features-3-thread-1 | app | app-ws - undefined | " +
+            "AppActivator                     |   | y | z | Start bundle: app - app-ws (1.2.3)"
+        assertTrue(matches(pattern, line))
     }
 
     @Test

@@ -72,6 +72,7 @@ class CompiledPattern(val pattern: String, private val zone: ZoneId = ZoneId.sys
                 i += 2
                 continue
             }
+            val start = i
             i++
             if (pattern.getOrNull(i) == '-') i++
             var minWidth = 0
@@ -105,14 +106,15 @@ class CompiledPattern(val pattern: String, private val zone: ZoneId = ZoneId.sys
                         tokens += Literal(literal.toString().toByteArray())
                         literal.clear()
                     }
-                    addField(word, options, minWidth)
+                    addField(word, options, minWidth, pattern.substring(start, i))
                 }
             }
         }
         return true
     }
 
-    private fun addField(word: String, options: List<String>, minWidth: Int) {
+    /** [source] is the converter as written, for naming one that is not known. */
+    private fun addField(word: String, options: List<String>, minWidth: Int, source: String) {
         val previous = tokens.lastOrNull()
         require(previous !is FieldToken || previous.kind == Kind.TIMESTAMP) {
             "%$word directly follows another field; the pattern needs text between them"
@@ -141,7 +143,12 @@ class CompiledPattern(val pattern: String, private val zone: ZoneId = ZoneId.sys
             "r", "relative" -> Triple("Relative", Kind.SPAN, null)
             "sn", "sequenceNumber" -> Triple("Sequence", Kind.SPAN, null)
             "u", "uuid" -> Triple("UUID", Kind.SPAN, null)
-            else -> throw IllegalArgumentException("Unsupported conversion %$word")
+            // Functions such as `%equals{%X{a}}{}{%X{b}}` and converters we do not know: all that matters is
+            // where the text they print starts and ends, so it is one opaque column.
+            else -> {
+                require(word.isNotEmpty()) { "A '%' without a conversion" }
+                Triple(FIRST_MDC_KEY.find(source)?.groupValues?.get(1) ?: source, Kind.SPAN, null)
+            }
         }
         val index = fields.size
         if (word in MDC_WORDS && options.firstOrNull().let { it.isNullOrEmpty() || ',' in it }) mdcMaps += index
@@ -280,6 +287,9 @@ class CompiledPattern(val pattern: String, private val zone: ZoneId = ZoneId.sys
         const val MDC = "MDC"
         val MDC_WORDS = setOf("X", "mdc", "MDC")
         const val OPEN_BRACE = '{'.code.toByte()
+
+        /** The first single-key MDC lookup inside a function converter, which names its column. */
+        val FIRST_MDC_KEY = Regex("%(?:X|mdc|MDC)\\{([^},]+)}")
 
         /** Converters that only decorate their content, e.g. with ANSI colors. */
         val WRAPPERS = setOf(
