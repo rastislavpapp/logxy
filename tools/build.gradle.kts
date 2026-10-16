@@ -8,6 +8,9 @@ plugins {
 dependencies {
     implementation(project(":core"))
     implementation(libs.jsvg)
+    // The app's fonts, for the splash screen.
+    implementation(libs.flatlaf.fonts.inter)
+    implementation(libs.flatlaf.fonts.jetbrains.mono)
     implementation(libs.jmh.core)
     kapt(libs.jmh.generator.annprocess)
 }
