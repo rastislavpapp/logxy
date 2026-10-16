@@ -19,15 +19,14 @@ enum class OpenMode(val key: String) {
 }
 
 /**
- * The user's saved parsers, level names, filters, the memory limit (e.g. `8g`, null for the JVM
- * default), how to open files without asking ([openMode], null to ask) and whether opened folders include
- * their subfolders, and the names of the built-in parsers the user deleted.
+ * The user's saved parsers, level names, filters, how to open files without asking ([openMode], null to ask)
+ * and whether opened folders include their subfolders, and the names of the built-in parsers the user deleted.
+ * The memory limit is not here but in [VmOptions], as the launcher reads it.
  */
 data class Settings(
     val parsers: List<Parser> = emptyList(),
     val levels: LevelMapping = LevelMapping.DEFAULT,
     val filters: List<SavedFilter> = emptyList(),
-    val maxMemory: String? = null,
     val openMode: OpenMode? = null,
     val includeSubfolders: Boolean = true,
     val deletedBuiltIns: Set<String> = emptySet(),
@@ -81,7 +80,6 @@ data class Settings(
          * filter.1.name=Slow DB
          * filter.1.level=WARN
          * filter.1.query=logger == "com.example.db*"
-         * max-memory=8g
          * open.mode=merge
          * open.subfolders=false
          * ```
@@ -110,7 +108,6 @@ data class Settings(
                 val level = Level.entries.firstOrNull { it.name == levelName }
                 SavedFilter(name, level, properties.getProperty("filter.$n.query").orEmpty())
             }
-            val maxMemory = properties.getProperty("max-memory")?.let(::parseMemory)
             // Without the marker, level entries only add to the built-in names (as first released).
             val openModeKey = properties.getProperty("open.mode")
             val openMode = OpenMode.entries.firstOrNull { it.key == openModeKey }
@@ -120,7 +117,7 @@ data class Settings(
                 .filter { it.isNotEmpty() }
                 .toSet()
             val levelMapping = LevelMapping(if (custom) levels else Level.BUILT_IN_NAMES + levels)
-            return Settings(parsers, levelMapping, filters, maxMemory, openMode, includeSubfolders, deletedBuiltIns)
+            return Settings(parsers, levelMapping, filters, openMode, includeSubfolders, deletedBuiltIns)
         }
 
         /** Writes [settings] to [path], replacing the file only once the new one is complete. */
@@ -135,7 +132,6 @@ data class Settings(
                 properties["filter.${i + 1}.level"] = filter.minimumLevel?.name.orEmpty()
                 properties["filter.${i + 1}.query"] = filter.query
             }
-            settings.maxMemory?.let { properties["max-memory"] = it }
             settings.openMode?.let { properties["open.mode"] = it.key }
             if (!settings.includeSubfolders) properties["open.subfolders"] = "false"
             if (settings.levels != LevelMapping.DEFAULT) {
@@ -162,17 +158,6 @@ data class Settings(
             properties["${prefix}type"] = parser.kind.type
             parser.properties().forEach { (key, value) -> properties[prefix + key] = value }
             properties["${prefix}name"] = parser.name
-        }
-
-        /**
-         * A memory size in megabytes (`m`) or gigabytes (`g`), lowercased, or null if it is malformed or under
-         * 256 MB. Strict, as the app passes it to a new JVM as `-Xmx`, which would not start with a bad value.
-         */
-        fun parseMemory(text: String): String? {
-            val match = Regex("""(\d{1,7})\s*([mg])b?""").matchEntire(text.trim().lowercase()) ?: return null
-            val (amount, unit) = match.destructured
-            val megabytes = amount.toLong() * if (unit == "g") 1024 else 1
-            return if (megabytes >= 256) "$amount$unit" else null
         }
 
         /** The N of all `prefix.N.name` keys, in order. */

@@ -62,9 +62,16 @@ tasks.shadowJar {
 // Native app image with a bundled runtime, archived for the OS it is built on (Windows or Linux).
 val platform = if (System.getProperty("os.name").startsWith("Windows")) "windows-x64" else "linux-x64"
 
+// Shipped twice: as the defaults, and as the file the launcher hands the JVM, which the app overwrites with the
+// user's options from the settings directory (see VmOptions). The defaults double the JVM's heap limit, so few
+// users need to set one in Preferences. The JVM rejects comments in the file, so they are here.
+val vmOptions = file("src/packaging/logxy.default.vmoptions")
+
 val jpackageInput = tasks.register<Sync>("jpackageInput") {
-    // jpackage bundles its whole input directory, so give it only the jar.
+    // jpackage bundles its whole input directory into the app directory, so give it only what belongs there.
     from(tasks.shadowJar)
+    from(vmOptions)
+    from(vmOptions) { rename { "logxy.vmoptions" } }
     into(layout.buildDirectory.dir("jpackage-input"))
 }
 
@@ -88,8 +95,9 @@ val jpackage = tasks.register<Exec>("jpackage") {
         "--main-jar", "logxy.jar",
         "--main-class", application.mainClass.get(),
         "--add-modules", "java.base,java.desktop,java.logging,java.prefs,jdk.unsupported",
-        // Twice the JVM default, so few users need a limit in Preferences, which costs a second JVM at every start.
-        "--java-options", "-XX:MaxRAMPercentage=50",
+        // The JVM does not start without the file; the property tells the app where it is.
+        "--java-options", "-XX:VMOptionsFile=\$APPDIR/logxy.vmoptions",
+        "--java-options", "-Dlogxy.vmoptions=\$APPDIR/logxy.vmoptions",
         "--java-options", nativeAccess,
         "--dest", image.get().asFile.path,
     )

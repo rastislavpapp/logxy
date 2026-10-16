@@ -1,6 +1,7 @@
 package io.github.rastislavpapp.logxy.core.config
 
 import java.io.IOException
+import java.io.Writer
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
@@ -18,11 +19,16 @@ object PropertiesFiles {
     /** Writes [properties] to [path] with sorted keys, replacing the file only once the new one is complete. */
     fun store(path: Path, properties: Properties, comment: String) {
         val sorted = SortedProperties().apply { putAll(properties) }
+        replace(path) { sorted.store(it, comment) }
+    }
+
+    /** Writes [path] with [write], replacing the file only once the new one is complete. */
+    internal fun replace(path: Path, write: (Writer) -> Unit) {
         val directory = path.toAbsolutePath().parent
         Files.createDirectories(directory)
         val temporary = Files.createTempFile(directory, "logxy", ".tmp")
         try {
-            Files.newBufferedWriter(temporary).use { sorted.store(it, comment) }
+            Files.newBufferedWriter(temporary).use(write)
             try {
                 Files.move(temporary, path, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
             } catch (_: IOException) {

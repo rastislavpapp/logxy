@@ -10,7 +10,6 @@ import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
-import kotlin.test.assertNull
 
 class SettingsTest {
 
@@ -31,7 +30,6 @@ class SettingsTest {
                 SavedFilter("Slow DB", Level.WARN, """logger == "com.example.db*" AND message =~ "\d+ ms""""),
                 SavedFilter("Everything", null, ""),
             ),
-            maxMemory = "8g",
             openMode = OpenMode.MERGE_WITH_CURRENT_IN_NEW,
             includeSubfolders = false,
             deletedBuiltIns = setOf("Spring Boot 3", "JSON lines"),
@@ -117,16 +115,6 @@ class SettingsTest {
         val file = dir.resolve("logxy.properties")
         Settings.save(file, Settings(levels = mapping))
         assertEquals(mapping, Settings.load(file).levels)
-    }
-
-    @Test
-    fun `memory limit is read strictly`() {
-        assertEquals("8g", Settings.parseMemory(" 8G "))
-        assertEquals("8g", Settings.parseMemory("8gb"))
-        assertEquals("6144m", Settings.parseMemory("6144m"))
-        assertNull(Settings.parseMemory("100m"))
-        assertNull(Settings.parseMemory("8"))
-        assertNull(Settings.parseMemory("-Xmx8g"))
     }
 
     @Test
