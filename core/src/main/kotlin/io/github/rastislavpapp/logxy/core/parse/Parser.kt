@@ -17,6 +17,11 @@ sealed interface Parser {
 
     val kind: Kind
 
+    /** Column aliases: original field name to display name, stored with the parser. */
+    val aliases: Map<String, String>
+
+    val builtIn: Boolean
+
     /** Compiled form, or null for [Raw]. Throws IllegalArgumentException for an invalid layout. */
     fun compile(): CompiledParser?
 
@@ -29,6 +34,8 @@ sealed interface Parser {
     /** The definition as settings properties, without the name and the kind. */
     fun properties(): Map<String, String> = emptyMap()
 
+    fun withAliases(aliases: Map<String, String>): Parser
+
     /**
      * A kind of parser: what its settings store as the type, and how to read one back.
      *
@@ -39,31 +46,42 @@ sealed interface Parser {
      */
     abstract class Kind(val type: String) {
         /** The parser named [name] whose other [properties] are given; null if they are incomplete. */
-        abstract fun read(name: String, properties: (String) -> String?): Parser?
+        abstract fun read(name: String, properties: (String) -> String?, aliases: Map<String, String>): Parser?
     }
 
     /** No parser: one record per line, the line its only field. */
     data object Raw : Parser {
         override val name = "Raw text"
         override val kind = object : Kind("raw") {
-            override fun read(name: String, properties: (String) -> String?) = Raw
+            override fun read(name: String, properties: (String) -> String?, aliases: Map<String, String>) = Raw
         }
+        override val aliases = emptyMap<String, String>()
+        override val builtIn = false
 
         override fun compile(): CompiledParser? = null
         override fun withName(name: String) = this
+        override fun withAliases(aliases: Map<String, String>) = this
+
     }
 
     /** A log4j / logback pattern layout, e.g. `%d [%t] %-5p %c - %m%n`; see [CompiledPattern]. */
-    data class Pattern(override val name: String, val pattern: String) : Parser {
+    data class Pattern(
+        override val name: String,
+        val pattern: String,
+        override val aliases: Map<String, String> = emptyMap(),
+        override val builtIn: Boolean = false
+    ) : Parser {
         override val kind get() = Companion
         override fun compile() = CompiledPattern(pattern)
         override fun withName(name: String) = copy(name = name)
-        override fun properties() = mapOf("layout" to pattern)
+        override fun properties() =
+            mapOf("layout" to pattern) + aliases.mapKeys { "alias.${it.key}" }
+        override fun withAliases(aliases: Map<String, String>): Parser = copy(aliases = aliases)
 
-        /** Stored as type `pattern`, with the layout under `layout`. */
+        /** Stored as type `pattern`, with the layout under `layout` and aliases under `alias.<fieldName>`. */
         companion object : Kind("pattern") {
-            override fun read(name: String, properties: (String) -> String?) =
-                properties("layout")?.let { Pattern(name, it) }
+            override fun read(name: String, properties: (String) -> String?, aliases: Map<String, String>) =
+                properties("layout")?.let { Pattern(name, it, aliases) }
         }
     }
 
@@ -71,33 +89,56 @@ sealed interface Parser {
      * A regex whose named groups are the fields, with [timestampPattern] for the timestamp group; see
      * [CompiledRegex].
      */
-    data class Regex(override val name: String, val regex: String, val timestampPattern: String) : Parser {
+    data class Regex(
+        override val name: String,
+        val regex: String,
+        val timestampPattern: String,
+        override val aliases: Map<String, String> = emptyMap(),
+        override val builtIn: Boolean = false
+    ) : Parser {
         override val kind get() = Companion
         override fun compile() = CompiledRegex(regex, timestampPattern)
         override fun withName(name: String) = copy(name = name)
-        override fun properties() = mapOf("layout" to regex, "timestamp" to timestampPattern)
+        override fun properties() =
+            mapOf("layout" to regex, "timestamp" to timestampPattern) + aliases.mapKeys { "alias.${it.key}" }
+        override fun withAliases(aliases: Map<String, String>): Parser = copy(aliases = aliases)
 
-        /** Stored as type `regex`, with the regex under `layout` and the timestamp pattern under `timestamp`. */
+        /**
+         * Stored as type `regex`, with the regex under `layout`, the timestamp under `timestamp`,
+         * and aliases under `alias.<fieldName>`.
+         */
         companion object : Kind("regex") {
             /** The timestamp pattern of a regex parser that does not name one. */
             const val DEFAULT_TIMESTAMP = "yyyy-MM-dd HH:mm:ss.SSS"
 
-            override fun read(name: String, properties: (String) -> String?) =
-                properties("layout")?.let { Regex(name, it, properties("timestamp") ?: DEFAULT_TIMESTAMP) }
+            override fun read(name: String, properties: (String) -> String?, aliases: Map<String, String>) =
+                properties("layout")?.let {
+                    Regex(name, it, properties("timestamp") ?: DEFAULT_TIMESTAMP, aliases)
+                }
         }
     }
 
     /** JSON lines, with [keys] naming the keys that fill the usual fields; see [CompiledJson]. */
-    data class Json(override val name: String, val keys: RoleKeys = RoleKeys()) : Parser {
+    data class Json(
+        override val name: String,
+        val keys: RoleKeys = RoleKeys(),
+        override val aliases: Map<String, String> = emptyMap(),
+        override val builtIn: Boolean = false
+    ) : Parser {
         override val kind get() = Companion
         override fun compile() = CompiledJson(keys)
         override fun withName(name: String) = copy(name = name)
-        override fun properties() = keys.properties("keys.")
+        override fun properties() =
+            keys.properties("keys.") + aliases.mapKeys { "alias.${it.key}" }
+        override fun withAliases(aliases: Map<String, String>): Parser = copy(aliases = aliases)
 
-        /** Stored as type `json`, with the keys of each role under `keys.<role>`; missing roles keep the defaults. */
+        /**
+         * Stored as type `json`, with the keys of each role under `keys.<role>`
+         * and aliases under `alias.<fieldName>`.
+         */
         companion object : Kind("json") {
-            override fun read(name: String, properties: (String) -> String?) =
-                Json(name, RoleKeys.read(properties, "keys.", RoleKeys()))
+            override fun read(name: String, properties: (String) -> String?, aliases: Map<String, String>) =
+                Json(name, RoleKeys.read(properties, "keys.", RoleKeys()), aliases)
         }
     }
 
@@ -105,31 +146,45 @@ sealed interface Parser {
      * logfmt lines (`key=value` pairs), with [keys] naming the keys that fill the usual fields; see
      * [CompiledLogfmt].
      */
-    data class Logfmt(override val name: String, val keys: RoleKeys = RoleKeys.LOGFMT) : Parser {
+    data class Logfmt(
+        override val name: String,
+        val keys: RoleKeys = RoleKeys.LOGFMT,
+        override val aliases: Map<String, String> = emptyMap(),
+        override val builtIn: Boolean = false
+    ) : Parser {
         override val kind get() = Companion
         override fun compile() = CompiledLogfmt(keys)
         override fun withName(name: String) = copy(name = name)
-        override fun properties() = keys.properties("keys.")
+        override fun properties() =
+            keys.properties("keys.") + aliases.mapKeys { "alias.${it.key}" }
+        override fun withAliases(aliases: Map<String, String>): Parser = copy(aliases = aliases)
 
         /**
-         * Stored as type `logfmt`, with the keys of each role under `keys.<role>`; missing roles keep the logfmt
-         * defaults.
+         * Stored as type `logfmt`, with the keys of each role under `keys.<role>`
+         * and aliases under `alias.<fieldName>`.
          */
         companion object : Kind("logfmt") {
-            override fun read(name: String, properties: (String) -> String?) =
-                Logfmt(name, RoleKeys.read(properties, "keys.", RoleKeys.LOGFMT))
+            override fun read(name: String, properties: (String) -> String?, aliases: Map<String, String>) =
+                Logfmt(name, RoleKeys.read(properties, "keys.", RoleKeys.LOGFMT), aliases)
         }
     }
 
     /** Web server access logs, common or combined layout; nothing to configure. See [CompiledAccessLog]. */
-    data class AccessLog(override val name: String) : Parser {
+    data class AccessLog(
+        override val name: String,
+        override val aliases: Map<String, String> = emptyMap(),
+        override val builtIn: Boolean = false
+    ) : Parser {
         override val kind get() = Companion
         override fun compile() = CompiledAccessLog()
         override fun withName(name: String) = copy(name = name)
+        override fun properties() = aliases.mapKeys { "alias.${it.key}" }
+        override fun withAliases(aliases: Map<String, String>): Parser = copy(aliases = aliases)
 
-        /** Stored as type `access-log`, with no other properties. */
+        /** Stored as type `access-log`, with aliases under `alias.<fieldName>`. */
         companion object : Kind("access-log") {
-            override fun read(name: String, properties: (String) -> String?) = AccessLog(name)
+            override fun read(name: String, properties: (String) -> String?, aliases: Map<String, String>) =
+                AccessLog(name, aliases)
         }
     }
 
@@ -139,13 +194,13 @@ sealed interface Parser {
 
         /** The most common layouts; others are guessed from the file. */
         val BUILT_IN: List<Parser> = listOf(
-            Pattern("date [thread] LEVEL logger - message", "%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %-5p %c - %m%n"),
-            Pattern("time [thread] LEVEL logger - message", "%d{HH:mm:ss.SSS} [%thread] %-5level %logger - %msg%n"),
-            Pattern("Spring Boot 3", "%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} %5p %pid --- [%t] %-40.40logger{39} : %m%n"),
-            Pattern("Python logging", "%d{yyyy-MM-dd HH:mm:ss,SSS} - %c - %p - %m%n"),
-            Logfmt("logfmt"),
-            AccessLog("Access log"),
-            Json("JSON lines"),
+            Pattern("date [thread] LEVEL logger - message", "%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %-5p %c - %m%n", builtIn = true),
+            Pattern("time [thread] LEVEL logger - message", "%d{HH:mm:ss.SSS} [%thread] %-5level %logger - %msg%n", builtIn = true),
+            Pattern("Spring Boot 3", "%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} %5p %pid --- [%t] %-40.40logger{39} : %m%n", builtIn = true),
+            Pattern("Python logging", "%d{yyyy-MM-dd HH:mm:ss,SSS} - %c - %p - %m%n", builtIn = true),
+            Logfmt("logfmt", builtIn = true),
+            AccessLog("Access log", builtIn = true),
+            Json("JSON lines", builtIn = true),
         )
 
         private class Scored(

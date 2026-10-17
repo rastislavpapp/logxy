@@ -15,7 +15,9 @@ import java.time.format.DateTimeFormatter
  * adds a quoted referer and user agent; anything after those is ignored. `-` means no value, except in the
  * request, which is shown as written. There is no level: the status says more, and is a field of its own.
  */
-class CompiledAccessLog(private val zone: ZoneId = ZoneId.systemDefault()) : CompiledParser() {
+class CompiledAccessLog(
+    private val zone: ZoneId = ZoneId.systemDefault(),
+) : CompiledParser() {
 
     override val schema = Schema(
         listOf(

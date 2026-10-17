@@ -41,6 +41,13 @@ class LogTableModel(val shown: ShownLog) : AbstractTableModel(), RowWindow {
             fireTableStructureChanged()
         }
 
+    /** Per-session column renames: original schema name to display name. */
+    var columnAliases: Map<String, String> = emptyMap()
+        set(value) {
+            field = value
+            fireTableStructureChanged()
+        }
+
     /** Field index of each column after the line number column. */
     private var columnFields: List<Int> = fieldsShown()
 
@@ -114,7 +121,8 @@ class LogTableModel(val shown: ShownLog) : AbstractTableModel(), RowWindow {
         columnFields[column]
     }
 
-    override fun getColumnName(column: Int) = fieldAt(column)?.name ?: "#"
+    override fun getColumnName(column: Int) =
+        fieldAt(column)?.let { columnAliases[it.name] ?: it.name } ?: "#"
 
     override fun getColumnClass(column: Int) =
         if (fieldAt(column) == null) Int::class.javaObjectType else String::class.java

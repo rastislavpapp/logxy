@@ -4,6 +4,7 @@ import io.github.rastislavpapp.logxy.core.archive.ArchiveOrigin
 import io.github.rastislavpapp.logxy.core.config.SavedFilter
 import io.github.rastislavpapp.logxy.core.formatByteSize
 import io.github.rastislavpapp.logxy.core.log.ColumnType
+import io.github.rastislavpapp.logxy.core.log.Field
 import io.github.rastislavpapp.logxy.core.log.Level
 import io.github.rastislavpapp.logxy.core.log.Role
 import io.github.rastislavpapp.logxy.core.parse.Parser
@@ -114,6 +115,10 @@ class LogTab(
     /** Short names of [paths], as the merge's source column shows them. */
     val sourceNames: List<String> get() = session.sourceNames
 
+    /** Per-session column renames: original schema name to display name. */
+    private val columnAliases = mutableMapOf<String, String>()
+    private val columnRenameDialog = ColumnRenameDialog(columnAliases)
+
     /**
      * Short name for the tab: the file name, or the merged files' names; files from archives go by the container's
      * name.
@@ -136,7 +141,7 @@ class LogTab(
     val description: String get() = paths.joinToString("\n") { (origin(it) ?: it).toString() }
     private val content = JPanel(BorderLayout())
     private val detail = LogDetailArea()
-    private val filterBar = FilterBar(::applyFilter)
+    private val filterBar = FilterBar(::applyFilter, columnAliases)
     private val findBar = FindBar(::searchFor) { forward -> find(forward) }
     private val patterns =
         PatternsPanel(scope, { session.patternCounts() }, { session.patternProgress }, filterBar::addRules)
@@ -293,7 +298,8 @@ class LogTab(
         val model = model ?: return
         val popup = JPopupMenu()
         val boxes = model.columnChoices.map { field ->
-            JCheckBoxMenuItem(field.name, field.name !in hiddenColumns).apply {
+            val displayName = columnAliases[field.name] ?: field.name
+            JCheckBoxMenuItem(displayName, field.name !in hiddenColumns).apply {
                 putClientProperty("CheckBoxMenuItem.doNotCloseOnMouseClick", true)
             }
         }
@@ -304,7 +310,12 @@ class LogTab(
             boxes.forEach { it.isEnabled = !single || !it.isSelected }
         }
         fun update() {
-            hideColumns(boxes.filter { !it.isSelected }.map { it.text }.toSet())
+            // Map display names back to original field names for hiding.
+            val originalNames = model.columnChoices.map { it.name }
+            val displayToOriginal = originalNames.associate { original ->
+                (columnAliases[original] ?: original) to original
+            }
+            hideColumns(boxes.filter { !it.isSelected }.map { displayToOriginal[it.text] ?: it.text }.toSet())
             enableBoxes()
         }
         boxes.forEach { box ->
@@ -322,12 +333,13 @@ class LogTab(
         popup.show(columnsButton, 0, columnsButton.height)
     }
 
-    /** The right-click menu of a column header: hide that column, or show all again. */
+    /** The right-click menu of a column header: hide that column, rename it, or show all again. */
     private fun showHeaderMenu(header: JComponent, column: Int, x: Int, y: Int) {
         val model = model ?: return
         val field = model.fieldAt(column) ?: return
+        val displayName = columnAliases[field.name] ?: field.name
         val popup = JPopupMenu()
-        popup.add(JMenuItem("Hide “${field.name}”").apply {
+        popup.add(JMenuItem("Hide “$displayName”").apply {
             isEnabled = model.columnChoices.count { it.name !in hiddenColumns } > 1
             addActionListener { hideColumns(hiddenColumns + field.name) }
         })
@@ -336,8 +348,21 @@ class LogTab(
             addActionListener { hideColumns(emptySet()) }
         })
         popup.addSeparator()
+        popup.add(JMenuItem("Rename for this session").apply {
+            addActionListener { renameColumn(header, field, persist = false) }
+        })
+
+        popup.add(JMenuItem("Rename in parser settings").apply {
+            if (session.parser.builtIn) {
+                isEnabled = false
+                toolTipText = CANNOT_RENAME_BUILT_IN_PARSERS
+            } else {
+                addActionListener { renameColumn(header, field, persist = true) }
+            }
+        })
+        popup.addSeparator()
         popup.add(JMenuItem("Copy Column").apply {
-            toolTipText = "The whole value of “${field.name}” of every shown row, one row per line"
+            toolTipText = "The whole value of “$displayName” of every shown row, one row per line"
             addActionListener {
                 val shown = model.shown
                 val column = shown.schema.fields.indexOf(field)
@@ -345,6 +370,22 @@ class LogTab(
             }
         })
         popup.show(header, x, y)
+    }
+
+    private fun renameColumn(header: JComponent, field: Field, persist: Boolean) {
+        columnRenameDialog.open(header, field) {
+            model?.columnAliases = columnAliases
+            model?.shown?.schema?.let { filterBar.setSchema(it) }
+            if (persist) {
+                val parser = session.parser
+                val settings = AppSettings.current.copy(
+                    parsers = AppSettings.current.parsers.map {
+                        if (it.name == parser.name) parser.withAliases(columnAliases) else it
+                    }
+                )
+                AppSettings.updateOrShowError(this, settings, true)
+            }
+        }
     }
 
     /** Copies the selected rows as their records are written in the file. */
@@ -558,10 +599,14 @@ class LogTab(
     }
 
     private fun showTable(shown: ShownLog) {
+        // Initialize column aliases from the parser; per-session renames will be merged on top.
+        columnAliases.clear()
+        columnAliases.putAll(session.parser.aliases)
         val model = LogTableModel(shown)
         // Columns hidden before stay hidden, unless that would hide them all (the file changed meanwhile).
         val leavesSome = model.columnChoices.any { it.name !in hiddenColumns }
         model.hiddenColumns = if (leavesSome) hiddenColumns else emptySet()
+        model.columnAliases = columnAliases
         val table = LogTable(model)
         columnsButton.isEnabled = true
         table.addMouseListener(object : MouseAdapter() {

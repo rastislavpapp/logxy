@@ -147,7 +147,11 @@ data class Settings(
             if (name.isEmpty()) return null
             val type = properties.getProperty("${prefix}type", "pattern")
             val kind = Parser.KINDS.firstOrNull { it.type == type } ?: return null
-            return kind.read(name) { properties.getProperty(prefix + it) }
+            val aliasPrefix = prefix + "alias."
+            val aliases = properties.stringPropertyNames()
+                .filter { it.startsWith(aliasPrefix) }
+                .associate { it.removePrefix(aliasPrefix) to properties.getProperty(it)!! }
+            return kind.read(name, { properties.getProperty(prefix + it) }, aliases)
         }
 
         /**

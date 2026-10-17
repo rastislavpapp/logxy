@@ -48,6 +48,12 @@ class Field internal constructor(
         Field(name, type, role, toRecordEnd, hidden, map, mapKey, json, optional)
 }
 
+class AliasedField(val field: Field, val aliases: Map<String, String>) {
+
+    fun getAlias() = aliases[field.name] ?: field.name
+
+}
+
 /** A key of a map field; see [Field.mapKey]. */
 class MapKey internal constructor(internal val field: Int, val key: String) {
     internal val bytes = key.toByteArray()

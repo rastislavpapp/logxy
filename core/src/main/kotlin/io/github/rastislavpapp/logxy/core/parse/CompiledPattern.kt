@@ -14,7 +14,10 @@ import java.time.ZoneId
  * matched byte by byte (no regex). A field's value ends where the next literal starts; the message
  * runs to the end of the record, including continuation lines such as stack traces.
  */
-class CompiledPattern(val pattern: String, private val zone: ZoneId = ZoneId.systemDefault()) : CompiledParser() {
+class CompiledPattern(
+    val pattern: String,
+    private val zone: ZoneId = ZoneId.systemDefault(),
+) : CompiledParser() {
 
     private enum class Kind { TIMESTAMP, LEVEL, DICT, SPAN, MESSAGE }
 
