@@ -39,3 +39,4 @@ jmh-generator-annprocess = { module = "org.openjdk.jmh:jmh-generator-annprocess"
 
 [plugins]
 shadow = { id = "com.gradleup.shadow", version = "9.6.1" }
+kotlin-kapt = { id = "org.jetbrains.kotlin.kapt", version.ref = "kotlin" }
