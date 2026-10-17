@@ -652,6 +652,12 @@ class LogSession internal constructor(
         for (source in sources) {
             val used = source.chosen ?: source.parser.takeIf { it in savedParsers } ?: continue
             val changed = settings.parsers.firstOrNull { it.name == used.name && it != used } ?: continue
+            // Only the column names changed: the records stay as they are.
+            if (changed.sameDefinition(used)) {
+                if (source.chosen != null) source.chosen = changed
+                source.parser = changed
+                continue
+            }
             // A detected parser is detected again, as the edit may no longer fit the file best.
             if (source.chosen != null) source.chosen = changed
             edited = true

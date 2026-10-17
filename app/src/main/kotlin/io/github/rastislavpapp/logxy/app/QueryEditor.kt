@@ -92,9 +92,10 @@ fun applyOnEnter(combo: JComboBox<*>, action: () -> Unit) {
 /**
  * Visual editor of a [Query]: rows of conditions, optionally in nested groups. Rows negate through
  * their operator ("does not contain"), groups through "none" / "not all". Rules with an empty value
- * are ignored.
+ * are ignored. Rules hold the fields' own names; the field choice shows their [columnNames].
  */
-class QueryEditor(private val onApply: () -> Unit) : JPanel(MigLayout("insets 0, fillx", "[grow, fill]")) {
+class QueryEditor(private val onApply: () -> Unit, private val columnNames: ColumnNames) :
+    JPanel(MigLayout("insets 0, fillx", "[grow, fill]")) {
 
     private var fields: List<Field> = emptyList()
 
@@ -344,16 +345,11 @@ class QueryEditor(private val onApply: () -> Unit) : JPanel(MigLayout("insets 0,
             if (known == null) field.addItem(rule.field)
             field.selectedItem = known ?: rule.field
             field.addActionListener { fieldChanged() }
-            op.renderer = object : DefaultListCellRenderer() {
-                override fun getListCellRendererComponent(
-                    list: JList<*>?,
-                    value: Any?,
-                    index: Int,
-                    isSelected: Boolean,
-                    hasFocus: Boolean,
-                ): Component =
-                    super.getListCellRendererComponent(list, (value as? RuleOp)?.label, index, isSelected, hasFocus)
+            field.renderer = FormattingListCellRenderer { value ->
+                val name = value as? String
+                if (name == null) null else columnNames.of(name)
             }
+            op.renderer = FormattingListCellRenderer { (it as? RuleOp)?.label }
             op.addActionListener { opChanged() }
             listOf(field, op, level).forEach { applyOnEnter(it, onApply) }
             add(field)
@@ -533,6 +529,18 @@ class QueryEditor(private val onApply: () -> Unit) : JPanel(MigLayout("insets 0,
                 RuleOp.NUMBER_BELOW -> Triple(QueryOp.BELOW, value, true)
             }
             return Query.Rule(name, queryOp, queryValue, bare)
+        }
+    }
+
+    private class FormattingListCellRenderer(private val formatter: (Any?) -> String?) : DefaultListCellRenderer() {
+        override fun getListCellRendererComponent(
+            list: JList<*>?,
+            value: Any?,
+            index: Int,
+            isSelected: Boolean,
+            cellHasFocus: Boolean,
+        ): Component? {
+            return super.getListCellRendererComponent(list, formatter.invoke(value), index, isSelected, cellHasFocus)
         }
     }
 }

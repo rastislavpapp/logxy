@@ -14,9 +14,10 @@ private const val CACHE_SIZE = 1024
 
 /**
  * The rows of a [ShownLog]. Raw logs get a line number column; for parsed logs the message column is
- * moved last, so it takes the remaining width. Fields named in [hiddenColumns] are left out.
+ * moved last, so it takes the remaining width. Fields named in [hiddenColumns] are left out; the others are headed
+ * by their [names].
  */
-class LogTableModel(val shown: ShownLog) : AbstractTableModel(), RowWindow {
+class LogTableModel(val shown: ShownLog, private val names: ColumnNames) : AbstractTableModel(), RowWindow {
 
     val showsLineNumbers = shown.isRaw
 
@@ -114,7 +115,10 @@ class LogTableModel(val shown: ShownLog) : AbstractTableModel(), RowWindow {
         columnFields[column]
     }
 
-    override fun getColumnName(column: Int) = fieldAt(column)?.name ?: "#"
+    override fun getColumnName(column: Int): String {
+        val field = fieldAt(column) ?: return "#"
+        return names.of(field)
+    }
 
     override fun getColumnClass(column: Int) =
         if (fieldAt(column) == null) Int::class.javaObjectType else String::class.java

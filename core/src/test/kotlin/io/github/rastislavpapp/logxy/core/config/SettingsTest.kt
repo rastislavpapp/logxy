@@ -23,7 +23,7 @@ class SettingsTest {
                 Parser.Regex("Tricky: = and \\ ž", """^(?<timestamp>\S+) \\d+ = (?<message>.*)$""", "HH:mm:ss"),
                 Parser.Json("JSON", RoleKeys(level = listOf("lvl", "log.level"), exception = emptyList())),
                 Parser.Logfmt("logfmt", RoleKeys.LOGFMT.copy(message = listOf("m"))),
-                Parser.AccessLog("My access log"),
+                Parser.AccessLog("My access log", mapOf("Status" to "HTTP status", "%X{a b}" to "Tricky: = ž")),
             ),
             levels = LevelMapping(Level.BUILT_IN_NAMES - "CONFIG" + mapOf("note" to Level.INFO, "40" to Level.ERROR)),
             filters = listOf(

@@ -1,12 +1,15 @@
 package io.github.rastislavpapp.logxy.app
 
 import io.github.rastislavpapp.logxy.core.config.Settings
+import io.github.rastislavpapp.logxy.core.log.Field
 import io.github.rastislavpapp.logxy.core.parse.Parser
 import io.github.rastislavpapp.logxy.core.parse.ParserPreview
 import io.github.rastislavpapp.logxy.core.parse.PreviewLine
 import io.github.rastislavpapp.logxy.core.parse.RoleKeys
 import net.miginfocom.swing.MigLayout
 import java.awt.Component
+import java.awt.event.MouseAdapter
+import java.awt.event.MouseEvent
 import java.nio.file.Path
 import javax.swing.DefaultListCellRenderer
 import javax.swing.DefaultListModel
@@ -86,6 +89,9 @@ class ParsersPage(
     private val previewTimer = Timer(250) { updatePreview() }.apply { isRepeats = false }
     private var loadingEditor = false
 
+    /** The column names of the parser being edited, renamed from the preview's header. */
+    private val columnNames = ColumnNames()
+
     init {
         AppSettings.current.parsers.forEach { entries.addElement(Entry(it, builtIn = false)) }
         AppSettings.current.builtInParsers.forEach { entries.addElement(Entry(it, builtIn = true)) }
@@ -138,6 +144,23 @@ class ParsersPage(
             autoResizeMode = JTable.AUTO_RESIZE_ALL_COLUMNS
             setShowGrid(false)
             setDefaultRenderer(Any::class.java, PreviewRenderer())
+            tableHeader.addMouseListener(object : MouseAdapter() {
+                // The popup trigger comes with the press on some systems, with the release on others.
+                override fun mousePressed(e: MouseEvent) = renameColumn(e)
+                override fun mouseReleased(e: MouseEvent) = renameColumn(e)
+
+                private fun renameColumn(e: MouseEvent) {
+                    if (!e.isPopupTrigger || selected()?.builtIn != false) return
+                    // Column 0 is the ✓/↳/✗ one; without fields the only other is the whole line.
+                    val fields = previewModel.fields
+                    val field = fields.getOrNull(tableHeader.columnAtPoint(e.point) - 1) ?: return
+                    showColumnRename(tableHeader, e.x, field, fields, columnNames) { name ->
+                        columnNames.renameSaved(field.name, name)
+                        edited()
+                        updatePreview()
+                    }
+                }
+            })
         }
         val right = JPanel(MigLayout("fill, insets 0 8 0 0, wrap 2, hidemode 3", "[][grow, fill]")).apply {
             add(JLabel("Name:"))
@@ -171,6 +194,7 @@ class ParsersPage(
                 val shown = if (choice.kind == parser?.kind) properties else emptyMap()
                 choice.settings.forEach { it.show(shown) }
             }
+            columnNames.saved = parser?.aliases.orEmpty()
             val editable = entry != null && !entry.builtIn
             deleteButton.isEnabled = entry != null
             (listOf(nameField, kindBox) + settings().map { it.field }).forEach { it.isEnabled = editable }
@@ -202,7 +226,7 @@ class ParsersPage(
         val entry = selected() ?: return
         if (entry.builtIn) return
         val parser = choice().parser(nameField.text.trim()) ?: return
-        entries.setElementAt(Entry(parser, builtIn = false), index)
+        entries.setElementAt(Entry(parser.withAliases(columnNames.saved), builtIn = false), index)
         previewTimer.restart()
     }
 
@@ -238,7 +262,7 @@ class ParsersPage(
             return
         }
         val lines = ParserPreview.preview(compiled, sample)
-        previewModel.show(compiled.schema.fields.map { it.name }, lines)
+        previewModel.show(compiled.schema.fields, lines)
         status.text = when {
             previewFile == null -> "Open a file to preview the parser on it."
             lines.isEmpty() -> "The file is empty."
@@ -346,12 +370,13 @@ class ParsersPage(
 
     /** Sample lines as the edited parser reads them: one row per line, one column per field. */
     private inner class PreviewModel : AbstractTableModel() {
-        private var columns: List<String> = emptyList()
+        var fields: List<Field> = emptyList()
+            private set
         var lines: List<PreviewLine> = emptyList()
             private set
 
-        fun show(fields: List<String>?, lines: List<PreviewLine>) {
-            columns = fields ?: emptyList()
+        fun show(fields: List<Field>?, lines: List<PreviewLine>) {
+            this.fields = fields.orEmpty()
             this.lines = lines
             fireTableStructureChanged()
             // The table has recreated its columns; keep the ✓/↳/✗ one narrow.
@@ -363,8 +388,12 @@ class ParsersPage(
         }
 
         override fun getRowCount() = lines.size
-        override fun getColumnCount() = 1 + maxOf(columns.size, 1)
-        override fun getColumnName(column: Int) = if (column == 0) "" else columns.getOrElse(column - 1) { "Line" }
+        override fun getColumnCount() = 1 + maxOf(fields.size, 1)
+        override fun getColumnName(column: Int): String {
+            if (column == 0) return ""
+            val field = fields.getOrNull(column - 1) ?: return "Line"
+            return columnNames.of(field)
+        }
 
         override fun getValueAt(row: Int, column: Int): Any {
             val line = lines[row]

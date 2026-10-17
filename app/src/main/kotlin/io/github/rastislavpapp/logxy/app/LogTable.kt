@@ -113,6 +113,14 @@ class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
         }
     }
 
+    /** Heads the columns with their names again, e.g. after a rename; widths stay. */
+    fun columnNamesChanged() {
+        for (column in 0..<columnModel.columnCount) {
+            columnModel.getColumn(column).headerValue = logModel.getColumnName(column)
+        }
+        tableHeader.repaint()
+    }
+
     private fun updateLook() {
         val base = UIManager.getFont("monospaced.font")
             ?: Font(Font.MONOSPACED, Font.PLAIN, UIManager.getFont("Table.font").size)
@@ -148,6 +156,8 @@ class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
         for (column in 0..<columnModel.columnCount) {
             val field = logModel.fieldAt(column)
             val tableColumn = columnModel.getColumn(column)
+            // By the field, not the header, so a renamed column keeps its width.
+            tableColumn.identifier = field?.name ?: "#"
             tableColumn.cellRenderer = when {
                 field == null -> DefaultTableCellRenderer().apply {
                     horizontalAlignment = SwingConstants.RIGHT
