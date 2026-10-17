@@ -17,7 +17,7 @@ Thumbs.db
 tools/gui-sandbox/out/
 
 # Local test logs
-test-data/
+.test-data/
 
 # Benchmark baseline of a machine other than the committed one
 tools/benchmark-baseline.local.properties
