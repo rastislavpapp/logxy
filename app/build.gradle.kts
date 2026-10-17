@@ -1,3 +1,5 @@
+import org.codehaus.plexus.util.Os
+
 plugins {
     id("logxy.kotlin")
     application
@@ -59,8 +61,7 @@ tasks.shadowJar {
     }
 }
 
-// Native app image with a bundled runtime, archived for the OS it is built on (Windows or Linux).
-val platform = if (System.getProperty("os.name").startsWith("Windows")) "windows-x64" else "linux-x64"
+val windows = Os.isFamily(Os.FAMILY_WINDOWS)
 
 // Shipped twice: as the defaults, and as the file the launcher hands the JVM, which the app overwrites with the
 // user's options from the settings directory (see VmOptions). The defaults double the JVM's heap limit, so few
@@ -79,7 +80,7 @@ val jpackageInput = tasks.register<Sync>("jpackageInput") {
 
 val jpackage = tasks.register<Exec>("jpackage") {
     val image = layout.buildDirectory.dir("jpackage")
-    val icon = file(if (platform.startsWith("windows")) "src/packaging/logxy.ico" else "src/packaging/logxy.png")
+    val icon = file(if (windows) "src/packaging/logxy.ico" else "src/packaging/logxy.png")
     val jdk = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(25) }.get().metadata.installationPath
     inputs.files(jpackageInput, icon)
     outputs.dir(image)
@@ -108,7 +109,7 @@ val jpackage = tasks.register<Exec>("jpackage") {
     // jpackage refuses to overwrite an existing image.
     val fs = objects.newInstance<Services>().fs
     doFirst { fs.delete { delete(image) } }
-    if (platform.startsWith("windows")) {
+    if (windows) {
         // By default the launcher restarts itself in a child process to put the app dir on PATH; logxy needs no DLLs from there.
         val cfg = image.get().file("logxy/app/logxy.cfg").asFile
         doLast { cfg.writeText(cfg.readText().replace("[Application]", "[Application]\nwin.norestart=true")) }
@@ -118,11 +119,12 @@ val jpackage = tasks.register<Exec>("jpackage") {
 fun AbstractArchiveTask.nativeArchive(extension: String) {
     from(jpackage)
     from(rootProject.file("LICENSE")) { into("logxy") }
+    val platform = if (windows) "windows-x64" else "linux-x64"
     archiveFileName = "logxy-$version-$platform.$extension"
     destinationDirectory = layout.buildDirectory.dir("dist")
 }
 
-if (platform.startsWith("windows")) {
+if (windows) {
     tasks.register<Zip>("nativeArchive") { nativeArchive("zip") }
 } else {
     // A tarball keeps the launcher executable.

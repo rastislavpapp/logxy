@@ -46,7 +46,7 @@ internal class ReadChannels private constructor(private val channels: List<FileC
     }
 
     companion object {
-        private val serialReads = System.getProperty("os.name").startsWith("Windows")
+        private val serialReads = PlatformDetector.isWindows()
 
         /** Opens [count] channels for tasks plus [main] where reads are serial, else one for all. */
         fun open(path: Path, count: Int): ReadChannels {
