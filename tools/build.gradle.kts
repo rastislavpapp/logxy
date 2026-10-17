@@ -1,7 +1,7 @@
 plugins {
     id("logxy.kotlin")
     // Runs JMH's annotation processor, which generates the code that runs the @Benchmark methods.
-    id("org.jetbrains.kotlin.kapt")
+    alias(libs.plugins.kotlin.kapt)
     application
 }
 

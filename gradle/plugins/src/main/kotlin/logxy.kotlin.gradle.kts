@@ -23,7 +23,7 @@ dependencies {
 detekt {
     // Only what differs from detekt's defaults.
     buildUponDefaultConfig = true
-    config.setFrom(rootDir.resolve("config/detekt.yml"))
+    config.setFrom(rootDir.resolve("gradle/detekt.yml"))
 }
 
 tasks.test {

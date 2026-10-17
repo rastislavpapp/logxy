@@ -1,6 +1,6 @@
 # Coding standards
 
-Checked in review, against the diff. Formatting and line length are detekt's (`config/detekt.yml`); these are the judgement calls it cannot make.
+Checked in review, against the diff. Formatting and line length are detekt's (`gradle/detekt.yml`); these are the judgement calls it cannot make.
 
 ## Domain terms
 

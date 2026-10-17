@@ -1,3 +1,8 @@
+pluginManagement {
+    // Convention plugins (logxy.kotlin), kept with the rest of the build plumbing under gradle/.
+    includeBuild("gradle/plugins")
+}
+
 rootProject.name = "logxy"
 
 include("core", "app", "tools")
