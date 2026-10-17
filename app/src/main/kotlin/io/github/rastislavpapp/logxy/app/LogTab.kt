@@ -4,6 +4,7 @@ import io.github.rastislavpapp.logxy.core.archive.ArchiveOrigin
 import io.github.rastislavpapp.logxy.core.config.SavedFilter
 import io.github.rastislavpapp.logxy.core.formatByteSize
 import io.github.rastislavpapp.logxy.core.log.ColumnType
+import io.github.rastislavpapp.logxy.core.log.Field
 import io.github.rastislavpapp.logxy.core.log.Level
 import io.github.rastislavpapp.logxy.core.log.Role
 import io.github.rastislavpapp.logxy.core.parse.Parser
@@ -114,6 +115,9 @@ class LogTab(
     /** Short names of [paths], as the merge's source column shows them. */
     val sourceNames: List<String> get() = session.sourceNames
 
+    /** Kept when the file is read again, as are the renames for this tab only. */
+    private val columnNames = ColumnNames()
+
     /**
      * Short name for the tab: the file name, or the merged files' names; files from archives go by the container's
      * name.
@@ -136,7 +140,7 @@ class LogTab(
     val description: String get() = paths.joinToString("\n") { (origin(it) ?: it).toString() }
     private val content = JPanel(BorderLayout())
     private val detail = LogDetailArea()
-    private val filterBar = FilterBar(::applyFilter)
+    private val filterBar = FilterBar(::applyFilter, columnNames)
     private val findBar = FindBar(::searchFor) { forward -> find(forward) }
     private val patterns =
         PatternsPanel(scope, { session.patternCounts() }, { session.patternProgress }, filterBar::addRules)
@@ -293,7 +297,7 @@ class LogTab(
         val model = model ?: return
         val popup = JPopupMenu()
         val boxes = model.columnChoices.map { field ->
-            JCheckBoxMenuItem(field.name, field.name !in hiddenColumns).apply {
+            JCheckBoxMenuItem(columnNames.of(field), field.name !in hiddenColumns).apply {
                 putClientProperty("CheckBoxMenuItem.doNotCloseOnMouseClick", true)
             }
         }
@@ -304,7 +308,8 @@ class LogTab(
             boxes.forEach { it.isEnabled = !single || !it.isSelected }
         }
         fun update() {
-            hideColumns(boxes.filter { !it.isSelected }.map { it.text }.toSet())
+            val hidden = model.columnChoices.filterIndexed { i, _ -> !boxes[i].isSelected }
+            hideColumns(hidden.map { it.name }.toSet())
             enableBoxes()
         }
         boxes.forEach { box ->
@@ -322,12 +327,13 @@ class LogTab(
         popup.show(columnsButton, 0, columnsButton.height)
     }
 
-    /** The right-click menu of a column header: hide that column, or show all again. */
+    /** The right-click menu of a column header: hide that column, rename it, or show all again. */
     private fun showHeaderMenu(header: JComponent, column: Int, x: Int, y: Int) {
         val model = model ?: return
         val field = model.fieldAt(column) ?: return
+        val name = columnNames.of(field)
         val popup = JPopupMenu()
-        popup.add(JMenuItem("Hide “${field.name}”").apply {
+        popup.add(JMenuItem("Hide “$name”").apply {
             isEnabled = model.columnChoices.count { it.name !in hiddenColumns } > 1
             addActionListener { hideColumns(hiddenColumns + field.name) }
         })
@@ -336,8 +342,28 @@ class LogTab(
             addActionListener { hideColumns(emptySet()) }
         })
         popup.addSeparator()
+        fun askName(onRename: (String) -> Unit) =
+            showColumnRename(header, x, field, model.columnChoices, columnNames, onRename)
+        popup.add(JMenuItem("Rename for this session").apply {
+            addActionListener {
+                askName { name ->
+                    columnNames.rename(field.name, name)
+                    columnNamesChanged()
+                }
+            }
+        })
+        val parser = savedParser()
+        popup.add(JMenuItem("Rename in parser settings").apply {
+            if (parser == null) {
+                isEnabled = false
+                toolTipText = RENAME_NEEDS_SAVED_PARSER
+            } else {
+                addActionListener { askName { name -> saveColumnName(parser, field, name) } }
+            }
+        })
+        popup.addSeparator()
         popup.add(JMenuItem("Copy Column").apply {
-            toolTipText = "The whole value of “${field.name}” of every shown row, one row per line"
+            toolTipText = "The whole value of “$name” of every shown row, one row per line"
             addActionListener {
                 val shown = model.shown
                 val column = shown.schema.fields.indexOf(field)
@@ -345,6 +371,40 @@ class LogTab(
             }
         })
         popup.show(header, x, y)
+    }
+
+    /** The user's saved parser that reads all the files, so a column name can be saved with it; null if none does. */
+    private fun savedParser(): Parser? {
+        val parser = session.parser
+        if (session.parsers.any { it != parser }) return null
+        return parser.takeIf { it in AppSettings.current.parsers }
+    }
+
+    /**
+     * Saves [field]'s new [name] with [parser]. The settings change reaches the sessions of all tabs that use it,
+     * which take the new names without reading their files again.
+     */
+    private fun saveColumnName(parser: Parser, field: Field, name: String) {
+        columnNames.renameSaved(field.name, name)
+        val renamed = parser.withAliases(columnNames.saved)
+        val parsers = AppSettings.current.parsers.map { if (it == parser) renamed else it }
+        if (!AppSettings.updateOrShowError(this, AppSettings.current.copy(parsers = parsers))) {
+            columnNames.saved = parser.aliases
+        }
+        columnNamesChanged()
+    }
+
+    /** Shows the parser's column names, if they changed, e.g. by a rename in another tab or in the settings. */
+    private fun showSavedColumnNames() {
+        val aliases = session.parser.aliases
+        if (aliases == columnNames.saved) return
+        columnNames.saved = aliases
+        columnNamesChanged()
+    }
+
+    private fun columnNamesChanged() {
+        table?.columnNamesChanged()
+        filterBar.columnNamesChanged()
     }
 
     /** Copies the selected rows as their records are written in the file. */
@@ -440,7 +500,7 @@ class LogTab(
             popup.add(JMenuItem("Copy Selected Rows").apply {
                 addActionListener { copySelectedRows() }
             })
-            popup.add(JMenuItem("Copy Column “${field.name}”").apply {
+            popup.add(JMenuItem("Copy Column “${columnNames.of(field)}”").apply {
                 addActionListener {
                     val prepared = shown.copyColumn(fieldIndex, copyLimit(), selectedRows())
                     copyColumn(prepared)
@@ -558,7 +618,7 @@ class LogTab(
     }
 
     private fun showTable(shown: ShownLog) {
-        val model = LogTableModel(shown)
+        val model = LogTableModel(shown, columnNames)
         // Columns hidden before stay hidden, unless that would hide them all (the file changed meanwhile).
         val leavesSome = model.columnChoices.any { it.name !in hiddenColumns }
         model.hiddenColumns = if (leavesSome) hiddenColumns else emptySet()
@@ -940,7 +1000,10 @@ class LogTab(
             onStatusChanged()
         }
 
-        override fun parserChanged() = showParser()
+        override fun parserChanged() {
+            showParser()
+            showSavedColumnNames()
+        }
 
         override fun fieldsShown() {
             val model = model ?: return

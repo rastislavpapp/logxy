@@ -27,9 +27,10 @@ import javax.swing.UIManager
 /**
  * The filter of one tab: the minimum level, the filter itself (visual or as text), Apply, the mode toggle,
  * saved filters and Clear.
- * Enter in any input applies. [onApply] is called to (re)apply; [minimumLevel] and [query] give the state.
+ * Enter in any input applies. [onApply] is called to (re)apply; [minimumLevel] and [query] give the state. The visual
+ * filter offers the fields by their [names]; the text one by their own.
  */
-class FilterBar(private val onApply: () -> Unit) :
+class FilterBar(private val onApply: () -> Unit, names: ColumnNames) :
     JPanel(MigLayout("insets 6 8 6 8, fillx, gapy 3, hidemode 3", "[grow, fill]0[]")) {
 
     private val levelButton = dropDownButton(
@@ -55,7 +56,7 @@ class FilterBar(private val onApply: () -> Unit) :
         addActionListener { onApply() }
         addItemListener { updateInputsEnabled() }
     }
-    private val editor = QueryEditor(applyFilter)
+    private val editor = QueryEditor(applyFilter, names)
     private val textArea = QueryTextArea(applyFilter)
     private val textMode = accentToggle(
         Icons.advanced,
@@ -134,6 +135,12 @@ class FilterBar(private val onApply: () -> Unit) :
         if (text != null && editor.query().items.isEmpty()) {
             textArea.text = QueryPrinter.print(editor.query(includeEmpty = true))
         }
+        if (suspended) updateInputsEnabled()
+    }
+
+    /** Offers the fields by their names again, e.g. after a rename; the conditions stay. */
+    fun columnNamesChanged() {
+        editor.setQuery(editor.query(includeEmpty = true))
         if (suspended) updateInputsEnabled()
     }
 

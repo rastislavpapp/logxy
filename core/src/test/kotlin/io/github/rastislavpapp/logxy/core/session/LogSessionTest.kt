@@ -1104,6 +1104,31 @@ class LogSessionTest {
         }
     }
 
+    @Test
+    fun `renamed columns of a saved parser take effect without reading the files again`() = runBlocking {
+        val file = Files.writeString(dir.resolve("aliases.log"), lines(10))
+        val settings = ChangingSettings(Settings(parsers = listOf(mine)))
+        val recorder = Recorder()
+        val (chosenSession, chosenShown) = openWith(settings, file, recorder, chosen = mine)
+        val (detectedSession, detectedShown) = openWith(settings, file, Recorder(), chosen = null)
+        val renamed = mine.withAliases(mapOf("Logger" to "Class"))
+        val announced = withContext(ui) { recorder.parserChanged }
+        withContext(ui) { settings.change(Settings(parsers = listOf(renamed))) }
+        withContext(ui) {
+            assertEquals(renamed, chosenSession.chosenParser)
+            assertEquals(renamed, chosenSession.parser)
+            assertEquals(renamed, detectedSession.parser)
+            assertEquals(announced + 1, recorder.parserChanged)
+            assertFalse(chosenShown.ended)
+            assertFalse(detectedShown.ended)
+        }
+        assertEquals(null, withTimeoutOrNull(500) { recorder.loads.receive() })
+        withContext(ui) {
+            chosenSession.dispose()
+            detectedSession.dispose()
+        }
+    }
+
     private fun withNotes(count: Int) = lines(100) + buildString {
         repeat(count) { append("2026-10-01 08:00:00.000 [main] NOTE  app.L - note $it\n") }
     }

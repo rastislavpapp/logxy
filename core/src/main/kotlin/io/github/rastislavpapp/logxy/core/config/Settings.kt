@@ -71,6 +71,7 @@ data class Settings(
          * parser.1.name=My app
          * parser.1.type=pattern
          * parser.1.layout=%d [%t] %-5p %c - %m%n
+         * parser.1.alias.Logger=Class
          * parser.2.name=My JSON
          * parser.2.type=json
          * parser.2.keys.level=level,severity
@@ -147,7 +148,11 @@ data class Settings(
             if (name.isEmpty()) return null
             val type = properties.getProperty("${prefix}type", "pattern")
             val kind = Parser.KINDS.firstOrNull { it.type == type } ?: return null
-            return kind.read(name) { properties.getProperty(prefix + it) }
+            val aliasPrefix = "${prefix}alias."
+            val aliases = properties.stringPropertyNames()
+                .filter { it.startsWith(aliasPrefix) }
+                .associate { it.removePrefix(aliasPrefix) to properties.getProperty(it) }
+            return kind.read(name) { properties.getProperty(prefix + it) }?.withAliases(aliases)
         }
 
         /**
@@ -157,6 +162,7 @@ data class Settings(
         internal fun writeParser(properties: Properties, prefix: String, parser: Parser) {
             properties["${prefix}type"] = parser.kind.type
             parser.properties().forEach { (key, value) -> properties[prefix + key] = value }
+            parser.aliases.forEach { (field, alias) -> properties["${prefix}alias.$field"] = alias }
             properties["${prefix}name"] = parser.name
         }
 
