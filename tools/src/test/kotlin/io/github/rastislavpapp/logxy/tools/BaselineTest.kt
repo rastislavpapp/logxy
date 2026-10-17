@@ -1,5 +1,7 @@
 package io.github.rastislavpapp.logxy.tools
 
+import io.github.rastislavpapp.logxy.core.PlatformDetector.isMac
+import io.github.rastislavpapp.logxy.core.PlatformDetector.isWindows
 import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.condition.DisabledIfEnvironmentVariable
 import java.nio.file.Files
@@ -90,11 +92,10 @@ private fun machine(): Map<String, String> = linkedMapOf(
 )
 
 private fun cpuName(): String {
-    val os = System.getProperty("os.name").lowercase()
     val name = runCatching {
         when {
-            os.startsWith("windows") -> System.getenv("PROCESSOR_IDENTIFIER")
-            os.startsWith("mac") -> ProcessBuilder("sysctl", "-n", "machdep.cpu.brand_string").start()
+            isWindows() -> System.getenv("PROCESSOR_IDENTIFIER")
+            isMac() -> ProcessBuilder("sysctl", "-n", "machdep.cpu.brand_string").start()
                 .inputStream.bufferedReader().readText()
             else -> Files.readAllLines(Path.of("/proc/cpuinfo"))
                 .firstOrNull { it.startsWith("model name") }?.substringAfter(':')
