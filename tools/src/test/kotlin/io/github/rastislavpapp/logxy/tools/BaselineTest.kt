@@ -1,5 +1,6 @@
 package io.github.rastislavpapp.logxy.tools
 
+import io.github.rastislavpapp.logxy.core.PlatformDetector
 import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.condition.DisabledIfEnvironmentVariable
 import java.nio.file.Files
@@ -93,7 +94,7 @@ private fun cpuName(): String {
     val os = System.getProperty("os.name").lowercase()
     val name = runCatching {
         when {
-            os.startsWith("windows") -> System.getenv("PROCESSOR_IDENTIFIER")
+            PlatformDetector.isWindows() -> System.getenv("PROCESSOR_IDENTIFIER")
             os.startsWith("mac") -> ProcessBuilder("sysctl", "-n", "machdep.cpu.brand_string").start()
                 .inputStream.bufferedReader().readText()
             else -> Files.readAllLines(Path.of("/proc/cpuinfo"))

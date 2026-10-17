@@ -94,7 +94,8 @@ fun applyOnEnter(combo: JComboBox<*>, action: () -> Unit) {
  * their operator ("does not contain"), groups through "none" / "not all". Rules with an empty value
  * are ignored.
  */
-class QueryEditor(private val onApply: () -> Unit) : JPanel(MigLayout("insets 0, fillx", "[grow, fill]")) {
+class QueryEditor(private val onApply: () -> Unit,
+                  private val columnAliases: Map<String, String>) : JPanel(MigLayout("insets 0, fillx", "[grow, fill]")) {
 
     private var fields: List<Field> = emptyList()
 
@@ -137,11 +138,17 @@ class QueryEditor(private val onApply: () -> Unit) : JPanel(MigLayout("insets 0,
     fun query(includeEmpty: Boolean = false): Query.Group = root.query(includeEmpty) ?: Query.EMPTY
 
     private fun defaultField(): String =
-        fields.firstOrNull { it.role == Role.MESSAGE }?.name ?: fields.firstOrNull()?.name ?: "Message"
+        columnAliases[fields.firstOrNull { it.role == Role.MESSAGE }?.name ?: ""]
+            ?: fields.firstOrNull()?.let { columnAliases[it.name] ?: it.name }
+            ?: "Message"
 
     private fun defaultRule() = Query.Rule(defaultField(), QueryOp.EQUALS, "")
 
-    private fun fieldType(name: String) = fields.firstOrNull { it.name.equals(name, ignoreCase = true) }?.type
+    private fun fieldType(name: String): ColumnType? {
+        // Resolve aliased name back to original.
+        val original = columnAliases.entries.firstOrNull { it.value.equals(name, ignoreCase = true) }?.key ?: name
+        return fields.firstOrNull { it.name.equals(original, ignoreCase = true) }?.type
+    }
 
     private fun isPattern(name: String) = name.equals(Query.PATTERN_FIELD, ignoreCase = true) && fieldType(name) == null
 
@@ -344,16 +351,11 @@ class QueryEditor(private val onApply: () -> Unit) : JPanel(MigLayout("insets 0,
             if (known == null) field.addItem(rule.field)
             field.selectedItem = known ?: rule.field
             field.addActionListener { fieldChanged() }
-            op.renderer = object : DefaultListCellRenderer() {
-                override fun getListCellRendererComponent(
-                    list: JList<*>?,
-                    value: Any?,
-                    index: Int,
-                    isSelected: Boolean,
-                    hasFocus: Boolean,
-                ): Component =
-                    super.getListCellRendererComponent(list, (value as? RuleOp)?.label, index, isSelected, hasFocus)
+            field.renderer = FormattingListCellRenderer {
+                val field = it as? String
+                columnAliases[field] ?: field
             }
+            op.renderer = FormattingListCellRenderer { (it as? RuleOp)?.label }
             op.addActionListener { opChanged() }
             listOf(field, op, level).forEach { applyOnEnter(it, onApply) }
             add(field)
@@ -533,6 +535,18 @@ class QueryEditor(private val onApply: () -> Unit) : JPanel(MigLayout("insets 0,
                 RuleOp.NUMBER_BELOW -> Triple(QueryOp.BELOW, value, true)
             }
             return Query.Rule(name, queryOp, queryValue, bare)
+        }
+    }
+
+    private class FormattingListCellRenderer(private val formatter: (Any?) -> String?): DefaultListCellRenderer() {
+        override fun getListCellRendererComponent(
+            list: JList<*>?,
+            value: Any?,
+            index: Int,
+            isSelected: Boolean,
+            cellHasFocus: Boolean
+        ): Component? {
+            return super.getListCellRendererComponent(list, formatter.invoke(value), index, isSelected, cellHasFocus)
         }
     }
 }

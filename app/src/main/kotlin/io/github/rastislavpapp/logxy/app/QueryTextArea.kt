@@ -26,7 +26,8 @@ import javax.swing.text.Segment
 private const val SYNTAX_STYLE = "text/x-logxy-query"
 
 /** Editor for the text form of a filter: highlighting, completion, and syntax errors underlined as you type. */
-class QueryTextArea(private val onApply: () -> Unit) : RSyntaxTextArea(3, 60) {
+class QueryTextArea(private val onApply: () -> Unit,
+                    private val columnAliases: Map<String, String>) : RSyntaxTextArea(3, 60) {
 
     private val completions = DefaultCompletionProvider()
     private val autoCompletion = AutoCompletion(completions)

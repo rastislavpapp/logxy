@@ -1,5 +1,6 @@
 package io.github.rastislavpapp.logxy.core.config
 
+import io.github.rastislavpapp.logxy.core.PlatformDetector
 import io.github.rastislavpapp.logxy.core.log.Level
 import io.github.rastislavpapp.logxy.core.log.LevelMapping
 import io.github.rastislavpapp.logxy.core.parse.Parser
@@ -42,7 +43,7 @@ data class Settings(
         fun directory(): Path {
             val appData = System.getenv("APPDATA")
             return when {
-                System.getProperty("os.name").startsWith("Windows") && appData != null -> Path.of(appData, "logxy")
+                PlatformDetector.isWindows() && appData != null -> Path.of(appData, "logxy")
                 else -> (System.getenv("XDG_CONFIG_HOME")?.let { Path.of(it) }
                     ?: Path.of(System.getProperty("user.home"), ".config")).resolve("logxy")
             }
@@ -57,7 +58,7 @@ data class Settings(
          */
         fun cacheDirectory(): Path {
             val localAppData = System.getenv("LOCALAPPDATA")
-            val windows = System.getProperty("os.name").startsWith("Windows")
+            val windows = PlatformDetector.isWindows()
             return when {
                 windows && localAppData != null -> Path.of(localAppData, "logxy", "cache")
                 else -> (System.getenv("XDG_CACHE_HOME")?.let { Path.of(it) }
@@ -147,7 +148,11 @@ data class Settings(
             if (name.isEmpty()) return null
             val type = properties.getProperty("${prefix}type", "pattern")
             val kind = Parser.KINDS.firstOrNull { it.type == type } ?: return null
-            return kind.read(name) { properties.getProperty(prefix + it) }
+            val aliasPrefix = prefix + "alias."
+            val aliases = properties.stringPropertyNames()
+                .filter { it.startsWith(aliasPrefix) }
+                .associate { it.removePrefix(aliasPrefix) to properties.getProperty(it)!! }
+            return kind.read(name, { properties.getProperty(prefix + it) }, aliases)
         }
 
         /**

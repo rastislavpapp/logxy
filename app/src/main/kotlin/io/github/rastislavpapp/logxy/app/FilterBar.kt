@@ -29,7 +29,8 @@ import javax.swing.UIManager
  * saved filters and Clear.
  * Enter in any input applies. [onApply] is called to (re)apply; [minimumLevel] and [query] give the state.
  */
-class FilterBar(private val onApply: () -> Unit) :
+class FilterBar(private val onApply: () -> Unit,
+                columnAliases: Map<String, String>) :
     JPanel(MigLayout("insets 6 8 6 8, fillx, gapy 3, hidemode 3", "[grow, fill]0[]")) {
 
     private val levelButton = dropDownButton(
@@ -55,8 +56,8 @@ class FilterBar(private val onApply: () -> Unit) :
         addActionListener { onApply() }
         addItemListener { updateInputsEnabled() }
     }
-    private val editor = QueryEditor(applyFilter)
-    private val textArea = QueryTextArea(applyFilter)
+    private val editor = QueryEditor(applyFilter, columnAliases)
+    private val textArea = QueryTextArea(applyFilter, columnAliases)
     private val textMode = accentToggle(
         Icons.advanced,
         "Advanced: write the filter as an expression, e.g. level >= WARN AND message == \"*timeout*\" " +

@@ -1,20 +1,29 @@
 package io.github.rastislavpapp.logxy.app
 
 import io.github.rastislavpapp.logxy.core.config.Settings
+import io.github.rastislavpapp.logxy.core.log.Field
 import io.github.rastislavpapp.logxy.core.parse.Parser
 import io.github.rastislavpapp.logxy.core.parse.ParserPreview
 import io.github.rastislavpapp.logxy.core.parse.PreviewLine
 import io.github.rastislavpapp.logxy.core.parse.RoleKeys
 import net.miginfocom.swing.MigLayout
+import java.awt.BorderLayout
 import java.awt.Component
+import java.awt.event.MouseAdapter
+import java.awt.event.MouseEvent
 import java.nio.file.Path
+import javax.swing.Box
+import javax.swing.BoxLayout
 import javax.swing.DefaultListCellRenderer
 import javax.swing.DefaultListModel
 import javax.swing.JButton
 import javax.swing.JComboBox
+import javax.swing.JComponent
 import javax.swing.JLabel
 import javax.swing.JList
+import javax.swing.JOptionPane
 import javax.swing.JPanel
+import javax.swing.JPopupMenu
 import javax.swing.JScrollPane
 import javax.swing.JSplitPane
 import javax.swing.JTable
@@ -57,7 +66,7 @@ class ParsersPage(
     private class KindChoice(val label: String, val kind: Parser.Kind, val settings: List<Setting>) {
         fun parser(name: String): Parser? {
             val values = settings.associate { it.key to it.field.text }
-            return kind.read(name) { values[it] }
+            return kind.read(name, { values[it] }, emptyMap())
         }
 
         override fun toString() = label
@@ -85,6 +94,10 @@ class ParsersPage(
     } ?: emptyList()
     private val previewTimer = Timer(250) { updatePreview() }.apply { isRepeats = false }
     private var loadingEditor = false
+
+    /** Column aliases for the parser being edited: original field name to alias. */
+    private val columnAliases = mutableMapOf<String, String>()
+    private val columnRenameDialog = ColumnRenameDialog(columnAliases)
 
     init {
         AppSettings.current.parsers.forEach { entries.addElement(Entry(it, builtIn = false)) }
@@ -138,6 +151,21 @@ class ParsersPage(
             autoResizeMode = JTable.AUTO_RESIZE_ALL_COLUMNS
             setShowGrid(false)
             setDefaultRenderer(Any::class.java, PreviewRenderer())
+            tableHeader.addMouseListener(object : MouseAdapter() {
+                override fun mousePressed(e: MouseEvent) = headerMenu(e)
+                override fun mouseReleased(e: MouseEvent) = headerMenu(e)
+
+                private fun headerMenu(e: MouseEvent) {
+                    val column = tableHeader.columnAtPoint(e.point)
+                    if (e.isPopupTrigger && column > 0) {
+                        val field = previewModel.fields[column - 1]
+                        columnRenameDialog.open(tableHeader, field) {
+                            edited()
+                            updatePreview()
+                        }
+                    }
+                }
+            })
         }
         val right = JPanel(MigLayout("fill, insets 0 8 0 0, wrap 2, hidemode 3", "[][grow, fill]")).apply {
             add(JLabel("Name:"))
@@ -171,6 +199,11 @@ class ParsersPage(
                 val shown = if (choice.kind == parser?.kind) properties else emptyMap()
                 choice.settings.forEach { it.show(shown) }
             }
+            // Load column aliases from parser properties
+            columnAliases.clear()
+            val aliasPrefix = "alias."
+            properties.filterKeys { it.startsWith(aliasPrefix) }
+                .forEach { (key, value) -> columnAliases[key.removePrefix(aliasPrefix)] = value }
             val editable = entry != null && !entry.builtIn
             deleteButton.isEnabled = entry != null
             (listOf(nameField, kindBox) + settings().map { it.field }).forEach { it.isEnabled = editable }
@@ -202,7 +235,8 @@ class ParsersPage(
         val entry = selected() ?: return
         if (entry.builtIn) return
         val parser = choice().parser(nameField.text.trim()) ?: return
-        entries.setElementAt(Entry(parser, builtIn = false), index)
+        // Merge column aliases into the parser
+        entries.setElementAt(Entry(parser.withAliases(columnAliases), builtIn = false), index)
         previewTimer.restart()
     }
 
@@ -238,7 +272,7 @@ class ParsersPage(
             return
         }
         val lines = ParserPreview.preview(compiled, sample)
-        previewModel.show(compiled.schema.fields.map { it.name }, lines)
+        previewModel.show(compiled.schema.fields, lines)
         status.text = when {
             previewFile == null -> "Open a file to preview the parser on it."
             lines.isEmpty() -> "The file is empty."
@@ -346,12 +380,15 @@ class ParsersPage(
 
     /** Sample lines as the edited parser reads them: one row per line, one column per field. */
     private inner class PreviewModel : AbstractTableModel() {
-        private var columns: List<String> = emptyList()
+        var fields: List<Field> = emptyList()
+            private set
+        var displayNames: List<String> = emptyList()
         var lines: List<PreviewLine> = emptyList()
             private set
 
-        fun show(fields: List<String>?, lines: List<PreviewLine>) {
-            columns = fields ?: emptyList()
+        fun show(fieldsArg: List<Field>?, lines: List<PreviewLine>) {
+            fields = fieldsArg ?: emptyList()
+            displayNames = fields.map { columnAliases[it.name] ?: it.name }
             this.lines = lines
             fireTableStructureChanged()
             // The table has recreated its columns; keep the ✓/↳/✗ one narrow.
@@ -363,8 +400,11 @@ class ParsersPage(
         }
 
         override fun getRowCount() = lines.size
-        override fun getColumnCount() = 1 + maxOf(columns.size, 1)
-        override fun getColumnName(column: Int) = if (column == 0) "" else columns.getOrElse(column - 1) { "Line" }
+        override fun getColumnCount() = 1 + maxOf(fields.size, 1)
+        override fun getColumnName(column: Int) =
+            if (column == 0) "" else displayNames.getOrElse(column - 1) {
+                fields.map { f -> f.name }.getOrElse(column - 1) { "Line" }
+            }
 
         override fun getValueAt(row: Int, column: Int): Any {
             val line = lines[row]

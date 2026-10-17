@@ -21,16 +21,18 @@ object AppSettings : SettingsStore {
     }
         private set
 
-    /** Saves [settings] and tells the listeners; throws if the file cannot be written. */
-    fun update(settings: Settings) {
+    /** Saves [settings] and tells the listeners (if not [silent]); throws if the file cannot be written. */
+    fun update(settings: Settings, silent: Boolean = false) {
         Settings.save(path, settings)
         current = settings
-        listeners.toList().forEach { it() }
+        if (!silent) {
+            listeners.toList().forEach { it() }
+        }
     }
 
     /** Saves [settings]; on failure tells the user (over [parent]) and returns false. */
-    fun updateOrShowError(parent: Component, settings: Settings): Boolean = try {
-        update(settings)
+    fun updateOrShowError(parent: Component, settings: Settings, silent: Boolean = false): Boolean = try {
+        update(settings, silent)
         true
     } catch (e: Exception) {
         val message = "Cannot write $path:\n${e.message}"
