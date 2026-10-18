@@ -72,6 +72,15 @@ internal object Bytes {
         return end
     }
 
+    /** Whether the line `bytes[from, to)` holds only spaces, tabs and carriage returns: no content. */
+    fun isBlank(bytes: ByteArray, from: Int, to: Int): Boolean {
+        for (i in from..<to) {
+            val b = bytes[i]
+            if (b != SPACE && b != TAB && b != CR) return false
+        }
+        return true
+    }
+
     /** `bytes[from, to)` as UTF-8 text; beyond [maxBytes] cut at a character boundary and ending with `…`. */
     fun utf8Text(bytes: ByteArray, from: Int, to: Int, maxBytes: Int): String {
         if (to - from <= maxBytes) return String(bytes, from, to - from, Charsets.UTF_8)
@@ -134,6 +143,7 @@ internal object Bytes {
     }
 
     private const val SPACE = ' '.code.toByte()
+    private const val TAB = '\t'.code.toByte()
     private const val PLUS = '+'.code.toByte()
     private const val MINUS = '-'.code.toByte()
     private const val DOT = '.'.code.toByte()

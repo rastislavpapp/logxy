@@ -175,9 +175,9 @@ class ParsedLog private constructor(
                 } else {
                     val relative = columns.ints[field]!![local]
                     val end = if (length == Columns.TO_RECORD_END) bytes.size else minOf(relative + length, bytes.size)
-                    // Lines that are no JSON run to the record end and are shown as written.
-                    if (schema.fields[field].json && length != Columns.TO_RECORD_END) {
-                        val decoded = Json.decode(bytes, minOf(relative, end), end)
+                    val encoding = schema.fields[field].encoding
+                    if (encoding != Encoding.PLAIN && length != Columns.TO_RECORD_END) {
+                        val decoded = encoding.decode(bytes, minOf(relative, end), end)
                         firstLine(decoded, 0, decoded.size, maxBytes)
                     } else {
                         firstLine(bytes, minOf(relative, end), end, maxBytes)
@@ -444,7 +444,8 @@ class ParsedLog private constructor(
                     val base = syntax.fieldName(map.name, key)
                     val name = (sequenceOf(base) + generateSequence(2) { it + 1 }.map { "$base $it" })
                         .first { candidate -> fields.none { it.name.equals(candidate, ignoreCase = true) } }
-                    fields += Field(name, ColumnType.SPAN, mapKey = MapKey(field, key), json = syntax.json)
+                    val encoding = if (syntax.json) Encoding.JSON else Encoding.PLAIN
+                    fields += Field(name, ColumnType.SPAN, mapKey = MapKey(field, key), encoding = encoding)
                 }
             }
             return Schema(fields)
@@ -475,7 +476,7 @@ class ParsedLog private constructor(
                 val starts = if (parser.multiLine) {
                     matcher.match(reader.buffer, reader.lineFrom, reader.lineTo)
                 } else {
-                    !isBlank(reader.buffer, reader.lineFrom, reader.lineTo)
+                    !Bytes.isBlank(reader.buffer, reader.lineFrom, reader.lineTo)
                 }
                 if (starts) return reader.lineStart
             }
@@ -504,14 +505,14 @@ class ParsedLog private constructor(
             while (reader.next()) {
                 if (++lines and 1023 == 0) check()
                 if (header > 0) {
-                    header--
+                    if (!Bytes.isBlank(reader.buffer, reader.lineFrom, reader.lineTo)) header--
                     tail = Tail(reader.lineStart, reader.hasNewline, lastLineStartedRecord = false)
                     continue
                 }
                 val matched = matcher.match(reader.buffer, reader.lineFrom, reader.lineTo)
                 // Without multi-line records, only blank lines continue one.
-                val startsRecord =
-                    matched || !inRecord || (!multiLine && !isBlank(reader.buffer, reader.lineFrom, reader.lineTo))
+                val startsRecord = matched || !inRecord ||
+                    (!multiLine && !Bytes.isBlank(reader.buffer, reader.lineFrom, reader.lineTo))
                 if (matched) {
                     out.beginRecord(reader.lineStart)
                     matcher.write(out)
@@ -566,11 +567,6 @@ class ParsedLog private constructor(
                 global
             }
 
-        private fun isBlank(bytes: ByteArray, from: Int, to: Int): Boolean {
-            for (i in from..<to) if (!Json.isSpace(bytes[i])) return false
-            return true
-        }
-
         /**
          * The whole text of [field] of the record at [local] in [columns]: all its lines, not cut. Dictionary
          * ids are looked up with [dictionaryText]; [read] reads the record's bytes from where it starts.
@@ -596,7 +592,8 @@ class ParsedLog private constructor(
                 return String(bytes, relative, end - relative, Charsets.UTF_8)
             }
             val end = minOf(relative + length, bytes.size)
-            if (schema.fields[field].json) return String(Json.decode(bytes, relative, end), Charsets.UTF_8)
+            val encoding = schema.fields[field].encoding
+            if (encoding != Encoding.PLAIN) return String(encoding.decode(bytes, relative, end), Charsets.UTF_8)
             return String(bytes, relative, end - relative, Charsets.UTF_8)
         }
 

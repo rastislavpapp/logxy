@@ -3,9 +3,11 @@ package io.github.rastislavpapp.logxy.core.filter
 import io.github.rastislavpapp.logxy.core.Bytes
 import io.github.rastislavpapp.logxy.core.log.ColumnType
 import io.github.rastislavpapp.logxy.core.log.Columns
+import io.github.rastislavpapp.logxy.core.log.Encoding
 import io.github.rastislavpapp.logxy.core.log.LevelMapping
 import io.github.rastislavpapp.logxy.core.log.LogData
 import io.github.rastislavpapp.logxy.core.log.MapKey
+import io.github.rastislavpapp.logxy.core.parse.Csv
 import io.github.rastislavpapp.logxy.core.parse.Json
 import io.github.rastislavpapp.logxy.core.parse.MapSyntax
 import io.github.rastislavpapp.logxy.core.parse.MdcMap
@@ -498,7 +500,7 @@ private class Leaf(
             absent: Boolean,
             test: ValueTest,
         ): Leaf {
-            val json = snapshot.schema.fields[field].json
+            val encoding = snapshot.schema.fields[field].encoding
             return Leaf(condition, 2, true) { c, reader ->
                 val length = c.spanLength(field)
                 if (length == Columns.ABSENT_LENGTH) {
@@ -509,11 +511,12 @@ private class Leaf(
                     val offset = reader!!.load(from, to)
                     var end = offset + (to - from).toInt()
                     if (length == Columns.TO_RECORD_END) end = Bytes.trimLineEnd(reader.buffer, offset, end)
-                    // Lines that are no JSON run to the record end and read as written.
-                    if (json && length != Columns.TO_RECORD_END) {
-                        testJson(test, reader.buffer, offset, minOf(end, reader.loaded))
-                    } else {
-                        test.test(reader.buffer, offset, minOf(end, reader.loaded))
+                    end = minOf(end, reader.loaded)
+                    when {
+                        length == Columns.TO_RECORD_END -> test.test(reader.buffer, offset, end)
+                        encoding == Encoding.JSON -> testJson(test, reader.buffer, offset, end)
+                        encoding == Encoding.CSV -> testCsv(test, reader.buffer, offset, end)
+                        else -> test.test(reader.buffer, offset, end)
                     }
                 }
             }
@@ -525,6 +528,15 @@ private class Leaf(
                 return test.test(bytes, from + 1, to - 1)
             }
             val decoded = Json.decode(bytes, from, to)
+            return test.test(decoded, 0, decoded.size)
+        }
+
+        /** Tests the CSV cell `bytes[from, to)` as shown; one without quotes in it straight on its bytes. */
+        private fun testCsv(test: ValueTest, bytes: ByteArray, from: Int, to: Int): Boolean {
+            if (Csv.isQuoted(bytes, from, to) && Csv.isPlain(bytes, from + 1, to - 1)) {
+                return test.test(bytes, from + 1, to - 1)
+            }
+            val decoded = Csv.decode(bytes, from, to)
             return test.test(decoded, 0, decoded.size)
         }
 

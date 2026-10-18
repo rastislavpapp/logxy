@@ -35,7 +35,7 @@ internal object ParserCheck {
             val from = reader.lineFrom
             val to = reader.lineTo
             if (matcher.match(bytes, from, to)) return
-            if (isBlank(bytes, from, to)) continue
+            if (Bytes.isBlank(bytes, from, to)) continue
             if (firstContent == null) firstContent = shown(bytes, from, to)
             if (looksLikeContinuation(bytes, from, to)) continue
             if (firstMismatch == null) firstMismatch = shown(bytes, from, to)
@@ -49,11 +49,6 @@ internal object ParserCheck {
 
     private fun shown(bytes: ByteArray, from: Int, to: Int) =
         String(bytes, from, minOf(to - from, SHOWN_LINE_CHARS), Charsets.UTF_8)
-
-    private fun isBlank(bytes: ByteArray, from: Int, to: Int): Boolean {
-        for (i in from..<to) if (bytes[i] != ' '.code.toByte() && bytes[i] != '\t'.code.toByte()) return false
-        return true
-    }
 
     /** Blank, indented, or the start of a stack trace: lines that usually continue a record. */
     fun looksLikeContinuation(bytes: ByteArray, from: Int, to: Int): Boolean {

@@ -26,7 +26,7 @@ internal object Csv {
         }
 
     /**
-     * Splits `bytes[from, to)` at [separator], writing where each cell's content (without its quotes) starts and ends
+     * Splits `bytes[from, to)` at [separator], writing where each cell (with its quotes, see [decode]) starts and ends
      * into [starts] and [ends]. Returns the number of cells, or -1 if the line is no valid row: a quote that never
      * closes, text after a closing quote, or more cells than the arrays hold.
      */
@@ -45,9 +45,9 @@ internal object Csv {
                     }
                     close++
                 }
-                starts[count] = i + 1
-                ends[count++] = close
+                starts[count] = i
                 i = close + 1
+                ends[count++] = i
                 if (i == to) return count
                 if (bytes[i] != separator) return -1
             } else {
@@ -62,6 +62,32 @@ internal object Csv {
         }
     }
 
-    /** Whether the cell that starts at [start] in [bytes] was quoted, for a line that starts at [lineFrom]. */
-    fun wasQuoted(bytes: ByteArray, lineFrom: Int, start: Int) = start > lineFrom && bytes[start - 1] == QUOTE
+    /** Whether the cell `bytes[from, to)` is quoted, its closing quote included. */
+    fun isQuoted(bytes: ByteArray, from: Int, to: Int) =
+        to - from >= 2 && bytes[from] == QUOTE && bytes[to - 1] == QUOTE
+
+    /** Whether `bytes[from, to)` has no quote, so a quoted cell's content reads as written. */
+    fun isPlain(bytes: ByteArray, from: Int, to: Int): Boolean {
+        for (i in from..<to) if (bytes[i] == QUOTE) return false
+        return true
+    }
+
+    /**
+     * The cell `bytes[from, to)` as UTF-8 to show: a quoted one without its quotes and with `""` read as `"`, others
+     * as written. A quoted cell cut before its closing quote is shown up to the cut.
+     */
+    fun decode(bytes: ByteArray, from: Int, to: Int): ByteArray {
+        if (from >= to || bytes[from] != QUOTE) return bytes.copyOfRange(from, to)
+        val out = ByteArray(to - from - 1)
+        var o = 0
+        var i = from + 1
+        while (i < to) {
+            if (bytes[i] == QUOTE) {
+                if (i + 1 >= to || bytes[i + 1] != QUOTE) break
+                i++
+            }
+            out[o++] = bytes[i++]
+        }
+        return if (o == out.size) out else out.copyOf(o)
+    }
 }

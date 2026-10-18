@@ -2,6 +2,7 @@ package io.github.rastislavpapp.logxy.core.parse
 
 import io.github.rastislavpapp.logxy.core.log.ColumnType
 import io.github.rastislavpapp.logxy.core.log.Columns
+import io.github.rastislavpapp.logxy.core.log.Encoding
 import io.github.rastislavpapp.logxy.core.log.Field
 import io.github.rastislavpapp.logxy.core.log.Role
 import java.time.ZoneId
@@ -16,10 +17,10 @@ internal class RoleFields(keys: RoleKeys) {
         when (role) {
             Role.TIMESTAMP -> Field("Timestamp", ColumnType.TIMESTAMP, role, optional = true)
             Role.LEVEL -> Field("Level", ColumnType.LEVEL, role, optional = true)
-            Role.THREAD -> Field("Thread", ColumnType.DICT, role, json = true, optional = true)
-            Role.LOGGER -> Field("Logger", ColumnType.DICT, role, json = true, optional = true)
-            Role.MESSAGE -> Field("Message", ColumnType.SPAN, role, json = true)
-            else -> Field("Exception", ColumnType.SPAN, role, json = true, optional = true)
+            Role.THREAD -> Field("Thread", ColumnType.DICT, role, encoding = Encoding.JSON, optional = true)
+            Role.LOGGER -> Field("Logger", ColumnType.DICT, role, encoding = Encoding.JSON, optional = true)
+            Role.MESSAGE -> Field("Message", ColumnType.SPAN, role, encoding = Encoding.JSON)
+            else -> Field("Exception", ColumnType.SPAN, role, encoding = Encoding.JSON, optional = true)
         }
     }
 

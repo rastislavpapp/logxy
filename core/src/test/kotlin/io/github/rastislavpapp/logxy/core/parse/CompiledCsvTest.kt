@@ -1,5 +1,8 @@
 package io.github.rastislavpapp.logxy.core.parse
 
+import io.github.rastislavpapp.logxy.core.filter.FilterEngine
+import io.github.rastislavpapp.logxy.core.filter.TextCondition
+import io.github.rastislavpapp.logxy.core.filter.TextOp
 import io.github.rastislavpapp.logxy.core.index.IndexOptions
 import io.github.rastislavpapp.logxy.core.index.IndexProgress
 import io.github.rastislavpapp.logxy.core.log.ParsedLog
@@ -17,14 +20,14 @@ class CompiledCsvTest {
     @TempDir
     lateinit var dir: Path
 
-    /** The cells of [line] split at [separator], or null if it is no valid row. */
+    /** The cells of [line] split at [separator] as shown, or null if it is no valid row. */
     private fun cells(line: String, separator: Char = ','): List<String>? {
         val bytes = line.toByteArray()
         val starts = IntArray(Csv.MAX_COLUMNS + 1)
         val ends = IntArray(Csv.MAX_COLUMNS + 1)
         val count = Csv.cells(bytes, 0, bytes.size, separator.code.toByte(), starts, ends)
         if (count < 0) return null
-        return List(count) { String(bytes, starts[it], ends[it] - starts[it]) }
+        return List(count) { String(Csv.decode(bytes, starts[it], ends[it])) }
     }
 
     private fun infer(text: String, csv: Boolean = true) =
@@ -43,7 +46,7 @@ class CompiledCsvTest {
     @Test
     fun `separators inside quotes belong to the cell`() {
         assertEquals(listOf("Smith, John", "42"), cells("\"Smith, John\",42"))
-        assertEquals(listOf("say \"\"hi\"\"", "x"), cells("\"say \"\"hi\"\"\",x"))
+        assertEquals(listOf("say \"hi\"", "x"), cells("\"say \"\"hi\"\"\",x"))
         assertEquals(listOf("", "x"), cells("\"\",x"))
         // A quote that does not start a cell is text.
         assertEquals(listOf("5\" pipe", "x"), cells("5\" pipe,x"))
@@ -70,6 +73,21 @@ class CompiledCsvTest {
             2;Bob;4,00
         """)
         assertEquals(Parser.Csv("CSV (;)", ';', listOf("id", "name", "price")), semicolons)
+    }
+
+    @Test
+    fun `quoted cells read without their quotes, also when cut`() {
+        fun decode(cell: String) = String(Csv.decode(cell.toByteArray(), 0, cell.length))
+        assertEquals("a \"b\" c", decode("\"a \"\"b\"\" c\""))
+        assertEquals("plain \"\"", decode("plain \"\""))
+        assertEquals("cut", decode("\"cut"))
+        assertEquals("", decode("\"\""))
+    }
+
+    @Test
+    fun `the header is the first line that is not blank`() {
+        assertEquals(listOf("a", "b"), ParserInference.infer(listOf(" ", "a,b", "1,2").map { it.toByteArray() }, true)
+            .let { (it as Parser.Csv).headers })
     }
 
     @Test
@@ -113,11 +131,14 @@ class CompiledCsvTest {
     }
 
     @Test
-    fun `reads the cells of a row as the columns`() {
+    fun `reads the cells of a row as the columns, and a line that is no row whole in the first`() {
         val compiled = Parser.Csv("CSV (,)", ',', listOf("id", "name")).compile()
-        val lines = listOf("1,\"Smith, J\"", "2,Bob", "3", "4,\"open").map { it.toByteArray() }
+        val lines = listOf("1,\"Smith, J\"", "2,\"B \"\"b\"\"\"", "3", "4,\"open", "").map { it.toByteArray() }
         val rows = ParserPreview.preview(compiled, lines).map { it.values }
-        assertEquals(listOf(listOf("1", "Smith, J"), listOf("2", "Bob"), null, null), rows)
+        val expected = listOf(
+            listOf("1", "Smith, J"), listOf("2", "B \"b\""), listOf("3", ""), listOf("4,\"open", ""), null,
+        )
+        assertEquals(expected, rows)
     }
 
     @Test
@@ -130,6 +151,14 @@ class CompiledCsvTest {
         assertEquals(Parser.Raw, Parser.detect(Files.writeString(dir.resolve("people.txt"), text)))
     }
 
+    @Test
+    fun `detects a csv file whose sample ends inside a row`() {
+        // Rows of 300 bytes: the sample's 256 KB end mid-row, inside a quoted cell, before 1000 lines.
+        val row = "1,\"" + "x".repeat(294) + "\"\n"
+        val file = Files.writeString(dir.resolve("wide.csv"), "id,note\n" + row.repeat(2000))
+        assertEquals(Parser.Csv("CSV (,)", ',', listOf("id", "note")), Parser.detect(file))
+    }
+
     private fun build(path: Path, options: IndexOptions = IndexOptions()) =
         runBlocking { ParsedLog.build(path, CompiledCsv(',', listOf("id", "name")), IndexProgress(), options) }
 
@@ -139,8 +168,40 @@ class CompiledCsvTest {
     fun `the header row is no record`() {
         val file = Files.writeString(dir.resolve("a.csv"), "id,name\r\n1,Ann\r\n2,\"B, b\"\r\n3\r\n")
         build(file).use { log ->
-            assertEquals(listOf(listOf("1", "Ann"), listOf("2", "B, b"), listOf("", "")), log.rows())
+            assertEquals(listOf(listOf("1", "Ann"), listOf("2", "B, b"), listOf("3", "")), log.rows())
             assertEquals("1,Ann\r\n", log.sourceText(0))
+        }
+    }
+
+    @Test
+    fun `blank lines before the header are skipped with it`() {
+        val file = Files.writeString(dir.resolve("blank.csv"), "\n \nid,name\n1,Ann\n")
+        build(file).use { log -> assertEquals(listOf(listOf("1", "Ann")), log.rows()) }
+    }
+
+    @Test
+    fun `quoted values show, filter and read in full without their escapes`() {
+        val file = Files.writeString(dir.resolve("q.csv"), "id,name\n1,\"say \"\"hi\"\"\"\n2,\"plain\"\n3,a\"b\n")
+        build(file).use { log ->
+            assertEquals(listOf(listOf("1", "say \"hi\""), listOf("2", "plain"), listOf("3", "a\"b")), log.rows())
+            assertEquals("say \"hi\"", log.fieldText(0, 1))
+            val engine = FilterEngine(log)
+            fun rows(value: String) =
+                runBlocking { engine.prepare(TextCondition("name", TextOp.EQUALS, value)).run() }.rows.toList()
+            assertEquals(listOf(0), rows("say \"hi\""))
+            assertEquals(listOf(1), rows("plain"))
+            assertEquals(listOf(2), rows("a\"b"))
+        }
+    }
+
+    @Test
+    fun `a line that is no row is found by its text`() {
+        val file = Files.writeString(dir.resolve("bad.csv"), "id,name\n1,Ann\n2,Bob,extra\n")
+        build(file).use { log ->
+            assertEquals(listOf(listOf("1", "Ann"), listOf("2,Bob,extra", "")), log.rows())
+            val engine = FilterEngine(log)
+            val found = runBlocking { engine.prepare(TextCondition("id", TextOp.MATCHES, "extra")).run() }
+            assertEquals(listOf(1), found.rows.toList())
         }
     }
 
