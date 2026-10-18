@@ -20,13 +20,14 @@ internal object ParserInference {
     private const val MIN_SEPARATORS = 2
 
     /**
-     * A parser guessed from the [sample] lines: JSON lines with the keys they use, else a pattern layout; null if
-     * neither fits.
+     * A parser guessed from the [sample] lines: JSON lines with the keys they use, else CSV if [csv] allows it
+     * (the caller knows the file looks like one), else a pattern layout; null if none fits.
      */
-    fun infer(sample: List<ByteArray>): Parser? {
+    fun infer(sample: List<ByteArray>, csv: Boolean = false): Parser? {
         val lines = sample.filter { !ParserCheck.looksLikeContinuation(it, 0, it.size) }
-        if (lines.isEmpty()) return null
-        return inferJson(lines) ?: inferText(lines)
+        inferJson(lines)?.let { return it }
+        if (csv) CsvInference.infer(sample)?.let { return it }
+        return if (lines.isEmpty()) null else inferText(lines)
     }
 
     // JSON lines

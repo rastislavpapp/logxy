@@ -244,8 +244,11 @@ class LogTab(
             add(PopupItem("Edit Parsers", Icons.settings, separatorBefore = true) {
                 editParsers(chosen ?: session.parser)
             })
-            // A guessed parser is none of the known ones; saving it makes it one the user can correct.
-            val detected = session.parser.takeIf { chosen == null && session.parserDetected && it !in known }
+            // A guessed parser is none of the known ones; saving it makes it one the user can correct. Not a CSV
+            // one: its headers belong to the file.
+            val detected = session.parser.takeIf {
+                chosen == null && session.parserDetected && it !in known && it !is Parser.Csv
+            }
             if (detected != null) add(PopupItem("Save Detected Parser…") { editParsers(detected, adopt = true) })
         }
         showPopupList(parserButton, items)

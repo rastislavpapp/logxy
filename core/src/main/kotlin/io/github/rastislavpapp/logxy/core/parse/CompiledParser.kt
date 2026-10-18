@@ -17,6 +17,9 @@ abstract class CompiledParser {
     /** Whether lines that do not start a record continue the one before (stack traces), or are records of their own. */
     open val multiLine: Boolean get() = true
 
+    /** Lines at the start of the file that are no records, such as a CSV header row. */
+    open val headerLines: Int get() = 0
+
     /** The record `bytes[from, to)` laid out for reading in full, or null to show it as written. */
     open fun detailText(bytes: ByteArray, from: Int, to: Int): String? = null
 }
