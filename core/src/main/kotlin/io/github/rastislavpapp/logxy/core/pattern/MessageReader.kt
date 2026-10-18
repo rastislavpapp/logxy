@@ -4,6 +4,7 @@ import io.github.rastislavpapp.logxy.core.filter.RecordSnapshot
 import io.github.rastislavpapp.logxy.core.filter.SpanReader
 import io.github.rastislavpapp.logxy.core.log.ColumnType
 import io.github.rastislavpapp.logxy.core.log.Columns
+import io.github.rastislavpapp.logxy.core.log.Encoding
 import io.github.rastislavpapp.logxy.core.parse.Json
 import java.nio.channels.FileChannel
 
@@ -11,7 +12,7 @@ import java.nio.channels.FileChannel
 internal class MessageReader(private val snapshot: RecordSnapshot, private val field: Int, channel: FileChannel) {
     private val cursor = snapshot.cursor()
     private val type = snapshot.schema.fields.getOrNull(field)?.type
-    private val json = snapshot.schema.fields.getOrNull(field)?.json == true
+    private val json = snapshot.schema.fields.getOrNull(field)?.encoding == Encoding.JSON
     private val reader = if (type == ColumnType.SPAN) SpanReader(channel, snapshot.end) else null
     private val dictionary =
         if (type == ColumnType.DICT) arrayOfNulls<ByteArray>(snapshot.dictionaryTexts(field).size) else null

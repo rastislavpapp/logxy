@@ -2,6 +2,7 @@ package io.github.rastislavpapp.logxy.core.parse
 
 import io.github.rastislavpapp.logxy.core.log.ColumnType
 import io.github.rastislavpapp.logxy.core.log.Columns
+import io.github.rastislavpapp.logxy.core.log.Encoding
 import io.github.rastislavpapp.logxy.core.log.Field
 import io.github.rastislavpapp.logxy.core.log.Schema
 import java.time.Instant
@@ -22,8 +23,9 @@ class CompiledLogfmt(
 
     private val mapField = roles.fields.size
 
-    override val schema =
-        Schema(roles.fields + Field("logfmt", ColumnType.SPAN, map = LogfmtMap(roles.excluded), json = true))
+    override val schema = Schema(
+        roles.fields + Field("logfmt", ColumnType.SPAN, map = LogfmtMap(roles.excluded), encoding = Encoding.JSON),
+    )
 
     private val displayFormat = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS").withZone(zone)
 

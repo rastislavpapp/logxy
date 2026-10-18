@@ -19,12 +19,18 @@ object ParserPreview {
 
     private const val SAMPLE_BYTES = 256 * 1024
 
-    /** The first lines of [path], up to [maxLines], from its first 256 KB; empty lines left out if [skipEmpty]. */
+    /**
+     * The first lines of [path], up to [maxLines], from its first 256 KB; empty lines left out if [skipEmpty]. A line
+     * cut off by that limit is left out too unless it is the only one, so that it does not read as a whole line;
+     * an unfinished last line of a smaller file is kept.
+     */
     fun sample(path: Path, maxLines: Int, skipEmpty: Boolean = false): List<ByteArray> =
         FileChannel.open(path, StandardOpenOption.READ).use { channel ->
+            val cut = channel.size() > SAMPLE_BYTES
             val reader = LineReader(channel, 0, minOf(channel.size(), SAMPLE_BYTES.toLong()), SAMPLE_BYTES)
             buildList {
                 while (size < maxLines && reader.next()) {
+                    if (cut && !reader.hasNewline && isNotEmpty()) break
                     if (skipEmpty && reader.lineTo == reader.lineFrom) continue
                     add(reader.buffer.copyOfRange(reader.lineFrom, reader.lineTo))
                 }
@@ -52,11 +58,7 @@ object ParserPreview {
                     when (val length = columns.spanLength(field, 0)) {
                         Columns.ABSENT_LENGTH -> ""
                         Columns.TO_RECORD_END -> String(line, start, line.size - start, Charsets.UTF_8)
-                        else -> if (fields[field].json) {
-                            Json.text(line, start, start + length)
-                        } else {
-                            String(line, start, length, Charsets.UTF_8)
-                        }
+                        else -> String(fields[field].encoding.decode(line, start, start + length), Charsets.UTF_8)
                     }
                 }
             }

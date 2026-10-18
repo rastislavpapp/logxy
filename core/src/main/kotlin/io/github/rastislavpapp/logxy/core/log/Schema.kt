@@ -1,5 +1,7 @@
 package io.github.rastislavpapp.logxy.core.log
 
+import io.github.rastislavpapp.logxy.core.parse.Csv
+import io.github.rastislavpapp.logxy.core.parse.Json
 import io.github.rastislavpapp.logxy.core.parse.MapSyntax
 
 /** How a field's values are stored, see [ParsedLog]. */
@@ -33,8 +35,7 @@ class Field internal constructor(
     internal val map: MapSyntax? = null,
     /** For a field taken from a map: the map's field and the entry's key. Its values are read from the map. */
     internal val mapKey: MapKey? = null,
-    /** Values are JSON values: strings are quoted and escaped, see [io.github.rastislavpapp.logxy.core.parse.Json]. */
-    internal val json: Boolean = false,
+    internal val encoding: Encoding = Encoding.PLAIN,
     /** Hidden if no record has a value, e.g. a role that the keys of a JSON log do not fill. */
     internal val optional: Boolean = false,
 ) {
@@ -45,7 +46,29 @@ class Field internal constructor(
      * optional field, hidden while none has it or when a map is split into its keys.
      */
     internal fun copy(type: ColumnType = this.type, hidden: Boolean = this.hidden) =
-        Field(name, type, role, toRecordEnd, hidden, map, mapKey, json, optional)
+        Field(name, type, role, toRecordEnd, hidden, map, mapKey, encoding, optional)
+}
+
+/**
+ * How the values of a SPAN field are written in the file, and so how they read as shown. A value that runs to the
+ * end of its record is never encoded: that is a line the parser did not split, shown as written.
+ */
+internal enum class Encoding {
+    PLAIN,
+
+    /** JSON values: strings are quoted and escaped, see [Json]. */
+    JSON,
+
+    /** CSV cells: a quoted one has `""` for each quote in it, see [Csv]. */
+    CSV,
+    ;
+
+    /** The value `bytes[from, to)` as UTF-8 to show. */
+    fun decode(bytes: ByteArray, from: Int, to: Int): ByteArray = when (this) {
+        PLAIN -> bytes.copyOfRange(from, to)
+        JSON -> Json.decode(bytes, from, to)
+        CSV -> Csv.decode(bytes, from, to)
+    }
 }
 
 /** A key of a map field; see [Field.mapKey]. */
