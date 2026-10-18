@@ -20,6 +20,7 @@ class WindowSelectionModel(private val window: RowWindow) : ListSelectionModel {
     private val listeners = EventListenerList()
     private var adjusting = false
     private var changedWhileAdjusting = false
+    private var kept = false
 
     private val rows: TableWindow
         get() {
@@ -34,6 +35,16 @@ class WindowSelectionModel(private val window: RowWindow) : ListSelectionModel {
 
     /** Like [extendTo], but other rows stay selected; see [Selection.extendKeepingOthers]. */
     fun extendKeepingOthers(index: Int) = change { selection.extendKeepingOthers(row(index)) }
+
+    /** Runs [block] ignoring all edits and adjusting, so the selection stays as it is and no listener hears. */
+    fun keeping(block: () -> Unit) {
+        kept = true
+        try {
+            block()
+        } finally {
+            kept = false
+        }
+    }
 
     /** Selects all rows of the shown log there are now. */
     fun selectAll() = change { selection.selectAll(window.totalRowCount) }
@@ -75,6 +86,7 @@ class WindowSelectionModel(private val window: RowWindow) : ListSelectionModel {
         change { selection.delete(row(minOf(index0, index1)), row(maxOf(index0, index1)) + 1) }
 
     override fun setValueIsAdjusting(valueIsAdjusting: Boolean) {
+        if (kept) return
         adjusting = valueIsAdjusting
         if (!adjusting && changedWhileAdjusting) fire()
     }
@@ -93,6 +105,7 @@ class WindowSelectionModel(private val window: RowWindow) : ListSelectionModel {
         listeners.remove(ListSelectionListener::class.java, listener)
 
     private inline fun change(edit: () -> Unit) {
+        if (kept) return
         edit()
         fire()
     }

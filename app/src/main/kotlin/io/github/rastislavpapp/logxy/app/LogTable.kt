@@ -15,6 +15,7 @@ import javax.swing.JTable
 import javax.swing.SwingConstants
 import javax.swing.SwingUtilities
 import javax.swing.UIManager
+import javax.swing.event.TableModelEvent
 import javax.swing.table.DefaultTableCellRenderer
 
 private const val CELL_PADDING = 12
@@ -98,6 +99,14 @@ class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
         // Also called from JTable's constructor, before the model is set.
         @Suppress("SENSELESS_COMPARISON")
         if (logModel != null) updateLook()
+    }
+
+    // JTable clears the selection when the model's columns change, e.g. one is hidden; the rows stay, so it stays.
+    override fun tableChanged(e: TableModelEvent?) {
+        // Also called from JTable's constructor, before the selection model is set.
+        @Suppress("SENSELESS_COMPARISON")
+        val columnsChanged = rowSelection != null && (e == null || e.firstRow == TableModelEvent.HEADER_ROW)
+        if (columnsChanged) rowSelection.keeping { super.tableChanged(e) } else super.tableChanged(e)
     }
 
     // Columns are created again when the model's columns change, e.g. some are hidden.
