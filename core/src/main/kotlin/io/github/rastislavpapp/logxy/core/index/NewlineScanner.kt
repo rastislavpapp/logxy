@@ -9,11 +9,22 @@ object NewlineScanner {
     private const val NEWLINES = 0x0A0A0A0A0A0A0A0AL
     private const val LOW7 = 0x7F7F7F7F7F7F7F7FL
 
+    /** Experiment: `-Dlogxy.newlines=vector` uses [VectorNewlineScanner]; a static final, so the JIT folds it. */
+    private val VECTOR = System.getProperty("logxy.newlines") == "vector"
+
     /**
      * Appends `base + i + 1` to [out] for every `\n` at buffer index `i` in `from..<to`,
      * i.e. the file offset where the next line starts.
      */
     fun scan(buffer: ByteBuffer, from: Int, to: Int, base: Long, out: LongChunkList) {
+        if (VECTOR) VectorNewlineScanner.scan(buffer, from, to, base, out) else swarScan(buffer, from, to, base, out)
+    }
+
+    /** Index of the first `\n` in `buffer[from, to)`, or -1. */
+    fun indexOf(buffer: ByteBuffer, from: Int, to: Int): Int =
+        if (VECTOR) VectorNewlineScanner.indexOf(buffer, from, to) else swarIndexOf(buffer, from, to)
+
+    fun swarScan(buffer: ByteBuffer, from: Int, to: Int, base: Long, out: LongChunkList) {
         buffer.order(ByteOrder.LITTLE_ENDIAN)
         var i = from
         val wordEnd = to - 7
@@ -33,8 +44,7 @@ object NewlineScanner {
         }
     }
 
-    /** Index of the first `\n` in `buffer[from, to)`, or -1. */
-    fun indexOf(buffer: ByteBuffer, from: Int, to: Int): Int {
+    fun swarIndexOf(buffer: ByteBuffer, from: Int, to: Int): Int {
         buffer.order(ByteOrder.LITTLE_ENDIAN)
         var i = from
         val wordEnd = to - 7
