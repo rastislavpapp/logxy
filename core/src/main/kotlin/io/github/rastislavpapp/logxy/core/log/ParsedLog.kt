@@ -499,8 +499,15 @@ class ParsedLog private constructor(
             var inRecord = hasPrevious
             var tail = Tail(from, lastLineComplete = true, lastLineStartedRecord = false)
             var lines = 0
+            // Header lines are skipped wherever the file is read from its start, also again when one is unfinished.
+            var header = if (from == 0L) parser.headerLines else 0
             while (reader.next()) {
                 if (++lines and 1023 == 0) check()
+                if (header > 0) {
+                    header--
+                    tail = Tail(reader.lineStart, reader.hasNewline, lastLineStartedRecord = false)
+                    continue
+                }
                 val matched = matcher.match(reader.buffer, reader.lineFrom, reader.lineTo)
                 // Without multi-line records, only blank lines continue one.
                 val startsRecord =

@@ -163,6 +163,27 @@ sealed interface Parser {
         }
     }
 
+    /**
+     * CSV with a header row, only ever guessed from a `.csv` file; see [CompiledCsv]. It is not stored in settings,
+     * as its [headers] belong to one file.
+     */
+    data class Csv(
+        override val name: String,
+        val separator: Char,
+        val headers: List<String>,
+        override val aliases: Map<String, String> = emptyMap(),
+    ) : Parser {
+        override val kind get() = Companion
+        override fun compile() = CompiledCsv(separator, headers)
+        override fun withName(name: String) = copy(name = name)
+        override fun withAliases(aliases: Map<String, String>) = copy(aliases = aliases)
+
+        /** Not in [KINDS], so settings never read one back. */
+        companion object : Kind("csv") {
+            override fun read(name: String, properties: (String) -> String?): Parser? = null
+        }
+    }
+
     companion object {
         /** Every kind of parser, as settings store them. Lazy, as [Raw] may be what is initializing this companion. */
         val KINDS: List<Kind> by lazy { listOf(Raw.kind, Pattern, Regex, Json, Logfmt, AccessLog) }
@@ -215,7 +236,7 @@ sealed interface Parser {
             val sample = ParserPreview.sample(path, SAMPLE_LINES, skipEmpty = true)
             if (sample.isEmpty()) return Raw
             val realLines = sample.count { !ParserCheck.looksLikeContinuation(it, 0, it.size) }
-            val guess = ParserInference.infer(sample)
+            val guess = ParserInference.infer(sample, csv = path.toString().endsWith(".csv", ignoreCase = true))
             // Guessed JSON keys refine the built-in JSON parser, which reads the same lines.
             val kept = if (guess is Json) builtIn.filter { it !is Json } else builtIn
             val scored = (preferred + kept + listOfNotNull(guess)).mapNotNull { candidate ->
