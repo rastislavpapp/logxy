@@ -211,6 +211,46 @@ class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
     private fun sampleLength(column: Int, fallback: Int): Int =
         (0..<minOf(rowCount, 100)).map { (getValueAt(it, column) as String).length }.firstOrNull { it > 0 } ?: fallback
 
+    /**
+     * The character of the text in the cell at [row] and [column] that is painted at [x]; -1 if none is, e.g. past
+     * its end or where a long value is cut off.
+     */
+    fun textOffsetAt(row: Int, column: Int, x: Int): Int {
+        val renderer = prepareRenderer(getCellRenderer(row, column), row, column) as? JLabel ?: return -1
+        val text = renderer.text ?: return -1
+        val cell = getCellRect(row, column, false)
+        renderer.setBounds(0, 0, cell.width, cell.height)
+        val textBounds = Rectangle()
+        val visible = layOut(renderer, text, textBounds)
+        val metrics = renderer.getFontMetrics(renderer.font)
+        var right = cell.x + textBounds.x
+        if (x < right) return -1
+        for (i in 0..<visible) {
+            right += metrics.charWidth(text[i])
+            if (x < right) return i
+        }
+        return -1
+    }
+
+    /**
+     * Lays out [text] in [label] as the label paints it, putting where it goes into [textBounds]; the number of its
+     * characters shown, before a cut value's "...".
+     */
+    private fun layOut(label: JLabel, text: String, textBounds: Rectangle): Int {
+        val insets = label.insets
+        val view = Rectangle(
+            insets.left,
+            insets.top,
+            label.width - insets.left - insets.right,
+            label.height - insets.top - insets.bottom,
+        )
+        val shown = SwingUtilities.layoutCompoundLabel(
+            label, label.getFontMetrics(label.font), text, null, label.verticalAlignment, label.horizontalAlignment,
+            label.verticalTextPosition, label.horizontalTextPosition, view, Rectangle(), textBounds, 0,
+        )
+        return if (shown == text) text.length else (shown.length - CLIP.length).coerceAtLeast(0)
+    }
+
     /** Paints the matches behind the text of left-aligned cells. */
     private open inner class HighlightRenderer : DefaultTableCellRenderer() {
         private var ranges = IntArray(0)
@@ -241,20 +281,9 @@ class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
                     cleared = true
                 }
                 val metrics = getFontMetrics(font)
-                val insets = insets
-                val view = Rectangle(
-                    insets.left,
-                    insets.top,
-                    width - insets.left - insets.right,
-                    height - insets.top - insets.bottom,
-                )
                 val textBounds = Rectangle()
-                // Laid out as the label paints it, so marks stop where a cut value's "..." begins.
-                val shown = SwingUtilities.layoutCompoundLabel(
-                    this, metrics, text, null, verticalAlignment, horizontalAlignment,
-                    verticalTextPosition, horizontalTextPosition, view, Rectangle(), textBounds, 0,
-                )
-                val visible = if (shown == text) text.length else (shown.length - CLIP.length).coerceAtLeast(0)
+                // Marks stop where a cut value's "..." begins.
+                val visible = layOut(this, text, textBounds)
                 fun mark(ranges: IntArray, color: Color) {
                     g.color = color
                     for (i in ranges.indices step 2) {

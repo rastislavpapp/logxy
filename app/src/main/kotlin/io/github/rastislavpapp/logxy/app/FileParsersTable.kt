@@ -338,9 +338,6 @@ class FileParsersTable(
         fun parserName(parser: Parser?) = parser?.name ?: "Auto-detect"
 
         /** [text] as a tooltip keeping its line breaks. */
-        fun htmlLines(text: String): String {
-            val escaped = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-            return "<html>" + escaped.replace("\n", "<br>") + "</html>"
-        }
+        fun htmlLines(text: String): String = "<html>" + escapeHtml(text).replace("\n", "<br>") + "</html>"
     }
 }

@@ -17,17 +17,21 @@ import java.awt.BorderLayout
 import java.awt.CardLayout
 import java.awt.Color
 import java.awt.Component
+import java.awt.Cursor
 import java.awt.Font
 import java.awt.Graphics
 import java.awt.Graphics2D
+import java.awt.Point
 import java.awt.RenderingHints
 import java.awt.Toolkit
 import java.awt.datatransfer.StringSelection
 import java.awt.event.HierarchyEvent
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
+import javax.swing.JCheckBoxMenuItem
 import javax.swing.JComponent
 import javax.swing.JLabel
+import javax.swing.JMenu
 import javax.swing.JMenuItem
 import javax.swing.JPanel
 import javax.swing.JPopupMenu
@@ -73,16 +77,31 @@ fun Schema.hasTemplates() =
  * The shown rows grouped by the template of their message (see [Templates]), most frequent first, with
  * a count per level. Counts only while it is showing: [count] does the work and is cancelled when a newer
  * count starts. Filtering by the selected templates goes through [addRules].
+ *
+ * While [canChart], clicking a template's `{}` charts that slot in [charts] or stops, as does the context menu; a
+ * charted slot is drawn bold in its chart's color.
  */
 class TemplatesPanel(
     private val scope: CoroutineScope,
     private val count: suspend () -> TemplateCounts?,
     private val progress: () -> Double,
     private val addRules: (List<Query>) -> Unit,
+    private val charts: SlotCharts,
+    private val canChart: () -> Boolean,
 ) : JPanel(BorderLayout()) {
 
     private val model = TemplatesModel()
-    private val table = JTable(model)
+
+    /** The slot under the mouse, as its template and number, or null. */
+    private var hovered: Pair<String, Int>? = null
+
+    private val table = object : JTable(model) {
+        override fun getToolTipText(e: MouseEvent): String? {
+            val (template, slot) = slotAt(e.point) ?: return super.getToolTipText(e)
+            val charted = charts.chart(template, slot) != null
+            return if (charted) "Stop charting slot ${slot + 1}" else "Chart slot ${slot + 1} over time"
+        }
+    }
     private val summary = JLabel(" ")
     private val scrollPane = JScrollPane(table).apply { border = null }
     private val placeholders = Placeholders()
@@ -102,6 +121,9 @@ class TemplatesPanel(
     /** Whether the records can be filtered by template; see [hasTemplates]. */
     var canFilter = true
 
+    /** Whether the panel shows counts, so the templates of the shown rows have been found. */
+    val hasCounts: Boolean get() = model.hasCounts
+
     init {
         add(JPanel(MigLayout("insets 4 8 2 8", "[grow]")).apply { add(summary) }, BorderLayout.NORTH)
         table.autoCreateRowSorter = true
@@ -114,14 +136,23 @@ class TemplatesPanel(
         addHierarchyListener { e ->
             if (e.changeFlags and HierarchyEvent.SHOWING_CHANGED.toLong() != 0L && isShowing && stale) refresh()
         }
-        table.addMouseListener(object : MouseAdapter() {
+        val mouse = object : MouseAdapter() {
             override fun mousePressed(e: MouseEvent) = menu(e)
             override fun mouseReleased(e: MouseEvent) = menu(e)
 
             override fun mouseClicked(e: MouseEvent) {
-                val onRow = table.rowAtPoint(e.point) >= 0
-                if (e.clickCount == 2 && e.button == MouseEvent.BUTTON1 && onRow) showOnly(selectedTemplates())
+                if (e.button != MouseEvent.BUTTON1) return
+                val slot = slotAt(e.point)
+                when {
+                    slot != null && e.clickCount == 1 -> toggleChart(slot.first, slot.second)
+                    // The first click of a double click on a slot charted it: that is all it does.
+                    slot == null && e.clickCount == 2 && table.rowAtPoint(e.point) >= 0 -> showOnly(selectedTemplates())
+                }
             }
+
+            override fun mouseMoved(e: MouseEvent) = hover(slotAt(e.point))
+
+            override fun mouseExited(e: MouseEvent) = hover(null)
 
             // The popup trigger comes with the press on some systems, with the release on others.
             private fun menu(e: MouseEvent) {
@@ -131,7 +162,39 @@ class TemplatesPanel(
                 if (!table.isRowSelected(row)) table.setRowSelectionInterval(row, row)
                 showMenu(e.x, e.y)
             }
-        })
+        }
+        table.addMouseListener(mouse)
+        table.addMouseMotionListener(mouse)
+    }
+
+    private fun toggleChart(template: String, slot: Int) = toggleChart(this, charts, template, slot)
+
+    private fun hover(slot: Pair<String, Int>?) {
+        if (slot == hovered) return
+        hovered = slot
+        table.cursor = if (slot != null) Cursor.getPredefinedCursor(Cursor.HAND_CURSOR) else null
+        table.repaint()
+    }
+
+    /** The template and slot of the `{}` at [point], or null; only while [canChart]. */
+    private fun slotAt(point: Point): Pair<String, Int>? {
+        if (!canChart()) return null
+        val row = table.rowAtPoint(point)
+        val column = table.columnAtPoint(point)
+        if (row < 0 || column != table.columnCount - 1) return null
+        val template = model.template(table.convertRowIndexToModel(row))?.takeIf { it.isNotEmpty() } ?: return null
+        val renderer = table.prepareRenderer(table.getCellRenderer(row, column), row, column) as JComponent
+        val metrics = table.getFontMetrics(table.font)
+        // Laid out as TemplateRenderer paints it.
+        var x = table.getCellRect(row, column, false).x + renderer.insets.left
+        val parts = template.split(Templates.PLACEHOLDER)
+        for (slot in 0..<parts.lastIndex) {
+            x += metrics.stringWidth(parts[slot])
+            val width = metrics.stringWidth(Templates.PLACEHOLDER)
+            if (point.x in x..<x + width) return template to slot
+            x += width
+        }
+        return null
     }
 
     override fun updateUI() {
@@ -287,6 +350,19 @@ class TemplatesPanel(
                 Toolkit.getDefaultToolkit().systemClipboard.setContents(selection, null)
             }
         })
+        val template = templates.singleOrNull()
+        val slots = template?.let { Templates.slotCount(it) } ?: 0
+        if (canChart() && template != null && slots > 0) {
+            popup.addSeparator()
+            popup.add(JMenu("Chart Slot").apply {
+                for (slot in 0..<slots) {
+                    val text = "${slot + 1}: ${SlotChart.label(template, slot).cut(MAX_MENU_CHARS)}"
+                    add(JCheckBoxMenuItem(text, charts.chart(template, slot) != null).apply {
+                        addActionListener { toggleChart(template, slot) }
+                    })
+                }
+            })
+        }
         popup.show(table, x, y)
     }
 
@@ -349,6 +425,8 @@ class TemplatesPanel(
             return true
         }
 
+        val hasCounts get() = counts != null
+
         fun levelAt(column: Int): Level? = levels.getOrNull(column - 1)
 
         /** Null for the records over the template limit. */
@@ -396,10 +474,14 @@ class TemplatesPanel(
         }
     }
 
-    /** A template with its placeholders dimmed, so the fixed text stands out. */
-    private class TemplateRenderer : DefaultTableCellRenderer() {
+    /**
+     * A template with its placeholders dimmed, so the fixed text stands out; a charted one bold in its chart's color,
+     * the one under the mouse underlined.
+     */
+    private inner class TemplateRenderer : DefaultTableCellRenderer() {
         private var template: String? = null
         private var dim = foreground
+        private var selected = false
 
         override fun getTableCellRendererComponent(
             table: JTable, value: Any?, isSelected: Boolean, hasFocus: Boolean, row: Int, column: Int,
@@ -412,6 +494,7 @@ class TemplatesPanel(
                 else -> template
             }
             super.getTableCellRendererComponent(table, text, isSelected, hasFocus, row, column)
+            selected = isSelected
             dim = if (isSelected) foreground else UIManager.getColor("Label.disabledForeground")
             if (template.isNullOrEmpty()) foreground = dim
             toolTipText = template?.takeIf { it.isNotEmpty() }
@@ -431,15 +514,25 @@ class TemplatesPanel(
             var x = insets.left
             val y = (height - metrics.height) / 2 + metrics.ascent
             val parts = template.split(Templates.PLACEHOLDER)
+            val plain = font
+            val bold = plain.deriveFont(Font.BOLD)
+            val hovered = hovered?.takeIf { it.first == template }?.second
             for ((i, part) in parts.withIndex()) {
                 if (x >= width) break
                 g2.color = foreground
+                g2.font = plain
                 BasicGraphicsUtils.drawString(this, g2, part, x.toFloat(), y.toFloat())
                 x += metrics.stringWidth(part)
                 if (i < parts.lastIndex) {
-                    g2.color = dim
+                    // Advanced by the plain width, as the mouse finds slots by it; monospaced bold is as wide.
+                    val chart = charts.chart(template, i)
+                    // On the selection's background a chart color may not show; bold still marks it.
+                    g2.color = chart?.color?.takeUnless { selected } ?: dim
+                    g2.font = if (chart != null) bold else plain
                     BasicGraphicsUtils.drawString(this, g2, Templates.PLACEHOLDER, x.toFloat(), y.toFloat())
-                    x += metrics.stringWidth(Templates.PLACEHOLDER)
+                    val placeholder = metrics.stringWidth(Templates.PLACEHOLDER)
+                    if (i == hovered) g2.fillRect(x, y + metrics.descent / 2, placeholder, 1)
+                    x += placeholder
                 }
             }
         }
