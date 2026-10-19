@@ -50,11 +50,14 @@ class JvmPage : PreferencesPage("JVM", Icons.memory) {
         add(note(vectorHint()), "wrap")
         if (vmOptions != null) {
             // Restart.atStartup installs the user's file, so an edit there applies from the next start.
-            val file = "These options are kept in ${vmOptions.user} with the other Java options. " +
-                "Edit that file to set any other option; it applies from the next start."
-            add(note(file))
+            val file = vmOptions.user.fileName
+            add(note("Any other Java option can be added to $file; it applies from the next start."))
         }
     }
+
+    override val savedIn: String
+        get() = vmOptions?.let { "JVM options are saved in ${it.user}" }
+            ?: "Not saved: started without its launcher, logxy has no JVM options file"
 
     private fun memoryHint(): String {
         val now = "logxy can use up to ${formatByteSize(Runtime.getRuntime().maxMemory())} now."

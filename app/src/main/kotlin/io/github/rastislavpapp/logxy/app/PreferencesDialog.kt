@@ -29,6 +29,9 @@ abstract class PreferencesPage(val title: String, val icon: Icon) : JPanel() {
 
     /** [settings] with this page's values. */
     abstract fun applyTo(settings: Settings): Settings
+
+    /** Where this page's values are saved, for the dialog's footer. */
+    open val savedIn: String get() = "Saved in ${AppSettings.location}"
 }
 
 /**
@@ -58,6 +61,7 @@ class PreferencesDialog(
     private val content = JPanel(cards)
     private val heading = JLabel().apply { putClientProperty("FlatLaf.styleClass", "h3") }
     private val navigation = JList(pages.toTypedArray())
+    private val savedIn = JLabel().apply { foreground = UIManager.getColor("Label.disabledForeground") }
     private var restartAfterClose = false
 
     init {
@@ -78,6 +82,8 @@ class PreferencesDialog(
             val page = navigation.selectedValue ?: return@addListSelectionListener
             heading.text = page.title
             cards.show(content, page.title)
+            savedIn.text = page.savedIn
+            savedIn.toolTipText = page.savedIn
             AppState[AppState.PREFERENCES_SECTION] = Section.entries[navigation.selectedIndex].name
         }
         val remembered = Section.entries.firstOrNull { it.name == AppState[AppState.PREFERENCES_SECTION] }
@@ -95,10 +101,7 @@ class PreferencesDialog(
     }
 
     private fun buttons(offerUse: Boolean) = JPanel(MigLayout("insets 0", "[grow][][][]")).apply {
-        add(JLabel("Saved in ${AppSettings.location}").apply {
-            foreground = UIManager.getColor("Label.disabledForeground")
-            toolTipText = AppSettings.location.toString()
-        }, "wmin 0")
+        add(savedIn, "wmin 0")
         if (offerUse) {
             add(JButton("Save and Use for This File").apply {
                 addActionListener {
