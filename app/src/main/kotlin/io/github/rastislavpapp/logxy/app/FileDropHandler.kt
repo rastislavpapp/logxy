@@ -7,6 +7,7 @@ import java.io.File
 import java.net.URI
 import java.nio.file.Path
 import javax.swing.JComponent
+import javax.swing.SwingUtilities
 import javax.swing.TransferHandler
 
 // Linux file managers often offer only a URI list, not a Java file list.
@@ -32,7 +33,9 @@ class FileDropHandler(
             return false
         }
         if (paths.isEmpty()) return false
-        open(paths)
+        // After the drop ends: opening may ask how in a modal dialog, and while the drop lasts the drag source
+        // (a file manager, through XWayland) holds the input, so the dialog would never get any (#74).
+        SwingUtilities.invokeLater { open(paths) }
         return true
     }
 
