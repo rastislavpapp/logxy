@@ -162,14 +162,14 @@ class TemplateIndexTest {
         it.epochSecond * 1_000_000_000L + it.nano
     }
 
-    private fun SlotValues.entries() = List(size) { time(it) to value(it) }
+    private fun VariableSeries.entries() = List(size) { time(it) to value(it) }
 
     @Test
-    fun `reads a slot's values and times from the records of its template`() {
+    fun `reads a variable's values and times from the records of its template`() {
         parse(sample).use { log ->
             val engine = FilterEngine(log)
-            fun values(slot: Int, rows: IntArray? = null) = runBlocking {
-                engine.slotValues(rows, rows?.size ?: log.recordCount, request, intArrayOf(slot)).single()
+            fun values(variable: Int, rows: IntArray? = null) = runBlocking {
+                engine.variableSeries(rows, rows?.size ?: log.recordCount, request, intArrayOf(variable)).single()
             }.entries()
             assertEquals(
                 listOf(nanos("08:00:00") to 5.0, nanos("08:00:02") to 5012.0, nanos("08:00:03") to 7.0),
@@ -179,16 +179,16 @@ class TemplateIndexTest {
             assertEquals(List(3) { Double.NaN }, values(0).map { it.second })
             // Only the rows given, e.g. those a filter shows.
             assertEquals(listOf(nanos("08:00:03") to 7.0), values(1, intArrayOf(1, 3, 5)))
-            val none = runBlocking { engine.slotValues(null, 6, "nothing like it", intArrayOf(0)) }.single()
+            val none = runBlocking { engine.variableSeries(null, 6, "nothing like it", intArrayOf(0)) }.single()
             assertEquals(listOf(), none.entries())
         }
     }
 
     @Test
-    fun `reads several slots in one pass, sharing their rows`() {
+    fun `reads several variables in one pass, sharing their rows`() {
         parse(sample).use { log ->
             val engine = FilterEngine(log)
-            val (took, from) = runBlocking { engine.slotValues(null, log.recordCount, request, intArrayOf(1, 0)) }
+            val (took, from) = runBlocking { engine.variableSeries(null, log.recordCount, request, intArrayOf(1, 0)) }
             assertEquals(listOf(5.0, 5012.0, 7.0), took.entries().map { it.second })
             assertEquals(List(3) { Double.NaN }, from.entries().map { it.second })
             assertEquals(listOf(0, 2, 3), List(took.size) { took.row(it) })
@@ -198,20 +198,20 @@ class TemplateIndexTest {
     }
 
     @Test
-    fun `reads slots of JSON messages unescaped`() {
+    fun `reads variables of JSON messages unescaped`() {
         val file = Files.writeString(dir.resolve("a.json"), """
             {"@timestamp":"2026-10-01T08:00:00Z","message":"User \"bob\" waited 120 ms"}
             {"@timestamp":"2026-10-01T08:00:01Z","message":"User \"eve\" waited 80 ms"}
         """.trimIndent() + "\n")
         runBlocking { ParsedLog.build(file, CompiledJson(zone = ZoneOffset.UTC), IndexProgress()) }.use { log ->
             val template = "User \"bob\" waited {} ms"
-            val values = runBlocking { FilterEngine(log).slotValues(null, 2, template, intArrayOf(0)) }.single()
+            val values = runBlocking { FilterEngine(log).variableSeries(null, 2, template, intArrayOf(0)) }.single()
             assertEquals(listOf(nanos("08:00:00") to 120.0), values.entries())
         }
     }
 
     @Test
-    fun `merged logs read a slot from the template in every file`() {
+    fun `merged logs read a variable from the template in every file`() {
         val a = parse(sample, "a.log")
         val b = parse("""
             2026-10-01 08:00:00.500 [main] INFO  app.B - Cache warmed
@@ -220,7 +220,7 @@ class TemplateIndexTest {
         val merged = runBlocking { MergedLog.build(listOf(a, b)) }
         try {
             val filter = MergedFilter(merged)
-            val values = runBlocking { filter.slotValues(null, merged.recordCount, query, intArrayOf(0)) }.single()
+            val values = runBlocking { filter.variableSeries(null, merged.recordCount, query, intArrayOf(0)) }.single()
             assertEquals(
                 listOf(nanos("08:00:01") to 17.0, nanos("08:00:04") to 18.0, nanos("08:00:06") to 99.0),
                 values.entries(),

@@ -24,8 +24,8 @@ import io.github.rastislavpapp.logxy.core.query.Query
 import io.github.rastislavpapp.logxy.core.query.QueryCompiler
 import io.github.rastislavpapp.logxy.core.query.QueryException
 import io.github.rastislavpapp.logxy.core.query.TextSearch
-import io.github.rastislavpapp.logxy.core.template.SlotValues
 import io.github.rastislavpapp.logxy.core.template.TemplateCounts
+import io.github.rastislavpapp.logxy.core.template.VariableSeries
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -408,15 +408,15 @@ class LogSession internal constructor(
     }
 
     /**
-     * The values at each of [slots] of the shown rows whose message has [template], over time, read in one pass;
+     * The values at each of [variables] of the shown rows whose message has [template], over time, read in one pass;
      * null if there is nothing loaded or the records have no message or no time. Cancelling the caller stops it.
      */
-    suspend fun slotValues(template: String, slots: IntArray): List<SlotValues>? {
+    suspend fun variableSeries(template: String, variables: IntArray): List<VariableSeries>? {
         while (true) countJob?.takeIf { it.isActive }?.join() ?: break
         val shown = shown ?: return null
         val engine = engine ?: return null
         if (shown.schema.indexOf(Role.MESSAGE) < 0 || shown.schema.indexOf(Role.TIMESTAMP) < 0) return null
-        return engine.slotValues(shown.rowArray, shown.rowCount, template, slots)
+        return engine.variableSeries(shown.rowArray, shown.rowCount, template, variables)
     }
 
     /** The template of [record]'s message; null if it has none, or nothing is loaded. */

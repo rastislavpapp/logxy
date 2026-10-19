@@ -3,15 +3,15 @@ package io.github.rastislavpapp.logxy.core.template
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
-class SlotValuesTest {
+class VariableSeriesTest {
 
-    private fun values(vararg entries: Pair<Long, Double>): SlotValues {
+    private fun values(vararg entries: Pair<Long, Double>): VariableSeries {
         val times = LongArray(entries.size) { entries[it].first }
         val rows = IntArray(entries.size) { it }
-        return SlotValues(rows, times, DoubleArray(entries.size) { entries[it].second }, entries.size)
+        return VariableSeries(rows, times, DoubleArray(entries.size) { entries[it].second }, entries.size)
     }
 
-    private fun SlotSlices.row(slice: Int): List<Double> {
+    private fun VariableSlices.row(slice: Int): List<Double> {
         val counts = listOf(records[slice].toDouble(), withoutNumber[slice].toDouble())
         return counts + listOf(min[slice], p50[slice], p99[slice], max[slice], sum[slice], average[slice])
     }

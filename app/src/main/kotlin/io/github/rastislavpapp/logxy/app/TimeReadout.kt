@@ -12,12 +12,12 @@ import javax.swing.UIManager
 private const val NANOS_PER_SECOND = 1_000_000_000L
 private const val READOUT_PADDING = 4
 
-/** Wide enough to keep the dots of a slot chart's slice, beside the pointer, clear of the box. */
+/** Wide enough to keep the dots of a variable chart's slice, beside the pointer, clear of the box. */
 private const val READOUT_GAP = 10
 
 /**
  * The times a histogram bar spans as painted: [count] slices of [sliceWidth] nanoseconds from [from], over the
- * [width] pixels of the bar. The slot chart under it paints on the same times, so the two line up.
+ * [width] pixels of the bar. The variable chart under it paints on the same times, so the two line up.
  */
 data class Timeline(val from: Long, val sliceWidth: Long, val count: Int, val width: Int) {
     val to: Long get() = from + sliceWidth * count
