@@ -128,9 +128,9 @@ class FilterBar(private val onApply: () -> Unit, names: ColumnNames) :
         val text = if (textMode.isSelected) runCatching { QueryParser.parse(textArea.text) }.getOrNull() else null
         text?.let(editor::setQuery)
         val fields = schema.fields.filter { !it.hidden }
-        editor.patterns = schema.hasPatterns()
+        editor.templates = schema.hasTemplates()
         editor.setFields(fields)
-        textArea.setFields(fields.map { it.name } + listOfNotNull(Query.PATTERN_FIELD.takeIf { schema.hasPatterns() }))
+        textArea.setFields(fields.map { it.name } + listOfNotNull(Query.TEMPLATE_FIELD.takeIf { editor.templates }))
         // The editor starts placeholder rows over on new fields; text without real conditions follows it.
         if (text != null && editor.query().items.isEmpty()) {
             textArea.text = QueryPrinter.print(editor.query(includeEmpty = true))

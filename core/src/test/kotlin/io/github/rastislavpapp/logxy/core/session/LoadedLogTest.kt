@@ -6,7 +6,7 @@ import io.github.rastislavpapp.logxy.core.log.LogData
 import io.github.rastislavpapp.logxy.core.log.Records
 import io.github.rastislavpapp.logxy.core.parse.Parser
 import io.github.rastislavpapp.logxy.core.parse.open
-import io.github.rastislavpapp.logxy.core.pattern.PatternIndex
+import io.github.rastislavpapp.logxy.core.template.TemplateIndex
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Files
@@ -133,7 +133,7 @@ abstract class LoadedLogContract {
     fun `the template of a record is its part's`() =
         load(line(1, "order 17 shipped") + line(2, "order 18 shipped") + line(3, "done")) { loaded ->
             val part = loaded.parts[0]
-            val templates = List(part.recordCount) { PatternIndex.templateOf(part.filterSnapshot(), it) }
+            val templates = List(part.recordCount) { TemplateIndex.templateOf(part.filterSnapshot(), it) }
             assertEquals(templates[0], templates[1])
             for (record in 0..<loaded.records.recordCount) {
                 if ((loaded.origin?.part(record) ?: 0) != 0) continue

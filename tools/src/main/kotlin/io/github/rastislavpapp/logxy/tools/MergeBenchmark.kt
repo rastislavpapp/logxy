@@ -8,9 +8,9 @@ import io.github.rastislavpapp.logxy.core.log.LogData
 import io.github.rastislavpapp.logxy.core.log.ParsedLog
 import io.github.rastislavpapp.logxy.core.merge.MergedFilter
 import io.github.rastislavpapp.logxy.core.merge.MergedLog
-import io.github.rastislavpapp.logxy.core.pattern.PatternCounts
 import io.github.rastislavpapp.logxy.core.session.TimeHistogram
 import io.github.rastislavpapp.logxy.core.session.countTimes
+import io.github.rastislavpapp.logxy.core.template.TemplateCounts
 import kotlinx.coroutines.runBlocking
 import org.openjdk.jmh.annotations.Benchmark
 import org.openjdk.jmh.annotations.Param
@@ -57,7 +57,7 @@ open class MergeBenchmark : MergedFiles() {
     fun merge(): MergedLog = runBlocking { MergedLog.build(parts) }
 
     @Benchmark
-    fun countPatterns(): PatternCounts = runBlocking { MergedFilter(merged).countPatterns(null, merged.recordCount) }
+    fun countTemplates(): TemplateCounts = runBlocking { MergedFilter(merged).countTemplates(null, merged.recordCount) }
 
     @Benchmark
     fun countTimes(): TimeHistogram = runBlocking { countTimes(merged) }
@@ -91,7 +91,7 @@ private fun parseParts(files: List<Path>, options: IndexOptions): List<LogData> 
 val mergeRows = listOf(
     BenchmarkRow(MergeBenchmark::class.java, "merge", "merge: merge files"),
     BenchmarkRow(MergedFilterBenchmark::class.java, "run", "merge: filter ", MergedFilterBenchmark::filter.name),
-    BenchmarkRow(MergeBenchmark::class.java, "countPatterns", "merge: count patterns"),
+    BenchmarkRow(MergeBenchmark::class.java, "countTemplates", "merge: count templates"),
     BenchmarkRow(MergeBenchmark::class.java, "countTimes", "merge: count times"),
     BenchmarkRow(MergeBenchmark::class.java, "countTimesOfEveryOtherRow", "merge: count times of every other row"),
 )

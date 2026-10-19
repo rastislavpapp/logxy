@@ -63,10 +63,10 @@ data class LevelCondition(override val field: String, val levels: Set<Level>) : 
 }
 
 /**
- * The template of the message [field] (see [io.github.rastislavpapp.logxy.core.pattern.Templates]) is one of
+ * The template of the message [field] (see [io.github.rastislavpapp.logxy.core.template.Templates]) is one of
  * [templates].
  */
-data class PatternCondition(override val field: String, val templates: Set<String>) : Condition
+data class TemplateCondition(override val field: String, val templates: Set<String>) : Condition
 
 /** The timestamp, in epoch nanoseconds, lies in `[from, to]`; a null bound is open. */
 data class TimeCondition(override val field: String, val from: Long? = null, val to: Long? = null) : Condition

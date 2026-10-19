@@ -3,12 +3,12 @@ package io.github.rastislavpapp.logxy.tools
 import io.github.rastislavpapp.logxy.core.filter.Filter
 import io.github.rastislavpapp.logxy.core.filter.FilterEngine
 import io.github.rastislavpapp.logxy.core.filter.FilterResult
-import io.github.rastislavpapp.logxy.core.filter.PatternCondition
+import io.github.rastislavpapp.logxy.core.filter.TemplateCondition
 import io.github.rastislavpapp.logxy.core.formatByteSize
 import io.github.rastislavpapp.logxy.core.log.ParsedLog
-import io.github.rastislavpapp.logxy.core.pattern.PatternCounts
 import io.github.rastislavpapp.logxy.core.session.TimeHistogram
 import io.github.rastislavpapp.logxy.core.session.countTimes
+import io.github.rastislavpapp.logxy.core.template.TemplateCounts
 import kotlinx.coroutines.runBlocking
 import org.openjdk.jmh.annotations.Benchmark
 import org.openjdk.jmh.annotations.Param
@@ -49,9 +49,9 @@ open class FilterBenchmark {
     fun run(): FilterResult = runBlocking { FilterEngine(log).prepare(condition).run() }
 }
 
-/** Counting patterns and times, and hiding the most common pattern. Open so JMH can generate its subclass. */
+/** Counting templates and times, and hiding the most common template. Open so JMH can generate its subclass. */
 @State(Scope.Benchmark)
-open class PatternBenchmark {
+open class TemplateBenchmark {
     @Param("")
     @JvmField
     var file = ""
@@ -60,14 +60,14 @@ open class PatternBenchmark {
 
     /** An engine that already found the templates. */
     private lateinit var usedEngine: FilterEngine
-    private lateinit var hideTopPattern: Filter
+    private lateinit var hideTopTemplate: Filter
 
     @Setup
     fun setUp() {
         log = parse(Path.of(file))
         usedEngine = FilterEngine(log)
-        val top = runBlocking { usedEngine.countPatterns(null, log.recordCount) }.templates.first()!!
-        hideTopPattern = Filter.Not(PatternCondition("Message", setOf(top)))
+        val top = runBlocking { usedEngine.countTemplates(null, log.recordCount) }.templates.first()!!
+        hideTopTemplate = Filter.Not(TemplateCondition("Message", setOf(top)))
     }
 
     @TearDown
@@ -75,29 +75,29 @@ open class PatternBenchmark {
 
     /** A new engine finds the templates anew. */
     @Benchmark
-    fun countPatterns(): PatternCounts = runBlocking { FilterEngine(log).countPatterns(null, log.recordCount) }
+    fun countTemplates(): TemplateCounts = runBlocking { FilterEngine(log).countTemplates(null, log.recordCount) }
 
     /** A used engine only counts. */
     @Benchmark
-    fun countPatternsAgain(): PatternCounts = runBlocking { usedEngine.countPatterns(null, log.recordCount) }
+    fun countTemplatesAgain(): TemplateCounts = runBlocking { usedEngine.countTemplates(null, log.recordCount) }
 
     @Benchmark
-    fun hideMostCommonPattern(): FilterResult = runBlocking { FilterEngine(log).prepare(hideTopPattern).run() }
+    fun hideMostCommonTemplate(): FilterResult = runBlocking { FilterEngine(log).prepare(hideTopTemplate).run() }
 
     @Benchmark
     fun countTimes(): TimeHistogram = runBlocking { countTimes(log) }
 }
 
-/** The `filter` rows: [benchmarkFilters] by name, patterns and count times. */
+/** The `filter` rows: [benchmarkFilters] by name, templates and count times. */
 val filterRows = listOf(
     BenchmarkRow(FilterBenchmark::class.java, "run", "filter ", FilterBenchmark::filter.name),
-    BenchmarkRow(PatternBenchmark::class.java, "countPatterns", "patterns: count all"),
-    BenchmarkRow(PatternBenchmark::class.java, "countPatternsAgain", "patterns: count all again"),
-    BenchmarkRow(PatternBenchmark::class.java, "hideMostCommonPattern", "filter hide most common pattern"),
-    BenchmarkRow(PatternBenchmark::class.java, "countTimes", "count times"),
+    BenchmarkRow(TemplateBenchmark::class.java, "countTemplates", "templates: count all"),
+    BenchmarkRow(TemplateBenchmark::class.java, "countTemplatesAgain", "templates: count all again"),
+    BenchmarkRow(TemplateBenchmark::class.java, "hideMostCommonTemplate", "filter hide most common template"),
+    BenchmarkRow(TemplateBenchmark::class.java, "countTimes", "count times"),
 )
 
-/** Parameters of [FilterBenchmark] and [PatternBenchmark], whose `file` parameters share the name. */
+/** Parameters of [FilterBenchmark] and [TemplateBenchmark], whose `file` parameters share the name. */
 fun filterParams(file: Path): Map<String, List<String>> = mapOf(
     FilterBenchmark::file.name to listOf(file.toString()),
     FilterBenchmark::filter.name to benchmarkFilters.keys.toList(),

@@ -3,8 +3,8 @@ package io.github.rastislavpapp.logxy.core.query
 import io.github.rastislavpapp.logxy.core.filter.Filter
 import io.github.rastislavpapp.logxy.core.filter.LevelCondition
 import io.github.rastislavpapp.logxy.core.filter.NumberCondition
-import io.github.rastislavpapp.logxy.core.filter.PatternCondition
 import io.github.rastislavpapp.logxy.core.filter.PresenceCondition
+import io.github.rastislavpapp.logxy.core.filter.TemplateCondition
 import io.github.rastislavpapp.logxy.core.filter.TextCondition
 import io.github.rastislavpapp.logxy.core.filter.TextOp
 import io.github.rastislavpapp.logxy.core.filter.TimeCondition
@@ -18,6 +18,7 @@ import java.time.ZoneOffset
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertTrue
 
 class QueryTest {
 
@@ -125,26 +126,27 @@ class QueryTest {
     }
 
     @Test
-    fun `pattern compiles to a template condition on the message`() {
+    fun `template compiles to a template condition on the message`() {
         fun compile(text: String, compiler: QueryCompiler = this.compiler) = compiler.compile(QueryParser.parse(text))
         fun error(text: String, compiler: QueryCompiler = this.compiler) =
             assertFailsWith<QueryException> { compile(text, compiler) }.message
         val template = "Request from {} took {} ms"
-        val condition = PatternCondition("Message", setOf(template))
-        assertEquals(all(condition), compile("pattern == \"$template\""))
-        assertEquals(all(Filter.Not(condition)), compile("Pattern !== \"$template\""))
-        assertEquals(all(), compile("Pattern == \"\""))
-        assertEquals("Pattern works with == and !=, not =~", error("Pattern =~ x"))
+        val condition = TemplateCondition("Message", setOf(template))
+        assertEquals(all(condition), compile("template == \"$template\""))
+        assertEquals(all(Filter.Not(condition)), compile("Template !== \"$template\""))
+        assertEquals(all(), compile("Template == \"\""))
+        assertEquals("Template works with == and !=, not =~", error("Template =~ x"))
+        assertTrue(error("Pattern == x")!!.startsWith("Unknown field “Pattern”"))
 
         val noMessage = QueryCompiler(Schema(listOf(Field("Level", ColumnType.LEVEL, Role.LEVEL))))
-        assertEquals("Pattern needs a message, which this log does not have", error("Pattern == x", noMessage))
+        assertEquals("Template needs a message, which this log does not have", error("Template == x", noMessage))
 
         // A field of the log with that name is used as it is.
         val withField =
-            QueryCompiler(CompiledPattern("%d{yyyy-MM-dd HH:mm:ss.SSS} %X{Pattern} - %m%n", ZoneOffset.UTC).schema)
+            QueryCompiler(CompiledPattern("%d{yyyy-MM-dd HH:mm:ss.SSS} %X{Template} - %m%n", ZoneOffset.UTC).schema)
         assertEquals(
-            all(TextCondition("Pattern", TextOp.EQUALS, "x", ignoreCase = true)),
-            compile("pattern == x", withField),
+            all(TextCondition("Template", TextOp.EQUALS, "x", ignoreCase = true)),
+            compile("template == x", withField),
         )
     }
 

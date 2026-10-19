@@ -21,7 +21,7 @@ private const val USAGE = """Usage:
                                         measure parsing one file with the detected parser, or the given pattern
                                         layout (one file only); several files one by one and at once
   filter <file> [--iterations N] [--forks N] [--only ROW]
-                                        measure typical filters, counting patterns and times on the parsed file
+                                        measure typical filters, counting templates and times on the parsed file
   merge <file> <file>... [--iterations N] [--forks N] [--only ROW] [--read-channels N]
                                         measure merging files and filtering the merged log
                                         parse, filter and merge time N runs (after uncounted ones) in each of

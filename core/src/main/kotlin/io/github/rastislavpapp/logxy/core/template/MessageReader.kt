@@ -1,4 +1,4 @@
-package io.github.rastislavpapp.logxy.core.pattern
+package io.github.rastislavpapp.logxy.core.template
 
 import io.github.rastislavpapp.logxy.core.filter.RecordSnapshot
 import io.github.rastislavpapp.logxy.core.filter.SpanReader

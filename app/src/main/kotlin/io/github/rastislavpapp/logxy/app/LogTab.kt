@@ -73,7 +73,10 @@ private const val MAX_TITLE_CHARS = 40
 private const val MAX_MENU_CHARS = 80
 private const val MAX_RULE_CHARS = 1000
 private val RANGE_OPS = listOf(QueryOp.AT_LEAST, QueryOp.ABOVE, QueryOp.AT_MOST, QueryOp.BELOW)
-private const val BOTTOM_TAB_PATTERNS = "patterns"
+private const val BOTTOM_TAB_TEMPLATES = "templates"
+
+/** The tab was called Patterns before, and app state may still name it so. */
+private val BOTTOM_TAB_TEMPLATES_STORED = setOf(BOTTOM_TAB_TEMPLATES, "patterns")
 
 /** A search taking longer than this shows its progress. */
 private const val SEARCH_PROGRESS_DELAY_MILLIS = 200
@@ -142,17 +145,17 @@ class LogTab(
     private val detail = LogDetailArea()
     private val filterBar = FilterBar(::applyFilter, columnNames)
     private val findBar = FindBar(::searchFor) { forward -> find(forward) }
-    private val patterns =
-        PatternsPanel(scope, { session.patternCounts() }, { session.patternProgress }, filterBar::addRules)
+    private val templates =
+        TemplatesPanel(scope, { session.templateCounts() }, { session.templateProgress }, filterBar::addRules)
 
-    /** Below the table: the selected record, or the message patterns of the shown rows. */
+    /** Below the table: the selected record, or the message templates of the shown rows. */
     private val bottomTabs = JTabbedPane().apply {
         val vertical = ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED
         addTab("Detail", JScrollPane(detail, vertical, ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER))
-        addTab("Patterns", patterns)
-        if (AppState[AppState.BOTTOM_TAB] == BOTTOM_TAB_PATTERNS) selectedComponent = patterns
+        addTab("Templates", templates)
+        if (AppState[AppState.BOTTOM_TAB] in BOTTOM_TAB_TEMPLATES_STORED) selectedComponent = templates
         addChangeListener {
-            AppState[AppState.BOTTOM_TAB] = if (selectedComponent === patterns) BOTTOM_TAB_PATTERNS else null
+            AppState[AppState.BOTTOM_TAB] = if (selectedComponent === templates) BOTTOM_TAB_TEMPLATES else null
         }
     }
     private val followButton = accentToggle(Icons.follow, "Follow (tail)").apply {
@@ -521,12 +524,12 @@ class LogTab(
         // `== ""` is a placeholder that filters nothing; `!= ""` keeps records with a value.
         if (value.isNotEmpty()) add(rule(QueryOp.EQUALS))
         add(rule(QueryOp.NOT_EQUALS))
-        val hasTemplate = field.role == Role.MESSAGE && shown.schema.hasPatterns()
+        val hasTemplate = field.role == Role.MESSAGE && shown.schema.hasTemplates()
         val template = if (hasTemplate) session.templateOf(model.recordAt(row)) else null
         if (template != null) {
             popup.addSeparator()
-            add(Query.Rule(Query.PATTERN_FIELD, QueryOp.EQUALS, template))
-            add(Query.Rule(Query.PATTERN_FIELD, QueryOp.NOT_EQUALS, template))
+            add(Query.Rule(Query.TEMPLATE_FIELD, QueryOp.EQUALS, template))
+            add(Query.Rule(Query.TEMPLATE_FIELD, QueryOp.NOT_EQUALS, template))
         }
         if (level != null) {
             popup.addSeparator()
@@ -679,7 +682,7 @@ class LogTab(
         this.histogramBar = histogramBar
         table.found = foundMarks
         filterBar.setSchema(shown.schema)
-        patterns.canFilter = shown.schema.hasPatterns()
+        templates.canFilter = shown.schema.hasTemplates()
         setFilterVisible(true)
 
         detail.text = ""
@@ -763,7 +766,7 @@ class LogTab(
         val top = scrollPane.firstVisibleRow.takeIf { it < oldSize }?.let(recordBefore)
         model.rowsReplaced()
         scrollPane.rowsReplaced()
-        patterns.refresh()
+        templates.refresh()
         val selectedIndex = selected?.let { record ->
             model.indexOfRecord(record).takeIf { it >= 0 && model.recordAtIndex(it) == record }
         }
@@ -937,7 +940,7 @@ class LogTab(
     /** Cancels any running work and releases the file. */
     fun dispose() {
         stopProgress()
-        patterns.reset()
+        templates.reset()
         showFilterProgress(false)
         showSearchProgress(false)
         session.dispose()
@@ -979,7 +982,7 @@ class LogTab(
             columnsButton.isEnabled = false
             showSearchProgress(false)
             histogramBar = null
-            patterns.reset()
+            templates.reset()
             // The table may still be painted until indexing shows its progress: with no rows.
             model?.rowsReplaced()
             model = null
@@ -1025,7 +1028,7 @@ class LogTab(
         override fun rowsChanged(firstChanged: Int, oldSize: Int) {
             model?.rowsChangedFrom(firstChanged, oldSize)
             scrollPane?.rowsAppended()
-            patterns.refreshSoon()
+            templates.refreshSoon()
         }
 
         override fun foundChanged() {
@@ -1035,7 +1038,7 @@ class LogTab(
 
         override fun levelMappingChanged() {
             model?.let { it.fireTableRowsUpdated(0, maxOf(0, it.rowCount - 1)) }
-            patterns.refresh()
+            templates.refresh()
         }
 
         override fun histogramChanged() {

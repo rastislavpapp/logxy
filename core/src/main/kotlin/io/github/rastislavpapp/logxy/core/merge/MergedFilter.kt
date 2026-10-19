@@ -9,16 +9,16 @@ import io.github.rastislavpapp.logxy.core.filter.FilterResult
 import io.github.rastislavpapp.logxy.core.filter.LevelCondition
 import io.github.rastislavpapp.logxy.core.filter.Narrowing
 import io.github.rastislavpapp.logxy.core.filter.NumberCondition
-import io.github.rastislavpapp.logxy.core.filter.PatternCondition
 import io.github.rastislavpapp.logxy.core.filter.PreparedFilter
 import io.github.rastislavpapp.logxy.core.filter.PresenceCondition
 import io.github.rastislavpapp.logxy.core.filter.RecordFilter
 import io.github.rastislavpapp.logxy.core.filter.RecordTextCondition
+import io.github.rastislavpapp.logxy.core.filter.TemplateCondition
 import io.github.rastislavpapp.logxy.core.filter.TextCondition
 import io.github.rastislavpapp.logxy.core.filter.TextMatcher
 import io.github.rastislavpapp.logxy.core.filter.TimeCondition
-import io.github.rastislavpapp.logxy.core.pattern.PatternCounts
-import io.github.rastislavpapp.logxy.core.pattern.RowOrigin
+import io.github.rastislavpapp.logxy.core.template.RowOrigin
+import io.github.rastislavpapp.logxy.core.template.TemplateCounts
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -94,10 +94,12 @@ class MergedFilter(private val log: MergedLog) : RecordFilter {
     }
 
     // Templates are counted per part and joined by their text.
-    override suspend fun countPatterns(rows: IntArray?, rowCount: Int): PatternCounts =
-        PatternCounts.count(engines.map { it.patterns }, log.parts.map { it.filterSnapshot() }, rows, rowCount, origin)
+    override suspend fun countTemplates(rows: IntArray?, rowCount: Int): TemplateCounts {
+        val snapshots = log.parts.map { it.filterSnapshot() }
+        return TemplateCounts.count(engines.map { it.templates }, snapshots, rows, rowCount, origin)
+    }
 
-    override val patternProgress get() = engines.sumOf { it.patterns.progress } / engines.size
+    override val templateProgress get() = engines.sumOf { it.templates.progress } / engines.size
 
     /**
      * The merged positions, in order, of each part's sorted [rows], leaving out records beyond its [merged]
@@ -148,7 +150,7 @@ class MergedFilter(private val log: MergedLog) : RecordFilter {
         is TextCondition -> constant(TextMatcher(condition).matches(name))
         is PresenceCondition -> constant(condition.present)
         is NumberCondition -> constant(condition.matches(Bytes.parseNumber(name)))
-        is LevelCondition, is TimeCondition, is PatternCondition, is RecordTextCondition -> constant(false)
+        is LevelCondition, is TimeCondition, is TemplateCondition, is RecordTextCondition -> constant(false)
     }
 
     private fun renamed(condition: Condition, field: String): Condition = when (condition) {
@@ -156,7 +158,7 @@ class MergedFilter(private val log: MergedLog) : RecordFilter {
         is PresenceCondition -> condition.copy(field = field)
         is LevelCondition -> condition.copy(field = field)
         is TimeCondition -> condition.copy(field = field)
-        is PatternCondition -> condition.copy(field = field)
+        is TemplateCondition -> condition.copy(field = field)
         is NumberCondition -> condition.copy(field = field)
         is RecordTextCondition -> condition
     }
