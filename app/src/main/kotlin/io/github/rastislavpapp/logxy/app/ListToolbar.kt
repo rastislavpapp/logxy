@@ -2,12 +2,6 @@ package io.github.rastislavpapp.logxy.app
 
 import com.formdev.flatlaf.FlatClientProperties
 import net.miginfocom.swing.MigLayout
-import java.awt.Cursor
-import java.awt.event.FocusAdapter
-import java.awt.event.FocusEvent
-import java.awt.event.MouseAdapter
-import java.awt.event.MouseEvent
-import java.awt.font.TextAttribute
 import javax.swing.BorderFactory
 import javax.swing.Icon
 import javax.swing.JButton
@@ -36,7 +30,7 @@ class ListToolbar(view: JComponent) : JPanel(MigLayout("insets 0, gap 0, fill", 
         add(JScrollPane(view).apply { border = null }, "grow")
     }
 
-    /** Adds a button with [icon] and [tooltip] at the end of the toolbar. */
+    /** Returns the added button, so that the caller can enable and disable it with the selection. */
     fun addButton(icon: Icon, tooltip: String, action: () -> Unit): JButton =
         JButton(icon).apply {
             toolTipText = tooltip
@@ -44,40 +38,4 @@ class ListToolbar(view: JComponent) : JPanel(MigLayout("insets 0, gap 0, fill", 
             addActionListener { action() }
             toolbar.add(this)
         }
-}
-
-/** A borderless button in FlatLaf's link color, with a hand cursor and an underline while the mouse is over it. */
-class LinkButton(label: String, action: () -> Unit) : JButton(label) {
-    init {
-        isContentAreaFilled = false
-        // FlatLaf's button border and minimum width would pad and clip a text this plain.
-        border = BorderFactory.createEmptyBorder()
-        putClientProperty(FlatClientProperties.MINIMUM_WIDTH, 0)
-        cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
-        foreground = UIManager.getColor("Component.linkColor")
-        addActionListener { action() }
-        val plain = font
-        // An underline attribute leaves the text as wide as it was, unlike an HTML <u>.
-        val underlined = plain.deriveFont(mapOf(TextAttribute.UNDERLINE to TextAttribute.UNDERLINE_ON))
-        // Underlined while the mouse is over it or it has the keyboard focus, which replaces a focus ring.
-        var hovered = false
-        fun update() {
-            font = if (hovered || isFocusOwner) underlined else plain
-        }
-        addMouseListener(object : MouseAdapter() {
-            override fun mouseEntered(e: MouseEvent) {
-                hovered = true
-                update()
-            }
-
-            override fun mouseExited(e: MouseEvent) {
-                hovered = false
-                update()
-            }
-        })
-        addFocusListener(object : FocusAdapter() {
-            override fun focusGained(e: FocusEvent) = update()
-            override fun focusLost(e: FocusEvent) = update()
-        })
-    }
 }

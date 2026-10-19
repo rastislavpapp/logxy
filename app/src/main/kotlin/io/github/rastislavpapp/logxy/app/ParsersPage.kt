@@ -73,12 +73,7 @@ class ParsersPage(
     private val kindBox = JComboBox(choices.toTypedArray())
     private val status = JLabel(" ")
     private val listToolbar = ListToolbar(list)
-    private val deleteButton: JButton = listToolbar.run {
-        addButton(Icons.add, "New parser") { addParser(newParser()) }
-        val delete = addButton(Icons.remove, "Delete the selected parser") { deleteSelected() }
-        addButton(Icons.copy, "Duplicate the selected parser") { selected()?.let { addParser(copyOf(it.parser)) } }
-        delete
-    }
+    private val deleteButton: JButton
     private val restoreLink = LinkButton("Restore Built-ins") { restoreBuiltIns() }.apply {
         toolTipText = "Brings back the deleted built-in parsers"
     }
@@ -98,6 +93,10 @@ class ParsersPage(
     private val columnNames = ColumnNames()
 
     init {
+        listToolbar.addButton(Icons.add, "New parser") { addParser(newParser()) }
+        deleteButton = listToolbar.addButton(Icons.remove, "Delete the selected parser") { deleteSelected() }
+        listToolbar.addButton(Icons.copy, "Duplicate the selected parser") { duplicateSelected() }
+
         AppSettings.current.parsers.forEach { entries.addElement(Entry(it, builtIn = false)) }
         AppSettings.current.builtInParsers.forEach { entries.addElement(Entry(it, builtIn = true)) }
         updateRestoreLink()
@@ -292,6 +291,11 @@ class ParsersPage(
         entries.remove(index)
         if (entries.size > 0) list.selectedIndex = minOf(index, entries.size - 1) else showSelected()
         updateRestoreLink()
+    }
+
+    private fun duplicateSelected() {
+        val entry = selected() ?: return
+        addParser(copyOf(entry.parser))
     }
 
     private fun builtIns() = (0..<entries.size).map { entries[it] }.filter { it.builtIn }.map { it.parser }

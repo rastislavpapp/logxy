@@ -28,7 +28,7 @@ class ParserTest {
         val file =
             Files.writeString(dir.resolve("b.log"), "2026-10-01 08:00:00.001 INFO  [main] com.example.App - Started\n")
         assertEquals(
-            Parser.Pattern("Detected layout", "%d{yyyy-MM-dd HH:mm:ss.SSS} %p [%t] %c - %m%n"),
+            Parser.Pattern("Detected parser", "%d{yyyy-MM-dd HH:mm:ss.SSS} %p [%t] %c - %m%n"),
             Parser.detect(file),
         )
     }
@@ -80,7 +80,7 @@ class ParserTest {
             dir.resolve("boot2.log"),
             "2026-10-08 12:00:00.123  INFO 12345 --- [           main] $app : Started\n",
         )
-        assertEquals("Detected layout", Parser.detect(boot2).name)
+        assertEquals("Detected parser", Parser.detect(boot2).name)
         val boot3 = Files.writeString(
             dir.resolve("boot3.log"),
             "2026-10-08T12:00:00.123+02:00  WARN 12345 --- [           main] $app : Slow\n",
@@ -91,7 +91,7 @@ class ParserTest {
             "2026-10-08T12:00:00.123+02:00  WARN 12345 --- [demo] [           main] $app : Slow\n" +
                 "2026-10-08T12:00:00.124+02:00  INFO 12345 --- [demo] [  restartedMain] $app : Up\n",
         )
-        assertEquals("Detected layout", Parser.detect(boot3named).name)
+        assertEquals("Detected parser", Parser.detect(boot3named).name)
     }
 
     @Test
@@ -169,7 +169,7 @@ class ParserTest {
             2026-10-01 08:00:00.001 [main] INFO  com.example.App {} - Started
             2026-10-01 08:00:00.002 [http-1] INFO  com.example.Api {breadcrumbId=ID-1, tenant=acme} - GET /a - done
         """.trimIndent())
-        assertEquals("Detected layout", Parser.detect(file).name)
+        assertEquals("Detected parser", Parser.detect(file).name)
     }
 
     @Test

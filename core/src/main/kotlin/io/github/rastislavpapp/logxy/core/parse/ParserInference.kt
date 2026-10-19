@@ -11,9 +11,6 @@ import java.time.ZoneOffset
 internal object ParserInference {
 
     /** Share of lines a guess has to agree with. */
-    // The name of every pattern guessed from a file: what is in it shows in the layout, not in the name.
-    private const val NAME = "Detected layout"
-
     private const val AGREEMENT = 0.9
 
     /** Tokens of a line looked at for its columns; the message comes before this many. */
@@ -21,6 +18,9 @@ internal object ParserInference {
 
     /** Separators `|` after the timestamp that make a line delimited: before and after the level, at least. */
     private const val MIN_SEPARATORS = 2
+
+    /** The name of every pattern guessed from a file: what is in it shows in the layout, not in the name. */
+    private const val NAME = "Detected parser"
 
     /**
      * A parser guessed from the [sample] lines: JSON lines with the keys they use, else CSV if [csv] allows it

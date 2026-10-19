@@ -39,7 +39,7 @@ class LevelsPage : PreferencesPage("Log Levels", Icons.levels) {
             addButton(Icons.remove, "Remove the selected rows") { removeSelected() }
         }
         layout = MigLayout("fill, insets 0", "[grow]", "[]rel[grow]rel[]")
-        add(Note(hint), "growx, wmin 0, wrap")
+        addNote(hint)
         add(list, "grow, wrap")
         add(LinkButton("Reset to Defaults") { show(LevelMapping.DEFAULT) })
     }
