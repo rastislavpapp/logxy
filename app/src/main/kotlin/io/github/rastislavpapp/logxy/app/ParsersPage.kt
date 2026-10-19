@@ -163,15 +163,16 @@ class ParsersPage(
             })
         }
         val right = JPanel(MigLayout("fill, insets 0 8 0 0, wrap 2, hidemode 3", "[][grow, fill]")).apply {
+            // A text field's minimum width follows its column count; the page must shrink below that.
             add(JLabel("Name:"))
-            add(nameField)
+            add(nameField, "wmin 0")
             add(JLabel("Kind:"))
             add(kindBox, "growx 0")
             for (setting in settings()) {
                 add(setting.labelComponent)
-                add(setting.field)
+                add(setting.field, "wmin 0")
             }
-            add(status, "span 2")
+            add(status, "span 2, wmin 0")
             add(JScrollPane(previewTable), "span 2, grow, push")
         }
         return JSplitPane(JSplitPane.HORIZONTAL_SPLIT, left, right).apply {

@@ -9,6 +9,7 @@ import net.miginfocom.swing.MigLayout
 import java.awt.CardLayout
 import java.awt.Color
 import java.awt.Component
+import java.awt.Dimension
 import java.awt.Window
 import java.io.IOException
 import java.nio.file.Path
@@ -28,6 +29,7 @@ import javax.swing.UIManager
 
 private const val MIN_SIDEBAR_WIDTH = 180
 private const val SIDEBAR_PADDING = 8
+private val MIN_SIZE = Dimension(760, 520)
 
 /** The panel background nudged away from itself, darker in a light theme and lighter in a dark one. */
 private fun sidebarBackground(): Color {
@@ -122,7 +124,10 @@ class PreferencesDialog(
             add(main, "grow")
         }
         fitToScreen(0.75)
+        minimumSize = MIN_SIZE
         WindowState.install(this, "preferences")
+        // A size remembered from an older, looser layout may be below the minimum.
+        size = Dimension(maxOf(width, MIN_SIZE.width), maxOf(height, MIN_SIZE.height))
     }
 
     /** The page list, flush with the dialog's edges; a plain panel, so that focusing the list draws no border. */

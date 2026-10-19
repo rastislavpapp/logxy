@@ -9,8 +9,8 @@ import io.github.rastislavpapp.logxy.core.index.VectorSupport
 import net.miginfocom.swing.MigLayout
 import javax.swing.JCheckBox
 import javax.swing.JLabel
+import javax.swing.JPanel
 import javax.swing.JTextField
-import javax.swing.UIManager
 
 /**
  * The JVM's options: the most memory logxy may use, and whether it searches for newlines with vectors. They are kept
@@ -36,22 +36,27 @@ class JvmPage : PreferencesPage("JVM", Icons.memory) {
     }
 
     init {
-        layout = MigLayout("insets 0", "[]", "[]rel[]para[][]para[]unrel[]rel[]para[]")
+        layout = MigLayout("insets 0", "[grow, fill]", "[]rel[]para[][]para[]unrel[]rel[]para[]")
         add(heading("Memory"), "wrap")
-        add(note(memoryHint()), "wrap")
-        add(JLabel("-Xmx"), "split 2")
-        add(xmx, "w 100!, wrap")
+        add(Note(memoryHint()), "growx, wmin 0, wrap")
+        // Its own panel, so that the field stays beside its label in the stretched column.
+        val limit = JPanel(MigLayout("insets 0", "[][100!]")).apply {
+            add(JLabel("-Xmx"))
+            add(xmx)
+        }
+        add(limit, "wrap")
         // The packaged launcher's defaults raise the JVM's; see the jpackage task.
         val example = "For example 8g or 8192m; empty for the default, " +
             if (vmOptions != null) "half of this computer's memory." else "a quarter of this computer's memory."
-        add(note(example), "wrap")
+        add(Note(example), "growx, wmin 0, wrap")
         add(heading("Newline search"), "wrap")
         add(vectors, "wrap")
-        add(note(vectorHint()), "wrap")
+        add(Note(vectorHint()), "growx, wmin 0, wrap")
         if (vmOptions != null) {
             // Restart.atStartup installs the user's file, so an edit there applies from the next start.
             val file = vmOptions.user.fileName
-            add(note("Any other Java option can be added to $file; it applies from the next start."))
+            val hint = "Any other Java option can be added to $file; it applies from the next start."
+            add(Note(hint), "growx, wmin 0")
         }
     }
 
@@ -90,8 +95,6 @@ class JvmPage : PreferencesPage("JVM", Icons.memory) {
     }
 
     private fun heading(text: String) = JLabel(text).apply { putClientProperty("FlatLaf.styleClass", "h4") }
-
-    private fun note(text: String) = JLabel(text).apply { foreground = UIManager.getColor("Label.disabledForeground") }
 
     override fun applyTo(settings: Settings) = settings
 
