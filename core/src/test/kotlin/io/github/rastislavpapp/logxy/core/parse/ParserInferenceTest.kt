@@ -28,7 +28,7 @@ class ParserInferenceTest {
             2026-10-01 08:00:01.003 [main] DEBUG com.example.App - Done
         """
         assertEquals("%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %p %c - %m%n", pattern(text))
-        assertEquals("date [thread] LEVEL logger - message", infer(text)!!.name)
+        assertEquals("Detected layout", infer(text)!!.name)
         val second = read(text)[1]
         assertEquals("http-nio-8080-exec-1", second["Thread"])
         assertEquals("ERROR", second["Level"])

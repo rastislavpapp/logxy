@@ -9,8 +9,7 @@ import javax.swing.JComboBox
 import javax.swing.JTable
 import javax.swing.table.AbstractTableModel
 
-private const val MAX_TABLE_WIDTH = 420
-private const val LEVEL_COLUMN_PADDING = 12
+private const val TEXT_COLUMN_WIDTH = 300
 
 /** Edits which level texts in logs mean which [Level]; starts from the current table, built-in names included. */
 class LevelsPage : PreferencesPage("Log Levels", Icons.levels) {
@@ -28,11 +27,12 @@ class LevelsPage : PreferencesPage("Log Levels", Icons.levels) {
         table.autoCreateRowSorter = true
 
         val hint = "Texts are matched ignoring case. Texts not listed here are shown as UNKNOWN."
-        // "Level" is as wide as its combo box editor; "Text in the log" takes the rest.
-        table.columnModel.getColumn(1).apply {
-            val width = JComboBox(Level.entries.toTypedArray()).preferredSize.width + 2 * LEVEL_COLUMN_PADDING
-            minWidth = width
-            maxWidth = width
+        // The table spans the page: "Text in the log" keeps its width and "Level" takes the rest.
+        table.autoResizeMode = JTable.AUTO_RESIZE_LAST_COLUMN
+        // The first layout redistributes the width by the columns' current widths, so set both.
+        table.columnModel.getColumn(0).apply {
+            width = TEXT_COLUMN_WIDTH
+            preferredWidth = TEXT_COLUMN_WIDTH
         }
         val list = ListToolbar(table).apply {
             addButton(Icons.add, "Add a row") { addRow() }
@@ -40,7 +40,7 @@ class LevelsPage : PreferencesPage("Log Levels", Icons.levels) {
         }
         layout = MigLayout("fill, insets 0", "[grow]", "[]rel[grow]rel[]")
         add(Note(hint), "growx, wmin 0, wrap")
-        add(list, "grow, wmax $MAX_TABLE_WIDTH, wrap")
+        add(list, "grow, wrap")
         add(LinkButton("Reset to Defaults") { show(LevelMapping.DEFAULT) })
     }
 

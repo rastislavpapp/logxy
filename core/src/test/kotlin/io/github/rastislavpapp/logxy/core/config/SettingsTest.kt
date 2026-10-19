@@ -125,8 +125,8 @@ class SettingsTest {
             listOf(
                 "Raw text",
                 "Mine",
-                "date [thread] LEVEL logger - message",
-                "time [thread] LEVEL logger - message",
+                "log4j standard",
+                "logback, time only",
                 "Python logging",
                 "logfmt",
                 "Access log",

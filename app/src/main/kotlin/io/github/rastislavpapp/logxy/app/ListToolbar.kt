@@ -3,9 +3,9 @@ package io.github.rastislavpapp.logxy.app
 import com.formdev.flatlaf.FlatClientProperties
 import net.miginfocom.swing.MigLayout
 import java.awt.Cursor
-import java.awt.Insets
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
+import java.awt.font.TextAttribute
 import javax.swing.BorderFactory
 import javax.swing.Icon
 import javax.swing.JButton
@@ -46,22 +46,26 @@ class ListToolbar(view: JComponent) : JPanel(MigLayout("insets 0, gap 0, fill", 
 }
 
 /** A borderless button in FlatLaf's link color, with a hand cursor and an underline while the mouse is over it. */
-class LinkButton(private val label: String, action: () -> Unit) : JButton(label) {
+class LinkButton(label: String, action: () -> Unit) : JButton(label) {
     init {
-        isBorderPainted = false
         isContentAreaFilled = false
         isFocusPainted = false
-        margin = Insets(0, 0, 0, 0)
+        // FlatLaf's button border and minimum width would pad and clip a text this plain.
+        border = BorderFactory.createEmptyBorder()
+        putClientProperty(FlatClientProperties.MINIMUM_WIDTH, 0)
         cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
         foreground = UIManager.getColor("Component.linkColor")
         addActionListener { action() }
+        val plain = font
+        // An underline attribute leaves the text as wide as it was, unlike an HTML <u>.
+        val underlined = plain.deriveFont(mapOf(TextAttribute.UNDERLINE to TextAttribute.UNDERLINE_ON))
         addMouseListener(object : MouseAdapter() {
             override fun mouseEntered(e: MouseEvent) {
-                text = "<html><u>$label</u></html>"
+                font = underlined
             }
 
             override fun mouseExited(e: MouseEvent) {
-                text = label
+                font = plain
             }
         })
     }

@@ -190,8 +190,8 @@ sealed interface Parser {
 
         /** The most common layouts; others are guessed from the file. */
         val BUILT_IN: List<Parser> = listOf(
-            Pattern("date [thread] LEVEL logger - message", "%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %-5p %c - %m%n"),
-            Pattern("time [thread] LEVEL logger - message", "%d{HH:mm:ss.SSS} [%thread] %-5level %logger - %msg%n"),
+            Pattern("log4j standard", "%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %-5p %c - %m%n"),
+            Pattern("logback, time only", "%d{HH:mm:ss.SSS} [%thread] %-5level %logger - %msg%n"),
             Pattern("Spring Boot 3", "%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} %5p %pid --- [%t] %-40.40logger{39} : %m%n"),
             Pattern("Python logging", "%d{yyyy-MM-dd HH:mm:ss,SSS} - %c - %p - %m%n"),
             Logfmt("logfmt"),
