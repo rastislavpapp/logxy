@@ -12,9 +12,12 @@ import io.github.rastislavpapp.logxy.core.parse.Json
 import io.github.rastislavpapp.logxy.core.parse.MapSyntax
 import io.github.rastislavpapp.logxy.core.parse.MdcMap
 import io.github.rastislavpapp.logxy.core.readFully
+import io.github.rastislavpapp.logxy.core.template.MessageReader
 import io.github.rastislavpapp.logxy.core.template.TemplateCounts
 import io.github.rastislavpapp.logxy.core.template.TemplateIndex
+import io.github.rastislavpapp.logxy.core.template.Templates
 import io.github.rastislavpapp.logxy.core.template.VariableSeries
+import io.github.rastislavpapp.logxy.core.template.VariableValues
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -72,6 +75,12 @@ interface RecordFilter {
         template: String,
         variables: IntArray,
     ): List<VariableSeries>
+
+    /**
+     * How often each value occurs at [variable] (from 0) of the rows (as [countTemplates] takes them) whose message
+     * has [template]. Call on the thread that owns the records; cancelling the calling coroutine stops it.
+     */
+    suspend fun variableValues(rows: IntArray?, rowCount: Int, template: String, variable: Int): VariableValues
 }
 
 /** Hears of the matches of a finished chunk of records; see [PreparedFilter.run]. */
@@ -152,6 +161,9 @@ class FilterEngine(private val log: LogData, private val maxCacheBytes: Long = D
             template,
             variables,
         )
+
+    override suspend fun variableValues(rows: IntArray?, rowCount: Int, template: String, variable: Int) =
+        VariableValues.count(listOf(templates), listOf(log.filterSnapshot()), rows, rowCount, null, template, variable)
 
     /** Caches [entry], dropping the least recently used others while the cache is over [maxCacheBytes]. */
     private fun store(condition: Condition, entry: Entry) = synchronized(cache) {
@@ -449,8 +461,67 @@ private class Leaf(
                     val prepare: suspend () -> Unit = { matching = templates.matching(snapshot, condition.templates) }
                     Leaf(condition, 0, false, prepare) { c, _ -> matching.getOrElse(templates.id(c.record)) { false } }
                 }
+                is VariableCondition -> variableLeaf(condition, snapshot, field, type, templates)
                 is NumberCondition -> numberLeaf(condition, snapshot, field, type)
                 is RecordTextCondition -> recordTextLeaf(condition)
+            }
+        }
+
+        /**
+         * Tests the word at the condition's variable; the template index rules out records of other templates
+         * first, so only messages of the condition's template are read.
+         */
+        private fun variableLeaf(
+            condition: VariableCondition,
+            snapshot: RecordSnapshot,
+            field: Int,
+            type: ColumnType,
+            templates: TemplateIndex,
+        ): Leaf {
+            val test = when (val inner = condition.test) {
+                is TextCondition -> {
+                    val matcher = TextMatcher(inner)
+                    ValueTest { bytes, from, to -> matcher.matches(bytes, from, to) }
+                }
+                is NumberCondition -> ValueTest { bytes, from, to ->
+                    inner.matches(Templates.leadingNumber(bytes, from, to))
+                }
+                else -> return Leaf(condition, 0, false) { _, _ -> false }
+            }
+            val variable = condition.variable
+            var matching = BooleanArray(0)
+            fun ofTemplate(c: RecordCursor) = matching.getOrElse(templates.id(c.record)) { false }
+            suspend fun match() {
+                matching = templates.matching(snapshot, setOf(condition.template))
+            }
+            return when (type) {
+                // Many records share a text: each is tested once.
+                ColumnType.DICT -> {
+                    var passes = BooleanArray(0)
+                    val prepare: suspend () -> Unit = {
+                        match()
+                        val scratch = VariableScratch(false)
+                        passes = snapshot.dictionaryTexts(field).map { text ->
+                            val bytes = text.toByteArray(Charsets.UTF_8)
+                            scratch.passes(bytes, 0, bytes.size, variable, test)
+                        }.toBooleanArray()
+                    }
+                    Leaf(condition, 0, false, prepare) { c, _ ->
+                        ofTemplate(c) && passes.getOrElse(c.dictId(field)) { false }
+                    }
+                }
+                ColumnType.SPAN -> {
+                    val json = snapshot.schema.fields[field].encoding == Encoding.JSON
+                    val scratches = ThreadLocal.withInitial { VariableScratch(json) }
+                    Leaf(condition, 2, true, ::match) { c, reader ->
+                        val scratch = scratches.get()
+                        ofTemplate(c) && MessageReader.readStart(c, field, json, reader!!, scratch.unescaped, false) {
+                                bytes, from, to ->
+                            scratch.passes(bytes, from, to, variable, test)
+                        }
+                    }
+                }
+                else -> Leaf(condition, 0, false) { _, _ -> false }
             }
         }
 
@@ -575,7 +646,7 @@ private class Leaf(
             is NumberCondition -> mapValueLeaf(condition, key, map, false) { bytes, from, to ->
                 condition.matches(Bytes.parseNumber(bytes, from, to))
             }
-            is LevelCondition, is TimeCondition, is TemplateCondition, is RecordTextCondition ->
+            is LevelCondition, is TimeCondition, is TemplateCondition, is VariableCondition, is RecordTextCondition ->
                 Leaf(condition, 0, false) { _, _ -> false }
         }
 
@@ -614,6 +685,19 @@ private class Leaf(
 /** Tests a value's text, as shown, in `bytes[from, to)`. */
 private fun interface ValueTest {
     fun test(bytes: ByteArray, from: Int, to: Int): Boolean
+}
+
+/** Space for finding the word at a template variable, one per thread; [json] messages need room to unescape. */
+private class VariableScratch(json: Boolean) {
+    private val out = ByteArray(Templates.OUT_SIZE)
+    private val places = IntArray(Templates.PLACES_SIZE)
+    val unescaped = if (json) ByteArray(MessageReader.READ_LIMIT) else null
+
+    /** Whether the word at [variable] of the message `bytes[from, to)` passes [test]; false if it has none. */
+    fun passes(bytes: ByteArray, from: Int, to: Int, variable: Int, test: ValueTest): Boolean {
+        val range = Templates.variableRange(bytes, from, to, variable, out, places)
+        return range >= 0 && test.test(bytes, (range ushr 32).toInt(), range.toInt())
+    }
 }
 
 /**

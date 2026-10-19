@@ -1,5 +1,6 @@
 package io.github.rastislavpapp.logxy.core.query
 
+import io.github.rastislavpapp.logxy.core.filter.Condition
 import io.github.rastislavpapp.logxy.core.filter.Filter
 import io.github.rastislavpapp.logxy.core.filter.LevelCondition
 import io.github.rastislavpapp.logxy.core.filter.NumberCondition
@@ -8,6 +9,7 @@ import io.github.rastislavpapp.logxy.core.filter.TemplateCondition
 import io.github.rastislavpapp.logxy.core.filter.TextCondition
 import io.github.rastislavpapp.logxy.core.filter.TextOp
 import io.github.rastislavpapp.logxy.core.filter.TimeCondition
+import io.github.rastislavpapp.logxy.core.filter.VariableCondition
 import io.github.rastislavpapp.logxy.core.log.ColumnType
 import io.github.rastislavpapp.logxy.core.log.Field
 import io.github.rastislavpapp.logxy.core.log.Level
@@ -147,6 +149,97 @@ class QueryTest {
         assertEquals(
             all(TextCondition("Template", TextOp.EQUALS, "x", ignoreCase = true)),
             compile("template == x", withField),
+        )
+    }
+
+    @Test
+    fun `template values take numbered or bare variables and print numbered`() {
+        val condition = all(TemplateCondition("Message", setOf("Request from {} took {} ms")))
+        assertEquals(condition, compiler.compile(QueryParser.parse("Template == \"Request from {1} took {2} ms\"")))
+        assertEquals(condition, compiler.compile(QueryParser.parse("Template == \"Request from {} took {} ms\"")))
+        assertEquals(
+            "Template == \"Request from {1} took {2} ms\" AND {2} >= 500",
+            roundTrip("Template == \"Request from {} took {} ms\" and {2} >= 500"),
+        )
+    }
+
+    @Test
+    fun `a variable rule tests the word of its group's template`() {
+        fun compile(text: String) = compiler.compile(QueryParser.parse(text))
+        val template = "Request from {} took {} ms"
+        val numbered = "Request from {1} took {2} ms"
+        val isTemplate = TemplateCondition("Message", setOf(template))
+        fun variable(n: Int, test: Condition) = VariableCondition("Message", template, n, test)
+        val is404 = TextCondition("Message", TextOp.EQUALS, "404", ignoreCase = true)
+        assertEquals(
+            all(isTemplate, variable(0, is404)),
+            compile("Template == \"$numbered\" AND {1} == 404"),
+        )
+        assertEquals(
+            all(variable(1, NumberCondition("Message", from = 500.0)), isTemplate),
+            compile("{2} >= 500 AND Template == \"$numbered\""),
+        )
+        // Nested groups take the template of the nearest AND group that has one.
+        val is500 = TextCondition("Message", TextOp.EQUALS, "500", ignoreCase = true)
+        assertEquals(
+            all(isTemplate, Filter.Or(listOf(variable(0, is404), variable(0, is500)))),
+            compile("Template == \"$numbered\" AND ({1} == 404 OR {1} == 500)"),
+        )
+        // Hiding one value of a template keeps every other template.
+        assertEquals(
+            Filter.Not(all(isTemplate, variable(0, is404))),
+            compile("NOT (Template == \"$numbered\" AND {1} == 404)"),
+        )
+        assertEquals(
+            all(isTemplate, variable(0, TextCondition("Message", TextOp.MATCHES, "^4", ignoreCase = true))),
+            compile("Template == \"$numbered\" AND {1} =~ \"^4\""),
+        )
+    }
+
+    @Test
+    fun `a variable rule without one template to belong to is an error`() {
+        fun error(text: String) =
+            assertFailsWith<QueryException> { compiler.compile(QueryParser.parse(text)) }.message
+        val numbered = "Request from {1} took {2} ms"
+        val needs = "{1} needs a Template == rule joined to it with AND"
+        assertEquals(needs, error("{1} == 404"))
+        assertEquals(needs, error("Template == \"$numbered\" OR {1} == 404"))
+        assertEquals(needs, error("Template != \"$numbered\" AND {1} == 404"))
+        assertEquals(needs, error("NOT Template == \"$numbered\" AND {1} == 404"))
+        assertEquals(
+            "{1} belongs to one Template == rule, but its group has 2",
+            error("Template == \"$numbered\" AND Template == \"Cache warmed\" AND {1} == 404"),
+        )
+        assertEquals(
+            "“$numbered” has variables {1} to {2}, no {3}",
+            error("Template == \"$numbered\" AND {3} == 404"),
+        )
+        assertEquals("“Cache warmed” has no variables", error("Template == \"Cache warmed\" AND {1} == x"))
+        assertEquals("Variables count from {1}", error("Template == \"$numbered\" AND {0} == 404"))
+        // Two templates are fine where no variable rule needs to pick one.
+        compiler.compile(QueryParser.parse("Template == \"$numbered\" AND Template == \"Cache warmed\""))
+    }
+
+    @Test
+    fun `rules that show or hide one value of a variable`() {
+        val template = "Request from {} took {} ms"
+        fun showOnly(current: String) = QueryPrinter.print(
+            TemplateRules.showOnly(QueryParser.parse(current), template, 1, "5*"),
+        )
+        val pair = "Template == \"Request from {1} took {2} ms\" AND {2} == \"5\\*\""
+        assertEquals(pair, showOnly(""))
+        assertEquals(pair, showOnly("level >= WARN"))
+        // Beside the template's own rule at the top, the variable rule alone.
+        assertEquals("{2} == \"5\\*\"", showOnly("Template == \"Request from {1} took {2} ms\" AND level >= WARN"))
+        assertEquals(pair, showOnly("Template == \"Cache warmed\""))
+        assertEquals(pair, showOnly("Template == \"Request from {1} took {2} ms\" OR level >= WARN"))
+        assertEquals(
+            "NOT (Template == \"Request from {1} took {2} ms\" AND {2} == \"5\\*\")",
+            QueryPrinter.print(TemplateRules.hide(template, 1, "5*")),
+        )
+        assertEquals(
+            "Template != \"Request from {1} took {2} ms\"",
+            QueryPrinter.print(TemplateRules.template(template, QueryOp.NOT_EQUALS)),
         )
     }
 

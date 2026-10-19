@@ -1,5 +1,6 @@
 package io.github.rastislavpapp.logxy.core.template
 
+import io.github.rastislavpapp.logxy.core.filter.RecordCursor
 import io.github.rastislavpapp.logxy.core.filter.RecordSnapshot
 import io.github.rastislavpapp.logxy.core.filter.SpanReader
 import io.github.rastislavpapp.logxy.core.log.ColumnType
@@ -84,29 +85,87 @@ internal class MessageReader(private val snapshot: RecordSnapshot, private val f
         }
     }
 
-    /** Calls [read] with the start of the message of the record at the cursor, or returns [absent] if it has none. */
-    private inline fun <T> span(absent: T, read: (bytes: ByteArray, from: Int, to: Int) -> T): T {
-        val length = cursor.spanLength(field)
-        if (length == Columns.ABSENT_LENGTH) return absent
-        val from = cursor.start + cursor.spanStart(field)
-        val to = if (length == Columns.TO_RECORD_END) cursor.end else from + length
-        // Only the start of the first line counts, so huge messages are not read whole.
-        val limit = minOf(to, from + READ_LIMIT)
-        val offset = reader!!.load(from, limit)
-        val end = minOf(offset + (limit - from).toInt(), reader.loaded)
-        val bytes = reader.buffer
-        // Lines that are no JSON run to the record end and read as written.
-        if (json && length != Columns.TO_RECORD_END && end > offset && bytes[offset] == QUOTE) {
-            val closed = limit == to && Json.isString(bytes, offset, end)
-            val n = Json.unescape(bytes, offset + 1, if (closed) end - 1 else end, unescaped!!, 0)
-            return read(unescaped, 0, n)
-        }
-        return read(bytes, offset, end)
+    /** The word of each dictionary text at [wordsVariable], once read; [NO_WORD] where it has none. */
+    private val dictionaryWords = if (type == ColumnType.DICT) arrayOfNulls<ByteArray>(dictionary!!.size) else null
+    private var wordsVariable = -1
+
+    /** Hears of a word in `bytes[from, to)`; see [variableWord]. */
+    fun interface WordVisitor {
+        fun visit(bytes: ByteArray, from: Int, to: Int)
     }
 
-    private companion object {
+    /**
+     * Calls [visit] with the word at [variable] of [record]'s message, unless it has none there. [out] and [places]
+     * are scratch space as [Templates.variableRange] needs.
+     */
+    fun variableWord(record: Int, variable: Int, out: ByteArray, places: IntArray, visit: WordVisitor) {
+        cursor.moveTo(record)
+        when (type) {
+            ColumnType.SPAN -> span(Unit) { bytes, from, to ->
+                val range = Templates.variableRange(bytes, from, to, variable, out, places)
+                if (range >= 0) visit.visit(bytes, (range ushr 32).toInt(), range.toInt())
+            }
+            ColumnType.DICT -> {
+                val id = cursor.dictId(field)
+                if (id < 0) return
+                val words = dictionaryWords!!
+                if (variable != wordsVariable) {
+                    words.fill(null)
+                    wordsVariable = variable
+                }
+                val word = words[id] ?: run {
+                    val bytes = snapshot.dictionaryTexts(field)[id].toByteArray(Charsets.UTF_8)
+                    val range = Templates.variableRange(bytes, 0, bytes.size, variable, out, places)
+                    val found = if (range < 0) NO_WORD else bytes.copyOfRange((range ushr 32).toInt(), range.toInt())
+                    found.also { words[id] = it }
+                }
+                if (word !== NO_WORD) visit.visit(word, 0, word.size)
+            }
+            else -> {}
+        }
+    }
+
+    /** Calls [read] with the start of the message of the record at the cursor, or returns [absent] if it has none. */
+    private inline fun <T> span(absent: T, read: (bytes: ByteArray, from: Int, to: Int) -> T): T =
+        readStart(cursor, field, json, reader!!, unescaped, absent, read)
+
+    companion object {
         /** Enough for [Templates.MAX_BYTES] of text even when JSON escapes take six bytes per character. */
         const val READ_LIMIT = Templates.MAX_BYTES * 6 + 2
         const val QUOTE = '"'.code.toByte()
+
+        /** Stands for a dictionary text without a word at the variable; compared by identity. */
+        private val NO_WORD = ByteArray(0)
+
+        /**
+         * Calls [read] with the start of the SPAN message [field] of the record at [cursor], read through [reader];
+         * returns [absent] if it has none. A [json] string is unescaped into [unescaped], at least [READ_LIMIT] long.
+         */
+        inline fun <T> readStart(
+            cursor: RecordCursor,
+            field: Int,
+            json: Boolean,
+            reader: SpanReader,
+            unescaped: ByteArray?,
+            absent: T,
+            read: (bytes: ByteArray, from: Int, to: Int) -> T,
+        ): T {
+            val length = cursor.spanLength(field)
+            if (length == Columns.ABSENT_LENGTH) return absent
+            val from = cursor.start + cursor.spanStart(field)
+            val to = if (length == Columns.TO_RECORD_END) cursor.end else from + length
+            // Only the start of the first line counts, so huge messages are not read whole.
+            val limit = minOf(to, from + READ_LIMIT)
+            val offset = reader.load(from, limit)
+            val end = minOf(offset + (limit - from).toInt(), reader.loaded)
+            val bytes = reader.buffer
+            // Lines that are no JSON run to the record end and read as written.
+            if (json && length != Columns.TO_RECORD_END && end > offset && bytes[offset] == QUOTE) {
+                val closed = limit == to && Json.isString(bytes, offset, end)
+                val n = Json.unescape(bytes, offset + 1, if (closed) end - 1 else end, unescaped!!, 0)
+                return read(unescaped, 0, n)
+            }
+            return read(bytes, offset, end)
+        }
     }
 }

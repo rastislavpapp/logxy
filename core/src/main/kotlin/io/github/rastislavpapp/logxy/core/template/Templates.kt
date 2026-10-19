@@ -98,6 +98,22 @@ object Templates {
      */
     fun variableCount(template: String): Int = template.split(PLACEHOLDER).size - 1
 
+    /** [template] as the user sees it: each `{}` numbered from 1, as in `Request from {1} took {2} ms`. */
+    fun numbered(template: String): String {
+        val parts = template.split(PLACEHOLDER)
+        return buildString {
+            for ((i, part) in parts.withIndex()) {
+                append(part)
+                if (i < parts.lastIndex) append('{').append(i + 1).append('}')
+            }
+        }
+    }
+
+    /** [text] with each `{n}` back to `{}`, the template as stored; `{}` stays, and the numbers are not checked. */
+    fun unnumbered(text: String): String = NUMBERED.replace(text, PLACEHOLDER)
+
+    private val NUMBERED = Regex("""\{\d+}""")
+
     /**
      * The value at [variable] (counted as [variableCount] does) of the template of the text `bytes[from, to)`: the
      * number its word starts with, as in `12` of `12ms`; NaN if the variable is missing, a literal `{}`, or its word
@@ -171,6 +187,20 @@ object Templates {
     }
 
     /**
+     * Where the word at [variable] of the template of the text `bytes[from, to)` starts and ends in [bytes], packed
+     * as `start shl 32 or end`; -1 if there is no such variable or it is a literal `{}`. [out] and [places] are
+     * scratch space as for [variableNumber].
+     */
+    fun variableRange(bytes: ByteArray, from: Int, to: Int, variable: Int, out: ByteArray, places: IntArray): Long {
+        var range = -1L
+        forEachVariable(bytes, from, to, out, places) { found, start, end ->
+            if (found == variable && start >= 0) range = (start.toLong() shl 32) or end.toLong()
+            found == variable
+        }
+        return range
+    }
+
+    /**
      * Masks the text `bytes[from, to)`, then calls [visit] with each variable of its template in turn and where the
      * variable's word starts and ends in [bytes] (both -1 for a literal `{}`), until it returns true.
      */
@@ -203,7 +233,7 @@ object Templates {
     }
 
     /** The number `bytes[from, to)` starts with, as described at [variableNumber]. */
-    private fun leadingNumber(bytes: ByteArray, from: Int, to: Int): Double {
+    fun leadingNumber(bytes: ByteArray, from: Int, to: Int): Double {
         fun digit(i: Int) = bytes[i] in ZERO..NINE
         var i = from
         if (i < to && (bytes[i] == MINUS || bytes[i] == PLUS)) i++
