@@ -55,7 +55,7 @@ private val TICK_STEPS = longArrayOf(
  * and a burst that is a small share of all records still rises well off the bottom. The selected rows, or the
  * top row in view, are marked. The records a search found are a strip along the bottom, in every slice with a match;
  * [found] counts them on bins of their own, which are mapped onto the slices by time.
- * Clicking calls [onJump] with the time there; dragging calls [onRange] with the times covered; the
+ * Clicking calls [onJump] with the slice there; dragging calls [onRange] with the times covered; the
  * context menu calls [onShowAllTimes] when [hasTimeRange].
  *
  * At the [pointer]'s time, set while the mouse is over this bar or another on the same [timeline], a line crosses
@@ -67,7 +67,8 @@ class TimeHistogramBar(
     private val found: () -> TimeHistogram? = { null },
 ) : JComponent() {
 
-    var onJump: (time: Long) -> Unit = {}
+    /** From [from] to [to], exclusive: the slice clicked, with the most severe [TimeHistogram] category in it. */
+    var onJump: (from: Long, to: Long, category: Int) -> Unit = { _, _, _ -> }
 
     /** From [from] to [to], exclusive. */
     var onRange: (from: Long, to: Long) -> Unit = { _, _ -> }
@@ -207,7 +208,13 @@ class TimeHistogramBar(
                 if (dragging && range != null) {
                     onRange(slices.start(range.first), slices.start(range.last + 1))
                 } else if (!dragging) {
-                    onJump(slices.start(sliceAt(slices, e.x)))
+                    val slice = sliceAt(slices, e.x)
+                    val category = when {
+                        slices.errors[slice] > 0 -> TimeHistogram.ERROR
+                        slices.warnings[slice] > 0 -> TimeHistogram.WARN
+                        else -> TimeHistogram.OTHER
+                    }
+                    onJump(slices.start(slice), slices.start(slice + 1), category)
                 }
             }
         }
@@ -323,12 +330,15 @@ class TimeHistogramBar(
         }
     }
 
-    /** [counts] as a line on the volume's square-root scale, which lifts small counts off the bottom. */
+    /**
+     * [counts] as a line on the volume's square-root scale, which lifts small counts off the bottom. Where the
+     * count stays 0 the line is left out, so it does not lie along the bottom of the chart.
+     */
     private fun paintLine(g2: Graphics2D, slices: Slices, counts: IntArray, peak: Double, color: Color) {
         if (counts.max() == 0) return
         g2.color = color
         g2.stroke = BasicStroke(UIScale.scale(1.5f), BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND)
-        g2.draw(path(slices) { sqrt(counts[it].toDouble()) / peak })
+        g2.draw(path(slices, { counts[it] == 0 }) { sqrt(counts[it].toDouble()) / peak })
     }
 
     /** The count the top of the chart stands for, e.g. `1,234 / 2 min`, so the height can be read. */
@@ -349,15 +359,27 @@ class TimeHistogramBar(
         else -> "$nanos ns"
     }
 
-    /** A line through the middle of each slice at [fraction] of the chart's height, held level to both edges. */
-    private fun path(slices: Slices, fraction: (Int) -> Double): Path2D.Double {
+    /**
+     * A line through the middle of each slice at [fraction] of the chart's height, held level to both edges; a
+     * stretch between two slices that are both [left out][leftOut] is not drawn.
+     */
+    private fun path(
+        slices: Slices,
+        leftOut: (Int) -> Boolean = { false },
+        fraction: (Int) -> Double,
+    ): Path2D.Double {
         val height = (chartBottom - chartTop).toDouble()
         fun y(slice: Int) = chartBottom - fraction(slice) * height
         val sliceWidth = width.toDouble() / slices.count
+        val last = slices.count - 1
         return Path2D.Double().apply {
             moveTo(0.0, y(0))
-            for (i in 0..<slices.count) lineTo((i + 0.5) * sliceWidth, y(i))
-            lineTo(width.toDouble(), y(slices.count - 1))
+            for (i in 0..last) {
+                val x = (i + 0.5) * sliceWidth
+                // The edge to the left of the first slice counts as that slice.
+                if (leftOut(i) && leftOut(maxOf(0, i - 1))) moveTo(x, y(i)) else lineTo(x, y(i))
+            }
+            if (leftOut(last)) moveTo(width.toDouble(), y(last)) else lineTo(width.toDouble(), y(last))
         }
     }
 

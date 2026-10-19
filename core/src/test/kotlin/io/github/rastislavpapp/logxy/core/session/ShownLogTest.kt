@@ -27,11 +27,14 @@ class ShownLogTest {
     lateinit var dir: Path
 
     /** Records with these times, [Records.NO_TIMESTAMP] for none; each one's text is "r" and its number. */
-    private class TimedRecords(private val times: LongArray) : Records {
+    private class TimedRecords(
+        private val times: LongArray,
+        private val levels: List<Level?> = List(times.size) { null },
+    ) : Records {
         override val schema = Schema.RAW
         override val recordCount get() = times.size
         override val isRaw = true
-        override fun level(record: Int): Level? = null
+        override fun level(record: Int): Level? = levels[record]
         override fun timestampNanos(record: Int) = times[record]
         override fun rowValues(record: Int, maxBytes: Int) = arrayOf("r$record")
         override fun fieldText(record: Int, field: Int) = "r$record"
@@ -109,6 +112,23 @@ class ShownLogTest {
         assertEquals(0, shown.firstRowAt(25))
         assertEquals(2, shown.firstRowAt(31))
         assertEquals(-1, shown(*LongArray(0)).firstRowAt(10))
+    }
+
+    @Test
+    fun `the first row in a time range at a level`() {
+        val times = longArrayOf(10, 20, none, 30, 40, 50)
+        val levels = listOf(Level.ERROR, Level.INFO, Level.FATAL, Level.WARN, Level.ERROR, Level.WARN)
+        val shown = ShownLog(Timed(TimedRecords(times, levels)))
+        assertEquals(1, shown.firstRowIn(20, 50, TimeHistogram.OTHER))
+        // A row without a time between rows in the range counts, and fatal counts as an error.
+        assertEquals(2, shown.firstRowIn(20, 50, TimeHistogram.ERROR))
+        assertEquals(3, shown.firstRowIn(20, 50, TimeHistogram.WARN))
+        // The end is exclusive.
+        assertEquals(-1, shown.firstRowIn(40, 50, TimeHistogram.WARN))
+
+        shown.showRows(intArrayOf(0, 1, 3, 4))
+        assertEquals(3, shown.firstRowIn(20, 50, TimeHistogram.ERROR))
+        assertEquals(-1, shown(*LongArray(0)).firstRowIn(0, 99, TimeHistogram.OTHER))
     }
 
     @Test

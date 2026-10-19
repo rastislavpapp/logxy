@@ -734,7 +734,7 @@ class LogTab(
         scrollPane.onRowsInViewChanged = ::showMarkedTimes
         val histogramBar = timestampField?.let { field ->
             TimeHistogramBar({ session.histogram }, { session.foundHistogram }).apply {
-                onJump = ::jumpToTime
+                onJump = ::jumpToSlice
                 onRange = { from, to -> filterBar.setTimeRange(field, timeLiteral(from), timeLiteral(to)) }
                 onShowAllTimes = { filterBar.setTimeRange(field, null, null) }
                 hasTimeRange = { filterBar.hasTimeRange(field) }
@@ -1017,6 +1017,17 @@ class LogTab(
         session.follow = false
         scrollPane.selectRow(row)
         table?.requestFocusInWindow()
+    }
+
+    /**
+     * Selects the first shown row from [from] to [to] (exclusive) at the histogram [category], e.g. the slice's
+     * first error; the first row at [from] or later if there is none.
+     */
+    private fun jumpToSlice(from: Long, to: Long, category: Int) {
+        val model = model ?: return
+        val row = model.shown.firstRowIn(from, to, category)
+        if (row < 0) return jumpToTime(from)
+        jumpToRecord(model.shown.recordAt(row))
     }
 
     /** Selects the first shown row at [time] or later, or the last row if none is. */
