@@ -26,6 +26,7 @@ import io.github.rastislavpapp.logxy.core.query.QueryException
 import io.github.rastislavpapp.logxy.core.query.TextSearch
 import io.github.rastislavpapp.logxy.core.template.TemplateCounts
 import io.github.rastislavpapp.logxy.core.template.VariableSeries
+import io.github.rastislavpapp.logxy.core.template.VariableValues
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -417,6 +418,18 @@ class LogSession internal constructor(
         val engine = engine ?: return null
         if (shown.schema.indexOf(Role.MESSAGE) < 0 || shown.schema.indexOf(Role.TIMESTAMP) < 0) return null
         return engine.variableSeries(shown.rowArray, shown.rowCount, template, variables)
+    }
+
+    /**
+     * How often each value occurs at [variable] (from 0) of the shown rows whose message has [template]; null if
+     * there is nothing loaded or the records have no message. Cancelling the caller stops it.
+     */
+    suspend fun variableValues(template: String, variable: Int): VariableValues? {
+        while (true) countJob?.takeIf { it.isActive }?.join() ?: break
+        val shown = shown ?: return null
+        val engine = engine ?: return null
+        if (shown.schema.indexOf(Role.MESSAGE) < 0) return null
+        return engine.variableValues(shown.rowArray, shown.rowCount, template, variable)
     }
 
     /** The template of [record]'s message; null if it has none, or nothing is loaded. */

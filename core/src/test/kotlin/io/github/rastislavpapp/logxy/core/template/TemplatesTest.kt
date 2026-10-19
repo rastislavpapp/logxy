@@ -99,6 +99,18 @@ class TemplatesTest {
     }
 
     @Test
+    fun `variables are numbered from 1 for the user, and the numbers dropped again`() {
+        assertEquals("Request from {1} took {2} ms", Templates.numbered("Request from {} took {} ms"))
+        assertEquals("Cache warmed", Templates.numbered("Cache warmed"))
+        assertEquals("id {{1}}", Templates.numbered("id {{}}"))
+        assertEquals("Request from {} took {} ms", Templates.unnumbered("Request from {1} took {2} ms"))
+        // Numbers are not checked, and `{}` stays as it is.
+        assertEquals("Request from {} took {} ms", Templates.unnumbered("Request from {} took {7} ms"))
+        assertEquals("id {{}}", Templates.unnumbered("id {{1}}"))
+        assertEquals("{x} and {}", Templates.unnumbered("{x} and {}"))
+    }
+
+    @Test
     fun `long hex words are variable, short ones and real words are not`() {
         assertEquals("commit {} added to face", mask("commit deadbeefcafe added to face"))
         assertEquals("{}", mask("DEADBEEF"))

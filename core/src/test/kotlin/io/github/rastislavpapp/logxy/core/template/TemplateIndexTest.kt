@@ -3,6 +3,9 @@ package io.github.rastislavpapp.logxy.core.template
 import io.github.rastislavpapp.logxy.core.filter.Filter
 import io.github.rastislavpapp.logxy.core.filter.FilterEngine
 import io.github.rastislavpapp.logxy.core.filter.TemplateCondition
+import io.github.rastislavpapp.logxy.core.filter.TextCondition
+import io.github.rastislavpapp.logxy.core.filter.TextOp
+import io.github.rastislavpapp.logxy.core.filter.VariableCondition
 import io.github.rastislavpapp.logxy.core.index.IndexProgress
 import io.github.rastislavpapp.logxy.core.index.LineIndex
 import io.github.rastislavpapp.logxy.core.log.Level
@@ -225,6 +228,84 @@ class TemplateIndexTest {
                 listOf(nanos("08:00:01") to 17.0, nanos("08:00:04") to 18.0, nanos("08:00:06") to 99.0),
                 values.entries(),
             )
+        } finally {
+            a.close()
+            b.close()
+        }
+    }
+
+    private val requests = """
+        2026-10-01 08:00:00.000 [main] INFO  app.Http - Request 1 done with 404 in 12 ms
+        2026-10-01 08:00:01.000 [main] INFO  app.Http - Request 2 done with 200 in 7 ms
+        2026-10-01 08:00:02.000 [main] INFO  app.Http - Request 3 done with 404 in 30 ms
+        2026-10-01 08:00:03.000 [main] INFO  app.Http - Request 4 done with 500 in 9 ms
+        2026-10-01 08:00:04.000 [main] INFO  app.Main - Cache warmed
+        2026-10-01 08:00:05.000 [main] INFO  app.Http - Request 5 done with 200 in 3 ms
+        2026-10-01 08:00:06.000 [main] INFO  app.Http - Request 6 done with 404 in 1 ms
+    """.trimIndent() + "\n"
+
+    private val done = "Request {} done with {} in {} ms"
+
+    private fun VariableValues.entries() = values.indices.map { values[it] to count(it) }
+
+    @Test
+    fun `counts the values of a variable, most frequent first`() {
+        parse(requests).use { log ->
+            val engine = FilterEngine(log)
+            val status = runBlocking { engine.variableValues(null, log.recordCount, done, 1) }
+            assertEquals(listOf("404" to 3, "200" to 2, "500" to 1), status.entries())
+            assertEquals(6, status.records)
+            assertEquals(0, status.other)
+            assertEquals(6, status.numbers)
+            assertEquals(200.0, status.min)
+            assertEquals(500.0, status.max)
+            assertEquals(352.0, status.average)
+            // Only the rows given; equal counts in the order first seen.
+            val some = runBlocking { engine.variableValues(intArrayOf(1, 2, 3, 4), 4, done, 1) }
+            assertEquals(listOf("200" to 1, "404" to 1, "500" to 1), some.entries())
+            val none = runBlocking { engine.variableValues(null, log.recordCount, "nothing like it", 0) }
+            assertEquals(listOf(), none.entries())
+            assertEquals(0, none.records)
+            assertEquals(Double.NaN, none.average)
+        }
+    }
+
+    @Test
+    fun `values past the limit of different ones count as other`() {
+        parse(requests).use { log ->
+            val engine = FilterEngine(log)
+            val counted = runBlocking {
+                VariableValues.count(
+                    listOf(engine.templates), listOf(log.filterSnapshot()), null, log.recordCount, null, done, 1,
+                    maxValues = 2,
+                )
+            }
+            assertEquals(listOf("404" to 3, "200" to 2), counted.entries())
+            assertEquals(1, counted.other)
+            assertEquals(6, counted.records)
+        }
+    }
+
+    @Test
+    fun `merged logs count a variable over every file`() {
+        val a = parse(sample, "a.log")
+        val b = parse("""
+            2026-10-01 08:00:00.500 [main] INFO  app.B - Cache warmed
+            2026-10-01 08:00:06.000 [main] ERROR app.B - Query 17 failed
+        """.trimIndent() + "\n", "b.log")
+        val merged = runBlocking { MergedLog.build(listOf(a, b)) }
+        try {
+            val filter = MergedFilter(merged)
+            val values = runBlocking { filter.variableValues(null, merged.recordCount, query, 0) }
+            assertEquals(listOf("17" to 2, "18" to 1), values.entries())
+            val queryCondition = TemplateCondition("Message", setOf(query))
+            val is17 = TextCondition("Message", TextOp.EQUALS, "17")
+            val rows = runBlocking {
+                filter.prepare(Filter.And(listOf(queryCondition, VariableCondition("Message", query, 0, is17)))).run()
+            }.rows.toList()
+            // After the source file's name.
+            val times = rows.map { merged.rowValues(it, 100)[1] }
+            assertEquals(listOf("2026-10-01 08:00:01.000", "2026-10-01 08:00:06.000"), times)
         } finally {
             a.close()
             b.close()

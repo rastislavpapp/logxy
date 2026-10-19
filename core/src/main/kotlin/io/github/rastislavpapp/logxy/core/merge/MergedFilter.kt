@@ -17,9 +17,11 @@ import io.github.rastislavpapp.logxy.core.filter.TemplateCondition
 import io.github.rastislavpapp.logxy.core.filter.TextCondition
 import io.github.rastislavpapp.logxy.core.filter.TextMatcher
 import io.github.rastislavpapp.logxy.core.filter.TimeCondition
+import io.github.rastislavpapp.logxy.core.filter.VariableCondition
 import io.github.rastislavpapp.logxy.core.template.RowOrigin
 import io.github.rastislavpapp.logxy.core.template.TemplateCounts
 import io.github.rastislavpapp.logxy.core.template.VariableSeries
+import io.github.rastislavpapp.logxy.core.template.VariableValues
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -113,6 +115,17 @@ class MergedFilter(private val log: MergedLog) : RecordFilter {
             variables,
         )
 
+    override suspend fun variableValues(rows: IntArray?, rowCount: Int, template: String, variable: Int) =
+        VariableValues.count(
+            engines.map { it.templates },
+            log.parts.map { it.filterSnapshot() },
+            rows,
+            rowCount,
+            origin,
+            template,
+            variable,
+        )
+
     /**
      * The merged positions, in order, of each part's sorted [rows], leaving out records beyond its [merged]
      * count. Positions are distinct and in [start, count), so a bitset sorts them in linear time.
@@ -162,7 +175,8 @@ class MergedFilter(private val log: MergedLog) : RecordFilter {
         is TextCondition -> constant(TextMatcher(condition).matches(name))
         is PresenceCondition -> constant(condition.present)
         is NumberCondition -> constant(condition.matches(Bytes.parseNumber(name)))
-        is LevelCondition, is TimeCondition, is TemplateCondition, is RecordTextCondition -> constant(false)
+        is LevelCondition, is TimeCondition, is TemplateCondition, is VariableCondition, is RecordTextCondition ->
+            constant(false)
     }
 
     private fun renamed(condition: Condition, field: String): Condition = when (condition) {
@@ -171,6 +185,7 @@ class MergedFilter(private val log: MergedLog) : RecordFilter {
         is LevelCondition -> condition.copy(field = field)
         is TimeCondition -> condition.copy(field = field)
         is TemplateCondition -> condition.copy(field = field)
+        is VariableCondition -> condition.copy(field = field)
         is NumberCondition -> condition.copy(field = field)
         is RecordTextCondition -> condition
     }

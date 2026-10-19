@@ -1,5 +1,7 @@
 package io.github.rastislavpapp.logxy.core.query
 
+import io.github.rastislavpapp.logxy.core.template.Templates
+
 /**
  * Parses the text form of a [Query], e.g.
  * `level >= WARN AND (message == "*timeout*" OR NOT thread =~ "^worker")`.
@@ -180,8 +182,11 @@ object QueryPrinter {
 
     private fun rule(rule: Query.Rule): String {
         val field = if (QueryParser.isBareWord(rule.field)) rule.field else "`${rule.field}`"
-        val bare = rule.bare && QueryParser.isBareWord(rule.value)
-        val value = if (bare) rule.value else "\"" + rule.value.replace("\"", "\\\"") + "\""
+        // Templates are shown with their variables numbered, however they were written.
+        val isTemplate = rule.field.equals(Query.TEMPLATE_FIELD, ignoreCase = true)
+        val text = if (isTemplate) Templates.numbered(Templates.unnumbered(rule.value)) else rule.value
+        val bare = rule.bare && QueryParser.isBareWord(text)
+        val value = if (bare) text else "\"" + text.replace("\"", "\\\"") + "\""
         return "$field ${rule.op.symbol} $value"
     }
 }

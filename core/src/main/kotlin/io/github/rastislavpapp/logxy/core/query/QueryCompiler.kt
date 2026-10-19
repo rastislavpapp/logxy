@@ -9,10 +9,12 @@ import io.github.rastislavpapp.logxy.core.filter.TemplateCondition
 import io.github.rastislavpapp.logxy.core.filter.TextCondition
 import io.github.rastislavpapp.logxy.core.filter.TextOp
 import io.github.rastislavpapp.logxy.core.filter.TimeCondition
+import io.github.rastislavpapp.logxy.core.filter.VariableCondition
 import io.github.rastislavpapp.logxy.core.log.ColumnType
 import io.github.rastislavpapp.logxy.core.log.Level
 import io.github.rastislavpapp.logxy.core.log.Role
 import io.github.rastislavpapp.logxy.core.log.Schema
+import io.github.rastislavpapp.logxy.core.template.Templates
 import java.time.DateTimeException
 import java.time.Instant
 import java.time.LocalDate
@@ -29,24 +31,48 @@ class QueryCompiler(private val schema: Schema, private val zone: ZoneId = ZoneI
      * Conditions with an empty value are placeholders and ignored, like groups left with nothing in them;
      * except `!= ""`, which keeps records with a non-empty value.
      */
-    fun compile(query: Query): Filter = compileOrNull(query) ?: Filter.And(emptyList())
+    fun compile(query: Query): Filter = compileOrNull(query, Binding(null, 0)) ?: Filter.And(emptyList())
 
-    private fun compileOrNull(query: Query): Filter? {
+    /**
+     * The `Template ==` rules joined with AND in the group around a variable rule: the template it belongs to if
+     * there is one [count], else null.
+     */
+    private class Binding(val template: String?, val count: Int)
+
+    private fun compileOrNull(query: Query, outer: Binding): Filter? {
         val filter = when (query) {
             is Query.Group -> {
-                val items = query.items.mapNotNull(::compileOrNull)
+                // A variable rule belongs to the template of the nearest AND group that has one.
+                val binding = if (query.all) binding(query) ?: outer else outer
+                val items = query.items.mapNotNull { compileOrNull(it, binding) }
                 if (items.isEmpty()) return null
                 if (query.all) Filter.And(items) else Filter.Or(items)
             }
-            is Query.Rule -> if (query.value.isEmpty() && !query.op.excludesEmpty) return null else rule(query)
+            is Query.Rule -> if (query.value.isEmpty() && !query.op.excludesEmpty) return null else rule(query, outer)
         }
         return if (query.negated) Filter.Not(filter) else filter
     }
 
-    private fun rule(rule: Query.Rule): Filter {
+    /** The `Template ==` rules among [group]'s own items, as a [Binding]; null if there are none. */
+    private fun binding(group: Query.Group): Binding? {
+        val templates = group.items.filter { item ->
+            item is Query.Rule && !item.negated && item.value.isNotEmpty() && isTemplate(item.field) &&
+                (item.op == QueryOp.EQUALS || item.op == QueryOp.EQUALS_CASE)
+        }
+        if (templates.isEmpty()) return null
+        val single = (templates.singleOrNull() as Query.Rule?)?.value?.let(Templates::unnumbered)
+        return Binding(single, templates.size)
+    }
+
+    // A field of the log named so wins over the template.
+    private fun isTemplate(name: String) =
+        name.equals(Query.TEMPLATE_FIELD, ignoreCase = true) && schema.fields.none { it.name.equals(name, true) }
+
+    private fun rule(rule: Query.Rule, binding: Binding): Filter {
         val field = schema.fields.firstOrNull { it.name.equals(rule.field, ignoreCase = true) }
-        // A field of the log named so wins over the template.
-        if (field == null && rule.field.equals(Query.TEMPLATE_FIELD, ignoreCase = true)) return template(rule)
+        if (field == null && isTemplate(rule.field)) return template(rule)
+        val variable = if (field == null) VARIABLE.matchEntire(rule.field) else null
+        if (variable != null) return variable(rule, variable.groupValues[1].toIntOrNull() ?: Int.MAX_VALUE, binding)
         if (field == null) {
             val names = schema.fields.joinToString { it.name }
             throw QueryException("Unknown field “${rule.field}”; this log has $names")
@@ -64,6 +90,14 @@ class QueryCompiler(private val schema: Schema, private val zone: ZoneId = ZoneI
             val condition = LevelCondition(name, setOf(level(rule.value)))
             return if (rule.op == QueryOp.EQUALS) condition else Filter.Not(condition)
         }
+        val text = text(name, rule)
+        // Absent values match negated conditions, so they need ruling out too.
+        if (rule.value.isEmpty()) return Filter.And(listOf(PresenceCondition(name), text))
+        return text
+    }
+
+    /** [rule], which compares text, as a condition on the text of [name]. */
+    private fun text(name: String, rule: Query.Rule): TextCondition {
         val (op, ignoreCase) = when (rule.op) {
             QueryOp.EQUALS -> TextOp.EQUALS to true
             QueryOp.NOT_EQUALS -> TextOp.NOT_EQUALS to true
@@ -71,13 +105,9 @@ class QueryCompiler(private val schema: Schema, private val zone: ZoneId = ZoneI
             QueryOp.NOT_EQUALS_CASE -> TextOp.NOT_EQUALS to false
             QueryOp.MATCHES -> TextOp.MATCHES to true
             QueryOp.NOT_MATCHES -> TextOp.NOT_MATCHES to true
-            else -> error("comparison handled above")
+            else -> error("comparisons are no text")
         }
-        // Absent values match negated conditions, so they need ruling out too.
-        if (rule.value.isEmpty()) {
-            return Filter.And(listOf(PresenceCondition(name), TextCondition(name, op, "", ignoreCase)))
-        }
-        if (op == TextOp.MATCHES || op == TextOp.NOT_MATCHES) {
+        if (rule.value.isNotEmpty() && (op == TextOp.MATCHES || op == TextOp.NOT_MATCHES)) {
             try {
                 Pattern.compile(rule.value)
             } catch (e: PatternSyntaxException) {
@@ -87,16 +117,39 @@ class QueryCompiler(private val schema: Schema, private val zone: ZoneId = ZoneI
         return TextCondition(name, op, rule.value, ignoreCase)
     }
 
-    /** Templates match exactly; `==` and `===` alike, as templates have no wildcards. */
+    /**
+     * Templates match exactly; `==` and `===` alike, as templates have no wildcards. Variables may be numbered,
+     * `{1}`, or bare, `{}`.
+     */
     private fun template(rule: Query.Rule): Filter {
-        val message = schema.fields.firstOrNull { it.role == Role.MESSAGE }
-            ?: throw QueryException("${Query.TEMPLATE_FIELD} needs a message, which this log does not have")
-        val condition = TemplateCondition(message.name, setOf(rule.value))
+        val condition = TemplateCondition(message().name, setOf(Templates.unnumbered(rule.value)))
         return when (rule.op) {
             QueryOp.EQUALS, QueryOp.EQUALS_CASE -> condition
             QueryOp.NOT_EQUALS, QueryOp.NOT_EQUALS_CASE -> Filter.Not(condition)
             else -> throw QueryException("${Query.TEMPLATE_FIELD} works with == and !=, not ${rule.op.symbol}")
         }
+    }
+
+    private fun message() = schema.fields.firstOrNull { it.role == Role.MESSAGE }
+        ?: throw QueryException("${Query.TEMPLATE_FIELD} needs a message, which this log does not have")
+
+    /** `{n}` [rule]: variable [number] (from 1) of the template of [binding], compared as other fields are. */
+    private fun variable(rule: Query.Rule, number: Int, binding: Binding): Filter {
+        val template = binding.template ?: throw QueryException(
+            if (binding.count > 1) {
+                "${rule.field} belongs to one ${Query.TEMPLATE_FIELD} == rule, but its group has ${binding.count}"
+            } else {
+                "${rule.field} needs a ${Query.TEMPLATE_FIELD} == rule joined to it with AND"
+            },
+        )
+        if (number == 0) throw QueryException("Variables count from {1}")
+        val count = Templates.variableCount(template)
+        val shown = Templates.numbered(template)
+        if (count == 0) throw QueryException("“$shown” has no variables")
+        if (number > count) throw QueryException("“$shown” has variables {1} to {$count}, no ${rule.field}")
+        val name = message().name
+        val test = if (rule.op.comparison) numberComparison(name, rule, rule.field) else text(name, rule)
+        return VariableCondition(name, template, number - 1, test)
     }
 
     private fun level(text: String): Level = Level.entries.firstOrNull { it.name.equals(text, ignoreCase = true) }
@@ -115,10 +168,11 @@ class QueryCompiler(private val schema: Schema, private val zone: ZoneId = ZoneI
         return LevelCondition(field, levels.toSet())
     }
 
-    private fun numberComparison(field: String, rule: Query.Rule): Filter {
+    /** [shown] names the field in errors. */
+    private fun numberComparison(field: String, rule: Query.Rule, shown: String = field): NumberCondition {
         val number = Bytes.parseNumber(rule.value)
         if (number.isNaN()) {
-            throw QueryException("${rule.op.symbol} on $field compares numbers; “${rule.value}” is no number")
+            throw QueryException("${rule.op.symbol} on $shown compares numbers; “${rule.value}” is no number")
         }
         return when (rule.op) {
             QueryOp.AT_LEAST -> NumberCondition(field, from = number)
@@ -136,6 +190,11 @@ class QueryCompiler(private val schema: Schema, private val zone: ZoneId = ZoneI
             QueryOp.AT_MOST -> TimeCondition(field, to = nanos)
             else -> TimeCondition(field, to = nanos - 1)
         }
+    }
+
+    private companion object {
+        /** `{n}`: a variable of the template its rule belongs to. */
+        val VARIABLE = Regex("""\{(\d+)}""")
     }
 }
 

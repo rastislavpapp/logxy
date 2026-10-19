@@ -7,6 +7,8 @@ import io.github.rastislavpapp.logxy.core.log.Level
 import io.github.rastislavpapp.logxy.core.log.LevelMapping
 import io.github.rastislavpapp.logxy.core.log.LogData
 import io.github.rastislavpapp.logxy.core.log.ParsedLog
+import io.github.rastislavpapp.logxy.core.log.Role
+import io.github.rastislavpapp.logxy.core.parse.CompiledJson
 import io.github.rastislavpapp.logxy.core.parse.CompiledPattern
 import io.github.rastislavpapp.logxy.core.query.QueryException
 import io.github.rastislavpapp.logxy.core.query.TextSearch
@@ -74,6 +76,46 @@ class FilterEngineTest {
             assertEquals(emptyList(), find(TextSearch("timeout", wholeWords = true, matchCase = true)))
             assertEquals(listOf(3), find(TextSearch("worker-\\d] WARN", regex = true)))
             assertFailsWith<QueryException> { TextSearch("(", regex = true).condition() }
+        }
+    }
+
+    @Test
+    fun `a variable condition tests the word at its variable in records of its template`() {
+        val log = parse("""
+            2026-10-01 08:00:00.000 [main] INFO  app.Http - Request 17 done with 200 in 12 ms
+            2026-10-01 08:00:01.000 [main] INFO  app.Http - Request 18 done with 404 in 7 ms
+            2026-10-01 08:00:02.000 [main] INFO  app.Http - Request 19 done with 500 in 1500 ms
+            2026-10-01 08:00:03.000 [main] INFO  app.Shop - Order 404 failed
+            2026-10-01 08:00:04.000 [main] INFO  app.Http - Request 20 done with 404 in 30 ms
+        """.trimIndent() + "\n")
+        log.use {
+            val engine = FilterEngine(log)
+            fun variable(n: Int, test: Condition) =
+                VariableCondition("Message", "Request {} done with {} in {} ms", n, test)
+            fun status(op: TextOp, value: String) = engine.rows(variable(1, message(op, value, ignoreCase = true)))
+            assertEquals(listOf(1, 4), status(TextOp.EQUALS, "404"))
+            assertEquals(listOf(2), status(TextOp.EQUALS, "5*"))
+            assertEquals(listOf(1, 4), status(TextOp.MATCHES, "^4"))
+            // Only records of the template count, also for the negated ops.
+            assertEquals(listOf(0, 2), status(TextOp.NOT_EQUALS, "404"))
+            assertEquals(listOf(2), engine.rows(variable(2, NumberCondition("Message", from = 100.0))))
+            assertEquals(listOf(0, 2, 3), engine.rows(Filter.Not(variable(1, message(TextOp.EQUALS, "404")))))
+            val other = VariableCondition("Message", "Order {} failed", 0, message(TextOp.EQUALS, "404"))
+            assertEquals(listOf(3), engine.rows(other))
+        }
+    }
+
+    @Test
+    fun `a variable condition reads JSON messages unescaped`() {
+        val file = Files.writeString(dir.resolve("a.json"), """
+            {"@timestamp":"2026-10-01T08:00:00Z","message":"User \"bob\" waited 120 ms"}
+            {"@timestamp":"2026-10-01T08:00:01Z","message":"User \"bob\" waited 80 ms"}
+        """.trimIndent() + "\n")
+        runBlocking { ParsedLog.build(file, CompiledJson(zone = ZoneOffset.UTC), IndexProgress()) }.use { log ->
+            val message = log.schema.fields.first { it.role == Role.MESSAGE }.name
+            val test = TextCondition(message, TextOp.EQUALS, "80")
+            val waited = VariableCondition(message, "User \"bob\" waited {} ms", 0, test)
+            assertEquals(listOf(1), FilterEngine(log).rows(waited))
         }
     }
 
@@ -341,6 +383,7 @@ class FilterEngineTest {
                     Filter.Not(TemplateCondition("Message", setOf("message {} hay"))),
                 ),
             ),
+            VariableCondition("Message", "message {} needle", 0, NumberCondition("Message", from = 5_000.0)),
         )
         fun expected(log: LogData, filter: Filter): List<Int> =
             (0..<log.recordCount).filter { matches(log as ParsedLog, it, filter) }
@@ -390,6 +433,13 @@ class FilterEngineTest {
         is TemplateCondition -> {
             val field = log.schema.fields.indexOfFirst { it.name == filter.field }
             Templates.mask(log.rowValues(record, 1000)[field]) in filter.templates
+        }
+        is VariableCondition -> {
+            val field = log.schema.fields.indexOfFirst { it.name == filter.field }
+            val message = log.rowValues(record, 1000)[field]
+            val word = Templates.variableWord(message, filter.variable)
+            val test = filter.test as NumberCondition
+            Templates.mask(message) == filter.template && word != null && test.matches(word.toDouble())
         }
         is PresenceCondition -> error("unused")
     }

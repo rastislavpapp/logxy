@@ -68,6 +68,17 @@ data class LevelCondition(override val field: String, val levels: Set<Level>) : 
  */
 data class TemplateCondition(override val field: String, val templates: Set<String>) : Condition
 
+/**
+ * The template of the message [field] is [template] (with `{}`, as stored), and the word at its [variable] (from 0)
+ * passes [test], a [TextCondition] or [NumberCondition] applied to that word.
+ */
+data class VariableCondition(
+    override val field: String,
+    val template: String,
+    val variable: Int,
+    val test: Condition,
+) : Condition
+
 /** The timestamp, in epoch nanoseconds, lies in `[from, to]`; a null bound is open. */
 data class TimeCondition(override val field: String, val from: Long? = null, val to: Long? = null) : Condition
 
