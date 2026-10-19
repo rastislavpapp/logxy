@@ -4,11 +4,9 @@ import com.formdev.flatlaf.util.UIScale
 import io.github.rastislavpapp.logxy.core.session.TimeHistogram
 import java.awt.BasicStroke
 import java.awt.Color
-import java.awt.Cursor
 import java.awt.Dimension
 import java.awt.Graphics
 import java.awt.Graphics2D
-import java.awt.Rectangle
 import java.awt.RenderingHints
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
@@ -24,21 +22,10 @@ import javax.swing.UIManager
 import kotlin.math.abs
 import kotlin.math.sqrt
 
-private const val CHART_HEIGHT = 40
+/** Of the chart, without the time labels under it. */
+internal const val HISTOGRAM_HEIGHT = 40
 private const val TICK_HEIGHT = 3
 private const val MATCH_STRIP_HEIGHT = 3
-
-/** The slot charts' strip holds several lines: taller than the histogram. */
-private const val STRIP_HEIGHT = CHART_HEIGHT * 3 / 2
-private const val LEGEND_PADDING = 2
-
-/** Histogram slices per slice of the charts. */
-private const val CHART_GROUP = 4
-private const val LEGEND_GAP = 12
-
-/** Legend labels are cut to this many characters, so a few charts fit side by side. */
-private const val MAX_LEGEND_CHARS = 40
-private const val CLOSE = "×"
 
 /** Pixels per slice of time: wide enough that counts are not mostly noise, narrow enough to look continuous. */
 private const val SLICE_WIDTH = 2
@@ -47,7 +34,7 @@ private const val SLICE_WIDTH = 2
 private const val LABEL_GAP = 24
 
 /** How far the mouse must move, in pixels, before a press becomes a drag. */
-private const val DRAG_THRESHOLD = 3
+internal const val DRAG_THRESHOLD = 3
 
 private const val MILLI = 1_000_000L
 private const val SECOND = 1_000 * MILLI
@@ -71,20 +58,22 @@ private val TICK_STEPS = longArrayOf(
  * Clicking calls [onJump] with the time there; dragging calls [onRange] with the times covered; the
  * context menu calls [onShowAllTimes] when [hasTimeRange].
  *
- * Below, while there are [charts], a strip of them on the same slices: per chart the p50 and p99 of its values, each
- * chart on its own scale, as their units differ; a legend row above it closes them. Clicking and dragging there do
- * what they do on the histogram.
+ * At the [pointer]'s time, set while the mouse is over this bar or another on the same [timeline], a line crosses
+ * the chart with the counts of the slice there beside it; [onPointer] hears where the mouse points here. Likewise
+ * [draggedTimes] shows a drag over such a bar, and [onDragged] hears of one here.
  */
 class TimeHistogramBar(
     private val histogram: () -> TimeHistogram?,
     private val found: () -> TimeHistogram? = { null },
-    private val charts: SlotCharts? = null,
 ) : JComponent() {
 
     var onJump: (time: Long) -> Unit = {}
 
     /** From [from] to [to], exclusive. */
     var onRange: (from: Long, to: Long) -> Unit = { _, _ -> }
+
+    /** The times being dragged over, or null once dropped. */
+    var onDragged: (times: Pair<Long, Long>?) -> Unit = {}
     var onShowAllTimes: () -> Unit = {}
     var hasTimeRange: () -> Boolean = { false }
 
@@ -96,13 +85,35 @@ class TimeHistogramBar(
             repaint()
         }
 
+    /** The times being dragged over on a bar under this one, from and to (exclusive); null if none. */
+    var draggedTimes: Pair<Long, Long>? = null
+        set(value) {
+            if (field == value) return
+            field = value
+            repaint()
+        }
+
+    /** The time the mouse points at, here or on a bar under it; null if none. */
+    var pointer: Long? = null
+        set(value) {
+            if (field == value) return
+            field = value
+            repaint()
+        }
+
+    var onPointer: (time: Long?) -> Unit = {}
+
+    /** The times as last painted; null before, or while there is no histogram. */
+    var timeline: Timeline? = null
+        private set
+
+    /** Hears when [timeline] changes, e.g. as records come or the bar is resized. */
+    var onTimelineChanged: () -> Unit = {}
+
     private val zone = ZoneId.systemDefault()
     private var pressX = -1
     private var dragging = false
     private var selection: IntRange? = null
-
-    /** Where the legend's close marks were painted, and the chart each closes. */
-    private val closeBoxes = mutableListOf<Pair<Rectangle, SlotChart>>()
 
     /** The histogram as painted: [count] slices of [group] bins each, the first starting at bin [first]. */
     private class Slices(
@@ -154,32 +165,32 @@ class TimeHistogramBar(
     }
 
     init {
-        toolTipText = ""
         val mouse = object : MouseAdapter() {
             override fun mousePressed(e: MouseEvent) {
                 if (e.isPopupTrigger) return showMenu(e)
                 if (!SwingUtilities.isLeftMouseButton(e)) return
-                closeBoxes.firstOrNull { it.first.contains(e.point) }?.let { (_, chart) ->
-                    charts?.remove(chart)
-                    return
-                }
                 pressX = e.x
                 dragging = false
             }
 
-            override fun mouseMoved(e: MouseEvent) {
-                val onClose = closeBoxes.any { it.first.contains(e.point) }
-                cursor = if (onClose) Cursor.getPredefinedCursor(Cursor.HAND_CURSOR) else null
+            override fun mouseMoved(e: MouseEvent) = point(e.x)
+
+            override fun mouseExited(e: MouseEvent) {
+                pointer = null
+                onPointer(null)
             }
 
             override fun mouseDragged(e: MouseEvent) {
+                point(e.x)
                 if (pressX < 0) return
                 if (abs(e.x - pressX) > DRAG_THRESHOLD) dragging = true
                 if (!dragging) return
                 val slices = slices() ?: return
                 val a = sliceAt(slices, pressX)
                 val b = sliceAt(slices, e.x)
-                selection = minOf(a, b)..maxOf(a, b)
+                val range = minOf(a, b)..maxOf(a, b)
+                selection = range
+                onDragged(slices.start(range.first) to slices.start(range.last + 1))
                 repaint()
             }
 
@@ -190,6 +201,7 @@ class TimeHistogramBar(
                 val range = selection
                 pressX = -1
                 selection = null
+                onDragged(null)
                 repaint()
                 if (slices == null) return
                 if (dragging && range != null) {
@@ -201,6 +213,12 @@ class TimeHistogramBar(
         }
         addMouseListener(mouse)
         addMouseMotionListener(mouse)
+    }
+
+    private fun point(x: Int) {
+        val time = timeline?.timeAt(x)
+        pointer = time
+        onPointer(time)
     }
 
     private fun showMenu(e: MouseEvent) {
@@ -215,17 +233,12 @@ class TimeHistogramBar(
     private val labelFont get() = UIManager.getFont("small.font") ?: font
 
     private val chartTop get() = UIScale.scale(4)
-    private val chartBottom get() = chartTop + UIScale.scale(CHART_HEIGHT)
-    private val labelsBottom
-        get() = chartBottom + UIScale.scale(TICK_HEIGHT) + getFontMetrics(labelFont).height + UIScale.scale(2)
+    private val chartBottom get() = chartTop + UIScale.scale(HISTOGRAM_HEIGHT)
 
-    private val hasCharts get() = charts?.all?.isNotEmpty() == true
-    private val legendTop get() = labelsBottom
-    private val stripTop get() = legendTop + getFontMetrics(labelFont).height + UIScale.scale(LEGEND_PADDING * 2)
-    private val stripBottom get() = stripTop + UIScale.scale(STRIP_HEIGHT)
-
-    override fun getPreferredSize(): Dimension =
-        Dimension(0, if (hasCharts) stripBottom + UIScale.scale(LEGEND_PADDING) else labelsBottom)
+    override fun getPreferredSize(): Dimension {
+        val labels = getFontMetrics(labelFont).height
+        return Dimension(0, chartBottom + UIScale.scale(TICK_HEIGHT) + labels + UIScale.scale(2))
+    }
 
     override fun getMinimumSize() = preferredSize
 
@@ -255,10 +268,14 @@ class TimeHistogramBar(
             g2.fillRect(0, 0, width, height)
             g2.color = UIManager.getColor("Component.borderColor")
             g2.fillRect(0, height - 1, width, 1)
-            closeBoxes.clear()
-            val slices = slices() ?: return
+            val slices = slices()
+            val timeline = slices?.let { Timeline(it.start(0), it.start(1) - it.start(0), it.count, width) }
+            if (timeline != this.timeline) {
+                this.timeline = timeline
+                onTimelineChanged()
+            }
+            if (slices == null) return
             g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
-            if (hasCharts) paintCharts(g2, slices)
             // One scale for all, so a line's height means as many records as the area's.
             val peak = sqrt(maxOf(1, slices.totals.max()).toDouble())
             paintVolume(g2, slices, peak)
@@ -275,7 +292,9 @@ class TimeHistogramBar(
                 val from = sliceX(slices, it.first).toDouble()
                 paintRegion(g2, from, sliceX(slices, it.last + 1).toDouble(), accent, 0.3f)
             }
+            draggedTimes?.let { (from, to) -> paintRegion(g2, timeX(slices, from), timeX(slices, to), accent, 0.3f) }
             paintTicks(g2, slices)
+            pointer?.let { paintPointer(g2, slices, it) }
         } finally {
             g2.dispose()
         }
@@ -342,113 +361,14 @@ class TimeHistogramBar(
         }
     }
 
-    /** Over the histogram, and over the charts' strip if it shows. */
     private fun paintRegion(g2: Graphics2D, x1: Double, x2: Double, accent: Color, alpha: Float) {
         val left = x1.toInt()
         val right = maxOf(left + 1, x2.toInt())
-        val bands = if (hasCharts) listOf(0 to chartBottom, stripTop to stripBottom) else listOf(0 to chartBottom)
-        for ((top, bottom) in bands) {
-            g2.color = withAlpha(accent, alpha)
-            g2.fillRect(left, top, right - left, bottom - top)
-            g2.color = accent
-            g2.fillRect(left, top, 1, bottom - top)
-            g2.fillRect(right - 1, top, 1, bottom - top)
-        }
-    }
-
-    /** The legend, then each chart's p50 as a line and its p99 dashed, on a scale of its own. */
-    private fun paintCharts(g2: Graphics2D, slices: Slices) {
-        val charts = charts ?: return
-        g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON)
-        g2.font = labelFont
-        val metrics = g2.fontMetrics
-        g2.color = UIManager.getColor("Component.borderColor")
-        g2.fillRect(0, legendTop, width, 1)
-        val baseline = legendTop + UIScale.scale(LEGEND_PADDING) + metrics.ascent
-        val chip = metrics.ascent * 2 / 3
-        val close = metrics.stringWidth(CLOSE)
-        val besideLabel = chip + UIScale.scale(4 + 4 + LEGEND_GAP) + close
-        // Labels are cut shorter until the whole row fits, so every chart can be closed.
-        var maxChars = MAX_LEGEND_CHARS
-        var legend = charts.all.map { it.label.cut(maxChars) }
-        while (maxChars > 1 && UIScale.scale(4) + legend.sumOf { besideLabel + metrics.stringWidth(it) } > width) {
-            maxChars--
-            legend = charts.all.map { it.label.cut(maxChars) }
-        }
-        var x = UIScale.scale(4)
-        for ((chart, label) in charts.all.zip(legend)) {
-            g2.color = chart.color
-            g2.fillRect(x, baseline - chip, chip, chip)
-            x += chip + UIScale.scale(4)
-            g2.color = UIManager.getColor("Label.foreground")
-            g2.drawString(label, x, baseline)
-            x += metrics.stringWidth(label) + UIScale.scale(4)
-            g2.color = UIManager.getColor("Label.disabledForeground")
-            g2.drawString(CLOSE, x, baseline)
-            closeBoxes += Rectangle(x - 2, legendTop, close + 4, stripTop - legendTop) to chart
-            x += close + UIScale.scale(LEGEND_GAP)
-        }
-        val (from, width, count) = chartSlicing(slices)
-        val top = stripTop + UIScale.scale(LEGEND_PADDING)
-        val height = (stripBottom - top).toDouble()
-        val labels = mutableListOf<Pair<String, Color>>()
-        val dashed = BasicStroke(
-            UIScale.scale(1f), BasicStroke.CAP_BUTT, BasicStroke.JOIN_ROUND, 10f,
-            floatArrayOf(UIScale.scale(3f), UIScale.scale(3f)), 0f,
-        )
-        val solid = BasicStroke(UIScale.scale(1.5f), BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND)
-        for (chart in charts.all) {
-            val values = charts.slices(chart, from, width, count) ?: continue
-            val shown = (0..<values.count).filter { i ->
-                val x = timeX(slices, values.from + i * values.width + values.width / 2)
-                x >= 0 && x <= this.width && !values.p50[i].isNaN()
-            }
-            if (shown.isEmpty()) continue
-            val high = shown.maxOf { values.p99[it] }
-            // From 0, or from the lowest value shown if any is below.
-            val low = minOf(0.0, shown.minOf { minOf(values.p50[it], values.p99[it]) })
-            val range = (high - low).takeIf { it > 0 } ?: 1.0
-            fun line(numbers: DoubleArray) = Path2D.Double().apply {
-                var drawing = false
-                for (i in 0..<values.count) {
-                    val value = numbers[i]
-                    if (value.isNaN()) {
-                        drawing = false
-                        continue
-                    }
-                    val x = timeX(slices, values.from + i * values.width + values.width / 2)
-                    val y = stripBottom - (value - low) / range * height
-                    if (drawing) lineTo(x, y) else moveTo(x, y)
-                    drawing = true
-                }
-            }
-            g2.color = chart.color
-            g2.stroke = dashed
-            g2.draw(line(values.p99))
-            g2.stroke = solid
-            g2.draw(line(values.p50))
-            labels += "p99 ${formatValue(high)}" to chart.color
-        }
-        // Over all lines, on the background, so they stay readable.
-        var labelY = stripTop
-        val background = withAlpha(UIManager.getColor("Table.background"), 0.85f)
-        for ((text, color) in labels) {
-            g2.color = background
-            g2.fillRect(UIScale.scale(2), labelY, metrics.stringWidth(text) + UIScale.scale(4), metrics.height)
-            g2.color = color
-            g2.drawString(text, UIScale.scale(4), labelY + metrics.ascent)
-            labelY += metrics.height
-        }
-    }
-
-    /**
-     * The charts' slices: [CHART_GROUP] of the histogram's each, as a percentile of the few records in one would be
-     * mostly noise; as start, width and count.
-     */
-    private fun chartSlicing(slices: Slices): Triple<Long, Long, Int> {
-        val from = slices.start(0)
-        val width = (slices.start(1) - from) * CHART_GROUP
-        return Triple(from, width, (slices.count + CHART_GROUP - 1) / CHART_GROUP)
+        g2.color = withAlpha(accent, alpha)
+        g2.fillRect(left, 0, right - left, chartBottom)
+        g2.color = accent
+        g2.fillRect(left, 0, 1, chartBottom)
+        g2.fillRect(right - 1, 0, 1, chartBottom)
     }
 
     /** Ticks at round times, labeled as far apart as the labels need. */
@@ -500,66 +420,27 @@ class TimeHistogramBar(
         return DateTimeFormatter.ofPattern(pattern).withZone(zone)
     }
 
-    override fun getToolTipText(e: MouseEvent): String? {
-        val slices = slices() ?: return null
-        if (closeBoxes.any { it.first.contains(e.point) }) return "Stop charting"
-        val slice = sliceAt(slices, e.x)
-        val onCharts = hasCharts && e.y >= legendTop
-        // On the charts, their own wider slice.
-        val (chartsFrom, chartsWidth) = chartSlicing(slices)
-        val from = if (onCharts) {
-            chartsFrom + Math.floorDiv(slices.start(slice) - chartsFrom, chartsWidth) * chartsWidth
-        } else {
-            slices.start(slice)
-        }
-        val to = if (onCharts) from + chartsWidth else slices.start(slice + 1)
+    /** The line at [time], and beside it the slice's time and counts. */
+    private fun paintPointer(g2: Graphics2D, slices: Slices, time: Long) {
+        val slice = Math.floorDiv(time - slices.start(0), slices.start(1) - slices.start(0))
+        if (slice !in 0..<slices.count) return
+        val i = slice.toInt()
+        val x = timeX(slices, time).toInt()
+        paintPointerLine(g2, x, 0, chartBottom)
+        g2.font = labelFont
         val multiDay = localDay(slices.start(0)) != localDay(slices.start(slices.count) - 1)
-        val time = if (to - from < SECOND) "HH:mm:ss.SSS" else "HH:mm:ss"
-        val formatter = DateTimeFormatter.ofPattern(if (multiDay) "yyyy-MM-dd $time" else time).withZone(zone)
-        val lines = if (onCharts) {
-            chartLines(from)
-        } else {
-            val parts = buildList {
-                add("%,d records".format(slices.totals[slice]))
-                slices.errors[slice].takeIf { it > 0 }?.let { add("%,d errors".format(it)) }
-                slices.warnings[slice].takeIf { it > 0 }?.let { add("%,d warnings".format(it)) }
-                slices.matches?.get(slice)?.takeIf { it > 0 }?.let { add("%,d matches".format(it)) }
-            }
-            listOf(parts.joinToString(", "))
+        val counts = buildList {
+            add("%,d records".format(slices.totals[i]))
+            slices.errors[i].takeIf { it > 0 }?.let { add("%,d errors".format(it)) }
+            slices.warnings[i].takeIf { it > 0 }?.let { add("%,d warnings".format(it)) }
+            slices.matches?.get(i)?.takeIf { it > 0 }?.let { add("%,d matches".format(it)) }
         }
-        val range = "${formatter.format(Instant.ofEpochSecond(0, from))} – " +
-            formatter.format(Instant.ofEpochSecond(0, to))
-        val hint = "<small>Click to go there, drag to filter by time</small>"
-        return "<html>$range<br>${lines.joinToString("<br>")}<br>$hint</html>"
-    }
-
-    /** Per chart, in its color, the numbers of its slice that starts at [time]. */
-    private fun chartLines(time: Long): List<String> = charts?.all.orEmpty().mapNotNull { chart ->
-        val values = chart.slices ?: return@mapNotNull null
-        val i = Math.floorDiv(time - values.from, values.width)
-        if (i !in 0..<values.count) return@mapNotNull null
-        val slice = i.toInt()
-        val color = "#%06x".format(chart.color.rgb and 0xFFFFFF)
-        val label = escapeHtml(chart.label.cut(MAX_LEGEND_CHARS))
-        val records = values.records[slice]
-        val numbers = if (records == values.withoutNumber[slice]) {
-            "no numbers"
-        } else {
-            listOf(values.min, values.p50, values.p99, values.max)
-                .joinToString(" · ") { formatValue(it[slice]) }
-                .let { "min · p50 · p99 · max: $it" }
-        }
-        val without = values.withoutNumber[slice].takeIf { it > 0 }?.let { ", %,d without a number".format(it) }
-        "<font color=\"$color\">■</font> $label: ${"%,d".format(records)} records, $numbers${without.orEmpty()}"
-    }
-
-    /** Whole numbers as they are, others to a few significant digits. */
-    private fun formatValue(value: Double): String = when {
-        value.isNaN() -> "–"
-        value == Math.rint(value) && abs(value) < 1e15 -> "%,d".format(value.toLong())
-        abs(value) >= 100 -> "%,.0f".format(value)
-        abs(value) >= 1 -> "%.2f".format(value)
-        else -> "%.3g".format(value)
+        val lines = listOf(
+            formatTimeRange(slices.start(i), slices.start(i + 1), zone, multiDay) to
+                UIManager.getColor("Label.disabledForeground"),
+            counts.joinToString(" · ") to UIManager.getColor("Label.foreground"),
+        )
+        paintReadout(g2, x, chartTop, width, lines)
     }
 
     private fun withAlpha(color: Color, alpha: Float) =

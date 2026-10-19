@@ -142,17 +142,31 @@ class LogTableModel(val shown: ShownLog, private val names: ColumnNames) : Abstr
         return values
     }
 
-    // Labels do not render tabs, so expand them to tab stops.
-    private fun expandTabs(text: String): String {
-        if (text.indexOf('\t') < 0) return text
-        val sb = StringBuilder(text.length + 16)
-        for (c in text) {
-            if (c == '\t') {
-                do sb.append(' ') while (sb.length % TAB_WIDTH != 0)
-            } else {
-                sb.append(c)
+    companion object {
+        /** [text] as its cell shows it: labels do not render tabs, so they are expanded to tab stops. */
+        fun expandTabs(text: String): String {
+            if (text.indexOf('\t') < 0) return text
+            val sb = StringBuilder(text.length + 16)
+            for (c in text) {
+                if (c == '\t') {
+                    do sb.append(' ') while (sb.length % TAB_WIDTH != 0)
+                } else {
+                    sb.append(c)
+                }
             }
+            return sb.toString()
         }
-        return sb.toString()
+
+        /** The character of [text] shown at [offset] of its cell's text, where tabs are expanded; -1 if none is. */
+        fun offsetBeforeTabs(text: String, offset: Int): Int {
+            if (offset < 0) return -1
+            var column = 0
+            for ((i, c) in text.withIndex()) {
+                // As expandTabs: a tab runs to the next tab stop.
+                column = if (c == '\t') (column / TAB_WIDTH + 1) * TAB_WIDTH else column + 1
+                if (offset < column) return i
+            }
+            return -1
+        }
     }
 }

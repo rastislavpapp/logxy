@@ -102,10 +102,16 @@ class MergedFilter(private val log: MergedLog) : RecordFilter {
 
     override val templateProgress get() = engines.sumOf { it.templates.progress } / engines.size
 
-    override suspend fun slotValues(rows: IntArray?, rowCount: Int, template: String, slot: Int): SlotValues {
-        val snapshots = log.parts.map { it.filterSnapshot() }
-        return SlotValues.collect(engines.map { it.templates }, snapshots, rows, rowCount, origin, template, slot)
-    }
+    override suspend fun slotValues(rows: IntArray?, rowCount: Int, template: String, slots: IntArray) =
+        SlotValues.collect(
+            engines.map { it.templates },
+            log.parts.map { it.filterSnapshot() },
+            rows,
+            rowCount,
+            origin,
+            template,
+            slots,
+        )
 
     /**
      * The merged positions, in order, of each part's sorted [rows], leaving out records beyond its [merged]

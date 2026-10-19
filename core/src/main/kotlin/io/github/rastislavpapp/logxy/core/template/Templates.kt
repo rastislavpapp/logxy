@@ -113,6 +113,27 @@ object Templates {
         return number
     }
 
+    /** [slotNumber] of each of [slots], masking once, written into [into] from [at]. */
+    fun slotNumbers(
+        bytes: ByteArray,
+        from: Int,
+        to: Int,
+        slots: IntArray,
+        into: DoubleArray,
+        at: Int,
+        out: ByteArray,
+        places: IntArray,
+    ) {
+        into.fill(Double.NaN, at, at + slots.size)
+        val last = slots.max()
+        forEachSlot(bytes, from, to, out, places) { found, start, end ->
+            if (start >= 0) {
+                for (s in slots.indices) if (slots[s] == found) into[at + s] = leadingNumber(bytes, start, end)
+            }
+            found >= last
+        }
+    }
+
     /** [slotNumber] of [text]. */
     fun slotNumber(text: String, slot: Int): Double {
         val bytes = text.toByteArray(Charsets.UTF_8)

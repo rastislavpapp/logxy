@@ -1,5 +1,6 @@
 package io.github.rastislavpapp.logxy.app
 
+import com.formdev.flatlaf.FlatClientProperties
 import io.github.rastislavpapp.logxy.core.archive.ArchiveOrigin
 import io.github.rastislavpapp.logxy.core.config.SavedFilter
 import io.github.rastislavpapp.logxy.core.formatByteSize
@@ -73,10 +74,6 @@ private const val MAX_DETAIL_BYTES = 1024 * 1024
 private const val MAX_TITLE_CHARS = 40
 private const val MAX_RULE_CHARS = 1000
 private val RANGE_OPS = listOf(QueryOp.AT_LEAST, QueryOp.ABOVE, QueryOp.AT_MOST, QueryOp.BELOW)
-private const val BOTTOM_TAB_TEMPLATES = "templates"
-
-/** The tab was called Patterns before, and app state may still name it so. */
-private val BOTTOM_TAB_TEMPLATES_STORED = setOf(BOTTOM_TAB_TEMPLATES, "patterns")
 
 /** A search taking longer than this shows its progress. */
 private const val SEARCH_PROGRESS_DELAY_MILLIS = 200
@@ -142,18 +139,27 @@ class LogTab(
     /** The full path, or one per line for a merge; files from archives as `container!/entry`. */
     val description: String get() = paths.joinToString("\n") { (origin(it) ?: it).toString() }
     private val content = JPanel(BorderLayout())
-    private val detail = LogDetailArea().apply { contextItems = { offset -> listOfNotNull(detailChartItem(offset)) } }
+    private val detail = LogDetailArea()
     private val filterBar = FilterBar(::applyFilter, columnNames)
     private val findBar = FindBar(::searchFor) { forward -> find(forward) }
 
     /** Slots charted under the histogram; they stay when the file is read again. */
     private val slotCharts: SlotCharts = SlotCharts(scope, session::slotValues).apply {
         onChanged = {
-            histogramBar?.let {
-                it.revalidate()
-                it.repaint()
-            }
+            showCharts()
+            chartPanel?.repaint()
             templates.repaint()
+        }
+        onNoNumbers = { chart ->
+            // Not from within the read that found it, which reads other templates' slots after.
+            SwingUtilities.invokeLater {
+                JOptionPane.showMessageDialog(
+                    this@LogTab,
+                    "No record has a number in this slot, so there is nothing to chart:\n${chart.label}",
+                    "Chart Slot",
+                    JOptionPane.INFORMATION_MESSAGE,
+                )
+            }
         }
     }
     private val templates: TemplatesPanel = TemplatesPanel(
@@ -170,10 +176,6 @@ class LogTab(
         val vertical = ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED
         addTab("Detail", JScrollPane(detail, vertical, ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER))
         addTab("Templates", templates)
-        if (AppState[AppState.BOTTOM_TAB] in BOTTOM_TAB_TEMPLATES_STORED) selectedComponent = templates
-        addChangeListener {
-            AppState[AppState.BOTTOM_TAB] = if (selectedComponent === templates) BOTTOM_TAB_TEMPLATES else null
-        }
     }
     private val followButton = accentToggle(Icons.follow, "Follow (tail)").apply {
         addActionListener { session.follow = isSelected }
@@ -196,8 +198,16 @@ class LogTab(
     private var scrollPane: VirtualScrollPane? = null
     private var histogramBar: TimeHistogramBar? = null
 
-    /** The record the detail area shows; null if none. */
-    private var detailRecord: Int? = null
+    /** The slot charts under the histogram, and the rows under them; null while there is no histogram. */
+    private var chartPanel: SlotChartPanel? = null
+    private var chartSplit: JSplitPane? = null
+
+    /** Where the table goes: alone, or under the charts in [chartSplit] while there are some. */
+    private val rowsHolder = JPanel(BorderLayout())
+    private var rowsView: JComponent? = null
+
+    /** Where the charts' divider was dragged to; -1 until it is, for their own height. */
+    private var chartHeight = -1
 
     private var search: TextSearch? = null
     private var foundMarks = Highlighter.NONE
@@ -548,8 +558,10 @@ class LogTab(
             popup.addSeparator()
             add(Query.Rule(Query.TEMPLATE_FIELD, QueryOp.EQUALS, template))
             add(Query.Rule(Query.TEMPLATE_FIELD, QueryOp.NOT_EQUALS, template))
-            // The cell's text is the message's first line, unless tabs were expanded in it.
-            val offset = if (table.getValueAt(row, column) == firstLine) table.textOffsetAt(row, column, x) else -1
+            // The cell shows the message's first line with its tabs expanded, unless it is cut.
+            val whole = table.getValueAt(row, column) == LogTableModel.expandTabs(firstLine)
+            val shownAt = if (whole) table.textOffsetAt(row, column, x) else -1
+            val offset = LogTableModel.offsetBeforeTabs(firstLine, shownAt)
             chartItem(template, value, offset)?.let { popup.add(it) }
         }
         if (level != null) {
@@ -585,22 +597,29 @@ class LogTab(
         val shown = word.cut(MAX_MENU_CHARS)
         val charted = slotCharts.chart(template, slot) != null
         return JMenuItem(if (charted) "Stop Charting “$shown”" else "Chart “$shown” Over Time").apply {
+            // Found to hold no number in any shown record.
+            isEnabled = slotCharts.canChart(template, slot)
             addActionListener { toggleChart(this@LogTab, slotCharts, template, slot) }
         }
     }
 
-    /** [chartItem] for the place [offset] in the detail area, which shows [detailRecord]. */
-    private fun detailChartItem(offset: Int): JMenuItem? {
-        val shown = model?.shown ?: return null
-        val record = detailRecord ?: return null
-        val field = shown.schema.indexOf(Role.MESSAGE).takeIf { it >= 0 } ?: return null
-        val message = shown.fieldText(record, field)
-        val firstLine = message.lineSequence().first()
-        // The message's first line ends the record's first line in most layouts; JSON shows it escaped, and gets none.
-        val start = detail.text.lineSequence().first().lastIndexOf(firstLine)
-        if (firstLine.isEmpty() || start < 0 || offset - start !in firstLine.indices) return null
-        val template = session.templateOf(record) ?: return null
-        return chartItem(template, message, offset - start)
+    /** Puts the charts between the histogram and the rows while there are some. */
+    private fun showCharts() {
+        val view = rowsView ?: return
+        val split = chartSplit
+        val wanted = if (split != null && slotCharts.all.isNotEmpty()) split else view
+        if (rowsHolder.componentCount > 0 && rowsHolder.getComponent(0) === wanted) return
+        rowsHolder.removeAll()
+        if (wanted === split) {
+            split.topComponent = chartPanel
+            split.bottomComponent = view
+        }
+        rowsHolder.add(wanted, BorderLayout.CENTER)
+        rowsHolder.revalidate()
+        rowsHolder.repaint()
+        if (wanted === split) {
+            if (chartHeight > 0) split.dividerLocation = chartHeight else split.resetToPreferredSizes()
+        }
     }
 
     private fun hideColumns(names: Set<String>) {
@@ -714,11 +733,23 @@ class LogTab(
         val timestampField = shown.schema.fields.firstOrNull { it.role == Role.TIMESTAMP }?.name
         scrollPane.onRowsInViewChanged = ::showMarkedTimes
         val histogramBar = timestampField?.let { field ->
-            TimeHistogramBar({ session.histogram }, { session.foundHistogram }, slotCharts).apply {
+            TimeHistogramBar({ session.histogram }, { session.foundHistogram }).apply {
                 onJump = ::jumpToTime
                 onRange = { from, to -> filterBar.setTimeRange(field, timeLiteral(from), timeLiteral(to)) }
                 onShowAllTimes = { filterBar.setTimeRange(field, null, null) }
                 hasTimeRange = { filterBar.hasTimeRange(field) }
+            }
+        }
+        val chartPanel = histogramBar?.let { bar ->
+            SlotChartPanel(slotCharts) { bar.timeline }.apply {
+                onJump = ::jumpToTime
+                onJumpToRecord = ::jumpToRecord
+                onRange = bar.onRange
+                onPointer = { bar.pointer = it }
+                bar.onPointer = { pointer = it }
+                onDragged = { bar.draggedTimes = it }
+                bar.onDragged = { draggedTimes = it }
+                bar.onTimelineChanged = ::repaint
             }
         }
         table.selectionModel.addListSelectionListener { event ->
@@ -733,20 +764,37 @@ class LogTab(
         this.table = table
         this.scrollPane = scrollPane
         this.histogramBar = histogramBar
+        this.chartPanel = chartPanel
         table.found = foundMarks
         filterBar.setSchema(shown.schema)
         templates.canFilter = shown.schema.hasTemplates()
         setFilterVisible(true)
 
         detail.text = ""
-        detailRecord = null
+        rowsView = FloatingTopRight(scrollPane, findBar)
+        // No arrows: the charts close by their ×. The height they are dragged to holds while the tab is open.
+        chartSplit = chartPanel?.let {
+            JSplitPane(JSplitPane.VERTICAL_SPLIT).apply {
+                border = null
+                addPropertyChangeListener(JSplitPane.DIVIDER_LOCATION_PROPERTY) {
+                    if (isShowing) chartHeight = dividerLocation
+                }
+            }
+        }
+        rowsHolder.removeAll()
+        showCharts()
         val rowsPanel = JPanel(BorderLayout()).apply {
             histogramBar?.let { add(it, BorderLayout.NORTH) }
-            add(FloatingTopRight(scrollPane, findBar), BorderLayout.CENTER)
+            add(rowsHolder, BorderLayout.CENTER)
         }
         val split = JSplitPane(JSplitPane.VERTICAL_SPLIT, rowsPanel, bottomTabs).apply {
             resizeWeight = 0.75
             isOneTouchExpandable = true
+            // Only the arrow that hides the bottom tabs, and brings them back; not the one that hides the rows.
+            putClientProperty(
+                FlatClientProperties.SPLIT_PANE_EXPANDABLE_SIDE,
+                FlatClientProperties.SPLIT_PANE_EXPANDABLE_SIDE_LEFT,
+            )
             border = null
         }
         content.removeAll()
@@ -773,7 +821,6 @@ class LogTab(
     /** Shows the record at [row] of the shown log, or nothing if there is none. */
     private fun showDetail(model: LogTableModel, row: Int) {
         val record = model.recordAtIndexOrNull(row)
-        detailRecord = record
         detail.show(if (record != null) model.shown.recordText(record, MAX_DETAIL_BYTES) else "")
         // A long record, e.g. with a stack trace, shows where the find bar's text is.
         detail.caretPosition = detail.firstFound
@@ -949,7 +996,7 @@ class LogTab(
         val rows = table?.selection?.rows ?: return
         val first = rows.min
         val last = rows.max
-        bar.markedTimes = if (first >= 0 && last < model.totalRowCount) {
+        val marked = if (first >= 0 && last < model.totalRowCount) {
             val from = model.shown.timestamp(model.recordAtIndex(first))
             val to = model.shown.timestamp(model.recordAtIndex(last))
             if (from != null && to != null) minOf(from, to) to maxOf(from, to) else (from ?: to)?.let { it to it }
@@ -958,6 +1005,18 @@ class LogTab(
         } else {
             null
         }
+        bar.markedTimes = marked
+        chartPanel?.markedTimes = marked
+    }
+
+    /** Selects the row of [record], if it is shown. */
+    private fun jumpToRecord(record: Int) {
+        val model = model ?: return
+        val scrollPane = scrollPane ?: return
+        val row = model.indexOfRecord(record).takeIf { it >= 0 && model.recordAtIndex(it) == record } ?: return
+        session.follow = false
+        scrollPane.selectRow(row)
+        table?.requestFocusInWindow()
     }
 
     /** Selects the first shown row at [time] or later, or the last row if none is. */
@@ -1039,6 +1098,9 @@ class LogTab(
             columnsButton.isEnabled = false
             showSearchProgress(false)
             histogramBar = null
+            chartPanel = null
+            chartSplit = null
+            rowsView = null
             templates.reset()
             slotCharts.reset()
             // The table may still be painted until indexing shows its progress: with no rows.

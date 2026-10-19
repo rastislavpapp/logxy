@@ -22,9 +22,12 @@ import java.awt.Font
 import java.awt.Graphics
 import java.awt.Graphics2D
 import java.awt.Point
+import java.awt.Rectangle
 import java.awt.RenderingHints
 import java.awt.Toolkit
 import java.awt.datatransfer.StringSelection
+import java.awt.event.ComponentAdapter
+import java.awt.event.ComponentEvent
 import java.awt.event.HierarchyEvent
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
@@ -66,6 +69,8 @@ private const val PLACEHOLDERS_CARD = "placeholders"
 
 private val PADDING = EmptyBorder(0, 0, 0, 12)
 
+private const val OTHER_MESSAGES = "(other messages, over the limit of different templates)"
+
 /**
  * Whether records with [this] schema can be filtered by message template: they have a message, and no field of
  * the log takes the name.
@@ -79,7 +84,9 @@ fun Schema.hasTemplates() =
  * count starts. Filtering by the selected templates goes through [addRules].
  *
  * While [canChart], clicking a template's `{}` charts that slot in [charts] or stops, as does the context menu; a
- * charted slot is drawn bold in its chart's color.
+ * charted slot is drawn bold in its chart's color, and one found to hold no number faint, as it cannot be charted.
+ * Hovering a slot tells what its values came to, once read. The columns fit their contents; the template's takes
+ * the rest of the width.
  */
 class TemplatesPanel(
     private val scope: CoroutineScope,
@@ -98,8 +105,13 @@ class TemplatesPanel(
     private val table = object : JTable(model) {
         override fun getToolTipText(e: MouseEvent): String? {
             val (template, slot) = slotAt(e.point) ?: return super.getToolTipText(e)
-            val charted = charts.chart(template, slot) != null
-            return if (charted) "Stop charting slot ${slot + 1}" else "Chart slot ${slot + 1} over time"
+            return slotToolTip(template, slot)
+        }
+
+        // Selecting a row would bring a long template's whole cell into view, scrolling the counts out of it.
+        override fun scrollRectToVisible(rect: Rectangle) {
+            val visible = visibleRect
+            super.scrollRectToVisible(Rectangle(visible.x, rect.y, visible.width, rect.height))
         }
     }
     private val summary = JLabel(" ")
@@ -127,7 +139,11 @@ class TemplatesPanel(
     init {
         add(JPanel(MigLayout("insets 4 8 2 8", "[grow]")).apply { add(summary) }, BorderLayout.NORTH)
         table.autoCreateRowSorter = true
-        table.autoResizeMode = JTable.AUTO_RESIZE_LAST_COLUMN
+        // Widths are set to fit the contents; see fitColumns.
+        table.autoResizeMode = JTable.AUTO_RESIZE_OFF
+        scrollPane.viewport.addComponentListener(object : ComponentAdapter() {
+            override fun componentResized(e: ComponentEvent) = fitColumns()
+        })
         table.setShowGrid(false)
         table.tableHeader.reorderingAllowed = false
         (table.tableHeader.defaultRenderer as? JLabel)?.horizontalAlignment = SwingConstants.LEADING
@@ -144,7 +160,9 @@ class TemplatesPanel(
                 if (e.button != MouseEvent.BUTTON1) return
                 val slot = slotAt(e.point)
                 when {
-                    slot != null && e.clickCount == 1 -> toggleChart(slot.first, slot.second)
+                    slot != null && e.clickCount == 1 -> {
+                        if (charts.canChart(slot.first, slot.second)) toggleChart(slot.first, slot.second)
+                    }
                     // The first click of a double click on a slot charted it: that is all it does.
                     slot == null && e.clickCount == 2 && table.rowAtPoint(e.point) >= 0 -> showOnly(selectedTemplates())
                 }
@@ -170,10 +188,27 @@ class TemplatesPanel(
     private fun toggleChart(template: String, slot: Int) = toggleChart(this, charts, template, slot)
 
     private fun hover(slot: Pair<String, Int>?) {
-        if (slot == hovered) return
-        hovered = slot
-        table.cursor = if (slot != null) Cursor.getPredefinedCursor(Cursor.HAND_CURSOR) else null
+        val chartable = slot?.takeIf { charts.canChart(it.first, it.second) }
+        table.cursor = if (chartable != null) Cursor.getPredefinedCursor(Cursor.HAND_CURSOR) else null
+        if (chartable == hovered) return
+        hovered = chartable
         table.repaint()
+    }
+
+    /** What [slot] of [template] came to, if read, and what clicking it does. */
+    private fun slotToolTip(template: String, slot: Int): String {
+        val summary = charts.summary(template, slot)
+        val action = if (charts.chart(template, slot) != null) "Click to stop charting" else "Click to chart over time"
+        return when {
+            summary == null -> "<html>Slot ${slot + 1}<br><small>$action</small></html>"
+            summary.numbers == 0 -> "None of its %,d records has a number in slot %d".format(summary.records, slot + 1)
+            else -> {
+                val share = "%,d of %,d records have a number".format(summary.numbers, summary.records)
+                val values = listOf("min" to summary.min, "avg" to summary.average, "max" to summary.max)
+                    .joinToString(" · ") { (name, value) -> "$name ${formatSlotValue(value)}" }
+                "<html>$share<br>$values<br><small>$action</small></html>"
+            }
+        }
     }
 
     /** The template and slot of the `{}` at [point], or null; only while [canChart]. */
@@ -306,20 +341,53 @@ class TemplatesPanel(
             table.rowSorter?.sortKeys = sortKeys?.takeIf { keys -> keys.all { it.column < model.columnCount } }
                 ?: listOf(RowSorter.SortKey(0, SortOrder.DESCENDING))
         }
+        fitColumns()
     }
 
     private fun setUpColumns() {
-        val metrics = table.getFontMetrics(table.font)
-        val countWidth = metrics.stringWidth("0,000,000,000") + 12
         for (column in 0..<table.columnCount) {
             val tableColumn = table.columnModel.getColumn(column)
-            if (column == table.columnCount - 1) {
-                tableColumn.cellRenderer = TemplateRenderer()
-            } else {
-                tableColumn.cellRenderer = CountRenderer(model.levelAt(column))
-                tableColumn.preferredWidth = countWidth
-                tableColumn.maxWidth = countWidth * 2
+            tableColumn.cellRenderer =
+                if (column == table.columnCount - 1) TemplateRenderer() else CountRenderer(model.levelAt(column))
+        }
+        fitColumns()
+    }
+
+    /**
+     * Makes each count column as wide as its header or its widest value, and the template column as wide as the
+     * longest template, or the rest of the view if that is wider.
+     */
+    private fun fitColumns() {
+        val columns = table.columnModel
+        if (columns.columnCount != model.columnCount) return
+        val header = table.tableHeader
+        val widths = IntArray(model.columnCount) { column ->
+            val name = model.getColumnName(column)
+            val headerWidth = header.defaultRenderer
+                .getTableCellRendererComponent(table, name, false, false, -1, column).preferredSize.width
+            // In the monospaced font, the longest template and the largest count are the widest.
+            val isTemplate = column == model.columnCount - 1
+            val widest = (0..<model.rowCount).maxByOrNull { row ->
+                if (isTemplate) {
+                    model.template(row)?.length ?: OTHER_MESSAGES.length
+                } else {
+                    model.getValueAt(row, column) as Int
+                }
             }
+            val viewRow = widest?.let { table.convertRowIndexToView(it) } ?: -1
+            val cellWidth = if (viewRow < 0) {
+                0
+            } else {
+                table.prepareRenderer(table.getCellRenderer(viewRow, column), viewRow, column).preferredSize.width
+            }
+            maxOf(headerWidth, cellWidth) + UIScale.scale(4)
+        }
+        val last = widths.lastIndex
+        widths[last] = maxOf(widths[last], scrollPane.viewport.width - widths.sum() + widths[last])
+        for (column in widths.indices) {
+            val tableColumn = columns.getColumn(column)
+            tableColumn.preferredWidth = widths[column]
+            tableColumn.width = widths[column]
         }
     }
 
@@ -358,6 +426,7 @@ class TemplatesPanel(
                 for (slot in 0..<slots) {
                     val text = "${slot + 1}: ${SlotChart.label(template, slot).cut(MAX_MENU_CHARS)}"
                     add(JCheckBoxMenuItem(text, charts.chart(template, slot) != null).apply {
+                        isEnabled = charts.canChart(template, slot)
                         addActionListener { toggleChart(template, slot) }
                     })
                 }
@@ -371,6 +440,8 @@ class TemplatesPanel(
         val rules = templates.map { Query.Rule(Query.TEMPLATE_FIELD, QueryOp.EQUALS, it) }
         addRules(listOf(rules.singleOrNull() ?: Query.Group(all = false, items = rules)))
     }
+
+    private fun faint(color: Color) = Color(color.red, color.green, color.blue, color.alpha / 3)
 
     /** Pulsing boxes where the counts and templates will be, while they are counted. */
     private inner class Placeholders : JComponent() {
@@ -476,7 +547,7 @@ class TemplatesPanel(
 
     /**
      * A template with its placeholders dimmed, so the fixed text stands out; a charted one bold in its chart's color,
-     * the one under the mouse underlined.
+     * one without numbers faint, the one under the mouse underlined.
      */
     private inner class TemplateRenderer : DefaultTableCellRenderer() {
         private var template: String? = null
@@ -489,7 +560,7 @@ class TemplatesPanel(
             val template = value as String?
             this.template = template
             val text = when (template) {
-                null -> "(other messages, over the limit of different templates)"
+                null -> OTHER_MESSAGES
                 "" -> "(no message)"
                 else -> template
             }
@@ -528,6 +599,7 @@ class TemplatesPanel(
                     val chart = charts.chart(template, i)
                     // On the selection's background a chart color may not show; bold still marks it.
                     g2.color = chart?.color?.takeUnless { selected } ?: dim
+                    if (chart == null && !charts.canChart(template, i)) g2.color = faint(g2.color)
                     g2.font = if (chart != null) bold else plain
                     BasicGraphicsUtils.drawString(this, g2, Templates.PLACEHOLDER, x.toFloat(), y.toFloat())
                     val placeholder = metrics.stringWidth(Templates.PLACEHOLDER)

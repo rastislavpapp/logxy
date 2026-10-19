@@ -408,15 +408,15 @@ class LogSession internal constructor(
     }
 
     /**
-     * The values at [slot] of the shown rows whose message has [template], over time; null if there is nothing
-     * loaded or the records have no message or no time. Cancelling the caller stops it.
+     * The values at each of [slots] of the shown rows whose message has [template], over time, read in one pass;
+     * null if there is nothing loaded or the records have no message or no time. Cancelling the caller stops it.
      */
-    suspend fun slotValues(template: String, slot: Int): SlotValues? {
+    suspend fun slotValues(template: String, slots: IntArray): List<SlotValues>? {
         while (true) countJob?.takeIf { it.isActive }?.join() ?: break
         val shown = shown ?: return null
         val engine = engine ?: return null
         if (shown.schema.indexOf(Role.MESSAGE) < 0 || shown.schema.indexOf(Role.TIMESTAMP) < 0) return null
-        return engine.slotValues(shown.rowArray, shown.rowCount, template, slot)
+        return engine.slotValues(shown.rowArray, shown.rowCount, template, slots)
     }
 
     /** The template of [record]'s message; null if it has none, or nothing is loaded. */

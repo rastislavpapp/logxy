@@ -40,6 +40,17 @@ class TemplatesTest {
     }
 
     @Test
+    fun `reads several slots at once, in the order asked`() {
+        val bytes = "Request 7 took 12ms from 10.0.0.1".toByteArray()
+        val into = DoubleArray(5) { -1.0 }
+        Templates.slotNumbers(
+            bytes, 0, bytes.size, intArrayOf(1, 2, 0), into, 1, ByteArray(Templates.OUT_SIZE),
+            IntArray(Templates.PLACES_SIZE),
+        )
+        assertEquals(listOf(-1.0, 12.0, Double.NaN, 7.0, -1.0), into.toList())
+    }
+
+    @Test
     fun `ids, addresses and dates have no value`() {
         fun slot(text: String) = Templates.slotNumber(text, 0)
         // A number followed by more digits is part of something else.

@@ -9,10 +9,7 @@ import org.fife.ui.rsyntaxtextarea.Token
 import org.fife.ui.rsyntaxtextarea.TokenMakerBase
 import org.fife.ui.rsyntaxtextarea.TokenMakerFactory
 import java.awt.Color
-import java.awt.Component
 import java.awt.Font
-import javax.swing.JMenuItem
-import javax.swing.JPopupMenu
 import javax.swing.UIManager
 import javax.swing.text.DefaultHighlighter
 import javax.swing.text.Segment
@@ -62,12 +59,6 @@ class LogDetailArea : RSyntaxTextArea() {
     /** Where the find bar's text first occurs in the shown text; 0 if it does not. */
     val firstFound: Int get() = foundRanges.firstOrNull() ?: 0
 
-    /** Items for the top of the context menu, given the place in the text it opened at (-1 if unknown). */
-    var contextItems: (offset: Int) -> List<JMenuItem> = { emptyList() }
-
-    /** What [contextItems] added to the menu last time, taken off before adding anew. */
-    private val addedItems = mutableListOf<Component>()
-
     init {
         (TokenMakerFactory.getDefaultInstance() as AbstractTokenMakerFactory)
             .putMapping(SYNTAX_STYLE, LogRecordTokenMaker::class.java.name, LogRecordTokenMaker::class.java.classLoader)
@@ -84,21 +75,6 @@ class LogDetailArea : RSyntaxTextArea() {
         super.updateUI()
         // Also called from the superclass constructor, before this class is initialized.
         if (initialized) applyTheme()
-    }
-
-    override fun configurePopupMenu(popupMenu: JPopupMenu) {
-        super.configurePopupMenu(popupMenu)
-        // Also called from the superclass constructor, before this class is initialized.
-        if (!initialized) return
-        for (item in addedItems) popupMenu.remove(item)
-        addedItems.clear()
-        // The text area shows its menu from its own mouse listener, before others hear of the click.
-        val offset = mousePosition?.let { viewToModel2D(it) } ?: -1
-        val items = contextItems(offset)
-        if (items.isEmpty()) return
-        addedItems += items
-        addedItems += JPopupMenu.Separator()
-        for ((i, item) in addedItems.withIndex()) popupMenu.insert(item, i)
     }
 
     /** Shows [value] with the matches marked. */

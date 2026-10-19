@@ -168,8 +168,9 @@ class TemplateIndexTest {
     fun `reads a slot's values and times from the records of its template`() {
         parse(sample).use { log ->
             val engine = FilterEngine(log)
-            fun values(slot: Int, rows: IntArray? = null) =
-                runBlocking { engine.slotValues(rows, rows?.size ?: log.recordCount, request, slot) }.entries()
+            fun values(slot: Int, rows: IntArray? = null) = runBlocking {
+                engine.slotValues(rows, rows?.size ?: log.recordCount, request, intArrayOf(slot)).single()
+            }.entries()
             assertEquals(
                 listOf(nanos("08:00:00") to 5.0, nanos("08:00:02") to 5012.0, nanos("08:00:03") to 7.0),
                 values(1),
@@ -178,7 +179,21 @@ class TemplateIndexTest {
             assertEquals(List(3) { Double.NaN }, values(0).map { it.second })
             // Only the rows given, e.g. those a filter shows.
             assertEquals(listOf(nanos("08:00:03") to 7.0), values(1, intArrayOf(1, 3, 5)))
-            assertEquals(listOf(), runBlocking { engine.slotValues(null, 6, "nothing like it", 0) }.entries())
+            val none = runBlocking { engine.slotValues(null, 6, "nothing like it", intArrayOf(0)) }.single()
+            assertEquals(listOf(), none.entries())
+        }
+    }
+
+    @Test
+    fun `reads several slots in one pass, sharing their rows`() {
+        parse(sample).use { log ->
+            val engine = FilterEngine(log)
+            val (took, from) = runBlocking { engine.slotValues(null, log.recordCount, request, intArrayOf(1, 0)) }
+            assertEquals(listOf(5.0, 5012.0, 7.0), took.entries().map { it.second })
+            assertEquals(List(3) { Double.NaN }, from.entries().map { it.second })
+            assertEquals(listOf(0, 2, 3), List(took.size) { took.row(it) })
+            assertEquals(3, took.numbers)
+            assertEquals(0, from.numbers)
         }
     }
 
@@ -189,7 +204,8 @@ class TemplateIndexTest {
             {"@timestamp":"2026-10-01T08:00:01Z","message":"User \"eve\" waited 80 ms"}
         """.trimIndent() + "\n")
         runBlocking { ParsedLog.build(file, CompiledJson(zone = ZoneOffset.UTC), IndexProgress()) }.use { log ->
-            val values = runBlocking { FilterEngine(log).slotValues(null, 2, "User \"bob\" waited {} ms", 0) }
+            val template = "User \"bob\" waited {} ms"
+            val values = runBlocking { FilterEngine(log).slotValues(null, 2, template, intArrayOf(0)) }.single()
             assertEquals(listOf(nanos("08:00:00") to 120.0), values.entries())
         }
     }
@@ -204,7 +220,7 @@ class TemplateIndexTest {
         val merged = runBlocking { MergedLog.build(listOf(a, b)) }
         try {
             val filter = MergedFilter(merged)
-            val values = runBlocking { filter.slotValues(null, merged.recordCount, query, 0) }
+            val values = runBlocking { filter.slotValues(null, merged.recordCount, query, intArrayOf(0)) }.single()
             assertEquals(
                 listOf(nanos("08:00:01") to 17.0, nanos("08:00:04") to 18.0, nanos("08:00:06") to 99.0),
                 values.entries(),

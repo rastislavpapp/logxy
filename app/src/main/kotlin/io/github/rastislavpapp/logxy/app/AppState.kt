@@ -32,7 +32,6 @@ object AppState {
     const val TITLE_BAR = "titleBar.integrated"
     const val LAST_DIRECTORY = "lastDirectory"
     const val DETAIL_DIVIDER = "detail.divider"
-    const val BOTTOM_TAB = "bottom.tab"
     const val FILTER_MODE = "filter.mode"
     const val PREFERENCES_SECTION = "preferences.section"
 }
