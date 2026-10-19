@@ -3,6 +3,8 @@ package io.github.rastislavpapp.logxy.app
 import com.formdev.flatlaf.FlatClientProperties
 import net.miginfocom.swing.MigLayout
 import java.awt.Cursor
+import java.awt.event.FocusAdapter
+import java.awt.event.FocusEvent
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import java.awt.font.TextAttribute
@@ -38,7 +40,6 @@ class ListToolbar(view: JComponent) : JPanel(MigLayout("insets 0, gap 0, fill", 
     fun addButton(icon: Icon, tooltip: String, action: () -> Unit): JButton =
         JButton(icon).apply {
             toolTipText = tooltip
-            isFocusable = false
             putClientProperty(FlatClientProperties.BUTTON_TYPE, FlatClientProperties.BUTTON_TYPE_TOOLBAR_BUTTON)
             addActionListener { action() }
             toolbar.add(this)
@@ -49,7 +50,6 @@ class ListToolbar(view: JComponent) : JPanel(MigLayout("insets 0, gap 0, fill", 
 class LinkButton(label: String, action: () -> Unit) : JButton(label) {
     init {
         isContentAreaFilled = false
-        isFocusPainted = false
         // FlatLaf's button border and minimum width would pad and clip a text this plain.
         border = BorderFactory.createEmptyBorder()
         putClientProperty(FlatClientProperties.MINIMUM_WIDTH, 0)
@@ -59,14 +59,25 @@ class LinkButton(label: String, action: () -> Unit) : JButton(label) {
         val plain = font
         // An underline attribute leaves the text as wide as it was, unlike an HTML <u>.
         val underlined = plain.deriveFont(mapOf(TextAttribute.UNDERLINE to TextAttribute.UNDERLINE_ON))
+        // Underlined while the mouse is over it or it has the keyboard focus, which replaces a focus ring.
+        var hovered = false
+        fun update() {
+            font = if (hovered || isFocusOwner) underlined else plain
+        }
         addMouseListener(object : MouseAdapter() {
             override fun mouseEntered(e: MouseEvent) {
-                font = underlined
+                hovered = true
+                update()
             }
 
             override fun mouseExited(e: MouseEvent) {
-                font = plain
+                hovered = false
+                update()
             }
+        })
+        addFocusListener(object : FocusAdapter() {
+            override fun focusGained(e: FocusEvent) = update()
+            override fun focusLost(e: FocusEvent) = update()
         })
     }
 }

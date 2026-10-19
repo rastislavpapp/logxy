@@ -72,7 +72,13 @@ class ParsersPage(
     private val choices = kindChoices()
     private val kindBox = JComboBox(choices.toTypedArray())
     private val status = JLabel(" ")
-    private lateinit var deleteButton: JButton
+    private val listToolbar = ListToolbar(list)
+    private val deleteButton: JButton = listToolbar.run {
+        addButton(Icons.add, "New parser") { addParser(newParser()) }
+        val delete = addButton(Icons.remove, "Delete the selected parser") { deleteSelected() }
+        addButton(Icons.copy, "Duplicate the selected parser") { selected()?.let { addParser(copyOf(it.parser)) } }
+        delete
+    }
     private val restoreLink = LinkButton("Restore Built-ins") { restoreBuiltIns() }.apply {
         toolTipText = "Brings back the deleted built-in parsers"
     }
@@ -132,13 +138,8 @@ class ParsersPage(
         (listOf(nameField) + settings().map { it.field }).forEach { it.document.addDocumentListener(onChange) }
         kindBox.addActionListener { kindChanged() }
 
-        val toolbar = ListToolbar(list).apply {
-            addButton(Icons.add, "New parser") { addParser(newParser()) }
-            deleteButton = addButton(Icons.remove, "Delete the selected parser") { deleteSelected() }
-            addButton(Icons.copy, "Duplicate the selected parser") { selected()?.let { addParser(copyOf(it.parser)) } }
-        }
         val left = JPanel(MigLayout("fill, insets 0, hidemode 3", "[grow]", "[grow]rel[]")).apply {
-            add(toolbar, "grow, wrap")
+            add(listToolbar, "grow, wrap")
             add(restoreLink)
         }
         previewTable.apply {
