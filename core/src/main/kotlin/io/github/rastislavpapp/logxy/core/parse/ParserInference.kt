@@ -11,6 +11,9 @@ import java.time.ZoneOffset
 internal object ParserInference {
 
     /** Share of lines a guess has to agree with. */
+    // The name of every pattern guessed from a file: what is in it shows in the layout, not in the name.
+    private const val NAME = "Detected layout"
+
     private const val AGREEMENT = 0.9
 
     /** Tokens of a line looked at for its columns; the message comes before this many. */
@@ -125,7 +128,6 @@ internal object ParserInference {
 
         private val suffix get() = if (prefix.isEmpty()) "" else "]"
         val conversion get() = "$prefix%d{$layout}$suffix"
-        val label get() = prefix + (if ('y' in layout || 'd' in layout) "date" else "time") + suffix
     }
 
     private fun inferText(lines: List<ByteArray>): Parser? {
@@ -217,7 +219,7 @@ internal object ParserInference {
         // A guess that does not read the lines is cut short, the message taking more, down to timestamp and message.
         for (end in header downTo 0) {
             if (stamp == null && (levelColumn == null || end <= levelColumn)) break
-            val (pattern, name) = layout(stamp, columns, levelColumn, end) ?: continue
+            val pattern = layout(stamp, columns, levelColumn, end) ?: continue
             val compiled = try {
                 CompiledPattern(pattern)
             } catch (_: IllegalArgumentException) {
@@ -225,7 +227,7 @@ internal object ParserInference {
             }
             val matcher = compiled.newMatcher()
             val matched = records.count { matcher.match(it, 0, it.size) }
-            if (matched >= records.size * AGREEMENT) return Parser.Pattern(name, pattern)
+            if (matched >= records.size * AGREEMENT) return Parser.Pattern(NAME, pattern)
         }
         return null
     }
@@ -306,16 +308,13 @@ internal object ParserInference {
     }
 
     /**
-     * The pattern layout and name of the timestamp, the first [end] columns as fields and literals, then the
-     * message.
+     * The pattern layout of the timestamp, the first [end] columns as fields and literals, then the message.
      */
-    private fun layout(stamp: Stamp?, columns: List<Column>, levelColumn: Int?, end: Int): Pair<String, String>? {
+    private fun layout(stamp: Stamp?, columns: List<Column>, levelColumn: Int?, end: Int): String? {
         val pattern = StringBuilder()
-        val name = StringBuilder()
         var fieldLast = false
         stamp?.let {
             pattern.append(it.conversion)
-            name.append(it.label)
             fieldLast = it.prefix.isEmpty()
         }
         val unnamed = (0..<end).filter {
@@ -329,9 +328,8 @@ internal object ParserInference {
         var pid = false
         var trace = false
         var generic = 0
-        fun field(conversion: String, label: String) {
+        fun field(conversion: String) {
             pattern.append(conversion)
-            name.append(label)
             fieldLast = true
         }
 
@@ -339,7 +337,6 @@ internal object ParserInference {
         fun literal(text: String): Boolean {
             if (fieldLast && text[0] in "{(") return false
             pattern.append(text.replace("%", "%%"))
-            name.append(text)
             fieldLast = false
             return true
         }
@@ -351,7 +348,7 @@ internal object ParserInference {
                 Kind.WORD, Kind.BRACKET -> {
                     // log4j2's `%X` writes the braces itself.
                     if (column.role() == Role.MDC) {
-                        field("%X", "{MDC}")
+                        field("%X")
                         continue
                     }
                     if (column.kind == Kind.BRACKET && !literal(column.signature)) return null
@@ -361,26 +358,26 @@ internal object ParserInference {
                         (k + 2 >= end || columns[k + 2].kind == Kind.WORD || columns[k + 2].role() == Role.MDC)
                     val width = column.width().takeIf { spaceAfter && it > 0 }?.toString().orEmpty()
                     when {
-                        k == levelColumn -> field("%${width}p", "LEVEL")
+                        k == levelColumn -> field("%${width}p")
                         key != null -> {
                             // Words start after a space or separator, never right after a field.
                             pattern.append("$key=")
-                            field("%X{$key}", key)
+                            field("%X{$key}")
                         }
                         column.role() == Role.LOGGER && !logger -> {
                             logger = true
-                            field("%${width}c", "logger")
+                            field("%${width}c")
                         }
                         column.role() == Role.NUMBER && !pid && column.distinct <= 3 -> {
                             pid = true
-                            field("%${width}pid", "pid")
+                            field("%${width}pid")
                         }
-                        k == threadColumn -> field("%t", "thread")
+                        k == threadColumn -> field("%t")
                         column.share(::isTraceId) >= AGREEMENT && !trace -> {
                             trace = true
-                            field("%${width}X{Trace}", "trace")
+                            field("%${width}X{Trace}")
                         }
-                        else -> field("%${width}X{Field ${++generic}}", "field")
+                        else -> field("%${width}X{Field ${++generic}}")
                     }
                     if (column.kind == Kind.BRACKET) literal(CLOSING.getValue(column.signature[0]).toString())
                 }
@@ -389,8 +386,7 @@ internal object ParserInference {
         if (end < columns.size && columns[end].kind == Kind.SPACE) literal(" ")
         if (fieldLast) return null
         pattern.append("%m%n")
-        name.append("message")
-        return pattern.toString() to name.toString().replace(Regex("\\s+"), " ").trim()
+        return pattern.toString()
     }
 
     // Tokens
