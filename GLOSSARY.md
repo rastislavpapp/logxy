@@ -24,6 +24,14 @@ _Avoid_: index, line
 A saved description of how to split a file's lines into records and fields. Each is of one parser kind (pattern, regex, JSON, …); built-in parsers ship with the app and are tried on every file opened.
 _Avoid_: format, layout
 
+**Message template**:
+The first line of a record's message with its variable parts, such as numbers and ids, replaced by `{}`, as in `Request {} done in {} ms`. Records with the same template are the same kind of message.
+_Avoid_: pattern (a parser kind), message pattern
+
+**Slot**:
+One `{}` of a message template, counted from the left; each record of the template has a value there.
+_Avoid_: placeholder, variable, parameter
+
 **Shown log**:
 The records of one load as the user sees them: all of them, or a filter's result. It ends when the session reloads or closes.
 _Avoid_: view, shown rows, filtered rows
