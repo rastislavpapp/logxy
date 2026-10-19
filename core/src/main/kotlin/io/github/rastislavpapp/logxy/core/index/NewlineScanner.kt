@@ -8,12 +8,17 @@ import java.nio.ByteBuffer
  */
 object NewlineScanner {
 
-    // A static final, so the JIT folds the choice. The module check comes first: without the module, touching
-    // VectorNewlineSearch throws NoClassDefFoundError.
-    private val VECTOR = usesVectors(
-        System.getProperty("logxy.newlines"),
-        ModuleLayer.boot().findModule("jdk.incubator.vector").isPresent,
-    ) { VectorNewlineSearch.bitSize }
+    /** The system property that turns the vector search off when set to [SWAR]. */
+    const val PROPERTY = "logxy.newlines"
+
+    const val SWAR = "swar"
+
+    /** Whether this JVM could search with vectors, also when [PROPERTY] turns them off. */
+    val vectorSupport: VectorSupport =
+        vectorSupport(ModuleLayer.boot().findModule("jdk.incubator.vector").isPresent) { VectorNewlineSearch.bitSize }
+
+    // A static final, so the JIT folds the choice.
+    private val VECTOR = usesVectors(System.getProperty(PROPERTY), vectorSupport)
 
     /** The search this JVM runs, e.g. `vector, 512-bit` or `SWAR`, for logxy's own log. */
     val implementation: String = if (VECTOR) "vector, ${VectorNewlineSearch.bitSize}-bit" else "SWAR"
@@ -35,6 +40,18 @@ object NewlineScanner {
         if (VECTOR) VectorNewlineSearch.indexOf(buffer, from, to) else SwarNewlineSearch.indexOf(buffer, from, to)
 }
 
+/** Whether a JVM can search for newlines with vectors, and why not. */
+sealed interface VectorSupport {
+    /** The CPU runs vectors of [bits] as SIMD instructions. */
+    data class Supported(val bits: Int) : VectorSupport
+
+    /** Started without `--add-modules jdk.incubator.vector`. */
+    data object NoModule : VectorSupport
+
+    /** The CPU's preferred vectors have [bits], fewer than [MIN_VECTOR_BITS]: without AVX2, slower than SWAR. */
+    data class TooNarrow(val bits: Int) : VectorSupport
+}
+
 /** One way to search for newlines, with the contracts of [NewlineScanner.scan] and [NewlineScanner.indexOf]. */
 internal interface NewlineSearch {
     fun scan(buffer: ByteBuffer, from: Int, to: Int, base: Long, out: LongChunkList)
@@ -43,11 +60,19 @@ internal interface NewlineSearch {
 }
 
 /** Narrower vectors run on SSE only, where the JIT leaves the Vector API as plain Java: 10× slower than SWAR. */
-private const val MIN_VECTOR_BITS = 256
+const val MIN_VECTOR_BITS = 256
 
 /**
- * Whether to search with vectors: never with [override] `swar` or without the module, else when the CPU's preferred
- * vector width is wide enough. [preferredBits] loads the Vector API, so it is called only once the module is there.
+ * Whether vectors can be used: not without the module, else when the CPU's preferred vector width is wide enough.
+ * [preferredBits] loads the Vector API, which throws NoClassDefFoundError without the module, so it is called only
+ * once the module is there.
  */
-internal fun usesVectors(override: String?, moduleLoaded: Boolean, preferredBits: () -> Int): Boolean =
-    override != "swar" && moduleLoaded && preferredBits() >= MIN_VECTOR_BITS
+internal fun vectorSupport(moduleLoaded: Boolean, preferredBits: () -> Int): VectorSupport {
+    if (!moduleLoaded) return VectorSupport.NoModule
+    val bits = preferredBits()
+    return if (bits >= MIN_VECTOR_BITS) VectorSupport.Supported(bits) else VectorSupport.TooNarrow(bits)
+}
+
+/** Whether to search with vectors: where [support]ed, unless [override] is [NewlineScanner.SWAR]. */
+internal fun usesVectors(override: String?, support: VectorSupport): Boolean =
+    override != NewlineScanner.SWAR && support is VectorSupport.Supported

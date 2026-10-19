@@ -45,15 +45,15 @@ class PreferencesDialog(
     adopt: Parser? = null,
 ) : JDialog(owner, "Preferences", ModalityType.APPLICATION_MODAL) {
 
-    enum class Section { PARSERS, LEVELS, MEMORY, OPENING }
+    enum class Section { PARSERS, LEVELS, JVM, OPENING }
 
     /** Set when the dialog closed with "Save and Use for This File". */
     var parserToUse: Parser? = null
         private set
 
     private val parsers = ParsersPage(previewFile, select, adopt)
-    private val memory = MemoryPage()
-    private val pages = listOf(parsers, LevelsPage(), memory, OpeningPage())
+    private val jvm = JvmPage()
+    private val pages = listOf(parsers, LevelsPage(), jvm, OpeningPage())
     private val cards = CardLayout()
     private val content = JPanel(cards)
     private val heading = JLabel().apply { putClientProperty("FlatLaf.styleClass", "h3") }
@@ -126,13 +126,13 @@ class PreferencesDialog(
         }
         val settings = pages.fold(AppSettings.current) { settings, page -> page.applyTo(settings) }
         if (!AppSettings.updateOrShowError(this, settings)) return false
-        return saveMemoryLimit()
+        return saveJvmOptions()
     }
 
-    /** Saves the memory page's limit if it changed, offering a restart to apply it; false if it cannot be saved. */
-    private fun saveMemoryLimit(): Boolean {
+    /** Saves the JVM page's options if they changed, offering a restart to apply them; false if they cannot be. */
+    private fun saveJvmOptions(): Boolean {
         val vmOptions = Restart.vmOptions ?: return true
-        val options = memory.options()
+        val options = jvm.options()
         if (options == null || options == vmOptions.current()) return true
         val installed = try {
             vmOptions.save(options)
@@ -142,17 +142,17 @@ class PreferencesDialog(
             return false
         }
         if (installed == VmOptions.Install.FAILED) {
-            val message = "logxy cannot write ${vmOptions.installed}, so the new memory limit does not apply. " +
+            val message = "logxy cannot write ${vmOptions.installed}, so the changed JVM options do not apply. " +
                 "Move logxy to a folder you can write to."
-            JOptionPane.showMessageDialog(this, message, "Memory Limit", JOptionPane.WARNING_MESSAGE)
+            JOptionPane.showMessageDialog(this, message, "JVM Options", JOptionPane.WARNING_MESSAGE)
             return true
         }
         val choices = arrayOf("Restart Now", "Later")
         restartAfterClose = JOptionPane.showOptionDialog(
             this,
-            "The new memory limit applies when logxy starts again. Restart now? " +
+            "The changed JVM options apply when logxy starts again. Restart now? " +
                 "Open tabs are reopened with their parsers and filters.",
-            "Memory Limit",
+            "JVM Options",
             JOptionPane.DEFAULT_OPTION, JOptionPane.QUESTION_MESSAGE, null, choices, choices[0],
         ) == 0
         return true

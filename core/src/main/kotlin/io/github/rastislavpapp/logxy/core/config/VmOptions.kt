@@ -1,11 +1,13 @@
 package io.github.rastislavpapp.logxy.core.config
 
+import io.github.rastislavpapp.logxy.core.index.NewlineScanner
 import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.Path
 
 /**
- * The options the packaged launcher starts the JVM with, such as the memory limit. The launcher hands the JVM
+ * The options the packaged launcher starts the JVM with, such as the memory limit and whether the newline search
+ * uses vectors. The launcher hands the JVM
  * [installed] (`logxy.vmoptions` in the app directory) with `-XX:VMOptionsFile`; the user's options live in
  * [user], which, unlike the app directory, survives an upgrade, and [install] copies them over. The JVM does not
  * start if the installed file is missing or holds anything but options, not even a comment, so it is only ever
@@ -79,6 +81,16 @@ class VmOptions(val installed: Path, val user: Path) {
         }
 
         private fun limitsHeap(option: String) = option.startsWith(XMX) || option.startsWith("-XX:MaxRAMPercentage=")
+
+        private const val NEWLINES = "-D${NewlineScanner.PROPERTY}="
+        private const val SWAR_ONLY = "$NEWLINES${NewlineScanner.SWAR}"
+
+        /** Whether [options] let [NewlineScanner] search with vectors, which it does by default where supported. */
+        fun vectorSearch(options: List<String>): Boolean = options.lastOrNull { it.startsWith(NEWLINES) } != SWAR_ONLY
+
+        /** [options] with the vector newline search turned [on], or off: SWAR only. */
+        fun withVectorSearch(options: List<String>, on: Boolean): List<String> =
+            options.filterNot { it.startsWith(NEWLINES) } + if (on) emptyList() else listOf(SWAR_ONLY)
 
         /** The options in [path], which the JVM splits at whitespace; null if the file does not exist. */
         private fun read(path: Path): List<String>? {

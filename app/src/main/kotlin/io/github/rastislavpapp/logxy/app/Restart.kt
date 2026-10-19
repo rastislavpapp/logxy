@@ -45,7 +45,7 @@ object Restart {
     fun now(window: Window?) {
         val main = generateSequence(window) { it.owner }.lastOrNull()
         if (!start((main as? MainFrame)?.tabArgs().orEmpty())) {
-            val message = "logxy could not be started again; start it yourself to apply the limit."
+            val message = "logxy could not be started again; start it yourself to apply the changed options."
             JOptionPane.showMessageDialog(main, message, "Restart", JOptionPane.ERROR_MESSAGE)
             return
         }
