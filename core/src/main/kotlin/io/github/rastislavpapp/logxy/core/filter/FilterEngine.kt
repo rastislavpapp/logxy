@@ -63,10 +63,10 @@ interface RecordFilter {
     val templateProgress: Double
 
     /**
-     * The values at [slot] of the rows (as [countTemplates] takes them) whose message has [template]. Call on the
-     * thread that owns the records; cancelling the calling coroutine stops it.
+     * The values at each of [slots] of the rows (as [countTemplates] takes them) whose message has [template], in
+     * one pass. Call on the thread that owns the records; cancelling the calling coroutine stops it.
      */
-    suspend fun slotValues(rows: IntArray?, rowCount: Int, template: String, slot: Int): SlotValues
+    suspend fun slotValues(rows: IntArray?, rowCount: Int, template: String, slots: IntArray): List<SlotValues>
 }
 
 /** Hears of the matches of a finished chunk of records; see [PreparedFilter.run]. */
@@ -137,8 +137,8 @@ class FilterEngine(private val log: LogData, private val maxCacheBytes: Long = D
 
     override val templateProgress get() = templates.progress
 
-    override suspend fun slotValues(rows: IntArray?, rowCount: Int, template: String, slot: Int): SlotValues =
-        SlotValues.collect(listOf(templates), listOf(log.filterSnapshot()), rows, rowCount, null, template, slot)
+    override suspend fun slotValues(rows: IntArray?, rowCount: Int, template: String, slots: IntArray) =
+        SlotValues.collect(listOf(templates), listOf(log.filterSnapshot()), rows, rowCount, null, template, slots)
 
     /** Caches [entry], dropping the least recently used others while the cache is over [maxCacheBytes]. */
     private fun store(condition: Condition, entry: Entry) = synchronized(cache) {

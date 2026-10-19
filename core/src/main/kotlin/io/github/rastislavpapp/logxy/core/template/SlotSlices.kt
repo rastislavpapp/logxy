@@ -15,4 +15,6 @@ class SlotSlices(val from: Long, val width: Long, val count: Int) {
     val p50 = DoubleArray(count) { Double.NaN }
     val p99 = DoubleArray(count) { Double.NaN }
     val max = DoubleArray(count) { Double.NaN }
+    val sum = DoubleArray(count) { Double.NaN }
+    val average = DoubleArray(count) { Double.NaN }
 }
