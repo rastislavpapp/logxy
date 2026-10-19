@@ -1,4 +1,4 @@
-package io.github.rastislavpapp.logxy.core.pattern
+package io.github.rastislavpapp.logxy.core.template
 
 import io.github.rastislavpapp.logxy.core.filter.RecordSnapshot
 import io.github.rastislavpapp.logxy.core.index.IntChunkList
@@ -18,7 +18,7 @@ import java.util.concurrent.atomic.AtomicInteger
  * first needed and extended as the log grows. [update] and the other suspending calls may run on any
  * thread; [id] is readable from any thread for records an update covered.
  */
-internal class PatternIndex(private val maxTemplates: Int = MAX_TEMPLATES, private val chunkSize: Int = CHUNK_SIZE) {
+internal class TemplateIndex(private val maxTemplates: Int = MAX_TEMPLATES, private val chunkSize: Int = CHUNK_SIZE) {
     private val mutex = Mutex()
     private val ids = IntChunkList()
     private val templates = ByteDictionary()

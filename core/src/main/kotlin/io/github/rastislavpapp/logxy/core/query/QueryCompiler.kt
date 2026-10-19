@@ -4,8 +4,8 @@ import io.github.rastislavpapp.logxy.core.Bytes
 import io.github.rastislavpapp.logxy.core.filter.Filter
 import io.github.rastislavpapp.logxy.core.filter.LevelCondition
 import io.github.rastislavpapp.logxy.core.filter.NumberCondition
-import io.github.rastislavpapp.logxy.core.filter.PatternCondition
 import io.github.rastislavpapp.logxy.core.filter.PresenceCondition
+import io.github.rastislavpapp.logxy.core.filter.TemplateCondition
 import io.github.rastislavpapp.logxy.core.filter.TextCondition
 import io.github.rastislavpapp.logxy.core.filter.TextOp
 import io.github.rastislavpapp.logxy.core.filter.TimeCondition
@@ -46,7 +46,7 @@ class QueryCompiler(private val schema: Schema, private val zone: ZoneId = ZoneI
     private fun rule(rule: Query.Rule): Filter {
         val field = schema.fields.firstOrNull { it.name.equals(rule.field, ignoreCase = true) }
         // A field of the log named so wins over the template.
-        if (field == null && rule.field.equals(Query.PATTERN_FIELD, ignoreCase = true)) return pattern(rule)
+        if (field == null && rule.field.equals(Query.TEMPLATE_FIELD, ignoreCase = true)) return template(rule)
         if (field == null) {
             val names = schema.fields.joinToString { it.name }
             throw QueryException("Unknown field “${rule.field}”; this log has $names")
@@ -88,14 +88,14 @@ class QueryCompiler(private val schema: Schema, private val zone: ZoneId = ZoneI
     }
 
     /** Templates match exactly; `==` and `===` alike, as templates have no wildcards. */
-    private fun pattern(rule: Query.Rule): Filter {
+    private fun template(rule: Query.Rule): Filter {
         val message = schema.fields.firstOrNull { it.role == Role.MESSAGE }
-            ?: throw QueryException("${Query.PATTERN_FIELD} needs a message, which this log does not have")
-        val condition = PatternCondition(message.name, setOf(rule.value))
+            ?: throw QueryException("${Query.TEMPLATE_FIELD} needs a message, which this log does not have")
+        val condition = TemplateCondition(message.name, setOf(rule.value))
         return when (rule.op) {
             QueryOp.EQUALS, QueryOp.EQUALS_CASE -> condition
             QueryOp.NOT_EQUALS, QueryOp.NOT_EQUALS_CASE -> Filter.Not(condition)
-            else -> throw QueryException("${Query.PATTERN_FIELD} works with == and !=, not ${rule.op.symbol}")
+            else -> throw QueryException("${Query.TEMPLATE_FIELD} works with == and !=, not ${rule.op.symbol}")
         }
     }
 

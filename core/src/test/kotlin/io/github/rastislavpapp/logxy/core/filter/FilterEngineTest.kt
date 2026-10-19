@@ -8,9 +8,9 @@ import io.github.rastislavpapp.logxy.core.log.LevelMapping
 import io.github.rastislavpapp.logxy.core.log.LogData
 import io.github.rastislavpapp.logxy.core.log.ParsedLog
 import io.github.rastislavpapp.logxy.core.parse.CompiledPattern
-import io.github.rastislavpapp.logxy.core.pattern.Templates
 import io.github.rastislavpapp.logxy.core.query.QueryException
 import io.github.rastislavpapp.logxy.core.query.TextSearch
+import io.github.rastislavpapp.logxy.core.template.Templates
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Files
@@ -338,7 +338,7 @@ class FilterEngineTest {
             Filter.And(
                 listOf(
                     LevelCondition.atLeast("Level", Level.INFO),
-                    Filter.Not(PatternCondition("Message", setOf("message {} hay"))),
+                    Filter.Not(TemplateCondition("Message", setOf("message {} hay"))),
                 ),
             ),
         )
@@ -387,7 +387,7 @@ class FilterEngineTest {
                 else -> error("unused")
             }
         }
-        is PatternCondition -> {
+        is TemplateCondition -> {
             val field = log.schema.fields.indexOfFirst { it.name == filter.field }
             Templates.mask(log.rowValues(record, 1000)[field]) in filter.templates
         }

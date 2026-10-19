@@ -27,9 +27,9 @@ sealed interface Query {
 
         /**
          * Not a field of the log: the template of the message, see
-         * [io.github.rastislavpapp.logxy.core.pattern.Templates].
+         * [io.github.rastislavpapp.logxy.core.template.Templates].
          */
-        const val PATTERN_FIELD = "Pattern"
+        const val TEMPLATE_FIELD = "Template"
     }
 }
 

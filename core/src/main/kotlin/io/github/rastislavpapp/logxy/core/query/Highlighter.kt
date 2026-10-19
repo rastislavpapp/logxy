@@ -114,7 +114,7 @@ class Highlighter private constructor(private val terms: List<Term>) {
                 is Query.Group -> query.items.forEach { collect(it, into) }
                 is Query.Rule -> {
                     // A template is no text to find.
-                    if (query.value.isEmpty() || query.field.equals(Query.PATTERN_FIELD, ignoreCase = true)) return
+                    if (query.value.isEmpty() || query.field.equals(Query.TEMPLATE_FIELD, ignoreCase = true)) return
                     pattern(query)?.let { into += Term(query.field, it) }
                 }
             }

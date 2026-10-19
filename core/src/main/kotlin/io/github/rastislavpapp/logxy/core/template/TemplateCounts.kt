@@ -1,4 +1,4 @@
-package io.github.rastislavpapp.logxy.core.pattern
+package io.github.rastislavpapp.logxy.core.template
 
 import io.github.rastislavpapp.logxy.core.filter.RecordSnapshot
 import io.github.rastislavpapp.logxy.core.log.ColumnType
@@ -11,7 +11,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 
-/** Where a view's row comes from: which log of [PatternCounts.count]'s, and which record there. */
+/** Where a view's row comes from: which log of [TemplateCounts.count]'s, and which record there. */
 internal interface RowOrigin {
     /** The index, among the counted logs, of the log [row] comes from. */
     fun part(row: Int): Int
@@ -21,9 +21,9 @@ internal interface RowOrigin {
 }
 
 /** How many of the counted rows have each message template, in total and per level. */
-class PatternCounts internal constructor(
+class TemplateCounts internal constructor(
     /**
-     * Templates, most frequent first; null stands for the records beyond [PatternIndex.MAX_TEMPLATES] distinct
+     * Templates, most frequent first; null stands for the records beyond [TemplateIndex.MAX_TEMPLATES] distinct
      * templates.
      */
     val templates: List<String?>,
@@ -49,7 +49,7 @@ class PatternCounts internal constructor(
         val LEVELS = Level.entries.size
         val SLOTS = LEVELS + 1
 
-        val EMPTY = PatternCounts(emptyList(), IntArray(0), 0)
+        val EMPTY = TemplateCounts(emptyList(), IntArray(0), 0)
 
         /**
          * Counts [rowCount] rows: `rows[i]`, or `i` if [rows] is null. Each row is a record of the log that
@@ -57,12 +57,12 @@ class PatternCounts internal constructor(
          * [indexes]. Indexes are updated first.
          */
         suspend fun count(
-            indexes: List<PatternIndex>,
+            indexes: List<TemplateIndex>,
             snapshots: List<RecordSnapshot>,
             rows: IntArray?,
             rowCount: Int,
             origin: RowOrigin?,
-        ): PatternCounts = withContext(Dispatchers.Default) {
+        ): TemplateCounts = withContext(Dispatchers.Default) {
             coroutineScope { indexes.indices.map { async { indexes[it].update(snapshots[it]) } }.awaitAll() }
             val texts = indexes.map { it.texts() }
             val levelFields = snapshots.map { s ->
@@ -120,7 +120,7 @@ class PatternCounts internal constructor(
             val order = joined.entries.sortedByDescending { it.value.sum() }
             val counts = IntArray(order.size * SLOTS)
             order.forEachIndexed { i, entry -> entry.value.copyInto(counts, i * SLOTS) }
-            PatternCounts(order.map { it.key }, counts, rowCount)
+            TemplateCounts(order.map { it.key }, counts, rowCount)
         }
 
         private const val MIN_TASK_ROWS = 1 shl 16

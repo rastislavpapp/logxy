@@ -59,8 +59,8 @@ class HighlighterTest {
     }
 
     @Test
-    fun skipsPatterns() {
-        assertTrue(of(rule(QueryOp.EQUALS, "Request from {} took {} ms", field = "Pattern")).isEmpty)
+    fun skipsTemplates() {
+        assertTrue(of(rule(QueryOp.EQUALS, "Request from {} took {} ms", field = "Template")).isEmpty)
     }
 
     @Test

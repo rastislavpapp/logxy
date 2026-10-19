@@ -11,9 +11,9 @@ import io.github.rastislavpapp.logxy.core.parse.Csv
 import io.github.rastislavpapp.logxy.core.parse.Json
 import io.github.rastislavpapp.logxy.core.parse.MapSyntax
 import io.github.rastislavpapp.logxy.core.parse.MdcMap
-import io.github.rastislavpapp.logxy.core.pattern.PatternCounts
-import io.github.rastislavpapp.logxy.core.pattern.PatternIndex
 import io.github.rastislavpapp.logxy.core.readFully
+import io.github.rastislavpapp.logxy.core.template.TemplateCounts
+import io.github.rastislavpapp.logxy.core.template.TemplateIndex
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -53,13 +53,13 @@ interface RecordFilter {
 
     /**
      * Counts [rowCount] rows (`rows[i]`, or all records from the first if [rows] is null) by the template of
-     * their message; see [io.github.rastislavpapp.logxy.core.pattern.Templates]. Call on the thread that owns
+     * their message; see [io.github.rastislavpapp.logxy.core.template.Templates]. Call on the thread that owns
      * the records; cancelling the calling coroutine stops it.
      */
-    suspend fun countPatterns(rows: IntArray?, rowCount: Int): PatternCounts
+    suspend fun countTemplates(rows: IntArray?, rowCount: Int): TemplateCounts
 
-    /** How far [countPatterns] got with finding the templates of records it had not seen, from 0 to 1. */
-    val patternProgress: Double
+    /** How far [countTemplates] got with finding the templates of records it had not seen, from 0 to 1. */
+    val templateProgress: Double
 }
 
 /** Hears of the matches of a finished chunk of records; see [PreparedFilter.run]. */
@@ -102,8 +102,8 @@ class FilterEngine(private val log: LogData, private val maxCacheBytes: Long = D
 
     internal val cachedConditions get() = cache.size
 
-    /** Message templates of the log's records, for [PatternCondition]s and for counting them. */
-    internal val patterns = PatternIndex()
+    /** Message templates of the log's records, for [TemplateCondition]s and for counting them. */
+    internal val templates = TemplateIndex()
 
     @Volatile
     private var cachedLevels: LevelMapping? = null
@@ -125,10 +125,10 @@ class FilterEngine(private val log: LogData, private val maxCacheBytes: Long = D
     // Only the last record of a log grows.
     override fun changedFrom(coveredRecords: Int) = maxOf(0, coveredRecords - 1)
 
-    override suspend fun countPatterns(rows: IntArray?, rowCount: Int): PatternCounts =
-        PatternCounts.count(listOf(patterns), listOf(log.filterSnapshot()), rows, rowCount, null)
+    override suspend fun countTemplates(rows: IntArray?, rowCount: Int): TemplateCounts =
+        TemplateCounts.count(listOf(templates), listOf(log.filterSnapshot()), rows, rowCount, null)
 
-    override val patternProgress get() = patterns.progress
+    override val templateProgress get() = templates.progress
 
     /** Caches [entry], dropping the least recently used others while the cache is over [maxCacheBytes]. */
     private fun store(condition: Condition, entry: Entry) = synchronized(cache) {
@@ -145,7 +145,7 @@ class FilterEngine(private val log: LogData, private val maxCacheBytes: Long = D
         is Filter.And -> AndNode(filter.parts.map { compile(it, snapshot) }.sortedBy { it.cost })
         is Filter.Or -> OrNode(filter.parts.map { compile(it, snapshot) }.sortedBy { it.cost })
         is Filter.Not -> NotNode(compile(filter.part, snapshot))
-        is Condition -> Leaf.of(filter, snapshot, patterns)
+        is Condition -> Leaf.of(filter, snapshot, templates)
     }
 
     /**
@@ -389,7 +389,7 @@ private class Leaf(
 ) : Node {
 
     companion object {
-        fun of(condition: Condition, snapshot: RecordSnapshot, patterns: PatternIndex): Leaf {
+        fun of(condition: Condition, snapshot: RecordSnapshot, templates: TemplateIndex): Leaf {
             if (condition is RecordTextCondition) return recordTextLeaf(condition)
             val field = snapshot.schema.fields.indexOfFirst { it.name == condition.field }
             val type = snapshot.schema.fields.getOrNull(field)?.type
@@ -421,10 +421,10 @@ private class Leaf(
                     Leaf(condition, 0, false) { c, _ -> c.timestamp(field) in from..to }
                 }
                 is TextCondition -> textLeaf(condition, snapshot, field, type)
-                is PatternCondition -> {
+                is TemplateCondition -> {
                     var matching = BooleanArray(0)
-                    val prepare: suspend () -> Unit = { matching = patterns.matching(snapshot, condition.templates) }
-                    Leaf(condition, 0, false, prepare) { c, _ -> matching.getOrElse(patterns.id(c.record)) { false } }
+                    val prepare: suspend () -> Unit = { matching = templates.matching(snapshot, condition.templates) }
+                    Leaf(condition, 0, false, prepare) { c, _ -> matching.getOrElse(templates.id(c.record)) { false } }
                 }
                 is NumberCondition -> numberLeaf(condition, snapshot, field, type)
                 is RecordTextCondition -> recordTextLeaf(condition)
@@ -552,7 +552,7 @@ private class Leaf(
             is NumberCondition -> mapValueLeaf(condition, key, map, false) { bytes, from, to ->
                 condition.matches(Bytes.parseNumber(bytes, from, to))
             }
-            is LevelCondition, is TimeCondition, is PatternCondition, is RecordTextCondition ->
+            is LevelCondition, is TimeCondition, is TemplateCondition, is RecordTextCondition ->
                 Leaf(condition, 0, false) { _, _ -> false }
         }
 

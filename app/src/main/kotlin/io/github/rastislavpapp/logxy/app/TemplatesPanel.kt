@@ -4,10 +4,10 @@ import com.formdev.flatlaf.util.UIScale
 import io.github.rastislavpapp.logxy.core.log.Level
 import io.github.rastislavpapp.logxy.core.log.Role
 import io.github.rastislavpapp.logxy.core.log.Schema
-import io.github.rastislavpapp.logxy.core.pattern.PatternCounts
-import io.github.rastislavpapp.logxy.core.pattern.Templates
 import io.github.rastislavpapp.logxy.core.query.Query
 import io.github.rastislavpapp.logxy.core.query.QueryOp
+import io.github.rastislavpapp.logxy.core.template.TemplateCounts
+import io.github.rastislavpapp.logxy.core.template.Templates
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -66,22 +66,22 @@ private val PADDING = EmptyBorder(0, 0, 0, 12)
  * Whether records with [this] schema can be filtered by message template: they have a message, and no field of
  * the log takes the name.
  */
-fun Schema.hasPatterns() =
-    indexOf(Role.MESSAGE) >= 0 && fields.none { it.name.equals(Query.PATTERN_FIELD, ignoreCase = true) }
+fun Schema.hasTemplates() =
+    indexOf(Role.MESSAGE) >= 0 && fields.none { it.name.equals(Query.TEMPLATE_FIELD, ignoreCase = true) }
 
 /**
  * The shown rows grouped by the template of their message (see [Templates]), most frequent first, with
  * a count per level. Counts only while it is showing: [count] does the work and is cancelled when a newer
  * count starts. Filtering by the selected templates goes through [addRules].
  */
-class PatternsPanel(
+class TemplatesPanel(
     private val scope: CoroutineScope,
-    private val count: suspend () -> PatternCounts?,
+    private val count: suspend () -> TemplateCounts?,
     private val progress: () -> Double,
     private val addRules: (List<Query>) -> Unit,
 ) : JPanel(BorderLayout()) {
 
-    private val model = PatternsModel()
+    private val model = TemplatesModel()
     private val table = JTable(model)
     private val summary = JLabel(" ")
     private val scrollPane = JScrollPane(table).apply { border = null }
@@ -99,7 +99,7 @@ class PatternsPanel(
     /** Counted rows changed while hidden, so they are counted once shown. */
     private var stale = true
 
-    /** Whether the records can be filtered by template; see [hasPatterns]. */
+    /** Whether the records can be filtered by template; see [hasTemplates]. */
     var canFilter = true
 
     init {
@@ -166,7 +166,7 @@ class PatternsPanel(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                summary.text = "Cannot find patterns: ${e.message ?: e.javaClass.simpleName}"
+                summary.text = "Cannot find templates:${e.message ?: e.javaClass.simpleName}"
             } finally {
                 timer.stop()
                 hideProgress()
@@ -219,15 +219,15 @@ class PatternsPanel(
         }
     }
 
-    private fun show(counts: PatternCounts?) {
+    private fun show(counts: TemplateCounts?) {
         if (counts == null) {
             setCounts(null)
-            summary.text = "These records have no message to find patterns in."
+            summary.text = "These records have no message to find templates in."
             return
         }
         val selected = selectedTemplates().toSet()
         setCounts(counts)
-        summary.text = "${count(counts.size, "pattern")} in ${count(counts.rows, "row")}"
+        summary.text = "${count(counts.size, "template")} in ${count(counts.rows, "row")}"
         for (row in 0..<table.rowCount) {
             if (counts.templates[table.convertRowIndexToModel(row)] in selected) table.addRowSelectionInterval(row, row)
         }
@@ -235,7 +235,7 @@ class PatternsPanel(
 
     private fun count(n: Int, unit: String) = "%,d %s".format(n, if (n == 1) unit else "${unit}s")
 
-    private fun setCounts(counts: PatternCounts?) {
+    private fun setCounts(counts: TemplateCounts?) {
         val sortKeys = table.rowSorter?.sortKeys
         if (model.update(counts)) {
             setUpColumns()
@@ -270,17 +270,17 @@ class PatternsPanel(
         val templates = selectedTemplates()
         val several = templates.size > 1
         val popup = JPopupMenu()
-        val showOnly = if (several) "Show Only These ${templates.size} Patterns" else "Show Only This Pattern"
+        val showOnly = if (several) "Show Only These ${templates.size} Templates" else "Show Only This Template"
         popup.add(JMenuItem(showOnly, Icons.filter).apply {
             isEnabled = canFilter && templates.isNotEmpty()
             addActionListener { showOnly(templates) }
         })
-        popup.add(JMenuItem(if (several) "Hide These ${templates.size} Patterns" else "Hide This Pattern").apply {
+        popup.add(JMenuItem(if (several) "Hide These ${templates.size} Templates" else "Hide This Template").apply {
             isEnabled = canFilter && templates.isNotEmpty()
-            addActionListener { addRules(templates.map { Query.Rule(Query.PATTERN_FIELD, QueryOp.NOT_EQUALS, it) }) }
+            addActionListener { addRules(templates.map { Query.Rule(Query.TEMPLATE_FIELD, QueryOp.NOT_EQUALS, it) }) }
         })
         popup.addSeparator()
-        popup.add(JMenuItem(if (several) "Copy Patterns" else "Copy Pattern").apply {
+        popup.add(JMenuItem(if (several) "Copy Templates" else "Copy Template").apply {
             isEnabled = templates.isNotEmpty()
             addActionListener {
                 val selection = StringSelection(templates.joinToString("\n"))
@@ -292,11 +292,11 @@ class PatternsPanel(
 
     private fun showOnly(templates: List<String>) {
         if (!canFilter || templates.isEmpty()) return
-        val rules = templates.map { Query.Rule(Query.PATTERN_FIELD, QueryOp.EQUALS, it) }
+        val rules = templates.map { Query.Rule(Query.TEMPLATE_FIELD, QueryOp.EQUALS, it) }
         addRules(listOf(rules.singleOrNull() ?: Query.Group(all = false, items = rules)))
     }
 
-    /** Pulsing boxes where the counts and patterns will be, while they are counted. */
+    /** Pulsing boxes where the counts and templates will be, while they are counted. */
     private inner class Placeholders : JComponent() {
         override fun paintComponent(g: Graphics) {
             val g2 = g.create() as Graphics2D
@@ -311,7 +311,7 @@ class PatternsPanel(
                 val rowHeight = table.rowHeight
                 val boxHeight = rowHeight / 2
                 val countWidth = metrics.stringWidth("000,000")
-                val patternX = metrics.stringWidth("0,000,000,000") + 24
+                val templateX = metrics.stringWidth("0,000,000,000") + 24
                 val arc = UIScale.scale(6)
                 var y = table.tableHeader.preferredSize.height + (rowHeight - boxHeight) / 2
                 var row = 0
@@ -319,9 +319,9 @@ class PatternsPanel(
                     // Varied, but the same on every repaint, so the boxes do not jump about.
                     val shape = ((row + 1) * -7046029254386353131L ushr 56) / 255.0
                     val count = (countWidth * (0.5 + shape / 2)).toInt()
-                    g2.fillRoundRect(patternX - 24 - count, y, count, boxHeight, arc, arc)
-                    val pattern = ((width - patternX - 16) * (0.3 + 0.55 * shape)).toInt()
-                    if (pattern > 0) g2.fillRoundRect(patternX, y, pattern, boxHeight, arc, arc)
+                    g2.fillRoundRect(templateX - 24 - count, y, count, boxHeight, arc, arc)
+                    val template = ((width - templateX - 16) * (0.3 + 0.55 * shape)).toInt()
+                    if (template > 0) g2.fillRoundRect(templateX, y, template, boxHeight, arc, arc)
                     y += rowHeight
                     row++
                 }
@@ -332,12 +332,12 @@ class PatternsPanel(
     }
 
     /** Columns: the total, one per level that some counted row has, and the template. */
-    private class PatternsModel : AbstractTableModel() {
-        private var counts: PatternCounts? = null
+    private class TemplatesModel : AbstractTableModel() {
+        private var counts: TemplateCounts? = null
         private var levels: List<Level> = emptyList()
 
         /** Shows [counts]; returns whether the columns changed. */
-        fun update(counts: PatternCounts?): Boolean {
+        fun update(counts: TemplateCounts?): Boolean {
             this.counts = counts
             val levels = counts?.levels.orEmpty()
             if (levels == this.levels) {
@@ -360,7 +360,7 @@ class PatternsPanel(
 
         override fun getColumnName(column: Int) = when (column) {
             0 -> "Count"
-            columnCount - 1 -> "Pattern"
+            columnCount - 1 -> "Template"
             else -> levels[column - 1].name
         }
 
@@ -407,7 +407,7 @@ class PatternsPanel(
             val template = value as String?
             this.template = template
             val text = when (template) {
-                null -> "(other messages, over the limit of different patterns)"
+                null -> "(other messages, over the limit of different templates)"
                 "" -> "(no message)"
                 else -> template
             }

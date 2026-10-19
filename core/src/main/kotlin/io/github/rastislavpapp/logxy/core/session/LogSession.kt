@@ -20,11 +20,11 @@ import io.github.rastislavpapp.logxy.core.merge.MergedLog
 import io.github.rastislavpapp.logxy.core.parse.Parser
 import io.github.rastislavpapp.logxy.core.parse.ParserMismatchException
 import io.github.rastislavpapp.logxy.core.parse.open
-import io.github.rastislavpapp.logxy.core.pattern.PatternCounts
 import io.github.rastislavpapp.logxy.core.query.Query
 import io.github.rastislavpapp.logxy.core.query.QueryCompiler
 import io.github.rastislavpapp.logxy.core.query.QueryException
 import io.github.rastislavpapp.logxy.core.query.TextSearch
+import io.github.rastislavpapp.logxy.core.template.TemplateCounts
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -389,21 +389,21 @@ class LogSession internal constructor(
         }
     }
 
-    /** How far [patternCounts] got with finding the templates of new records, from 0 to 1. */
-    val patternProgress: Double get() = engine?.patternProgress ?: 1.0
+    /** How far [templateCounts] got with finding the templates of new records, from 0 to 1. */
+    val templateProgress: Double get() = engine?.templateProgress ?: 1.0
 
     /**
      * Counts the shown rows by the template of their message (see
-     * [io.github.rastislavpapp.logxy.core.pattern.Templates]); null if there is nothing loaded or the records have
+     * [io.github.rastislavpapp.logxy.core.template.Templates]); null if there is nothing loaded or the records have
      * no message. Cancelling the caller stops it.
      */
-    suspend fun patternCounts(): PatternCounts? {
+    suspend fun templateCounts(): TemplateCounts? {
         // Counting the times takes a fraction of finding the templates: let it have the threads first.
         while (true) countJob?.takeIf { it.isActive }?.join() ?: break
         val shown = shown ?: return null
         val engine = engine ?: return null
         if (shown.schema.indexOf(Role.MESSAGE) < 0) return null
-        return engine.countPatterns(shown.rowArray, shown.rowCount)
+        return engine.countTemplates(shown.rowArray, shown.rowCount)
     }
 
     /** The template of [record]'s message; null if it has none, or nothing is loaded. */

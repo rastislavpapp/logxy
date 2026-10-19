@@ -1,8 +1,8 @@
-package io.github.rastislavpapp.logxy.core.pattern
+package io.github.rastislavpapp.logxy.core.template
 
 import io.github.rastislavpapp.logxy.core.filter.Filter
 import io.github.rastislavpapp.logxy.core.filter.FilterEngine
-import io.github.rastislavpapp.logxy.core.filter.PatternCondition
+import io.github.rastislavpapp.logxy.core.filter.TemplateCondition
 import io.github.rastislavpapp.logxy.core.index.IndexProgress
 import io.github.rastislavpapp.logxy.core.index.LineIndex
 import io.github.rastislavpapp.logxy.core.log.Level
@@ -25,7 +25,7 @@ import java.time.ZoneOffset
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
-class PatternIndexTest {
+class TemplateIndexTest {
 
     @TempDir
     lateinit var dir: Path
@@ -50,18 +50,18 @@ class PatternIndexTest {
         return runBlocking { ParsedLog.build(file, parser, IndexProgress()) }
     }
 
-    private fun PatternIndex.templates(log: LogData): List<String?> = runBlocking {
+    private fun TemplateIndex.templates(log: LogData): List<String?> = runBlocking {
         update(log.filterSnapshot())
         val texts = texts()
         List(log.recordCount) { id(it).let { id -> if (id < 0) null else texts[id] } }
     }
 
-    private fun count(log: LogData, rows: IntArray? = null): PatternCounts = runBlocking {
+    private fun count(log: LogData, rows: IntArray? = null): TemplateCounts = runBlocking {
         val rowCount = rows?.size ?: log.recordCount
-        PatternCounts.count(listOf(PatternIndex()), listOf(log.filterSnapshot()), rows, rowCount, null)
+        TemplateCounts.count(listOf(TemplateIndex()), listOf(log.filterSnapshot()), rows, rowCount, null)
     }
 
-    private fun PatternCounts.entries() = List(size) { templates[it] to total(it) }
+    private fun TemplateCounts.entries() = List(size) { templates[it] to total(it) }
 
     private fun FilterEngine.rows(filter: Filter) = runBlocking { prepare(filter).run() }.rows.toList()
 
@@ -71,8 +71,8 @@ class PatternIndexTest {
             repeat(2000) { append("2026-10-01 08:00:00.000 [main] INFO  app.Main - Job ${it % 7} took $it ms\n") }
         }
         parse(content).use { log ->
-            val expected = PatternIndex().templates(log)
-            val index = PatternIndex(chunkSize = 10)
+            val expected = TemplateIndex().templates(log)
+            val index = TemplateIndex(chunkSize = 10)
             runBlocking {
                 val update = launch(Dispatchers.Default) { index.update(log.filterSnapshot()) }
                 while (index.progress == 1.0 && update.isActive) yield()
@@ -108,8 +108,8 @@ class PatternIndexTest {
             }
         }
         parse(content).use { log ->
-            val expected = PatternIndex().templates(log)
-            assertEquals(expected, PatternIndex(chunkSize = 3).templates(log))
+            val expected = TemplateIndex().templates(log)
+            assertEquals(expected, TemplateIndex(chunkSize = 3).templates(log))
             assertEquals(setOf("kind {} message x", "kind {} message {}"), expected.toSet())
         }
     }
@@ -117,7 +117,7 @@ class PatternIndexTest {
     @Test
     fun `records over the template limit share one entry`() {
         parse(sample).use { log ->
-            val templates = PatternIndex(maxTemplates = 1).templates(log)
+            val templates = TemplateIndex(maxTemplates = 1).templates(log)
             assertEquals(listOf(request, null, request, request, null, null), templates)
         }
     }
@@ -126,7 +126,7 @@ class PatternIndexTest {
     fun `follows appended records and the last one growing`() {
         val file = Files.writeString(dir.resolve("partial.log"), "hello wor")
         runBlocking { LineIndex.build(file) }.use { log ->
-            val index = PatternIndex()
+            val index = TemplateIndex()
             assertEquals(listOf("hello wor"), index.templates(log))
             Files.writeString(file, "ld 42\nbye 7\n", StandardOpenOption.APPEND)
             log.append(log.readAppended(Files.size(file)))
@@ -142,8 +142,8 @@ class PatternIndexTest {
             {"level":"INFO"}
         """.trimIndent() + "\n")
         runBlocking { ParsedLog.build(file, CompiledJson(zone = ZoneOffset.UTC), IndexProgress()) }.use { log ->
-            assertEquals(listOf("User \"bob\" logged in from {}", "Disk {} full", ""), PatternIndex().templates(log))
-            assertEquals("Disk {} full", PatternIndex.templateOf(log.filterSnapshot(), 1))
+            assertEquals(listOf("User \"bob\" logged in from {}", "Disk {} full", ""), TemplateIndex().templates(log))
+            assertEquals("Disk {} full", TemplateIndex.templateOf(log.filterSnapshot(), 1))
         }
     }
 
@@ -151,10 +151,10 @@ class PatternIndexTest {
     fun `filters by template`() {
         parse(sample).use { log ->
             val engine = FilterEngine(log)
-            assertEquals(listOf(0, 2, 3), engine.rows(PatternCondition("Message", setOf(request))))
-            assertEquals(listOf(1, 4, 5), engine.rows(Filter.Not(PatternCondition("Message", setOf(request)))))
-            assertEquals(listOf(1, 4, 5), engine.rows(PatternCondition("Message", setOf(query, "Cache warmed"))))
-            assertEquals(listOf(), engine.rows(PatternCondition("Message", setOf("nothing like it"))))
+            assertEquals(listOf(0, 2, 3), engine.rows(TemplateCondition("Message", setOf(request))))
+            assertEquals(listOf(1, 4, 5), engine.rows(Filter.Not(TemplateCondition("Message", setOf(request)))))
+            assertEquals(listOf(1, 4, 5), engine.rows(TemplateCondition("Message", setOf(query, "Cache warmed"))))
+            assertEquals(listOf(), engine.rows(TemplateCondition("Message", setOf("nothing like it"))))
         }
     }
 
@@ -168,9 +168,9 @@ class PatternIndexTest {
         val merged = runBlocking { MergedLog.build(listOf(a, b)) }
         try {
             val filter = MergedFilter(merged)
-            val counts = runBlocking { filter.countPatterns(null, merged.recordCount) }
+            val counts = runBlocking { filter.countTemplates(null, merged.recordCount) }
             assertEquals(listOf(request to 3, query to 3, "Cache warmed" to 2), counts.entries())
-            val rows = runBlocking { filter.prepare(PatternCondition("Message", setOf(query))).run() }.rows.toList()
+            val rows = runBlocking { filter.prepare(TemplateCondition("Message", setOf(query))).run() }.rows.toList()
             val messages = rows.map { merged.rowValues(it, 100).last() }
             assertEquals(listOf("Query 17 failed", "Query 18 failed", "Query 99 failed"), messages)
         } finally {

@@ -1,4 +1,4 @@
-package io.github.rastislavpapp.logxy.core.pattern
+package io.github.rastislavpapp.logxy.core.template
 
 /**
  * Message templates: the first line of a message with its variable parts replaced by `{}`, as in

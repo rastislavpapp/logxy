@@ -9,8 +9,8 @@ import io.github.rastislavpapp.logxy.core.log.Records
 import io.github.rastislavpapp.logxy.core.log.Schema
 import io.github.rastislavpapp.logxy.core.merge.MergedFilter
 import io.github.rastislavpapp.logxy.core.merge.MergedLog
-import io.github.rastislavpapp.logxy.core.pattern.PatternIndex
-import io.github.rastislavpapp.logxy.core.pattern.RowOrigin
+import io.github.rastislavpapp.logxy.core.template.RowOrigin
+import io.github.rastislavpapp.logxy.core.template.TemplateIndex
 
 /** What appending to the files of a load did to its records. */
 internal enum class Appended {
@@ -120,7 +120,7 @@ internal class SingleLoad(private val log: LogData) : LoadedLog {
 
     override fun firstRecordFrom(part: Int, record: Int) = record
 
-    override fun templateOf(record: Int) = PatternIndex.templateOf(log.filterSnapshot(), record)
+    override fun templateOf(record: Int) = TemplateIndex.templateOf(log.filterSnapshot(), record)
 
     override fun fieldReader(field: Int, records: IntArray?, count: Int): (Int) -> String {
         val snapshot = log.filterSnapshot()
@@ -163,7 +163,7 @@ internal class MergedLoad(private val log: MergedLog) : LoadedLog {
     override fun firstRecordFrom(part: Int, record: Int) = log.firstRecordFrom(part, record)
 
     override fun templateOf(record: Int) =
-        PatternIndex.templateOf(log.parts[log.part(record)].filterSnapshot(), log.record(record))
+        TemplateIndex.templateOf(log.parts[log.part(record)].filterSnapshot(), log.record(record))
 
     override fun fieldReader(field: Int, records: IntArray?, count: Int) = log.fieldReader(field, records, count)
 

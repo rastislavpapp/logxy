@@ -1,4 +1,4 @@
-package io.github.rastislavpapp.logxy.core.pattern
+package io.github.rastislavpapp.logxy.core.template
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
