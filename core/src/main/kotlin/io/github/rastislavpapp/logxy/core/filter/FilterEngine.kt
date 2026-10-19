@@ -12,9 +12,9 @@ import io.github.rastislavpapp.logxy.core.parse.Json
 import io.github.rastislavpapp.logxy.core.parse.MapSyntax
 import io.github.rastislavpapp.logxy.core.parse.MdcMap
 import io.github.rastislavpapp.logxy.core.readFully
-import io.github.rastislavpapp.logxy.core.template.SlotValues
 import io.github.rastislavpapp.logxy.core.template.TemplateCounts
 import io.github.rastislavpapp.logxy.core.template.TemplateIndex
+import io.github.rastislavpapp.logxy.core.template.VariableSeries
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -63,10 +63,15 @@ interface RecordFilter {
     val templateProgress: Double
 
     /**
-     * The values at each of [slots] of the rows (as [countTemplates] takes them) whose message has [template], in
-     * one pass. Call on the thread that owns the records; cancelling the calling coroutine stops it.
+     * The values at each of [variables] of the rows (as [countTemplates] takes them) whose message has [template],
+     * in one pass. Call on the thread that owns the records; cancelling the calling coroutine stops it.
      */
-    suspend fun slotValues(rows: IntArray?, rowCount: Int, template: String, slots: IntArray): List<SlotValues>
+    suspend fun variableSeries(
+        rows: IntArray?,
+        rowCount: Int,
+        template: String,
+        variables: IntArray,
+    ): List<VariableSeries>
 }
 
 /** Hears of the matches of a finished chunk of records; see [PreparedFilter.run]. */
@@ -137,8 +142,16 @@ class FilterEngine(private val log: LogData, private val maxCacheBytes: Long = D
 
     override val templateProgress get() = templates.progress
 
-    override suspend fun slotValues(rows: IntArray?, rowCount: Int, template: String, slots: IntArray) =
-        SlotValues.collect(listOf(templates), listOf(log.filterSnapshot()), rows, rowCount, null, template, slots)
+    override suspend fun variableSeries(rows: IntArray?, rowCount: Int, template: String, variables: IntArray) =
+        VariableSeries.collect(
+            listOf(templates),
+            listOf(log.filterSnapshot()),
+            rows,
+            rowCount,
+            null,
+            template,
+            variables,
+        )
 
     /** Caches [entry], dropping the least recently used others while the cache is over [maxCacheBytes]. */
     private fun store(condition: Condition, entry: Entry) = synchronized(cache) {

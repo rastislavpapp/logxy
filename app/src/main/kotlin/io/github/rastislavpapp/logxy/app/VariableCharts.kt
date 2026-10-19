@@ -1,8 +1,8 @@
 package io.github.rastislavpapp.logxy.app
 
-import io.github.rastislavpapp.logxy.core.template.SlotSlices
-import io.github.rastislavpapp.logxy.core.template.SlotValues
 import io.github.rastislavpapp.logxy.core.template.Templates
+import io.github.rastislavpapp.logxy.core.template.VariableSeries
+import io.github.rastislavpapp.logxy.core.template.VariableSlices
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -16,8 +16,8 @@ import javax.swing.JOptionPane
 import javax.swing.Timer
 import kotlin.math.abs
 
-/** At most this many slots are charted at once: one per color of [CHART_COLORS]. */
-const val MAX_SLOT_CHARTS = 6
+/** At most this many variables are charted at once: one per color of [CHART_COLORS]. */
+const val MAX_VARIABLE_CHARTS = 6
 
 /** Reading the values again while a file is tailed waits this long, so a busy file does not keep it reading. */
 private const val REFRESH_MILLIS = 1000
@@ -32,19 +32,19 @@ private val CHART_COLORS = listOf(
     Color(0x8C6E45),
 )
 
-/** Charts [slot] of [template] in [charts], or stops; tells the user, over [parent], when no more fit. */
-fun toggleChart(parent: Component, charts: SlotCharts, template: String, slot: Int) {
-    if (charts.toggle(template, slot)) return
+/** Charts [variable] of [template] in [charts], or stops; tells the user, over [parent], when no more fit. */
+fun toggleChart(parent: Component, charts: VariableCharts, template: String, variable: Int) {
+    if (charts.toggle(template, variable)) return
     JOptionPane.showMessageDialog(
         parent,
-        "At most $MAX_SLOT_CHARTS slots can be charted at once. Close one first.",
-        "Chart Slot",
+        "At most $MAX_VARIABLE_CHARTS variables can be charted at once. Close one first.",
+        "Chart Variable",
         JOptionPane.INFORMATION_MESSAGE,
     )
 }
 
 /** Whole numbers as they are, others to a few significant digits. */
-fun formatSlotValue(value: Double): String = when {
+fun formatVariableValue(value: Double): String = when {
     value.isNaN() -> "–"
     value == Math.rint(value) && abs(value) < 1e15 -> "%,d".format(value.toLong())
     abs(value) >= 100 -> "%,.0f".format(value)
@@ -53,7 +53,7 @@ fun formatSlotValue(value: Double): String = when {
 }
 
 /** What a chart shows of each slice's numbers; [short] goes in front of its label. */
-enum class SlotMetric(val title: String, val short: String, val of: (SlotSlices) -> DoubleArray) {
+enum class VariableMetric(val title: String, val short: String, val of: (VariableSlices) -> DoubleArray) {
     AVERAGE("Average", "avg", { it.average }),
     P50("Median (p50)", "p50", { it.p50 }),
     P99("99th Percentile (p99)", "p99", { it.p99 }),
@@ -62,41 +62,44 @@ enum class SlotMetric(val title: String, val short: String, val of: (SlotSlices)
     ;
 
     /** The value of a record that stands for [slice] of [slices]: the largest for a sum, which no record is near. */
-    fun target(slices: SlotSlices, slice: Int): Double = if (this == SUM) slices.max[slice] else of(slices)[slice]
+    fun target(slices: VariableSlices, slice: Int): Double = if (this == SUM) slices.max[slice] else of(slices)[slice]
 }
 
-/** What the values of a slot came to over all shown rows of its template that have a time. */
-class SlotSummary(val records: Int, val numbers: Int, val min: Double, val average: Double, val max: Double) {
-    constructor(values: SlotValues) : this(values.size, values.numbers, values.min, values.average, values.max)
+/** What the values of a variable came to over all shown rows of its template that have a time. */
+class VariableSummary(val records: Int, val numbers: Int, val min: Double, val average: Double, val max: Double) {
+    constructor(values: VariableSeries) : this(values.size, values.numbers, values.min, values.average, values.max)
 }
 
-/** One slot of a template charted over time; see [SlotCharts]. */
-class SlotChart internal constructor(val template: String, val slot: Int, val color: Color) {
-    /** False until its values are first read: only a slot with numbers is shown. */
+/** One variable of a template charted over time; see [VariableCharts]. */
+class VariableChart internal constructor(val template: String, val variable: Int, val color: Color) {
+    /** False until its values are first read: only a variable with numbers is shown. */
     var shown = false
         internal set
 
-    var metric = SlotMetric.AVERAGE
+    var metric = VariableMetric.AVERAGE
 
     /** The shown rows' values; null until read. */
-    internal var values: SlotValues? = null
+    internal var values: VariableSeries? = null
 
-    /** The last [SlotValues.slices] computed, and for which values; drawn by their own times until newer ones come. */
-    var slices: SlotSlices? = null
+    /**
+     * The last [VariableSeries.slices] computed, and for which values; drawn by their own times until newer ones
+     * come.
+     */
+    var slices: VariableSlices? = null
         internal set
-    var slicedValues: SlotValues? = null
+    var slicedValues: VariableSeries? = null
         internal set
     internal var slicing: Job? = null
 
-    val label: String = label(template, slot)
+    val label: String = label(template, variable)
 
     companion object {
-        /** [template] with [slot] marked, e.g. `done in {•} ms`. */
-        fun label(template: String, slot: Int): String = template.split(Templates.PLACEHOLDER).let { parts ->
+        /** [template] with [variable] marked, e.g. `done in {•} ms`. */
+        fun label(template: String, variable: Int): String = template.split(Templates.PLACEHOLDER).let { parts ->
             buildString {
                 for ((i, part) in parts.withIndex()) {
                     append(part)
-                    if (i < parts.lastIndex) append(if (i == slot) "{•}" else Templates.PLACEHOLDER)
+                    if (i < parts.lastIndex) append(if (i == variable) "{•}" else Templates.PLACEHOLDER)
                 }
             }
         }
@@ -104,65 +107,65 @@ class SlotChart internal constructor(val template: String, val slot: Int, val co
 }
 
 /**
- * The slots charted in one tab, in the order they were added, each with its own color. Values are read through
- * [read], one pass per template for all its charted slots, for the shown rows, and kept until [refresh] reads them
- * again; [onChanged] hears of charts added or removed and of new values or slices. A slot read for the first time
+ * The variables charted in one tab, in the order they were added, each with its own color. Values are read through
+ * [read], one pass per template for all its charted variables, for the shown rows, and kept until [refresh] reads them
+ * again; [onChanged] hears of charts added or removed and of new values or slices. A variable read for the first time
  * is shown only if it holds a number; else [onNoNumbers] hears of it. Use on the UI thread.
  */
-class SlotCharts(
+class VariableCharts(
     private val scope: CoroutineScope,
-    private val read: suspend (template: String, slots: IntArray) -> List<SlotValues>?,
+    private val read: suspend (template: String, variables: IntArray) -> List<VariableSeries>?,
 ) {
-    private val charts = mutableListOf<SlotChart>()
+    private val charts = mutableListOf<VariableChart>()
     private var job: Job? = null
     private val throttle = Timer(REFRESH_MILLIS) { readValues(charts.toList()) }.apply { isRepeats = false }
 
-    /** Of the slots read since the shown rows changed, charted or not. */
-    private val summaries = HashMap<Pair<String, Int>, SlotSummary>()
+    /** Of the variables read since the shown rows changed, charted or not. */
+    private val summaries = HashMap<Pair<String, Int>, VariableSummary>()
 
     var onChanged: () -> Unit = {}
-    var onNoNumbers: (SlotChart) -> Unit = {}
+    var onNoNumbers: (VariableChart) -> Unit = {}
 
     /** The charts shown, without those still read for the first time. */
-    val all: List<SlotChart> get() = charts.filter { it.shown }
+    val all: List<VariableChart> get() = charts.filter { it.shown }
 
-    /** The chart of [slot] of [template], also while it is read for the first time; null if none. */
-    fun chart(template: String, slot: Int): SlotChart? =
-        charts.firstOrNull { it.template == template && it.slot == slot }
+    /** The chart of [variable] of [template], also while it is read for the first time; null if none. */
+    fun chart(template: String, variable: Int): VariableChart? =
+        charts.firstOrNull { it.template == template && it.variable == variable }
 
-    /** What the slot's values came to, if read since the shown rows changed; else null. */
-    fun summary(template: String, slot: Int): SlotSummary? = summaries[template to slot]
+    /** What the variable's values came to, if read since the shown rows changed; else null. */
+    fun summary(template: String, variable: Int): VariableSummary? = summaries[template to variable]
 
-    /** Whether [slot] of [template] may hold numbers: it was not read, or found some. */
-    fun canChart(template: String, slot: Int): Boolean =
-        chart(template, slot) != null || summary(template, slot)?.numbers != 0
+    /** Whether [variable] of [template] may hold numbers: it was not read, or found some. */
+    fun canChart(template: String, variable: Int): Boolean =
+        chart(template, variable) != null || summary(template, variable)?.numbers != 0
 
-    /** Charts [slot] of [template], or stops charting it; false if [MAX_SLOT_CHARTS] are charted already. */
-    fun toggle(template: String, slot: Int): Boolean {
-        chart(template, slot)?.let {
+    /** Charts [variable] of [template], or stops charting it; false if [MAX_VARIABLE_CHARTS] are charted already. */
+    fun toggle(template: String, variable: Int): Boolean {
+        chart(template, variable)?.let {
             remove(it)
             return true
         }
-        if (!canChart(template, slot)) return true
-        if (charts.size >= MAX_SLOT_CHARTS) return false
+        if (!canChart(template, variable)) return true
+        if (charts.size >= MAX_VARIABLE_CHARTS) return false
         val color = CHART_COLORS.first { color -> charts.none { it.color == color } }
-        val chart = SlotChart(template, slot, color)
+        val chart = VariableChart(template, variable, color)
         charts += chart
         onChanged()
         readValues(listOf(chart))
         return true
     }
 
-    fun remove(chart: SlotChart) {
+    fun remove(chart: VariableChart) {
         chart.slicing?.cancel()
         charts -= chart
         onChanged()
     }
 
-    /** Reads the values of every chart again, for other shown rows; forgets what other slots came to. */
+    /** Reads the values of every chart again, for other shown rows; forgets what other variables came to. */
     fun refresh() {
         throttle.stop()
-        summaries.keys.retainAll { (template, slot) -> chart(template, slot) != null }
+        summaries.keys.retainAll { (template, variable) -> chart(template, variable) != null }
         readValues(charts.toList())
     }
 
@@ -189,7 +192,7 @@ class SlotCharts(
      * [chart]'s values in [count] slices of [width] nanoseconds from [from]. Computed off the UI thread: until they
      * are, the last ones computed (perhaps of other slices), or null; [onChanged] hears when they are.
      */
-    fun slices(chart: SlotChart, from: Long, width: Long, count: Int): SlotSlices? {
+    fun slices(chart: VariableChart, from: Long, width: Long, count: Int): VariableSlices? {
         val values = chart.values ?: return null
         val last = chart.slices
         val current = last != null && chart.slicedValues === values &&
@@ -207,20 +210,20 @@ class SlotCharts(
         return last
     }
 
-    private fun readValues(of: List<SlotChart>) {
+    private fun readValues(of: List<VariableChart>) {
         if (of.isEmpty()) return
         // A newer read covers the charts of the one it replaces.
         val pending = if (job?.isActive == true) charts.toList() else of
         job?.cancel()
         job = scope.launch {
             for ((template, group) in pending.groupBy { it.template }) {
-                val slots = group.map { it.slot }.toIntArray()
+                val variables = group.map { it.variable }.toIntArray()
                 val values = try {
-                    read(template, slots)
+                    read(template, variables)
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
-                    log.warn("Cannot read the values of slots {} of “{}”", slots.toList(), template, e)
+                    log.warn("Cannot read the values of variables {} of “{}”", variables.toList(), template, e)
                     null
                 }
                 for ((i, chart) in group.withIndex()) {
@@ -229,7 +232,7 @@ class SlotCharts(
                     val read = values?.get(i)
                     chart.values = read
                     if (read == null) continue
-                    summaries[template to chart.slot] = SlotSummary(read)
+                    summaries[template to chart.variable] = VariableSummary(read)
                     if (!chart.shown && read.numbers == 0) {
                         charts -= chart
                         onNoNumbers(chart)
@@ -243,6 +246,6 @@ class SlotCharts(
     }
 
     private companion object {
-        val log = LoggerFactory.getLogger(SlotCharts::class.java)
+        val log = LoggerFactory.getLogger(VariableCharts::class.java)
     }
 }

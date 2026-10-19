@@ -12,11 +12,11 @@ import kotlinx.coroutines.withContext
 import kotlin.math.abs
 
 /**
- * The values of one slot of one template over time: per counted row of the template that has a time, the row, its
- * time in epoch nanoseconds and the slot's value (see [Templates.slotNumber]), NaN where the slot holds no number.
- * In row order. Slots read in one pass share their rows and times.
+ * The values of one variable of one template over time: per counted row of the template that has a time, the row,
+ * its time in epoch nanoseconds and the variable's value (see [Templates.variableNumber]), NaN where the variable
+ * holds no number. In row order. Variables read in one pass share their rows and times.
  */
-class SlotValues internal constructor(
+class VariableSeries internal constructor(
     private val rows: IntArray,
     private val times: LongArray,
     private val values: DoubleArray,
@@ -78,8 +78,8 @@ class SlotValues internal constructor(
      * outside them are left out. Sorts each slice's numbers, so it takes a while for many values: call it off the
      * UI thread.
      */
-    fun slices(from: Long, width: Long, count: Int): SlotSlices {
-        val slices = SlotSlices(from, width, count)
+    fun slices(from: Long, width: Long, count: Int): VariableSlices {
+        val slices = VariableSlices(from, width, count)
         fun sliceOf(i: Int): Int = Math.floorDiv(times[i] - from, width).let { if (it in 0..<count) it.toInt() else -1 }
         // Where each slice's numbers start in one array of them all.
         val starts = IntArray(count + 1)
@@ -119,7 +119,7 @@ class SlotValues internal constructor(
         /**
          * Reads [rowCount] rows (`rows[i]`, or `i` if [rows] is null) whose template is [template]: each a record
          * of the log that [origin] tells (the first if null), whose snapshot and index are at that position in
-         * [snapshots] and [indexes]. Indexes are updated first. Reads all [slots] in one pass, and returns their
+         * [snapshots] and [indexes]. Indexes are updated first. Reads all [variables] in one pass, and returns their
          * values in that order.
          */
         suspend fun collect(
@@ -129,8 +129,8 @@ class SlotValues internal constructor(
             rowCount: Int,
             origin: RowOrigin?,
             template: String,
-            slots: IntArray,
-        ): List<SlotValues> = withContext(Dispatchers.Default) {
+            variables: IntArray,
+        ): List<VariableSeries> = withContext(Dispatchers.Default) {
             val matching = coroutineScope {
                 indexes.indices.map { async { indexes[it].matching(snapshots[it], setOf(template)) } }.awaitAll()
             }
@@ -140,7 +140,7 @@ class SlotValues internal constructor(
             val perTask = coroutineScope {
                 (0..<tasks).map { task ->
                     async {
-                        val found = Found(slots.size)
+                        val found = Found(variables.size)
                         val cursors = snapshots.map { it.cursor() }
                         val readers = arrayOfNulls<MessageReader>(snapshots.size)
                         val out = ByteArray(Templates.OUT_SIZE)
@@ -163,7 +163,7 @@ class SlotValues internal constructor(
                                     .also { readers[p] = it }
                             // Adding may grow the values, so they are taken after.
                             val at = found.add(row, time)
-                            reader.slotNumbers(r, slots, at, found.values, out, places)
+                            reader.variableNumbers(r, variables, at, found.values, out, places)
                         }
                         found
                     }
@@ -178,13 +178,13 @@ class SlotValues internal constructor(
                 found.times.copyInto(times, at, 0, found.size)
                 at += found.size
             }
-            slots.indices.map { s ->
+            variables.indices.map { s ->
                 val values = DoubleArray(size)
                 var i = 0
                 for (found in perTask) {
-                    for (j in 0..<found.size) values[i++] = found.values[j * slots.size + s]
+                    for (j in 0..<found.size) values[i++] = found.values[j * variables.size + s]
                 }
-                SlotValues(shared, times, values, size)
+                VariableSeries(shared, times, values, size)
             }
         }
 
@@ -192,11 +192,11 @@ class SlotValues internal constructor(
         private const val CHECK_MASK = (1 shl 16) - 1
     }
 
-    /** Rows, times and values found by one task, growing as needed; the values of each row's slots side by side. */
-    private class Found(private val slots: Int) {
+    /** Rows, times and values found by one task, growing as needed; the values of each row's variables side by side. */
+    private class Found(private val variables: Int) {
         var rows = IntArray(INITIAL_SIZE)
         var times = LongArray(INITIAL_SIZE)
-        var values = DoubleArray(INITIAL_SIZE * slots)
+        var values = DoubleArray(INITIAL_SIZE * variables)
         var size = 0
 
         /** Adds [row] at [time]; returns where its values go in [values]. */
@@ -204,11 +204,11 @@ class SlotValues internal constructor(
             if (size == times.size) {
                 rows = rows.copyOf(size * 2)
                 times = times.copyOf(size * 2)
-                values = values.copyOf(size * 2 * slots)
+                values = values.copyOf(size * 2 * variables)
             }
             rows[size] = row
             times[size] = time
-            return size++ * slots
+            return size++ * variables
         }
 
         private companion object {

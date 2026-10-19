@@ -83,9 +83,9 @@ fun Schema.hasTemplates() =
  * a count per level. Counts only while it is showing: [count] does the work and is cancelled when a newer
  * count starts. Filtering by the selected templates goes through [addRules].
  *
- * While [canChart], clicking a template's `{}` charts that slot in [charts] or stops, as does the context menu; a
- * charted slot is drawn bold in its chart's color, and one found to hold no number faint, as it cannot be charted.
- * Hovering a slot tells what its values came to, once read. The columns fit their contents; the template's takes
+ * While [canChart], clicking a template's `{}` charts that variable in [charts] or stops, as does the context menu; a
+ * charted variable is drawn bold in its chart's color, and one found to hold no number faint, as it cannot be charted.
+ * Hovering a variable tells what its values came to, once read. The columns fit their contents; the template's takes
  * the rest of the width.
  */
 class TemplatesPanel(
@@ -93,19 +93,19 @@ class TemplatesPanel(
     private val count: suspend () -> TemplateCounts?,
     private val progress: () -> Double,
     private val addRules: (List<Query>) -> Unit,
-    private val charts: SlotCharts,
+    private val charts: VariableCharts,
     private val canChart: () -> Boolean,
 ) : JPanel(BorderLayout()) {
 
     private val model = TemplatesModel()
 
-    /** The slot under the mouse, as its template and number, or null. */
+    /** The variable under the mouse, as its template and number, or null. */
     private var hovered: Pair<String, Int>? = null
 
     private val table = object : JTable(model) {
         override fun getToolTipText(e: MouseEvent): String? {
-            val (template, slot) = slotAt(e.point) ?: return super.getToolTipText(e)
-            return slotToolTip(template, slot)
+            val (template, variable) = variableAt(e.point) ?: return super.getToolTipText(e)
+            return variableToolTip(template, variable)
         }
 
         // Selecting a row would bring a long template's whole cell into view, scrolling the counts out of it.
@@ -158,17 +158,19 @@ class TemplatesPanel(
 
             override fun mouseClicked(e: MouseEvent) {
                 if (e.button != MouseEvent.BUTTON1) return
-                val slot = slotAt(e.point)
+                val variable = variableAt(e.point)
                 when {
-                    slot != null && e.clickCount == 1 -> {
-                        if (charts.canChart(slot.first, slot.second)) toggleChart(slot.first, slot.second)
+                    variable != null && e.clickCount == 1 -> {
+                        val (template, number) = variable
+                        if (charts.canChart(template, number)) toggleChart(template, number)
                     }
-                    // The first click of a double click on a slot charted it: that is all it does.
-                    slot == null && e.clickCount == 2 && table.rowAtPoint(e.point) >= 0 -> showOnly(selectedTemplates())
+                    // The first click of a double click on a variable charted it: that is all it does.
+                    variable == null && e.clickCount == 2 && table.rowAtPoint(e.point) >= 0 ->
+                        showOnly(selectedTemplates())
                 }
             }
 
-            override fun mouseMoved(e: MouseEvent) = hover(slotAt(e.point))
+            override fun mouseMoved(e: MouseEvent) = hover(variableAt(e.point))
 
             override fun mouseExited(e: MouseEvent) = hover(null)
 
@@ -185,35 +187,37 @@ class TemplatesPanel(
         table.addMouseMotionListener(mouse)
     }
 
-    private fun toggleChart(template: String, slot: Int) = toggleChart(this, charts, template, slot)
+    private fun toggleChart(template: String, variable: Int) = toggleChart(this, charts, template, variable)
 
-    private fun hover(slot: Pair<String, Int>?) {
-        val chartable = slot?.takeIf { charts.canChart(it.first, it.second) }
+    private fun hover(variable: Pair<String, Int>?) {
+        val chartable = variable?.takeIf { charts.canChart(it.first, it.second) }
         table.cursor = if (chartable != null) Cursor.getPredefinedCursor(Cursor.HAND_CURSOR) else null
         if (chartable == hovered) return
         hovered = chartable
         table.repaint()
     }
 
-    /** What [slot] of [template] came to, if read, and what clicking it does. */
-    private fun slotToolTip(template: String, slot: Int): String {
-        val summary = charts.summary(template, slot)
-        val action = if (charts.chart(template, slot) != null) "Click to stop charting" else "Click to chart over time"
+    /** What [variable] of [template] came to, if read, and what clicking it does. */
+    private fun variableToolTip(template: String, variable: Int): String {
+        val summary = charts.summary(template, variable)
+        val charted = charts.chart(template, variable) != null
+        val action = if (charted) "Click to stop charting" else "Click to chart over time"
+        val records = count(summary?.records ?: 0, "record")
         return when {
-            summary == null -> "<html>Slot ${slot + 1}<br><small>$action</small></html>"
-            summary.numbers == 0 -> "None of its ${count(summary.records, "record")} has a number in slot ${slot + 1}"
+            summary == null -> "<html>Variable ${variable + 1}<br><small>$action</small></html>"
+            summary.numbers == 0 -> "None of its $records has a number in variable ${variable + 1}"
             else -> {
                 val has = if (summary.numbers == 1) "has" else "have"
                 val share = "%,d of ${count(summary.records, "record")} $has a number".format(summary.numbers)
                 val values = listOf("min" to summary.min, "avg" to summary.average, "max" to summary.max)
-                    .joinToString(" · ") { (name, value) -> "$name ${formatSlotValue(value)}" }
+                    .joinToString(" · ") { (name, value) -> "$name ${formatVariableValue(value)}" }
                 "<html>$share<br>$values<br><small>$action</small></html>"
             }
         }
     }
 
-    /** The template and slot of the `{}` at [point], or null; only while [canChart]. */
-    private fun slotAt(point: Point): Pair<String, Int>? {
+    /** The template and variable of the `{}` at [point], or null; only while [canChart]. */
+    private fun variableAt(point: Point): Pair<String, Int>? {
         if (!canChart()) return null
         val row = table.rowAtPoint(point)
         val column = table.columnAtPoint(point)
@@ -224,10 +228,10 @@ class TemplatesPanel(
         // Laid out as TemplateRenderer paints it.
         var x = table.getCellRect(row, column, false).x + renderer.insets.left
         val parts = template.split(Templates.PLACEHOLDER)
-        for (slot in 0..<parts.lastIndex) {
-            x += metrics.stringWidth(parts[slot])
+        for (variable in 0..<parts.lastIndex) {
+            x += metrics.stringWidth(parts[variable])
             val width = metrics.stringWidth(Templates.PLACEHOLDER)
-            if (point.x in x..<x + width) return template to slot
+            if (point.x in x..<x + width) return template to variable
             x += width
         }
         return null
@@ -418,15 +422,15 @@ class TemplatesPanel(
             }
         })
         val template = templates.singleOrNull()
-        val slots = template?.let { Templates.slotCount(it) } ?: 0
-        if (canChart() && template != null && slots > 0) {
+        val variables = template?.let { Templates.variableCount(it) } ?: 0
+        if (canChart() && template != null && variables > 0) {
             popup.addSeparator()
-            popup.add(JMenu("Chart Slot").apply {
-                for (slot in 0..<slots) {
-                    val text = "${slot + 1}: ${SlotChart.label(template, slot).cut(MAX_MENU_CHARS)}"
-                    add(JCheckBoxMenuItem(text, charts.chart(template, slot) != null).apply {
-                        isEnabled = charts.canChart(template, slot)
-                        addActionListener { toggleChart(template, slot) }
+            popup.add(JMenu("Chart Variable").apply {
+                for (variable in 0..<variables) {
+                    val text = "${variable + 1}: ${VariableChart.label(template, variable).cut(MAX_MENU_CHARS)}"
+                    add(JCheckBoxMenuItem(text, charts.chart(template, variable) != null).apply {
+                        isEnabled = charts.canChart(template, variable)
+                        addActionListener { toggleChart(template, variable) }
                     })
                 }
             })
@@ -594,7 +598,7 @@ class TemplatesPanel(
                 BasicGraphicsUtils.drawString(this, g2, part, x.toFloat(), y.toFloat())
                 x += metrics.stringWidth(part)
                 if (i < parts.lastIndex) {
-                    // Advanced by the plain width, as the mouse finds slots by it; monospaced bold is as wide.
+                    // Advanced by the plain width, as the mouse finds variables by it; monospaced bold is as wide.
                     val chart = charts.chart(template, i)
                     // On the selection's background a chart color may not show; bold still marks it.
                     g2.color = chart?.color?.takeUnless { selected } ?: dim

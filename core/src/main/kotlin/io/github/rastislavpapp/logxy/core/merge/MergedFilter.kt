@@ -18,8 +18,8 @@ import io.github.rastislavpapp.logxy.core.filter.TextCondition
 import io.github.rastislavpapp.logxy.core.filter.TextMatcher
 import io.github.rastislavpapp.logxy.core.filter.TimeCondition
 import io.github.rastislavpapp.logxy.core.template.RowOrigin
-import io.github.rastislavpapp.logxy.core.template.SlotValues
 import io.github.rastislavpapp.logxy.core.template.TemplateCounts
+import io.github.rastislavpapp.logxy.core.template.VariableSeries
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -102,15 +102,15 @@ class MergedFilter(private val log: MergedLog) : RecordFilter {
 
     override val templateProgress get() = engines.sumOf { it.templates.progress } / engines.size
 
-    override suspend fun slotValues(rows: IntArray?, rowCount: Int, template: String, slots: IntArray) =
-        SlotValues.collect(
+    override suspend fun variableSeries(rows: IntArray?, rowCount: Int, template: String, variables: IntArray) =
+        VariableSeries.collect(
             engines.map { it.templates },
             log.parts.map { it.filterSnapshot() },
             rows,
             rowCount,
             origin,
             template,
-            slots,
+            variables,
         )
 
     /**

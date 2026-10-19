@@ -16,7 +16,7 @@ object Templates {
     /** Space [mask] needs for its output: every byte may become a two-byte placeholder. */
     const val OUT_SIZE = MAX_BYTES * 2
 
-    /** Space [slotNumber] needs for the placeholders it finds: a count, then three numbers each. */
+    /** Space [variableNumber] needs for the placeholders it finds: a count, then three numbers each. */
     const val PLACES_SIZE = 1 + 3 * MAX_BYTES
 
     /**
@@ -93,91 +93,97 @@ object Templates {
     }
 
     /**
-     * Slots of [template]: its placeholders, counted from the left as [String.split] finds them. A literal `{}` in
+     * Variables of [template]: its placeholders, counted from the left as [String.split] finds them. A literal `{}` in
      * the message counts too, as the template cannot tell it apart.
      */
-    fun slotCount(template: String): Int = template.split(PLACEHOLDER).size - 1
+    fun variableCount(template: String): Int = template.split(PLACEHOLDER).size - 1
 
     /**
-     * The value at [slot] (counted as [slotCount] does) of the template of the text `bytes[from, to)`: the number
-     * its word starts with, as in `12` of `12ms`; NaN if the slot is missing, a literal `{}`, or its word does
-     * not start with a number or has more digits after it (`10.0.3.17`, `0x1F`, `3fa9c1d2e5`). [out] and [places]
-     * are scratch space, at least [OUT_SIZE] and [PLACES_SIZE] long.
+     * The value at [variable] (counted as [variableCount] does) of the template of the text `bytes[from, to)`: the
+     * number its word starts with, as in `12` of `12ms`; NaN if the variable is missing, a literal `{}`, or its word
+     * does not start with a number or has more digits after it (`10.0.3.17`, `0x1F`, `3fa9c1d2e5`). [out] and
+     * [places] are scratch space, at least [OUT_SIZE] and [PLACES_SIZE] long.
      */
-    fun slotNumber(bytes: ByteArray, from: Int, to: Int, slot: Int, out: ByteArray, places: IntArray): Double {
+    fun variableNumber(bytes: ByteArray, from: Int, to: Int, variable: Int, out: ByteArray, places: IntArray): Double {
         var number = Double.NaN
-        forEachSlot(bytes, from, to, out, places) { found, start, end ->
-            if (found == slot && start >= 0) number = leadingNumber(bytes, start, end)
-            found == slot
+        forEachVariable(bytes, from, to, out, places) { found, start, end ->
+            if (found == variable && start >= 0) number = leadingNumber(bytes, start, end)
+            found == variable
         }
         return number
     }
 
-    /** [slotNumber] of each of [slots], masking once, written into [into] from [at]. */
-    fun slotNumbers(
+    /** [variableNumber] of each of [variables], masking once, written into [into] from [at]. */
+    fun variableNumbers(
         bytes: ByteArray,
         from: Int,
         to: Int,
-        slots: IntArray,
+        variables: IntArray,
         into: DoubleArray,
         at: Int,
         out: ByteArray,
         places: IntArray,
     ) {
-        into.fill(Double.NaN, at, at + slots.size)
-        val last = slots.max()
-        forEachSlot(bytes, from, to, out, places) { found, start, end ->
+        into.fill(Double.NaN, at, at + variables.size)
+        val last = variables.max()
+        forEachVariable(bytes, from, to, out, places) { found, start, end ->
             if (start >= 0) {
-                for (s in slots.indices) if (slots[s] == found) into[at + s] = leadingNumber(bytes, start, end)
+                for (s in variables.indices) if (variables[s] == found) into[at + s] = leadingNumber(bytes, start, end)
             }
             found >= last
         }
     }
 
-    /** [slotNumber] of [text]. */
-    fun slotNumber(text: String, slot: Int): Double {
+    /** [variableNumber] of [text]. */
+    fun variableNumber(text: String, variable: Int): Double {
         val bytes = text.toByteArray(Charsets.UTF_8)
-        return slotNumber(bytes, 0, bytes.size, slot, ByteArray(OUT_SIZE), IntArray(PLACES_SIZE))
+        return variableNumber(bytes, 0, bytes.size, variable, ByteArray(OUT_SIZE), IntArray(PLACES_SIZE))
     }
 
-    /** The slot (counted as [slotCount] does) whose word in [text] holds the character at [offset]; -1 if none. */
-    fun slotAt(text: String, offset: Int): Int {
+    /**
+     * The variable (counted as [variableCount] does) whose word in [text] holds the character at [offset]; -1 if
+     * none.
+     */
+    fun variableAt(text: String, offset: Int): Int {
         if (offset !in text.indices) return -1
         val bytes = text.toByteArray(Charsets.UTF_8)
         val at = text.substring(0, offset).toByteArray(Charsets.UTF_8).size
-        var slot = -1
-        forEachSlot(bytes, 0, bytes.size, ByteArray(OUT_SIZE), IntArray(PLACES_SIZE)) { found, start, end ->
-            if (at in start..<end) slot = found
-            slot >= 0 || start > at
+        var variable = -1
+        forEachVariable(bytes, 0, bytes.size, ByteArray(OUT_SIZE), IntArray(PLACES_SIZE)) { found, start, end ->
+            if (at in start..<end) variable = found
+            variable >= 0 || start > at
         }
-        return slot
+        return variable
     }
 
-    /** The word of [text] at [slot], as the template leaves it out; null if there is no such slot or it is literal. */
-    fun slotWord(text: String, slot: Int): String? {
+    /**
+     * The word of [text] at [variable], as the template leaves it out; null if there is no such variable or it is
+     * literal.
+     */
+    fun variableWord(text: String, variable: Int): String? {
         val bytes = text.toByteArray(Charsets.UTF_8)
         var word: String? = null
-        forEachSlot(bytes, 0, bytes.size, ByteArray(OUT_SIZE), IntArray(PLACES_SIZE)) { found, start, end ->
-            if (found == slot && start >= 0) word = String(bytes, start, end - start, Charsets.UTF_8)
-            found == slot
+        forEachVariable(bytes, 0, bytes.size, ByteArray(OUT_SIZE), IntArray(PLACES_SIZE)) { found, start, end ->
+            if (found == variable && start >= 0) word = String(bytes, start, end - start, Charsets.UTF_8)
+            found == variable
         }
         return word
     }
 
     /**
-     * Masks the text `bytes[from, to)`, then calls [visit] with each slot of its template in turn and where the slot's
-     * word starts and ends in [bytes] (both -1 for a literal `{}`), until it returns true.
+     * Masks the text `bytes[from, to)`, then calls [visit] with each variable of its template in turn and where the
+     * variable's word starts and ends in [bytes] (both -1 for a literal `{}`), until it returns true.
      */
-    private inline fun forEachSlot(
+    private inline fun forEachVariable(
         bytes: ByteArray,
         from: Int,
         to: Int,
         out: ByteArray,
         places: IntArray,
-        visit: (slot: Int, start: Int, end: Int) -> Boolean,
+        visit: (variable: Int, start: Int, end: Int) -> Boolean,
     ) {
         val n = mask(bytes, from, to, out, places)
-        var slot = 0
+        var variable = 0
         var placed = 0
         var i = 0
         while (i < n - 1) {
@@ -189,14 +195,14 @@ object Templates {
             while (placed < places[0] && places[1 + 3 * placed] < i) placed++
             val at = 1 + 3 * placed
             val written = placed < places[0] && places[at] == i
-            val stop = if (written) visit(slot, places[at + 1], places[at + 2]) else visit(slot, -1, -1)
+            val stop = if (written) visit(variable, places[at + 1], places[at + 2]) else visit(variable, -1, -1)
             if (stop) return
-            slot++
+            variable++
             i += 2
         }
     }
 
-    /** The number `bytes[from, to)` starts with, as described at [slotNumber]. */
+    /** The number `bytes[from, to)` starts with, as described at [variableNumber]. */
     private fun leadingNumber(bytes: ByteArray, from: Int, to: Int): Double {
         fun digit(i: Int) = bytes[i] in ZERO..NINE
         var i = from

@@ -1,7 +1,7 @@
 package io.github.rastislavpapp.logxy.app
 
 import com.formdev.flatlaf.util.UIScale
-import io.github.rastislavpapp.logxy.core.template.SlotSlices
+import io.github.rastislavpapp.logxy.core.template.VariableSlices
 import java.awt.BasicStroke
 import java.awt.Color
 import java.awt.Cursor
@@ -44,10 +44,10 @@ private const val DOT_SIZE = 6f
 private const val MAX_BELOW_ZERO = 0.5
 
 /**
- * The slots charted in [charts], over the times of [timeline] (of the histogram bar above, so the two line up), in
- * one plot: per chart a line of its [SlotChart.metric] per slice of [CHART_GROUP] histogram slices. Each line has its
- * own scale, as their units differ, and all have 0 on one shared line; the left edge labels each scale's ends in its
- * chart's color. A legend row above switches a chart's metric (its label) or closes it (×).
+ * The variables charted in [charts], over the times of [timeline] (of the histogram bar above, so the two line up),
+ * in one plot: per chart a line of its [VariableChart.metric] per slice of [CHART_GROUP] histogram slices. Each line
+ * has its own scale, as their units differ, and all have 0 on one shared line; the left edge labels each scale's
+ * ends in its chart's color. A legend row above switches a chart's metric (its label) or closes it (×).
  *
  * At the [pointer]'s time, set while the mouse is over this plot or the histogram, a line crosses the plot with each
  * chart's value there beside it; [onPointer] hears where the mouse points here. Clicking calls [onJumpToRecord] with
@@ -55,7 +55,7 @@ private const val MAX_BELOW_ZERO = 0.5
  * Dragging selects whole slices of the histogram, as dragging there does: [onDragged] hears the times while
  * dragging, [onRange] once dropped.
  */
-class SlotChartPanel(private val charts: SlotCharts, private val timeline: () -> Timeline?) : JComponent() {
+class VariableChartPanel(private val charts: VariableCharts, private val timeline: () -> Timeline?) : JComponent() {
 
     var onPointer: (time: Long?) -> Unit = {}
     var onJump: (time: Long) -> Unit = {}
@@ -111,12 +111,12 @@ class SlotChartPanel(private val charts: SlotCharts, private val timeline: () ->
     /** The lines as last painted, for the pointer and clicks. */
     private val lines = mutableListOf<Line>()
 
-    private class LegendEntry(val bounds: Rectangle, val chart: SlotChart, val closes: Boolean)
+    private class LegendEntry(val bounds: Rectangle, val chart: VariableChart, val closes: Boolean)
 
     /** [chart]'s [values] of [slices] as painted: [zeroY] where 0 is, [scale] pixels per unit. */
     private class Line(
-        val chart: SlotChart,
-        val slices: SlotSlices,
+        val chart: VariableChart,
+        val slices: VariableSlices,
         val values: DoubleArray,
         val zeroY: Double,
         val scale: Double,
@@ -208,7 +208,7 @@ class SlotChartPanel(private val charts: SlotCharts, private val timeline: () ->
 
     private fun showMetrics(entry: LegendEntry) {
         val popup = JPopupMenu()
-        for (metric in SlotMetric.entries) {
+        for (metric in VariableMetric.entries) {
             popup.add(JRadioButtonMenuItem(metric.title, metric == entry.chart.metric).apply {
                 addActionListener {
                     entry.chart.metric = metric
@@ -242,7 +242,7 @@ class SlotChartPanel(private val charts: SlotCharts, private val timeline: () ->
         if (index >= 0) onJumpToRecord(values.row(index)) else onJump(time)
     }
 
-    private fun sliceOf(slices: SlotSlices, time: Long): Int =
+    private fun sliceOf(slices: VariableSlices, time: Long): Int =
         Math.floorDiv(time - slices.from, slices.width).let { if (it in 0..<slices.count) it.toInt() else -1 }
 
     override fun paintComponent(g: Graphics) {
@@ -328,8 +328,8 @@ class SlotChartPanel(private val charts: SlotCharts, private val timeline: () ->
         val (from, sliceWidth, count) = slicing(timeline)
         // Per chart, how far above and below 0 its scale must reach.
         class Range(
-            val chart: SlotChart,
-            val slices: SlotSlices,
+            val chart: VariableChart,
+            val slices: VariableSlices,
             val values: DoubleArray,
             val top: Double,
             val bottom: Double,
@@ -370,8 +370,8 @@ class SlotChartPanel(private val charts: SlotCharts, private val timeline: () ->
             g2.color = range.chart.color
             g2.stroke = stroke
             paintLine(g2, timeline, line)
-            if (above > 0) topLabels += formatSlotValue(above / scale) to range.chart.color
-            if (range.bottom > 0) bottomLabels += formatSlotValue(-under / scale) to range.chart.color
+            if (above > 0) topLabels += formatVariableValue(above / scale) to range.chart.color
+            if (range.bottom > 0) bottomLabels += formatVariableValue(-under / scale) to range.chart.color
         }
         val metrics = g2.fontMetrics
         paintLabels(g2, topLabels, plotTop.toInt())
@@ -435,7 +435,7 @@ class SlotChartPanel(private val charts: SlotCharts, private val timeline: () ->
         for (line in lines) {
             val i = sliceOf(line.slices, time)
             val value = if (i >= 0) line.values[i] else Double.NaN
-            readout += "${line.chart.metric.short} ${formatSlotValue(value)}" to line.chart.color
+            readout += "${line.chart.metric.short} ${formatVariableValue(value)}" to line.chart.color
             if (value.isNaN()) continue
             g2.color = line.chart.color
             dot(g2, timeline.x(line.slices.from + i * line.slices.width + line.slices.width / 2), line.y(value))

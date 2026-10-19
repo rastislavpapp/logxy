@@ -18,10 +18,13 @@ internal class MessageReader(private val snapshot: RecordSnapshot, private val f
         if (type == ColumnType.DICT) arrayOfNulls<ByteArray>(snapshot.dictionaryTexts(field).size) else null
     private val unescaped = if (json) ByteArray(READ_LIMIT) else null
 
-    /** The numbers of each dictionary text at [numbersSlots], side by side, once read; many records share a text. */
+    /**
+     * The numbers of each dictionary text at [numbersVariables], side by side, once read; many records share a
+     * text.
+     */
     private var dictionaryNumbers = DoubleArray(0)
     private val numbersRead = if (type == ColumnType.DICT) BooleanArray(dictionary!!.size) else null
-    private var numbersSlots = IntArray(0)
+    private var numbersVariables = IntArray(0)
 
     /** Writes the template of [record]'s message into [out] (see [Templates.mask]); empty if it has none. */
     fun template(record: Int, out: ByteArray): Int {
@@ -41,35 +44,43 @@ internal class MessageReader(private val snapshot: RecordSnapshot, private val f
     }
 
     /**
-     * Writes the values at [slots] of [record]'s message (see [Templates.slotNumbers]) into [into] from [at]; NaN
-     * where it has none. [out] and [places] are scratch space as that needs.
+     * Writes the values at [variables] of [record]'s message (see [Templates.variableNumbers]) into [into] from
+     * [at]; NaN where it has none. [out] and [places] are scratch space as that needs.
      */
-    fun slotNumbers(record: Int, slots: IntArray, at: Int, into: DoubleArray, out: ByteArray, places: IntArray) {
+    fun variableNumbers(
+        record: Int,
+        variables: IntArray,
+        at: Int,
+        into: DoubleArray,
+        out: ByteArray,
+        places: IntArray,
+    ) {
         cursor.moveTo(record)
         when (type) {
             ColumnType.SPAN -> {
                 val read = span(false) { bytes, from, to ->
-                    Templates.slotNumbers(bytes, from, to, slots, into, at, out, places)
+                    Templates.variableNumbers(bytes, from, to, variables, into, at, out, places)
                     true
                 }
-                if (!read) into.fill(Double.NaN, at, at + slots.size)
+                if (!read) into.fill(Double.NaN, at, at + variables.size)
             }
             ColumnType.DICT -> {
                 val id = cursor.dictId(field)
-                if (id < 0) return into.fill(Double.NaN, at, at + slots.size)
-                if (!slots.contentEquals(numbersSlots)) {
+                if (id < 0) return into.fill(Double.NaN, at, at + variables.size)
+                if (!variables.contentEquals(numbersVariables)) {
                     numbersRead!!.fill(false)
-                    numbersSlots = slots.copyOf()
-                    dictionaryNumbers = DoubleArray(numbersRead.size * slots.size)
+                    numbersVariables = variables.copyOf()
+                    dictionaryNumbers = DoubleArray(numbersRead.size * variables.size)
                 }
                 if (!numbersRead!![id]) {
                     val bytes = snapshot.dictionaryTexts(field)[id].toByteArray(Charsets.UTF_8)
-                    Templates.slotNumbers(bytes, 0, bytes.size, slots, dictionaryNumbers, id * slots.size, out, places)
+                    val at = id * variables.size
+                    Templates.variableNumbers(bytes, 0, bytes.size, variables, dictionaryNumbers, at, out, places)
                     numbersRead[id] = true
                 }
-                dictionaryNumbers.copyInto(into, at, id * slots.size, (id + 1) * slots.size)
+                dictionaryNumbers.copyInto(into, at, id * variables.size, (id + 1) * variables.size)
             }
-            else -> into.fill(Double.NaN, at, at + slots.size)
+            else -> into.fill(Double.NaN, at, at + variables.size)
         }
     }
 

@@ -143,20 +143,20 @@ class LogTab(
     private val filterBar = FilterBar(::applyFilter, columnNames)
     private val findBar = FindBar(::searchFor) { forward -> find(forward) }
 
-    /** Slots charted under the histogram; they stay when the file is read again. */
-    private val slotCharts: SlotCharts = SlotCharts(scope, session::slotValues).apply {
+    /** Variables charted under the histogram; they stay when the file is read again. */
+    private val variableCharts: VariableCharts = VariableCharts(scope, session::variableSeries).apply {
         onChanged = {
             showCharts()
             chartPanel?.repaint()
             templates.repaint()
         }
         onNoNumbers = { chart ->
-            // Not from within the read that found it, which reads other templates' slots after.
+            // Not from within the read that found it, which reads other templates' variables after.
             SwingUtilities.invokeLater {
                 JOptionPane.showMessageDialog(
                     this@LogTab,
-                    "No record has a number in this slot, so there is nothing to chart:\n${chart.label}",
-                    "Chart Slot",
+                    "No record has a number in this variable, so there is nothing to chart:\n${chart.label}",
+                    "Chart Variable",
                     JOptionPane.INFORMATION_MESSAGE,
                 )
             }
@@ -167,7 +167,7 @@ class LogTab(
         { session.templateCounts() },
         { session.templateProgress },
         filterBar::addRules,
-        slotCharts,
+        variableCharts,
         ::canChart,
     )
 
@@ -198,8 +198,8 @@ class LogTab(
     private var scrollPane: VirtualScrollPane? = null
     private var histogramBar: TimeHistogramBar? = null
 
-    /** The slot charts under the histogram, and the rows under them; null while there is no histogram. */
-    private var chartPanel: SlotChartPanel? = null
+    /** The variable charts under the histogram, and the rows under them; null while there is no histogram. */
+    private var chartPanel: VariableChartPanel? = null
     private var chartSplit: JSplitPane? = null
 
     /** Where the table goes: alone, or under the charts in [chartSplit] while there are some. */
@@ -583,23 +583,24 @@ class LogTab(
         popup.show(table, x, y)
     }
 
-    /** Whether slots can be charted: the records have templates and times, so the histogram shows. */
+    /** Whether variables can be charted: the records have templates and times, so the histogram shows. */
     private fun canChart() = histogramBar != null && model?.shown?.schema?.hasTemplates() == true
 
     /**
-     * The menu item that charts, or stops charting, the slot of [message] (whose template is [template]) holding the
-     * character at [offset]; null if there is none there, or the templates of the shown rows are not counted yet.
+     * The menu item that charts, or stops charting, the variable of [message] (whose template is [template])
+     * holding the character at [offset]; null if there is none there, or the templates of the shown rows are not
+     * counted yet.
      */
     private fun chartItem(template: String, message: String, offset: Int): JMenuItem? {
         if (offset < 0 || !canChart() || !templates.hasCounts) return null
-        val slot = Templates.slotAt(message, offset).takeIf { it >= 0 } ?: return null
-        val word = Templates.slotWord(message, slot) ?: return null
+        val variable = Templates.variableAt(message, offset).takeIf { it >= 0 } ?: return null
+        val word = Templates.variableWord(message, variable) ?: return null
         val shown = word.cut(MAX_MENU_CHARS)
-        val charted = slotCharts.chart(template, slot) != null
+        val charted = variableCharts.chart(template, variable) != null
         return JMenuItem(if (charted) "Stop Charting “$shown”" else "Chart “$shown” Over Time").apply {
             // Found to hold no number in any shown record.
-            isEnabled = slotCharts.canChart(template, slot)
-            addActionListener { toggleChart(this@LogTab, slotCharts, template, slot) }
+            isEnabled = variableCharts.canChart(template, variable)
+            addActionListener { toggleChart(this@LogTab, variableCharts, template, variable) }
         }
     }
 
@@ -607,7 +608,7 @@ class LogTab(
     private fun showCharts() {
         val view = rowsView ?: return
         val split = chartSplit
-        val wanted = if (split != null && slotCharts.all.isNotEmpty()) split else view
+        val wanted = if (split != null && variableCharts.all.isNotEmpty()) split else view
         if (rowsHolder.componentCount > 0 && rowsHolder.getComponent(0) === wanted) return
         rowsHolder.removeAll()
         if (wanted === split) {
@@ -741,7 +742,7 @@ class LogTab(
             }
         }
         val chartPanel = histogramBar?.let { bar ->
-            SlotChartPanel(slotCharts) { bar.timeline }.apply {
+            VariableChartPanel(variableCharts) { bar.timeline }.apply {
                 onJump = ::jumpToTime
                 onJumpToRecord = ::jumpToRecord
                 onRange = bar.onRange
@@ -869,7 +870,7 @@ class LogTab(
         model.rowsReplaced()
         scrollPane.rowsReplaced()
         templates.refresh()
-        slotCharts.refresh()
+        variableCharts.refresh()
         val selectedIndex = selected?.let { record ->
             model.indexOfRecord(record).takeIf { it >= 0 && model.recordAtIndex(it) == record }
         }
@@ -1067,7 +1068,7 @@ class LogTab(
     fun dispose() {
         stopProgress()
         templates.reset()
-        slotCharts.reset()
+        variableCharts.reset()
         showFilterProgress(false)
         showSearchProgress(false)
         session.dispose()
@@ -1113,7 +1114,7 @@ class LogTab(
             chartSplit = null
             rowsView = null
             templates.reset()
-            slotCharts.reset()
+            variableCharts.reset()
             // The table may still be painted until indexing shows its progress: with no rows.
             model?.rowsReplaced()
             model = null
@@ -1160,7 +1161,7 @@ class LogTab(
             model?.rowsChangedFrom(firstChanged, oldSize)
             scrollPane?.rowsAppended()
             templates.refreshSoon()
-            slotCharts.refreshSoon()
+            variableCharts.refreshSoon()
         }
 
         override fun foundChanged() {
