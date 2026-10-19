@@ -6,6 +6,13 @@ import io.github.rastislavpapp.logxy.core.index.LineIndex
 import io.github.rastislavpapp.logxy.core.index.LongChunkList
 import io.github.rastislavpapp.logxy.core.index.NewlineScanner
 import kotlinx.coroutines.runBlocking
+import org.openjdk.jmh.annotations.Benchmark
+import org.openjdk.jmh.annotations.Level
+import org.openjdk.jmh.annotations.Param
+import org.openjdk.jmh.annotations.Scope
+import org.openjdk.jmh.annotations.Setup
+import org.openjdk.jmh.annotations.State
+import org.openjdk.jmh.annotations.TearDown
 import java.lang.foreign.Arena
 import java.nio.channels.FileChannel
 import java.nio.file.Files
@@ -16,6 +23,37 @@ import kotlin.random.Random
 
 private const val BUFFER_SIZE = 1 shl 20
 private const val MAX_MAPPING = 1L shl 30
+
+/** Building the [LineIndex] of [file], the newline scan over the whole file. Open so JMH can generate its subclass. */
+@State(Scope.Benchmark)
+open class IndexFileBenchmark {
+    @Param("")
+    @JvmField
+    var file = ""
+
+    private var index: LineIndex? = null
+
+    /** Closes the previous run's index outside the timing. */
+    @Setup(Level.Iteration)
+    fun closeIndex() {
+        index?.close()
+        index = null
+    }
+
+    @Benchmark
+    fun build(): LineIndex {
+        val built = runBlocking { LineIndex.build(Path.of(file), options = IndexOptions()) }
+        index = built
+        return built
+    }
+
+    @TearDown
+    fun tearDown() = closeIndex()
+}
+
+val indexRows = listOf(BenchmarkRow(IndexFileBenchmark::class.java, "build", "index file"))
+
+fun indexParams(file: Path): Map<String, List<String>> = mapOf(IndexFileBenchmark::file.name to listOf(file.toString()))
 
 /**
  * Compares positional reads with short-lived memory mappings for the newline scan, single- and

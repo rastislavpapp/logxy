@@ -61,7 +61,7 @@ case "${1:-}" in
         Xvfb :99 -screen 0 ${size}x24 -nolisten tcp &
         until xdpyinfo >/dev/null 2>&1; do sleep 0.1; done
         openbox &
-        exec java -jar /app/logxy.jar ${args[*]@Q} > /out/app.log 2>&1" >/dev/null
+        exec java --add-modules jdk.incubator.vector -jar /app/logxy.jar ${args[*]@Q} > /out/app.log 2>&1" >/dev/null
     for _ in $(seq 1 100); do
       in_box xdotool search --onlyvisible --name . >/dev/null 2>&1 && break
       sleep 0.2

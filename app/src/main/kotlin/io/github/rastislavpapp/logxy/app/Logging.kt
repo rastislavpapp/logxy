@@ -1,6 +1,7 @@
 package io.github.rastislavpapp.logxy.app
 
 import io.github.rastislavpapp.logxy.core.config.Settings
+import io.github.rastislavpapp.logxy.core.index.NewlineScanner
 import org.slf4j.LoggerFactory
 import java.nio.file.FileAlreadyExistsException
 import java.nio.file.Files
@@ -31,5 +32,6 @@ object Logging {
         Thread.setDefaultUncaughtExceptionHandler { thread, e -> log.error("Uncaught exception in {}", thread.name, e) }
         val version = Logging::class.java.`package`?.implementationVersion ?: "development build"
         log.info("logxy {} on Java {} ({})", version, Runtime.version(), System.getProperty("java.home"))
+        log.info("Newline search: {}", NewlineScanner.implementation)
     }
 }

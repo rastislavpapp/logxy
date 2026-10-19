@@ -7,28 +7,21 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
 /**
- * [NewlineScanner] with the Vector API: compares a whole vector of bytes to `\n` per step. Experimental: needs
- * `--add-modules jdk.incubator.vector`. The vector width comes from `-Dlogxy.vectorBits` (128, 256 or 512), by
- * default the widest the CPU has; it must be a constant for the JIT to emit SIMD code, hence a static final.
+ * Searches for newlines a whole vector of bytes per step with the incubating Vector API. Loading this class needs
+ * `--add-modules jdk.incubator.vector`; [NewlineScanner] checks for the module before it touches it.
  */
-object VectorNewlineScanner {
+internal object VectorNewlineSearch : NewlineSearch {
 
-    private val SPECIES: VectorSpecies<Byte> = when (System.getProperty("logxy.vectorBits")) {
-        "128" -> ByteVector.SPECIES_128
-        "256" -> ByteVector.SPECIES_256
-        "512" -> ByteVector.SPECIES_512
-        else -> ByteVector.SPECIES_PREFERRED
-    }
+    // Always the preferred width: a wider species than the CPU's runs as plain Java, 10× slower than SWAR. A static
+    // final, so the JIT sees a constant species and emits SIMD code.
+    private val SPECIES: VectorSpecies<Byte> = ByteVector.SPECIES_PREFERRED
 
     private const val NEWLINE = '\n'.code.toByte()
 
-    fun scan(buffer: ByteBuffer, from: Int, to: Int, base: Long, out: LongChunkList) {
-        if (buffer.hasArray()) {
-            scanArray(buffer.array(), buffer.arrayOffset() + from, buffer.arrayOffset() + to, base - buffer.arrayOffset(), out)
-            return
-        }
-        // A segment of the whole buffer, whatever its position: indexes are absolute.
-        val segment = MemorySegment.ofBuffer(buffer.duplicate().clear())
+    val bitSize: Int get() = SPECIES.vectorBitSize()
+
+    override fun scan(buffer: ByteBuffer, from: Int, to: Int, base: Long, out: LongChunkList) {
+        val segment = wholeSegment(buffer)
         val step = SPECIES.length()
         var i = from
         val bound = from + SPECIES.loopBound(to - from)
@@ -47,31 +40,15 @@ object VectorNewlineScanner {
         }
     }
 
-    private fun scanArray(bytes: ByteArray, from: Int, to: Int, base: Long, out: LongChunkList) {
-        val step = SPECIES.length()
-        var i = from
-        val bound = from + SPECIES.loopBound(to - from)
-        while (i < bound) {
-            var mask = ByteVector.fromArray(SPECIES, bytes, i).eq(NEWLINE).toLong()
-            while (mask != 0L) {
-                out.add(base + i + java.lang.Long.numberOfTrailingZeros(mask) + 1)
-                mask = mask and (mask - 1)
-            }
-            i += step
-        }
-        while (i < to) {
-            if (bytes[i] == NEWLINE) out.add(base + i + 1)
-            i++
-        }
-    }
-
-    fun indexOf(buffer: ByteBuffer, from: Int, to: Int): Int {
+    override fun indexOf(buffer: ByteBuffer, from: Int, to: Int): Int {
+        // Parsing calls this once per line on a heap buffer, where loading from the array is 8-15% faster than from
+        // a segment of it: the segment costs a little per call, which short lines do not repay.
         if (buffer.hasArray()) {
             val offset = buffer.arrayOffset()
             val found = indexOfArray(buffer.array(), offset + from, offset + to)
             return if (found < 0) -1 else found - offset
         }
-        val segment = MemorySegment.ofBuffer(buffer.duplicate().clear())
+        val segment = wholeSegment(buffer)
         val step = SPECIES.length()
         var i = from
         val bound = from + SPECIES.loopBound(to - from)
@@ -102,5 +79,12 @@ object VectorNewlineScanner {
             i++
         }
         return -1
+    }
+
+    /** The whole of [buffer], heap or direct, whatever its position and limit: segment offsets are buffer indexes. */
+    private fun wholeSegment(buffer: ByteBuffer): MemorySegment {
+        if (!buffer.hasArray()) return MemorySegment.ofBuffer(buffer.duplicate().clear())
+        val array = MemorySegment.ofArray(buffer.array())
+        return if (buffer.arrayOffset() == 0) array else array.asSlice(buffer.arrayOffset().toLong())
     }
 }

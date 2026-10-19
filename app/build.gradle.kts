@@ -28,7 +28,7 @@ val nativeAccess = "--enable-native-access=ALL-UNNAMED"
 
 application {
     mainClass = "io.github.rastislavpapp.logxy.app.MainKt"
-    applicationDefaultJvmArgs = listOf(nativeAccess)
+    applicationDefaultJvmArgs = listOf(nativeAccess, "--add-modules", VECTOR_MODULE)
 }
 
 // As a resource, so it reaches the fat jar ahead of the libraries' META-INF/LICENSE files: the first copy wins there.
@@ -97,11 +97,12 @@ val jpackage = tasks.register<Exec>("jpackage") {
         "--input", jpackageInput.get().destinationDir.path,
         "--main-jar", "logxy.jar",
         "--main-class", application.mainClass.get(),
-        "--add-modules", "java.base,java.desktop,java.logging,java.prefs,jdk.unsupported",
+        "--add-modules", "java.base,java.desktop,java.logging,java.prefs,jdk.unsupported,$VECTOR_MODULE",
         // The JVM does not start without the file; the property tells the app where it is.
         "--java-options", "-XX:VMOptionsFile=\$APPDIR/logxy.vmoptions",
         "--java-options", "-Dlogxy.vmoptions=\$APPDIR/logxy.vmoptions",
         "--java-options", nativeAccess,
+        "--java-options", "--add-modules=$VECTOR_MODULE",
         // Drawn natively before the JVM loads any class, so something shows at once; it closes with the first window.
         "--java-options", "-splash:\$APPDIR/splash.gif",
         "--dest", image.get().asFile.path,
