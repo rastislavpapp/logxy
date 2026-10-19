@@ -184,6 +184,23 @@ class ShownLog internal constructor(private val loaded: LoadedLog) {
     }
 
     /**
+     * The first row from [from] to [to] (exclusive) whose level counts in [category], one of [TimeHistogram]'s;
+     * -1 if there is none. Rows without a time between them are looked at too.
+     */
+    fun firstRowIn(from: Long, to: Long, category: Int): Int {
+        val start = firstRowAt(from)
+        if (start < 0) return -1
+        for (row in start..<size) {
+            val record = recordAt(row)
+            val time = records.timestampNanos(record)
+            if (time != Records.NO_TIMESTAMP && time >= to) break
+            if (time != Records.NO_TIMESTAMP && time < from) continue
+            if (TimeHistogram.category(records.level(record)) == category) return row
+        }
+        return -1
+    }
+
+    /**
      * Copies [rows] (below [size]) as their records are written in the files, each starting on a line of its own.
      * Rows taking more than [limit] bytes there are refused before any is read.
      */
