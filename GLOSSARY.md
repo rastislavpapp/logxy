@@ -25,12 +25,16 @@ A saved description of how to split a file's lines into records and fields. Each
 _Avoid_: format, layout
 
 **Message template**:
-The first line of a record's message with its variable parts, such as numbers and ids, replaced by `{}`, as in `Request {} done in {} ms`. Records with the same template are the same kind of message.
+The first line of a record's message with its variable parts, such as numbers and ids, replaced by `{1}`, `{2}`, … numbered from the left, as in `Request {1} done in {2} ms`. Records with the same template are the same kind of message.
 _Avoid_: pattern (a parser kind), message pattern
 
-**Slot**:
-One `{}` of a message template, counted from the left; each record of the template has a value there.
-_Avoid_: placeholder, variable, parameter
+**Template variable**:
+One `{n}` of a message template, such as `{2}`; each record of the template has a value there. Short form _variable_ where the template is clear.
+_Avoid_: slot, placeholder, parameter
+
+**Variable value**:
+The word a record has at a template variable, such as `404` in `Request 404 done in 12 ms` at variable 1.
+_Avoid_: argument
 
 **Shown log**:
 The records of one load as the user sees them: all of them, or a filter's result. It ends when the session reloads or closes.
