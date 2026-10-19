@@ -13,8 +13,8 @@ import java.nio.file.Path
 import java.nio.file.StandardOpenOption
 
 /**
- * Experiment: the newline scan alone, on the first 8 MB of [file] in memory. Which scanner runs is chosen per JVM
- * with `-Dlogxy.newlines=vector` (and `-Dlogxy.vectorBits`), see [NewlineScanner].
+ * The newline scan alone, on the first 8 MB of [file] in memory. [NewlineScanner] picks the search per JVM; compare
+ * with SWAR by forking with `-jvmArgsAppend -Dlogxy.newlines=swar`.
  */
 @State(Scope.Benchmark)
 open class NewlineBenchmark {

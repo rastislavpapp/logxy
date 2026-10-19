@@ -51,14 +51,15 @@ fun verdict(seconds: Double, baseline: Double, tolerance: Double, noise: Double)
 }
 
 /**
- * Measures parsing, typical filters, following and merging on fixed-seed generated files, the rows of the `tools`
- * commands. The files are generated into `build/benchmark` once.
+ * Measures indexing, parsing, typical filters, following and merging on fixed-seed generated files, the rows of the
+ * `tools` commands. The files are generated into `build/benchmark` once.
  */
 private fun measureAll(): Map<String, Timings> {
     val main = dataFile("main.log", MAIN_SIZE, 1)
     val appended = dataFile("appended.log", APPEND_SIZE, 10)
     val parts = (0 until MERGE_FILES).map { dataFile("merge-$it.log", MERGE_FILE_SIZE, 2L + it) }
     val groups = listOf(
+        indexRows to indexParams(main),
         parseFileRows to parseFileParams(main),
         parseFilesRows to parseFilesParams(parts),
         filterRows to filterParams(main),

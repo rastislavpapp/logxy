@@ -28,6 +28,7 @@ detekt {
 
 tasks.test {
     useJUnitPlatform()
+    jvmArgs("--add-modules", VECTOR_MODULE)
 }
 
 tasks.withType<Test>().configureEach {

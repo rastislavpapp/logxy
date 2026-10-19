@@ -16,7 +16,12 @@ dependencies {
 }
 
 // JMH reads field offsets through sun.misc.Unsafe, which JDK 25 warns about in every JVM; its forks inherit these.
-val jmhJvmArgs = listOf("--sun-misc-unsafe-memory-access=allow", "--enable-native-access=ALL-UNNAMED")
+val jmhJvmArgs = listOf(
+    "--sun-misc-unsafe-memory-access=allow",
+    "--enable-native-access=ALL-UNNAMED",
+    "--add-modules",
+    VECTOR_MODULE,
+)
 
 application {
     mainClass = "io.github.rastislavpapp.logxy.tools.ToolsKt"
@@ -34,7 +39,7 @@ tasks.test {
 }
 
 tasks.register<Test>("benchmark") {
-    description = "Fails if parsing, filtering or merging got slower than the saved baseline."
+    description = "Fails if indexing, parsing, filtering or merging got slower than the saved baseline."
     group = "verification"
     testClassesDirs = sourceSets.test.get().output.classesDirs
     classpath = sourceSets.test.get().runtimeClasspath
