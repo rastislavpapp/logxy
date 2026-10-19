@@ -2,7 +2,7 @@
 
 Indexing and parsing spend much of their time finding newlines. `NewlineScanner` searches a whole SIMD vector of bytes per step with `jdk.incubator.vector` and falls back to SWAR, eight bytes in a `long`. On the baseline machine (Ryzen 7800X3D, 512-bit vectors), building the line index of a 1 GB log takes 0.031 s instead of 0.053 s, and the scan alone runs 3× faster; on a 4-core Xeon the index builds 2.4× faster and a parse takes up to 26% less. The module still incubates and may change between JDK releases, and every JVM that loads it prints `WARNING: Using incubator modules`. Both are accepted for the gain (#73).
 
-The search is chosen once per JVM: vectors when the module is loaded and `ByteVector.SPECIES_PREFERRED` is at least 256 bits wide, SWAR otherwise. `-Dlogxy.newlines=swar` forces SWAR. The rule comes from measurements on the baseline machine, with the JVM held back by flags:
+The search is chosen once per JVM: vectors when the module is loaded and `ByteVector.SPECIES_PREFERRED` is at least 256 bits wide, SWAR otherwise. `-Dlogxy.newlines=swar` forces SWAR; the JVM page of the preferences writes it to the launcher's options, and tells why vectors are unavailable where they are. The rule comes from measurements on the baseline machine, with the JVM held back by flags:
 
 - On an SSE-only CPU (`-XX:UseAVX=0`) the preferred width is 128 bits, yet the JIT does not compile the search to SIMD instructions, and it runs 10× slower than SWAR. On x86, 256 bits means AVX2, where it does. CPUs with AVX1 only lose about 20% to SWAR.
 - A species wider than the preferred one also runs as plain Java, 10× slower, so the search always uses the preferred width.
