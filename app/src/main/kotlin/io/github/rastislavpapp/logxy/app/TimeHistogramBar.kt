@@ -452,10 +452,10 @@ class TimeHistogramBar(
         g2.font = labelFont
         val multiDay = localDay(slices.start(0)) != localDay(slices.start(slices.count) - 1)
         val counts = buildList {
-            add("%,d records".format(slices.totals[i]))
-            slices.errors[i].takeIf { it > 0 }?.let { add("%,d errors".format(it)) }
-            slices.warnings[i].takeIf { it > 0 }?.let { add("%,d warnings".format(it)) }
-            slices.matches?.get(i)?.takeIf { it > 0 }?.let { add("%,d matches".format(it)) }
+            add(count(slices.totals[i], "record"))
+            slices.errors[i].takeIf { it > 0 }?.let { add(count(it, "error")) }
+            slices.warnings[i].takeIf { it > 0 }?.let { add(count(it, "warning")) }
+            slices.matches?.get(i)?.takeIf { it > 0 }?.let { add(count(it, "match", "matches")) }
         }
         val lines = listOf(
             formatTimeRange(slices.start(i), slices.start(i + 1), zone, multiDay) to

@@ -201,9 +201,10 @@ class TemplatesPanel(
         val action = if (charts.chart(template, slot) != null) "Click to stop charting" else "Click to chart over time"
         return when {
             summary == null -> "<html>Slot ${slot + 1}<br><small>$action</small></html>"
-            summary.numbers == 0 -> "None of its %,d records has a number in slot %d".format(summary.records, slot + 1)
+            summary.numbers == 0 -> "None of its ${count(summary.records, "record")} has a number in slot ${slot + 1}"
             else -> {
-                val share = "%,d of %,d records have a number".format(summary.numbers, summary.records)
+                val has = if (summary.numbers == 1) "has" else "have"
+                val share = "%,d of ${count(summary.records, "record")} $has a number".format(summary.numbers)
                 val values = listOf("min" to summary.min, "avg" to summary.average, "max" to summary.max)
                     .joinToString(" · ") { (name, value) -> "$name ${formatSlotValue(value)}" }
                 "<html>$share<br>$values<br><small>$action</small></html>"
@@ -330,8 +331,6 @@ class TemplatesPanel(
             if (counts.templates[table.convertRowIndexToModel(row)] in selected) table.addRowSelectionInterval(row, row)
         }
     }
-
-    private fun count(n: Int, unit: String) = "%,d %s".format(n, if (n == 1) unit else "${unit}s")
 
     private fun setCounts(counts: TemplateCounts?) {
         val sortKeys = table.rowSorter?.sortKeys
