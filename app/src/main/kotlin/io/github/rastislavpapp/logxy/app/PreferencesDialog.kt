@@ -1,10 +1,13 @@
 package io.github.rastislavpapp.logxy.app
 
+import com.formdev.flatlaf.FlatLaf
+import com.formdev.flatlaf.util.ColorFunctions
 import io.github.rastislavpapp.logxy.core.config.Settings
 import io.github.rastislavpapp.logxy.core.config.VmOptions
 import io.github.rastislavpapp.logxy.core.parse.Parser
 import net.miginfocom.swing.MigLayout
 import java.awt.CardLayout
+import java.awt.Color
 import java.awt.Component
 import java.awt.Window
 import java.io.IOException
@@ -19,8 +22,18 @@ import javax.swing.JList
 import javax.swing.JOptionPane
 import javax.swing.JPanel
 import javax.swing.JScrollPane
+import javax.swing.JSeparator
 import javax.swing.ListSelectionModel
 import javax.swing.UIManager
+
+private const val MIN_SIDEBAR_WIDTH = 180
+private const val SIDEBAR_PADDING = 8
+
+/** The panel background nudged away from itself, darker in a light theme and lighter in a dark one. */
+private fun sidebarBackground(): Color {
+    val panel = UIManager.getColor("Panel.background")
+    return if (FlatLaf.isLafDark()) ColorFunctions.lighten(panel, 0.03f) else ColorFunctions.darken(panel, 0.03f)
+}
 
 /** A section of the preferences; all sections are saved together. */
 abstract class PreferencesPage(val title: String, val icon: Icon) : JPanel() {
@@ -74,10 +87,15 @@ class PreferencesDialog(
                 val page = value as PreferencesPage
                 super.getListCellRendererComponent(list, page.title, index, isSelected, cellHasFocus)
                 icon = page.icon
-                border = BorderFactory.createEmptyBorder(4, 8, 4, 8)
                 return this
             }
         }
+        // The list's own cell border paints the selection, so the pill's shape and the padding are FlatLaf styles.
+        navigation.putClientProperty(
+            "FlatLaf.style",
+            "cellMargins: 5,10,5,10; selectionArc: 10; selectionInsets: 1,8,1,8",
+        )
+        navigation.background = sidebarBackground()
         navigation.addListSelectionListener {
             val page = navigation.selectedValue ?: return@addListSelectionListener
             heading.text = page.title
@@ -90,17 +108,39 @@ class PreferencesDialog(
         val shown = section ?: remembered ?: Section.PARSERS
         navigation.selectedIndex = shown.ordinal
 
-        contentPane = JPanel(MigLayout("fill, insets dialog", "[][grow]", "[][grow][]")).apply {
-            add(JScrollPane(navigation), "spany 2, growy, w 170!")
+        val body = JPanel(MigLayout("fill, insets 16 20 16 16", "[grow]", "[]para[grow]")).apply {
             add(heading, "wrap")
-            add(content, "grow, wrap")
-            add(buttons(offerUse), "span, growx")
+            add(content, "grow")
+        }
+        val main = JPanel(MigLayout("fill, insets 0, gap 0", "[grow]", "[grow][][]")).apply {
+            add(body, "grow, wrap")
+            add(JSeparator(), "growx, wrap")
+            add(buttons(offerUse), "growx")
+        }
+        contentPane = JPanel(MigLayout("fill, insets 0, gap 0", "[][grow]", "[grow]")).apply {
+            add(sidebar(), "growy")
+            add(main, "grow")
         }
         fitToScreen(0.75)
         WindowState.install(this, "preferences")
     }
 
-    private fun buttons(offerUse: Boolean) = JPanel(MigLayout("insets 0", "[grow][][][]")).apply {
+    /** The page list, flush with the dialog's edges; a plain panel, so that focusing the list draws no border. */
+    private fun sidebar(): JPanel {
+        // The list is as wide as its longest title needs; the scroll pane only adds a scroll bar if the height fails.
+        val width = maxOf(MIN_SIDEBAR_WIDTH, navigation.preferredSize.width + 2 * SIDEBAR_PADDING)
+        return JPanel(MigLayout("fill, insets $SIDEBAR_PADDING 0 $SIDEBAR_PADDING 0", "[grow]", "[grow]")).apply {
+            background = sidebarBackground()
+            border = BorderFactory.createMatteBorder(0, 0, 0, 1, UIManager.getColor("Component.borderColor"))
+            val scroll = JScrollPane(navigation).apply {
+                border = null
+                viewport.isOpaque = false
+            }
+            add(scroll, "grow, w $width!")
+        }
+    }
+
+    private fun buttons(offerUse: Boolean) = JPanel(MigLayout("insets 10 16 10 16", "[grow][][][]")).apply {
         add(savedIn, "wmin 0")
         if (offerUse) {
             add(JButton("Save and Use for This File").apply {
