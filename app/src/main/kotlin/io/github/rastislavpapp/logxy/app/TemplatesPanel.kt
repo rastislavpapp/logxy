@@ -6,13 +6,16 @@ import io.github.rastislavpapp.logxy.core.log.Role
 import io.github.rastislavpapp.logxy.core.log.Schema
 import io.github.rastislavpapp.logxy.core.query.Query
 import io.github.rastislavpapp.logxy.core.query.QueryOp
+import io.github.rastislavpapp.logxy.core.query.TemplateRules
 import io.github.rastislavpapp.logxy.core.template.TemplateCounts
 import io.github.rastislavpapp.logxy.core.template.Templates
+import io.github.rastislavpapp.logxy.core.template.VariableValues
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import net.miginfocom.swing.MigLayout
+import org.slf4j.LoggerFactory
 import java.awt.BorderLayout
 import java.awt.CardLayout
 import java.awt.Color
@@ -31,6 +34,7 @@ import java.awt.event.ComponentEvent
 import java.awt.event.HierarchyEvent
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
+import javax.swing.Icon
 import javax.swing.JCheckBoxMenuItem
 import javax.swing.JComponent
 import javax.swing.JLabel
@@ -44,6 +48,7 @@ import javax.swing.RowSorter
 import javax.swing.SortOrder
 import javax.swing.SwingConstants
 import javax.swing.Timer
+import javax.swing.ToolTipManager
 import javax.swing.UIManager
 import javax.swing.border.CompoundBorder
 import javax.swing.border.EmptyBorder
@@ -69,6 +74,14 @@ private const val PLACEHOLDERS_CARD = "placeholders"
 
 private val PADDING = EmptyBorder(0, 0, 0, 12)
 
+/** Values of a variable its tooltip lists; the rest are summed up in one line. */
+private const val TOOLTIP_VALUES = 5
+
+/** Values of a variable its Show Only and Hide menus list. */
+private const val MENU_VALUES = 10
+
+private val log = LoggerFactory.getLogger(TemplatesPanel::class.java)
+
 private const val OTHER_MESSAGES = "(other messages, over the limit of different templates)"
 
 /**
@@ -83,24 +96,35 @@ fun Schema.hasTemplates() =
  * a count per level. Counts only while it is showing: [count] does the work and is cancelled when a newer
  * count starts. Filtering by the selected templates goes through [addRules].
  *
- * While [canChart], clicking a template's `{}` charts that variable in [charts] or stops, as does the context menu; a
- * charted variable is drawn bold in its chart's color, and one found to hold no number faint, as it cannot be charted.
- * Hovering a variable tells what its values came to, once read. The columns fit their contents; the template's takes
- * the rest of the width.
+ * Templates show their variables numbered, `{1}`, `{2}`, …. Hovering one lists its most frequent values in the shown
+ * rows, counted by [values] when first needed; right-clicking one offers to show only or hide one of them, through
+ * [addRuleFor] and [addRules]. While [canChart], clicking a variable charts it in [charts] or stops, as does the
+ * context menu; a charted variable is drawn bold in its chart's color, and one found to hold no number faint, as it
+ * cannot be charted. The columns fit their contents; the template's takes the rest of the width.
  */
 class TemplatesPanel(
     private val scope: CoroutineScope,
     private val count: suspend () -> TemplateCounts?,
     private val progress: () -> Double,
     private val addRules: (List<Query>) -> Unit,
+    private val addRuleFor: ((current: Query.Group) -> Query) -> Unit,
+    private val values: suspend (template: String, variable: Int) -> VariableValues?,
     private val charts: VariableCharts,
     private val canChart: () -> Boolean,
 ) : JPanel(BorderLayout()) {
 
     private val model = TemplatesModel()
 
-    /** The variable under the mouse, as its template and number, or null. */
+    /** The chartable variable under the mouse, as its template and number, or null. */
     private var hovered: Pair<String, Int>? = null
+
+    /** Where the mouse last moved over the table, to show a tooltip again once its values are counted. */
+    private var pointer: Point? = null
+
+    /** The values of variables counted since the shown rows changed. */
+    private val counted = HashMap<Pair<String, Int>, VariableValues?>()
+    private var counting: Job? = null
+    private var countingFor: Pair<String, Int>? = null
 
     private val table = object : JTable(model) {
         override fun getToolTipText(e: MouseEvent): String? {
@@ -162,7 +186,7 @@ class TemplatesPanel(
                 when {
                     variable != null && e.clickCount == 1 -> {
                         val (template, number) = variable
-                        if (charts.canChart(template, number)) toggleChart(template, number)
+                        if (canChart(template, number)) toggleChart(template, number)
                     }
                     // The first click of a double click on a variable charted it: that is all it does.
                     variable == null && e.clickCount == 2 && table.rowAtPoint(e.point) >= 0 ->
@@ -170,9 +194,15 @@ class TemplatesPanel(
                 }
             }
 
-            override fun mouseMoved(e: MouseEvent) = hover(variableAt(e.point))
+            override fun mouseMoved(e: MouseEvent) {
+                pointer = e.point
+                hover(variableAt(e.point))
+            }
 
-            override fun mouseExited(e: MouseEvent) = hover(null)
+            override fun mouseExited(e: MouseEvent) {
+                pointer = null
+                hover(null)
+            }
 
             // The popup trigger comes with the press on some systems, with the release on others.
             private fun menu(e: MouseEvent) {
@@ -180,7 +210,10 @@ class TemplatesPanel(
                 val row = table.rowAtPoint(e.point)
                 if (row < 0) return
                 if (!table.isRowSelected(row)) table.setRowSelectionInterval(row, row)
-                showMenu(e.x, e.y)
+                val variable = variableAt(e.point)
+                if (variable == null) return showMenu(e.x, e.y, null)
+                // A variable's menu lists its values, so they are counted first.
+                countValues(variable) { if (table.isShowing) showMenu(e.x, e.y, variable) }
             }
         }
         table.addMouseListener(mouse)
@@ -189,36 +222,94 @@ class TemplatesPanel(
 
     private fun toggleChart(template: String, variable: Int) = toggleChart(this, charts, template, variable)
 
+    /** Whether [variable] of [template] can be charted: the log has times, and it may hold numbers. */
+    private fun canChart(template: String, variable: Int): Boolean =
+        canChart() && charts.canChart(template, variable) && counted[template to variable]?.numbers != 0
+
     private fun hover(variable: Pair<String, Int>?) {
-        val chartable = variable?.takeIf { charts.canChart(it.first, it.second) }
+        val chartable = variable?.takeIf { canChart(it.first, it.second) }
         table.cursor = if (chartable != null) Cursor.getPredefinedCursor(Cursor.HAND_CURSOR) else null
         if (chartable == hovered) return
         hovered = chartable
         table.repaint()
     }
 
-    /** What [variable] of [template] came to, if read, and what clicking it does. */
-    private fun variableToolTip(template: String, variable: Int): String {
-        val summary = charts.summary(template, variable)
-        val charted = charts.chart(template, variable) != null
-        val action = if (charted) "Click to stop charting" else "Click to chart over time"
-        val records = count(summary?.records ?: 0, "record")
-        return when {
-            summary == null -> "<html>Variable ${variable + 1}<br><small>$action</small></html>"
-            summary.numbers == 0 -> "None of its $records has a number in variable ${variable + 1}"
-            else -> {
-                val has = if (summary.numbers == 1) "has" else "have"
-                val share = "%,d of ${count(summary.records, "record")} $has a number".format(summary.numbers)
-                val values = listOf("min" to summary.min, "avg" to summary.average, "max" to summary.max)
-                    .joinToString(" · ") { (name, value) -> "$name ${formatVariableValue(value)}" }
-                "<html>$share<br>$values<br><small>$action</small></html>"
+    /**
+     * Counts the values of [variable] (a template and its variable) unless they are counted already, then calls
+     * [then]; a count for another variable stops.
+     */
+    private fun countValues(variable: Pair<String, Int>, then: () -> Unit) {
+        if (variable in counted) return then()
+        if (countingFor == variable && counting?.isActive == true) return
+        counting?.cancel()
+        countingFor = variable
+        counting = scope.launch {
+            val found = try {
+                values(variable.first, variable.second)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                log.warn("Cannot count the values of {{}} of “{}”", variable.second + 1, variable.first, e)
+                null
             }
+            counted[variable] = found
+            then()
         }
     }
 
-    /** The template and variable of the `{}` at [point], or null; only while [canChart]. */
+    /**
+     * The most frequent values of [variable] of [template] with their counts, what their numbers come to, and what
+     * clicking does; counted when first asked for, saying so meanwhile.
+     */
+    private fun variableToolTip(template: String, variable: Int): String {
+        val key = template to variable
+        val name = "{${variable + 1}}"
+        val action = when {
+            !canChart(template, variable) -> ""
+            charts.chart(template, variable) != null -> "<br><small>Click to stop charting</small>"
+            else -> "<br><small>Click to chart over time</small>"
+        }
+        if (key !in counted) {
+            // Shown again once counted, if the mouse is still there.
+            countValues(key) {
+                val point = pointer ?: return@countValues
+                if (variableAt(point) != key) return@countValues
+                val now = System.currentTimeMillis()
+                val moved = MouseEvent(table, MouseEvent.MOUSE_MOVED, now, 0, point.x, point.y, 0, false)
+                ToolTipManager.sharedInstance().mouseMoved(moved)
+            }
+            return "<html>$name<br>Counting its values…$action</html>"
+        }
+        val values = counted[key] ?: return "<html>$name$action</html>"
+        if (values.records == 0) return "<html>$name: no shown row has this template$action</html>"
+        val top = (0..<minOf(TOOLTIP_VALUES, values.values.size)).joinToString("") { i ->
+            val share = 100.0 * values.count(i) / values.records
+            "<tr><td>${escapeHtml(values.values[i].cut(MAX_MENU_CHARS))}</td>" +
+                "<td align='right'>&nbsp;&nbsp;%,d</td><td align='right'>&nbsp;&nbsp;%.0f%%</td></tr>"
+                    .format(values.count(i), share)
+        }
+        val restValues = values.values.size - minOf(TOOLTIP_VALUES, values.values.size)
+        val restRecords = values.records - (0..<minOf(TOOLTIP_VALUES, values.values.size)).sumOf(values::count)
+        val rest = when {
+            values.other > 0 -> "Over ${count(restValues, "other value")} in ${count(restRecords, "record")}"
+            restValues > 0 -> "${count(restValues, "other value")} in ${count(restRecords, "record")}"
+            else -> ""
+        }
+        val numbers = if (values.numbers == 0) {
+            ""
+        } else {
+            listOf("min" to values.min, "avg" to values.average, "max" to values.max)
+                .joinToString(" · ") { (label, value) -> "$label ${formatVariableValue(value)}" }
+        }
+        val header = "$name in ${count(values.records, "record")}"
+        // Lines after the table go in blocks, as a `<br>` after it would leave an empty line.
+        val after = listOf(rest, numbers, action.removePrefix("<br>")).filter { it.isNotEmpty() }
+            .joinToString("") { "<div>$it</div>" }
+        return "<html>$header<table cellspacing='0' cellpadding='0'>$top</table>$after</html>"
+    }
+
+    /** The template and variable of the `{n}` at [point], or null. */
     private fun variableAt(point: Point): Pair<String, Int>? {
-        if (!canChart()) return null
         val row = table.rowAtPoint(point)
         val column = table.columnAtPoint(point)
         if (row < 0 || column != table.columnCount - 1) return null
@@ -230,7 +321,7 @@ class TemplatesPanel(
         val parts = template.split(Templates.PLACEHOLDER)
         for (variable in 0..<parts.lastIndex) {
             x += metrics.stringWidth(parts[variable])
-            val width = metrics.stringWidth(Templates.PLACEHOLDER)
+            val width = metrics.stringWidth("{${variable + 1}}")
             if (point.x in x..<x + width) return template to variable
             x += width
         }
@@ -256,6 +347,7 @@ class TemplatesPanel(
     fun refresh() {
         throttle.stop()
         job?.cancel()
+        forgetValues()
         stale = true
         if (!isShowing) return
         stale = false
@@ -286,9 +378,16 @@ class TemplatesPanel(
     fun reset() {
         throttle.stop()
         job?.cancel()
+        forgetValues()
         stale = true
         summary.text = " "
         setCounts(null)
+    }
+
+    /** Forgets the values of variables counted, as the shown rows changed. */
+    private fun forgetValues() {
+        counting?.cancel()
+        counted.clear()
     }
 
     private fun showProgress() {
@@ -372,7 +471,7 @@ class TemplatesPanel(
             val isTemplate = column == model.columnCount - 1
             val widest = (0..<model.rowCount).maxByOrNull { row ->
                 if (isTemplate) {
-                    model.template(row)?.length ?: OTHER_MESSAGES.length
+                    model.template(row)?.let { Templates.numbered(it).length } ?: OTHER_MESSAGES.length
                 } else {
                     model.getValueAt(row, column) as Int
                 }
@@ -400,10 +499,37 @@ class TemplatesPanel(
             .mapNotNull { model.template(table.convertRowIndexToModel(it)) }
             .filter { it.isNotEmpty() }
 
-    private fun showMenu(x: Int, y: Int) {
+    /**
+     * The menu of the selected templates; on [variable] (a template and its variable, whose values are counted), it
+     * first offers to show only or hide one of its most frequent values.
+     */
+    private fun showMenu(x: Int, y: Int, variable: Pair<String, Int>?) {
         val templates = selectedTemplates()
         val several = templates.size > 1
         val popup = JPopupMenu()
+        val values = variable?.let { counted[it] }
+        if (variable != null && values != null && values.values.isNotEmpty()) {
+            val (template, number) = variable
+            val shown = minOf(MENU_VALUES, values.values.size)
+            fun valuesMenu(title: String, icon: Icon?, rule: (String) -> Unit) = JMenu(title).apply {
+                this.icon = icon
+                isEnabled = canFilter
+                for (i in 0..<shown) {
+                    val value = values.values[i]
+                    add(JMenuItem("${value.cut(MAX_MENU_CHARS)}  (%,d)".format(values.count(i))).apply {
+                        addActionListener { rule(value) }
+                    })
+                }
+            }
+            val name = "{${number + 1}}"
+            popup.add(valuesMenu("Show Only $name", Icons.filter) { value ->
+                addRuleFor { current -> TemplateRules.showOnly(current, template, number, value) }
+            })
+            popup.add(valuesMenu("Hide $name", null) { value ->
+                addRules(listOf(TemplateRules.hide(template, number, value)))
+            })
+            popup.addSeparator()
+        }
         val showOnly = if (several) "Show Only These ${templates.size} Templates" else "Show Only This Template"
         popup.add(JMenuItem(showOnly, Icons.filter).apply {
             isEnabled = canFilter && templates.isNotEmpty()
@@ -411,13 +537,13 @@ class TemplatesPanel(
         })
         popup.add(JMenuItem(if (several) "Hide These ${templates.size} Templates" else "Hide This Template").apply {
             isEnabled = canFilter && templates.isNotEmpty()
-            addActionListener { addRules(templates.map { Query.Rule(Query.TEMPLATE_FIELD, QueryOp.NOT_EQUALS, it) }) }
+            addActionListener { addRules(templates.map { TemplateRules.template(it, QueryOp.NOT_EQUALS) }) }
         })
         popup.addSeparator()
         popup.add(JMenuItem(if (several) "Copy Templates" else "Copy Template").apply {
             isEnabled = templates.isNotEmpty()
             addActionListener {
-                val selection = StringSelection(templates.joinToString("\n"))
+                val selection = StringSelection(templates.joinToString("\n", transform = Templates::numbered))
                 Toolkit.getDefaultToolkit().systemClipboard.setContents(selection, null)
             }
         })
@@ -427,9 +553,9 @@ class TemplatesPanel(
             popup.addSeparator()
             popup.add(JMenu("Chart Variable").apply {
                 for (variable in 0..<variables) {
-                    val text = "${variable + 1}: ${VariableChart.label(template, variable).cut(MAX_MENU_CHARS)}"
+                    val text = VariableChart.label(template, variable).cut(MAX_MENU_CHARS)
                     add(JCheckBoxMenuItem(text, charts.chart(template, variable) != null).apply {
-                        isEnabled = charts.canChart(template, variable)
+                        isEnabled = canChart(template, variable)
                         addActionListener { toggleChart(template, variable) }
                     })
                 }
@@ -440,7 +566,7 @@ class TemplatesPanel(
 
     private fun showOnly(templates: List<String>) {
         if (!canFilter || templates.isEmpty()) return
-        val rules = templates.map { Query.Rule(Query.TEMPLATE_FIELD, QueryOp.EQUALS, it) }
+        val rules = templates.map { TemplateRules.template(it, QueryOp.EQUALS) }
         addRules(listOf(rules.singleOrNull() ?: Query.Group(all = false, items = rules)))
     }
 
@@ -565,13 +691,13 @@ class TemplatesPanel(
             val text = when (template) {
                 null -> OTHER_MESSAGES
                 "" -> "(no message)"
-                else -> template
+                else -> Templates.numbered(template)
             }
             super.getTableCellRendererComponent(table, text, isSelected, hasFocus, row, column)
             selected = isSelected
             dim = if (isSelected) foreground else UIManager.getColor("Label.disabledForeground")
             if (template.isNullOrEmpty()) foreground = dim
-            toolTipText = template?.takeIf { it.isNotEmpty() }
+            toolTipText = text.takeIf { !template.isNullOrEmpty() }
             return this
         }
 
@@ -602,10 +728,11 @@ class TemplatesPanel(
                     val chart = charts.chart(template, i)
                     // On the selection's background a chart color may not show; bold still marks it.
                     g2.color = chart?.color?.takeUnless { selected } ?: dim
-                    if (chart == null && !charts.canChart(template, i)) g2.color = faint(g2.color)
+                    if (chart == null && !canChart(template, i)) g2.color = faint(g2.color)
                     g2.font = if (chart != null) bold else plain
-                    BasicGraphicsUtils.drawString(this, g2, Templates.PLACEHOLDER, x.toFloat(), y.toFloat())
-                    val placeholder = metrics.stringWidth(Templates.PLACEHOLDER)
+                    val name = "{${i + 1}}"
+                    BasicGraphicsUtils.drawString(this, g2, name, x.toFloat(), y.toFloat())
+                    val placeholder = metrics.stringWidth(name)
                     if (i == hovered) g2.fillRect(x, y + metrics.descent / 2, placeholder, 1)
                     x += placeholder
                 }

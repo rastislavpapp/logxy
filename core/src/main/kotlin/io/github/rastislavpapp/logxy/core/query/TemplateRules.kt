@@ -28,11 +28,8 @@ object TemplateRules {
     }
 
     /** `{n} == value`, with wildcards in [value] escaped, as variable values are matched exactly. */
-    private fun variable(variable: Int, value: String) = Query.Rule(
-        "{${variable + 1}}",
-        QueryOp.EQUALS,
-        value.replace("\\", "\\\\").replace("*", "\\*").replace("?", "\\?"),
-    )
+    private fun variable(variable: Int, value: String) =
+        Query.Rule("{${variable + 1}}", QueryOp.EQUALS, escapeWildcards(value))
 
     private fun isTemplateEquals(item: Query) = item is Query.Rule && !item.negated &&
         item.field.equals(Query.TEMPLATE_FIELD, ignoreCase = true) &&

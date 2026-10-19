@@ -209,6 +209,11 @@ class LogSession internal constructor(
         private set
 
     private var engine: RecordFilter? = null
+
+    // The values of variables over all records, and the records they were counted in: the loaded log and its count.
+    private val allValues = HashMap<Pair<String, Int>, VariableValues>()
+    private var allValuesOf: Pair<LoadedLog, Int>? = null
+
     private var activeFilter: Filter? = null
     private var filterJob: Job? = null
 
@@ -430,6 +435,27 @@ class LogSession internal constructor(
         val engine = engine ?: return null
         if (shown.schema.indexOf(Role.MESSAGE) < 0) return null
         return engine.variableValues(shown.rowArray, shown.rowCount, template, variable)
+    }
+
+    /**
+     * As [variableValues], but over all records rather than the shown rows; kept until the records change, as the
+     * filter editor asks again whenever a value is edited.
+     */
+    suspend fun allVariableValues(template: String, variable: Int): VariableValues? {
+        while (true) countJob?.takeIf { it.isActive }?.join() ?: break
+        val loaded = loaded ?: return null
+        val engine = engine ?: return null
+        if (loaded.records.schema.indexOf(Role.MESSAGE) < 0) return null
+        val recordCount = loaded.records.recordCount
+        if (allValuesOf != loaded to recordCount) {
+            allValues.clear()
+            allValuesOf = loaded to recordCount
+        }
+        val key = template to variable
+        allValues[key]?.let { return it }
+        val values = engine.variableValues(null, recordCount, template, variable)
+        if (allValuesOf == loaded to recordCount) allValues[key] = values
+        return values
     }
 
     /** The template of [record]'s message; null if it has none, or nothing is loaded. */

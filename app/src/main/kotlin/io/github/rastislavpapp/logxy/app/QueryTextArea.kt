@@ -1,9 +1,11 @@
 package io.github.rastislavpapp.logxy.app
 
 import io.github.rastislavpapp.logxy.core.log.Level
+import io.github.rastislavpapp.logxy.core.query.Query
 import io.github.rastislavpapp.logxy.core.query.QueryException
 import io.github.rastislavpapp.logxy.core.query.QueryOp
 import io.github.rastislavpapp.logxy.core.query.QueryParser
+import io.github.rastislavpapp.logxy.core.template.Templates
 import org.fife.ui.autocomplete.AutoCompletion
 import org.fife.ui.autocomplete.BasicCompletion
 import org.fife.ui.autocomplete.DefaultCompletionProvider
@@ -21,6 +23,8 @@ import java.awt.event.ActionEvent
 import java.awt.event.KeyEvent
 import javax.swing.AbstractAction
 import javax.swing.KeyStroke
+import javax.swing.event.DocumentEvent
+import javax.swing.event.DocumentListener
 import javax.swing.text.Segment
 
 private const val SYNTAX_STYLE = "text/x-logxy-query"
@@ -28,8 +32,13 @@ private const val SYNTAX_STYLE = "text/x-logxy-query"
 /** Editor for the text form of a filter: highlighting, completion, and syntax errors underlined as you type. */
 class QueryTextArea(private val onApply: () -> Unit) : RSyntaxTextArea(3, 60) {
 
-    private val completions = DefaultCompletionProvider()
+    // `{` and `}` are part of words, so `{2` completes to `{2}`.
+    private val completions = object : DefaultCompletionProvider() {
+        override fun isValidChar(ch: Char) = super.isValidChar(ch) || ch == '{' || ch == '}'
+    }
     private val autoCompletion = AutoCompletion(completions)
+    private var fields = emptyList<String>()
+    private var variables = 0
 
     init {
         (TokenMakerFactory.getDefaultInstance() as AbstractTokenMakerFactory)
@@ -42,13 +51,18 @@ class QueryTextArea(private val onApply: () -> Unit) : RSyntaxTextArea(3, 60) {
         addParser(SyntaxChecker())
         parserDelay = 300
 
-        completions.setAutoActivationRules(true, null)
+        completions.setAutoActivationRules(true, "{")
         autoCompletion.apply {
             isAutoActivationEnabled = true
             autoActivationDelay = 400
             install(this@QueryTextArea)
         }
         setFields(emptyList())
+        document.addDocumentListener(object : DocumentListener {
+            override fun insertUpdate(e: DocumentEvent) = offerVariables()
+            override fun removeUpdate(e: DocumentEvent) = offerVariables()
+            override fun changedUpdate(e: DocumentEvent) {}
+        })
 
         // Enter starts a new line, as in any editor; Ctrl+Enter applies.
         getInputMap(WHEN_FOCUSED).put(KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, KeyEvent.CTRL_DOWN_MASK), "logxyApply")
@@ -65,10 +79,33 @@ class QueryTextArea(private val onApply: () -> Unit) : RSyntaxTextArea(3, 60) {
 
     /** Field names offered by completion, besides keywords, operators and levels. */
     fun setFields(fields: List<String>) {
+        this.fields = fields
+        fillCompletions()
+    }
+
+    private fun fillCompletions() {
         completions.clear()
         val words = fields.map { if (QueryParser.isBareWord(it)) it else "`$it`" } +
-            listOf("AND", "OR", "NOT") + Level.entries.map { it.name } + QueryOp.entries.map { it.symbol }
+            listOf("AND", "OR", "NOT") + Level.entries.map { it.name } + QueryOp.entries.map { it.symbol } +
+            (1..variables).map { "{$it}" }
         words.distinct().forEach { completions.addCompletion(BasicCompletion(completions, it)) }
+    }
+
+    /** Offers `{1}` to `{n}` for the most variables a template in the text has; none if it names no template. */
+    private fun offerVariables() {
+        val query = runCatching { QueryParser.parse(text) }.getOrNull() ?: return
+        fun most(item: Query): Int = when (item) {
+            is Query.Group -> item.items.maxOfOrNull(::most) ?: 0
+            is Query.Rule -> if (item.field.equals(Query.TEMPLATE_FIELD, ignoreCase = true)) {
+                Templates.variableCount(Templates.unnumbered(item.value))
+            } else {
+                0
+            }
+        }
+        val count = most(query)
+        if (count == variables) return
+        variables = count
+        fillCompletions()
     }
 
     override fun updateUI() {

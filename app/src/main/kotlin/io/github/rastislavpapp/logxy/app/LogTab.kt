@@ -14,8 +14,10 @@ import io.github.rastislavpapp.logxy.core.query.Query
 import io.github.rastislavpapp.logxy.core.query.QueryException
 import io.github.rastislavpapp.logxy.core.query.QueryOp
 import io.github.rastislavpapp.logxy.core.query.QueryPrinter
+import io.github.rastislavpapp.logxy.core.query.TemplateRules
 import io.github.rastislavpapp.logxy.core.query.TextSearch
 import io.github.rastislavpapp.logxy.core.query.TimeLiteral
+import io.github.rastislavpapp.logxy.core.query.escapeWildcards
 import io.github.rastislavpapp.logxy.core.session.CopyResult
 import io.github.rastislavpapp.logxy.core.session.LogSession
 import io.github.rastislavpapp.logxy.core.session.MAX_COPY_BYTES
@@ -27,6 +29,7 @@ import io.github.rastislavpapp.logxy.core.session.SessionStatus
 import io.github.rastislavpapp.logxy.core.session.ShownLog
 import io.github.rastislavpapp.logxy.core.session.copyLimit
 import io.github.rastislavpapp.logxy.core.template.Templates
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
@@ -36,6 +39,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.swing.Swing
 import net.miginfocom.swing.MigLayout
+import org.slf4j.LoggerFactory
 import java.awt.BorderLayout
 import java.awt.Component
 import java.awt.Container
@@ -74,6 +78,7 @@ private const val MAX_DETAIL_BYTES = 1024 * 1024
 private const val MAX_TITLE_CHARS = 40
 private const val MAX_RULE_CHARS = 1000
 private val RANGE_OPS = listOf(QueryOp.AT_LEAST, QueryOp.ABOVE, QueryOp.AT_MOST, QueryOp.BELOW)
+private val log = LoggerFactory.getLogger(LogTab::class.java)
 
 /** A search taking longer than this shows its progress. */
 private const val SEARCH_PROGRESS_DELAY_MILLIS = 200
@@ -167,6 +172,8 @@ class LogTab(
         { session.templateCounts() },
         { session.templateProgress },
         filterBar::addRules,
+        filterBar::addRuleFor,
+        session::variableValues,
         variableCharts,
         ::canChart,
     )
@@ -258,6 +265,20 @@ class LogTab(
         add(content, BorderLayout.CENTER)
         showParser()
         filter?.let(filterBar::load)
+        // Over all records: the shown rows may already be narrowed by the very rule being edited.
+        filterBar.variableValues = { template, variable, onValues ->
+            scope.launch {
+                val values = try {
+                    session.allVariableValues(template, variable)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    log.warn("Cannot count the values of {{}} of “{}”", variable + 1, template, e)
+                    null
+                }
+                onValues(values)
+            }
+        }
         session.start()
     }
 
@@ -519,7 +540,7 @@ class LogTab(
         val value = shown.fieldText(model.recordAt(row), fieldIndex)
         val level = model.level(row)?.takeIf { field.role == Role.LEVEL && it != Level.UNKNOWN }
         val firstLine = value.lineSequence().first()
-        val escaped = firstLine.take(MAX_RULE_CHARS).replace("\\", "\\\\").replace("*", "\\*").replace("?", "\\?")
+        val escaped = escapeWildcards(firstLine.take(MAX_RULE_CHARS))
         // A long or multi-line value, such as a message with its stack trace, is matched by its start.
         val pattern = if (firstLine.length > MAX_RULE_CHARS || firstLine.length < value.length) "$escaped*" else escaped
         fun rule(op: QueryOp) = if (level != null) {
@@ -556,13 +577,26 @@ class LogTab(
         val template = if (hasTemplate) session.templateOf(model.recordAt(row)) else null
         if (template != null) {
             popup.addSeparator()
-            add(Query.Rule(Query.TEMPLATE_FIELD, QueryOp.EQUALS, template))
-            add(Query.Rule(Query.TEMPLATE_FIELD, QueryOp.NOT_EQUALS, template))
+            add(TemplateRules.template(template, QueryOp.EQUALS))
+            add(TemplateRules.template(template, QueryOp.NOT_EQUALS))
             // The cell shows the message's first line with its tabs expanded, unless it is cut.
             val whole = table.getValueAt(row, column) == LogTableModel.expandTabs(firstLine)
             val shownAt = if (whole) table.textOffsetAt(row, column, x) else -1
             val offset = LogTableModel.offsetBeforeTabs(firstLine, shownAt)
-            chartItem(template, value, offset)?.let { popup.add(it) }
+            val variable = if (offset >= 0) Templates.variableAt(value, offset) else -1
+            val word = if (variable >= 0) Templates.variableWord(value, variable) else null
+            if (word != null) {
+                val shown = "{${variable + 1}} == “${word.cut(MAX_MENU_CHARS)}”"
+                popup.add(JMenuItem("Show Only $shown", Icons.filter).apply {
+                    addActionListener {
+                        filterBar.addRuleFor { TemplateRules.showOnly(it, template, variable, word) }
+                    }
+                })
+                popup.add(JMenuItem("Hide $shown").apply {
+                    addActionListener { filterBar.addRule(TemplateRules.hide(template, variable, word)) }
+                })
+                chartItem(template, variable, word)?.let { popup.add(it) }
+            }
         }
         if (level != null) {
             popup.addSeparator()
@@ -587,14 +621,11 @@ class LogTab(
     private fun canChart() = histogramBar != null && model?.shown?.schema?.hasTemplates() == true
 
     /**
-     * The menu item that charts, or stops charting, the variable of [message] (whose template is [template])
-     * holding the character at [offset]; null if there is none there, or the templates of the shown rows are not
-     * counted yet.
+     * The menu item that charts, or stops charting, [variable] of [template], whose value in the clicked record is
+     * [word]; null if variables cannot be charted, or the templates of the shown rows are not counted yet.
      */
-    private fun chartItem(template: String, message: String, offset: Int): JMenuItem? {
-        if (offset < 0 || !canChart() || !templates.hasCounts) return null
-        val variable = Templates.variableAt(message, offset).takeIf { it >= 0 } ?: return null
-        val word = Templates.variableWord(message, variable) ?: return null
+    private fun chartItem(template: String, variable: Int, word: String): JMenuItem? {
+        if (!canChart() || !templates.hasCounts) return null
         val shown = word.cut(MAX_MENU_CHARS)
         val charted = variableCharts.chart(template, variable) != null
         return JMenuItem(if (charted) "Stop Charting “$shown”" else "Chart “$shown” Over Time").apply {
