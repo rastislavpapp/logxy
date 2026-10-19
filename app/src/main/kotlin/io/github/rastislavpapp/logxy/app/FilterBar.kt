@@ -121,6 +121,9 @@ class FilterBar(private val onApply: () -> Unit, names: ColumnNames) :
         actionsColumn.isVisible = text
     }
 
+    /** Gives the values of a template's variable to pick from; see [QueryEditor.variableValues]. */
+    var variableValues by editor::variableValues
+
     /** Fields of the log being filtered: offered in the editors; the level choice needs a level field. */
     fun setSchema(schema: Schema) {
         val hasLevel = schema.indexOf(Role.LEVEL) >= 0
@@ -188,7 +191,10 @@ class FilterBar(private val onApply: () -> Unit, names: ColumnNames) :
     fun addRule(rule: Query) = addRules(listOf(rule))
 
     /** Adds [rules] to the filter, each joined with AND, and applies it once. */
-    fun addRules(rules: List<Query>) = combine(rules) { it }
+    fun addRules(rules: List<Query>) = combine({ rules }) { it }
+
+    /** Adds the rule [make] gives for the current filter, joined with AND, and applies it. */
+    fun addRuleFor(make: (current: Query.Group) -> Query) = combine({ listOf(make(it)) }) { it }
 
     /**
      * Replaces the comparisons on [field] joined at the top of the filter with `>= from` and `< to`, or
@@ -203,7 +209,7 @@ class FilterBar(private val onApply: () -> Unit, names: ColumnNames) :
                 Query.Rule(field, QueryOp.BELOW, to),
             )
         }
-        combine(rules) { items -> items.filterNot { isTimeRule(it, field) } }
+        combine({ rules }) { items -> items.filterNot { isTimeRule(it, field) } }
     }
 
     /** Whether the filter has comparisons on [field] that [setTimeRange] replaces. */
@@ -215,14 +221,18 @@ class FilterBar(private val onApply: () -> Unit, names: ColumnNames) :
     private fun isTimeRule(item: Query, field: String) =
         item is Query.Rule && !item.negated && item.op.comparison && item.field.equals(field, ignoreCase = true)
 
-    /** Joins [rules] to the filter with AND, after [keep] picked which of its top-level items stay, and applies it. */
-    private fun combine(rules: List<Query>, keep: (List<Query>) -> List<Query>) {
+    /**
+     * Joins the rules [make] gives for the current filter to it with AND, after [keep] picked which of its top-level
+     * items stay, and applies it.
+     */
+    private fun combine(make: (current: Query.Group) -> List<Query>, keep: (List<Query>) -> List<Query>) {
         val current = try {
             query()
         } catch (e: QueryException) {
             showError("Fix the filter first: ${e.message}")
             return
         }
+        val rules = make(current)
         val combined = when {
             current.items.isEmpty() -> Query.Group(all = true, items = rules)
             current.all && !current.negated -> current.copy(items = keep(current.items) + rules)

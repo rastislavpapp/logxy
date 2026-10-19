@@ -6,6 +6,9 @@ import io.github.rastislavpapp.logxy.core.log.Level
 import io.github.rastislavpapp.logxy.core.log.Role
 import io.github.rastislavpapp.logxy.core.query.Query
 import io.github.rastislavpapp.logxy.core.query.QueryOp
+import io.github.rastislavpapp.logxy.core.query.escapeWildcards
+import io.github.rastislavpapp.logxy.core.template.Templates
+import io.github.rastislavpapp.logxy.core.template.VariableValues
 import net.miginfocom.swing.MigLayout
 import java.awt.Component
 import java.awt.Graphics
@@ -23,6 +26,8 @@ import javax.swing.JPanel
 import javax.swing.JTextField
 import javax.swing.KeyStroke
 import javax.swing.UIManager
+import javax.swing.event.PopupMenuEvent
+import javax.swing.event.PopupMenuListener
 
 /** Operators as the visual editor offers them; several map to the same [QueryOp] with a wildcard shape. */
 private enum class RuleOp(val label: String) {
@@ -101,6 +106,13 @@ class QueryEditor(private val onApply: () -> Unit, private val columnNames: Colu
 
     /** Whether rules on the message template, [Query.TEMPLATE_FIELD], are offered; set before [setFields]. */
     var templates = false
+
+    /**
+     * Gives the values of a template's variable (from 0) in the log, to pick from in a `{n}` rule: calls back
+     * on the UI thread, perhaps later, with null if there are none.
+     */
+    var variableValues: (template: String, variable: Int, onValues: (VariableValues?) -> Unit) -> Unit =
+        { _, _, onValues -> onValues(null) }
     private var root = GroupView(Query.EMPTY, isRoot = true)
 
     init {
@@ -146,6 +158,10 @@ class QueryEditor(private val onApply: () -> Unit, private val columnNames: Colu
 
     private fun isTemplate(name: String) =
         name.equals(Query.TEMPLATE_FIELD, ignoreCase = true) && fieldType(name) == null
+
+    /** The number of `{n}`, a variable of the template its group belongs to; null if [name] is no such rule. */
+    private fun variableNumber(name: String) =
+        if (fieldType(name) == null) VARIABLE.matchEntire(name)?.groupValues?.get(1)?.toIntOrNull() else null
 
     /** Puts the keyboard focus into the first condition's value. */
     fun focusFirstValue() {
@@ -303,6 +319,21 @@ class QueryEditor(private val onApply: () -> Unit, private val columnNames: Colu
             if (parent is GroupView) parent.removeItem(view)
         }
 
+        /**
+         * The template (as stored, with `{}`) that `{n}` rules here belong to, as the query compiler finds it: of the
+         * one "Template is" row of this group if it matches all, else of the group around it; null if none.
+         */
+        fun template(): String? {
+            val selected = match.selectedItem as Match
+            if (selected.all) {
+                val own = items.components.mapNotNull { (it as? RuleView)?.templateIs() }
+                if (own.isNotEmpty()) return own.singleOrNull()?.let(Templates::unnumbered)
+            }
+            var parent = parent
+            while (parent != null && parent !is GroupView) parent = parent.parent
+            return (parent as GroupView?)?.template()
+        }
+
         fun query(includeEmpty: Boolean): Query.Group? {
             val parts = items.components.mapNotNull { child ->
                 when (child) {
@@ -331,6 +362,9 @@ class QueryEditor(private val onApply: () -> Unit, private val columnNames: Colu
         }
         private val level = JComboBox(Level.entries.filter { it != Level.UNKNOWN }.toTypedArray())
         private var valueSlot: JComponent = text
+
+        // A picked value is matched as it is, not as a wildcard pattern.
+        private val suggestions = ValueSuggestions(text, ::loadValues) { escapeWildcards(it) }
         val remove = toolBarButton(Icons.closeSmall, "Remove this condition", focusable = true) {
             // Only a condition with a value filtered anything.
             val counted = rule(includeEmpty = false) != null
@@ -346,6 +380,12 @@ class QueryEditor(private val onApply: () -> Unit, private val columnNames: Colu
             if (known == null) field.addItem(rule.field)
             field.selectedItem = known ?: rule.field
             field.addActionListener { fieldChanged() }
+            // The template the rows belong to may have changed since: its variables are offered as the list opens.
+            field.addPopupMenuListener(object : PopupMenuListener {
+                override fun popupMenuWillBecomeVisible(e: PopupMenuEvent) = offerVariables()
+                override fun popupMenuWillBecomeInvisible(e: PopupMenuEvent) {}
+                override fun popupMenuCanceled(e: PopupMenuEvent) {}
+            })
             field.renderer = FormattingListCellRenderer { value ->
                 val name = value as? String
                 if (name == null) null else columnNames.of(name)
@@ -371,6 +411,40 @@ class QueryEditor(private val onApply: () -> Unit, private val columnNames: Colu
 
         private fun isTemplate() = isTemplate(field.selectedItem as String)
 
+        private fun variableNumber() = variableNumber(field.selectedItem as String)
+
+        /** The template this row names, if it is a "Template is" row with one. */
+        fun templateIs(): String? =
+            text.text.takeIf { isTemplate() && op.selectedItem == RuleOp.IS && it.isNotEmpty() }
+
+        /** Puts `{1}` to `{n}` in the field list, for the variables of the template the group belongs to. */
+        private fun offerVariables() {
+            val count = group.template()?.let(Templates::variableCount) ?: 0
+            val selected = field.selectedItem as String
+            val listeners = field.actionListeners
+            listeners.forEach(field::removeActionListener)
+            for (i in field.itemCount - 1 downTo 0) {
+                val name = field.getItemAt(i)
+                if (variableNumber(name) != null && name != selected) field.removeItemAt(i)
+            }
+            for (n in 1..count) {
+                val name = "{$n}"
+                if (name != selected) field.addItem(name)
+            }
+            field.selectedItem = selected
+            listeners.forEach(field::addActionListener)
+        }
+
+        /** The values of this row's variable, most frequent first, if it is a `{n}` row whose group has a template. */
+        private fun loadValues(onValues: (List<Pair<String, Int>>?) -> Unit) {
+            val number = variableNumber()
+            val template = group.template()
+            if (number == null || number < 1 || template == null) return onValues(null)
+            variableValues(template, number - 1) { values ->
+                onValues(values?.let { v -> v.values.indices.map { v.values[it] to v.count(it) } })
+            }
+        }
+
         // Templates match exactly.
         private fun ops(): List<RuleOp> = if (isTemplate()) {
             listOf(RuleOp.IS, RuleOp.IS_NOT)
@@ -392,7 +466,11 @@ class QueryEditor(private val onApply: () -> Unit, private val columnNames: Colu
             opChanged()
         }
 
-        private fun fieldChanged() = fillOps(op.selectedItem as RuleOp? ?: RuleOp.CONTAINS)
+        // A variable's value is mostly picked whole.
+        private fun fieldChanged() {
+            val selected = op.selectedItem as RuleOp? ?: RuleOp.CONTAINS
+            fillOps(if (variableNumber() != null && selected == RuleOp.CONTAINS) RuleOp.IS else selected)
+        }
 
         private fun opChanged() {
             val selected = op.selectedItem as RuleOp? ?: return
@@ -405,10 +483,12 @@ class QueryEditor(private val onApply: () -> Unit, private val columnNames: Colu
                 changed()
             }
             case.isEnabled = selected.usesCase && !isTemplate()
-            text.toolTipText = if (isTemplate()) {
-                "The message with its variable parts (numbers, ids, …) written as {}"
-            } else {
-                when (selected) {
+            suggestions.enabled = variableNumber() != null && !selected.usesLevel
+            text.toolTipText = when {
+                isTemplate() -> "The message with its variable parts (numbers, ids, …) written as {1}, {2}, …"
+                variableNumber() != null && selected.usesCase ->
+                    "The word at this variable of the template; * matches any text, ? one character"
+                else -> when (selected) {
                     RuleOp.MATCHES, RuleOp.NOT_MATCHES ->
                         "Regular expression, found anywhere; ignores case unless it starts with (?-i)"
                     in RuleOp.TIME -> "e.g. 2026-10-09 08:30:00.000, 2026-10-09 or 08:30"
@@ -531,6 +611,10 @@ class QueryEditor(private val onApply: () -> Unit, private val columnNames: Colu
             }
             return Query.Rule(name, queryOp, queryValue, bare)
         }
+    }
+
+    private companion object {
+        val VARIABLE = Regex("""\{(\d+)}""")
     }
 
     private class FormattingListCellRenderer(private val formatter: (Any?) -> String?) : DefaultListCellRenderer() {

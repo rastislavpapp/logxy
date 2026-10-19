@@ -94,15 +94,8 @@ class VariableChart internal constructor(val template: String, val variable: Int
     val label: String = label(template, variable)
 
     companion object {
-        /** [template] with [variable] marked, e.g. `done in {•} ms`. */
-        fun label(template: String, variable: Int): String = template.split(Templates.PLACEHOLDER).let { parts ->
-            buildString {
-                for ((i, part) in parts.withIndex()) {
-                    append(part)
-                    if (i < parts.lastIndex) append(if (i == variable) "{•}" else Templates.PLACEHOLDER)
-                }
-            }
-        }
+        /** [variable] and its numbered [template], e.g. `{2} · took {1} in {2} ms`. */
+        fun label(template: String, variable: Int): String = "{${variable + 1}} · ${Templates.numbered(template)}"
     }
 }
 

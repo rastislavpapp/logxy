@@ -280,6 +280,26 @@ class LogSessionTest {
         }
     }
 
+    @Test
+    fun `counts a variable's values in all records, not only the shown rows, and again once records are appended`() =
+        runBlocking {
+            fun took(level: String, ms: Int) = "2026-10-01 08:00:00.000 [main] $level  app.L - took $ms ms\n"
+            val file = Files.writeString(dir.resolve("values.log"), took("WARN", 1) + took("INFO", 2) + took("INFO", 2))
+            val (session, _) = open(file, Recorder())
+            withContext(ui) { session.applyFilter(Level.WARN, Query.EMPTY) }
+            awaitShown(session, file, LevelCondition.atLeast("Level", Level.WARN))
+            fun counts() = runBlocking(ui) {
+                val values = session.allVariableValues("took {} ms", 0)!!
+                values.values.indices.associate { values.values[it] to values.count(it) }
+            }
+            assertEquals(mapOf("2" to 2, "1" to 1), counts())
+            append(file, took("INFO", 3))
+            withTimeout(10_000) {
+                while (counts().size < 3) delay(50)
+            }
+            assertEquals(mapOf("2" to 2, "1" to 1, "3" to 1), counts())
+        }
+
     /** Waits until the histogram counts [records] records, [warnings] warnings and [errors] errors. */
     private suspend fun awaitHistogram(
         session: LogSession,

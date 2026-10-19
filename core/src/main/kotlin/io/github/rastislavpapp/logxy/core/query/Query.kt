@@ -58,5 +58,8 @@ enum class QueryOp(val symbol: String) {
     val excludesEmpty get() = this == NOT_EQUALS || this == NOT_EQUALS_CASE
 }
 
+/** [text] as a wildcard pattern of [QueryOp.EQUALS] that matches it as it is: `\`, `*` and `?` escaped. */
+fun escapeWildcards(text: String): String = text.replace("\\", "\\\\").replace("*", "\\*").replace("?", "\\?")
+
 /** A problem in a query, at `[offset, offset + length)` of its text when known. */
 class QueryException(message: String, val offset: Int = -1, val length: Int = 0) : Exception(message)
