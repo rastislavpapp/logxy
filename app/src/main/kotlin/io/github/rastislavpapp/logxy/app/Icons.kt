@@ -32,6 +32,7 @@ object Icons {
     val levels get() = get("nodes/sortBySeverity")
     val memory get() = get("actions/profileMemory")
     val add get() = get("general/add")
+    val remove get() = get("general/remove")
     val group get() = get("general/groups")
     val star get() = get("nodes/star")
     val logFile get() = get("fileTypes/text")
