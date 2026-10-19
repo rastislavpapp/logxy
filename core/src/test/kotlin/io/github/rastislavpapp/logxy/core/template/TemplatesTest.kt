@@ -24,6 +24,70 @@ class TemplatesTest {
     }
 
     @Test
+    fun `a slot's value is the number its word starts with, before a unit`() {
+        fun slot(text: String, slot: Int) = Templates.slotNumber(text, slot)
+        val text = "Request 7 took 12ms, 1.5s in total, +4 tries, delta -3, 100KB/s for id 42: done"
+        assertEquals(7.0, slot(text, 0))
+        assertEquals(12.0, slot(text, 1))
+        assertEquals(1.5, slot(text, 2))
+        assertEquals(4.0, slot(text, 3))
+        assertEquals(-3.0, slot(text, 4))
+        assertEquals(100.0, slot(text, 5))
+        assertEquals(42.0, slot(text, 6))
+        assertEquals(Double.NaN, slot(text, 7))
+        assertEquals(709491.0, slot("Payload: {\"orderId\":709491,\"retries\":0}", 0))
+        assertEquals(0.0, slot("Payload: {\"orderId\":709491,\"retries\":0}", 1))
+    }
+
+    @Test
+    fun `ids, addresses and dates have no value`() {
+        fun slot(text: String) = Templates.slotNumber(text, 0)
+        // A number followed by more digits is part of something else.
+        assertEquals(Double.NaN, slot("from 10.0.3.17"))
+        assertEquals(Double.NaN, slot("flags 0x1F"))
+        assertEquals(Double.NaN, slot("commit 3fa9c1d2e5"))
+        assertEquals(Double.NaN, slot("id 8a05f3c2-1b7e-4c1d-9f00-2e7b1d3c4a5b"))
+        assertEquals(Double.NaN, slot("on 2026-10-01"))
+        // Words that are variable but start with no number.
+        assertEquals(Double.NaN, slot("Order #1234 sent"))
+        assertEquals(Double.NaN, slot("[pool-1-thread-3]"))
+        assertEquals(Double.NaN, slot("commit deadbeefcafe added"))
+    }
+
+    @Test
+    fun `a literal placeholder in the message is a slot without a value`() {
+        // An unformatted SLF4J message: its `{}` shows in the template like the slot after it.
+        val text = "Value {} is bad: 17"
+        assertEquals("Value {} is bad: {}", Templates.mask(text))
+        assertEquals(Double.NaN, Templates.slotNumber(text, 0))
+        assertEquals(17.0, Templates.slotNumber(text, 1))
+    }
+
+    @Test
+    fun `finds the slot at a place in the text`() {
+        val text = "Request §7 took 12ms: done"
+        // `§` takes two bytes in UTF-8: places are characters, not bytes.
+        assertEquals(-1, Templates.slotAt(text, 0))
+        assertEquals(-1, Templates.slotAt(text, 7))
+        assertEquals(0, Templates.slotAt(text, 8))
+        assertEquals(0, Templates.slotAt(text, 9))
+        assertEquals(1, Templates.slotAt(text, 16))
+        assertEquals(1, Templates.slotAt(text, 19))
+        assertEquals(-1, Templates.slotAt(text, 20))
+        assertEquals("§7", Templates.slotWord(text, 0))
+        assertEquals("12ms", Templates.slotWord(text, 1))
+        assertEquals(null, Templates.slotWord(text, 2))
+        assertEquals(null, Templates.slotWord("Value {} is 3", 0))
+    }
+
+    @Test
+    fun `slots are counted in the template`() {
+        assertEquals(0, Templates.slotCount("Cache warmed"))
+        assertEquals(2, Templates.slotCount("Request from {} took {} ms"))
+        assertEquals(1, Templates.slotCount("{{}}"))
+    }
+
+    @Test
     fun `long hex words are variable, short ones and real words are not`() {
         assertEquals("commit {} added to face", mask("commit deadbeefcafe added to face"))
         assertEquals("{}", mask("DEADBEEF"))

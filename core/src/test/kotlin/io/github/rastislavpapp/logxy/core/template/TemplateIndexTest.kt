@@ -158,6 +158,63 @@ class TemplateIndexTest {
         }
     }
 
+    private fun nanos(time: String) = java.time.Instant.parse("2026-10-01T${time}Z").let {
+        it.epochSecond * 1_000_000_000L + it.nano
+    }
+
+    private fun SlotValues.entries() = List(size) { time(it) to value(it) }
+
+    @Test
+    fun `reads a slot's values and times from the records of its template`() {
+        parse(sample).use { log ->
+            val engine = FilterEngine(log)
+            fun values(slot: Int, rows: IntArray? = null) =
+                runBlocking { engine.slotValues(rows, rows?.size ?: log.recordCount, request, slot) }.entries()
+            assertEquals(
+                listOf(nanos("08:00:00") to 5.0, nanos("08:00:02") to 5012.0, nanos("08:00:03") to 7.0),
+                values(1),
+            )
+            // IP addresses are no numbers, but the records still count.
+            assertEquals(List(3) { Double.NaN }, values(0).map { it.second })
+            // Only the rows given, e.g. those a filter shows.
+            assertEquals(listOf(nanos("08:00:03") to 7.0), values(1, intArrayOf(1, 3, 5)))
+            assertEquals(listOf(), runBlocking { engine.slotValues(null, 6, "nothing like it", 0) }.entries())
+        }
+    }
+
+    @Test
+    fun `reads slots of JSON messages unescaped`() {
+        val file = Files.writeString(dir.resolve("a.json"), """
+            {"@timestamp":"2026-10-01T08:00:00Z","message":"User \"bob\" waited 120 ms"}
+            {"@timestamp":"2026-10-01T08:00:01Z","message":"User \"eve\" waited 80 ms"}
+        """.trimIndent() + "\n")
+        runBlocking { ParsedLog.build(file, CompiledJson(zone = ZoneOffset.UTC), IndexProgress()) }.use { log ->
+            val values = runBlocking { FilterEngine(log).slotValues(null, 2, "User \"bob\" waited {} ms", 0) }
+            assertEquals(listOf(nanos("08:00:00") to 120.0), values.entries())
+        }
+    }
+
+    @Test
+    fun `merged logs read a slot from the template in every file`() {
+        val a = parse(sample, "a.log")
+        val b = parse("""
+            2026-10-01 08:00:00.500 [main] INFO  app.B - Cache warmed
+            2026-10-01 08:00:06.000 [main] ERROR app.B - Query 99 failed
+        """.trimIndent() + "\n", "b.log")
+        val merged = runBlocking { MergedLog.build(listOf(a, b)) }
+        try {
+            val filter = MergedFilter(merged)
+            val values = runBlocking { filter.slotValues(null, merged.recordCount, query, 0) }
+            assertEquals(
+                listOf(nanos("08:00:01") to 17.0, nanos("08:00:04") to 18.0, nanos("08:00:06") to 99.0),
+                values.entries(),
+            )
+        } finally {
+            a.close()
+            b.close()
+        }
+    }
+
     @Test
     fun `merged logs count and filter by template text`() {
         val a = parse(sample, "a.log")
