@@ -38,7 +38,7 @@ class JvmPage : PreferencesPage("JVM", Icons.memory) {
     init {
         layout = MigLayout("insets 0", "[grow, fill]", "[]rel[]para[][]para[]unrel[]rel[]para[]")
         add(heading("Memory"), "wrap")
-        add(Note(memoryHint()), "growx, wmin 0, wrap")
+        addNote(memoryHint())
         // Its own panel, so that the field stays beside its label in the stretched column.
         val limit = JPanel(MigLayout("insets 0", "[][100!]")).apply {
             add(JLabel("-Xmx"))
@@ -48,15 +48,15 @@ class JvmPage : PreferencesPage("JVM", Icons.memory) {
         // The packaged launcher's defaults raise the JVM's; see the jpackage task.
         val example = "For example 8g or 8192m; empty for the default, " +
             if (vmOptions != null) "half of this computer's memory." else "a quarter of this computer's memory."
-        add(Note(example), "growx, wmin 0, wrap")
+        addNote(example)
         add(heading("Newline search"), "wrap")
         add(vectors, "wrap")
-        add(Note(vectorHint()), "growx, wmin 0, wrap")
+        addNote(vectorHint())
         if (vmOptions != null) {
             // Restart.atStartup installs the user's file, so an edit there applies from the next start.
             val file = vmOptions.user.fileName
             val hint = "Any other Java option can be added to $file; it applies from the next start."
-            add(Note(hint), "growx, wmin 0")
+            addNote(hint)
         }
     }
 

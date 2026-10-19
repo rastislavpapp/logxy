@@ -127,7 +127,9 @@ class PreferencesDialog(
         minimumSize = MIN_SIZE
         WindowState.install(this, "preferences")
         // A size remembered from an older, looser layout may be below the minimum.
-        size = Dimension(maxOf(width, MIN_SIZE.width), maxOf(height, MIN_SIZE.height))
+        val fittedWidth = maxOf(width, MIN_SIZE.width)
+        val fittedHeight = maxOf(height, MIN_SIZE.height)
+        size = Dimension(fittedWidth, fittedHeight)
     }
 
     /** The page list, flush with the dialog's edges; a plain panel, so that focusing the list draws no border. */
