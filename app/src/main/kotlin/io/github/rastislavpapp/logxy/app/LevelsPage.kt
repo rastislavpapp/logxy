@@ -7,10 +7,8 @@ import net.miginfocom.swing.MigLayout
 import javax.swing.DefaultCellEditor
 import javax.swing.JButton
 import javax.swing.JComboBox
-import javax.swing.JLabel
 import javax.swing.JScrollPane
 import javax.swing.JTable
-import javax.swing.UIManager
 import javax.swing.table.AbstractTableModel
 
 /** Edits which level texts in logs mean which [Level]; starts from the current table, built-in names included. */
@@ -30,7 +28,7 @@ class LevelsPage : PreferencesPage("Log Levels", Icons.levels) {
 
         val hint = "Texts are matched ignoring case. Texts not listed here are shown as UNKNOWN."
         layout = MigLayout("fill, insets 0", "[grow]", "[][grow][]")
-        add(JLabel(hint).apply { foreground = UIManager.getColor("Label.disabledForeground") }, "wrap")
+        add(Note(hint), "growx, wmin 0, wrap")
         add(JScrollPane(table), "grow, wrap")
         add(JButton("Add").apply { addActionListener { addRow() } }, "split 3")
         add(JButton("Remove").apply { addActionListener { removeSelected() } })
