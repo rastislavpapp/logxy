@@ -5,11 +5,12 @@ import io.github.rastislavpapp.logxy.core.log.Level
 import io.github.rastislavpapp.logxy.core.log.LevelMapping
 import net.miginfocom.swing.MigLayout
 import javax.swing.DefaultCellEditor
-import javax.swing.JButton
 import javax.swing.JComboBox
-import javax.swing.JScrollPane
 import javax.swing.JTable
 import javax.swing.table.AbstractTableModel
+
+private const val MAX_TABLE_WIDTH = 420
+private const val LEVEL_COLUMN_PADDING = 12
 
 /** Edits which level texts in logs mean which [Level]; starts from the current table, built-in names included. */
 class LevelsPage : PreferencesPage("Log Levels", Icons.levels) {
@@ -27,12 +28,20 @@ class LevelsPage : PreferencesPage("Log Levels", Icons.levels) {
         table.autoCreateRowSorter = true
 
         val hint = "Texts are matched ignoring case. Texts not listed here are shown as UNKNOWN."
-        layout = MigLayout("fill, insets 0", "[grow]", "[][grow][]")
+        // "Level" is as wide as its combo box editor; "Text in the log" takes the rest.
+        table.columnModel.getColumn(1).apply {
+            val width = JComboBox(Level.entries.toTypedArray()).preferredSize.width + 2 * LEVEL_COLUMN_PADDING
+            minWidth = width
+            maxWidth = width
+        }
+        val list = ListToolbar(table).apply {
+            addButton(Icons.add, "Add a row") { addRow() }
+            addButton(Icons.remove, "Remove the selected rows") { removeSelected() }
+        }
+        layout = MigLayout("fill, insets 0", "[grow]", "[]rel[grow]rel[]")
         add(Note(hint), "growx, wmin 0, wrap")
-        add(JScrollPane(table), "grow, wrap")
-        add(JButton("Add").apply { addActionListener { addRow() } }, "split 3")
-        add(JButton("Remove").apply { addActionListener { removeSelected() } })
-        add(JButton("Reset to Defaults").apply { addActionListener { show(LevelMapping.DEFAULT) } })
+        add(list, "grow, wmax $MAX_TABLE_WIDTH, wrap")
+        add(LinkButton("Reset to Defaults") { show(LevelMapping.DEFAULT) })
     }
 
     private fun show(mapping: LevelMapping) {

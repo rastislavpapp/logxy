@@ -72,10 +72,9 @@ class ParsersPage(
     private val choices = kindChoices()
     private val kindBox = JComboBox(choices.toTypedArray())
     private val status = JLabel(" ")
-    private val deleteButton = JButton("Delete").apply { addActionListener { deleteSelected() } }
-    private val restoreButton = JButton("Restore Built-ins").apply {
+    private lateinit var deleteButton: JButton
+    private val restoreLink = LinkButton("Restore Built-ins") { restoreBuiltIns() }.apply {
         toolTipText = "Brings back the deleted built-in parsers"
-        addActionListener { restoreBuiltIns() }
     }
     private val previewModel = PreviewModel()
     private val previewTable = JTable(previewModel)
@@ -95,7 +94,7 @@ class ParsersPage(
     init {
         AppSettings.current.parsers.forEach { entries.addElement(Entry(it, builtIn = false)) }
         AppSettings.current.builtInParsers.forEach { entries.addElement(Entry(it, builtIn = true)) }
-        updateRestoreButton()
+        updateRestoreLink()
 
         layout = MigLayout("fill, insets 0", "[grow]", "[grow]")
         add(editor(), "grow")
@@ -133,12 +132,14 @@ class ParsersPage(
         (listOf(nameField) + settings().map { it.field }).forEach { it.document.addDocumentListener(onChange) }
         kindBox.addActionListener { kindChanged() }
 
-        val left = JPanel(MigLayout("fill, insets 0", "[grow]", "[grow][]")).apply {
-            add(JScrollPane(list), "grow, wrap")
-            add(JButton("New").apply { addActionListener { addParser(newParser()) } }, "split 3")
-            add(JButton("Duplicate").apply { addActionListener { selected()?.let { addParser(copyOf(it.parser)) } } })
-            add(deleteButton, "wrap")
-            add(restoreButton)
+        val toolbar = ListToolbar(list).apply {
+            addButton(Icons.add, "New parser") { addParser(newParser()) }
+            deleteButton = addButton(Icons.remove, "Delete the selected parser") { deleteSelected() }
+            addButton(Icons.copy, "Duplicate the selected parser") { selected()?.let { addParser(copyOf(it.parser)) } }
+        }
+        val left = JPanel(MigLayout("fill, insets 0, hidemode 3", "[grow]", "[grow]rel[]")).apply {
+            add(toolbar, "grow, wrap")
+            add(restoreLink)
         }
         previewTable.apply {
             autoResizeMode = JTable.AUTO_RESIZE_ALL_COLUMNS
@@ -162,7 +163,7 @@ class ParsersPage(
                 }
             })
         }
-        val right = JPanel(MigLayout("fill, insets 0 8 0 0, wrap 2, hidemode 3", "[][grow, fill]")).apply {
+        val right = JPanel(MigLayout("fill, insets 0 12 0 0, wrap 2, hidemode 3", "[][grow, fill]")).apply {
             // A text field's minimum width follows its column count; the page must shrink below that.
             add(JLabel("Name:"))
             add(nameField, "wmin 0")
@@ -289,7 +290,7 @@ class ParsersPage(
         val index = list.selectedIndex
         entries.remove(index)
         if (entries.size > 0) list.selectedIndex = minOf(index, entries.size - 1) else showSelected()
-        updateRestoreButton()
+        updateRestoreLink()
     }
 
     private fun builtIns() = (0..<entries.size).map { entries[it] }.filter { it.builtIn }.map { it.parser }
@@ -303,11 +304,11 @@ class ParsersPage(
             if (parser !in kept) entries.add(firstBuiltIn + i, Entry(parser, builtIn = true))
         }
         list.setSelectedValue((0..<entries.size).map { entries[it] }.firstOrNull { it.parser == selectedParser }, true)
-        updateRestoreButton()
+        updateRestoreLink()
     }
 
-    private fun updateRestoreButton() {
-        restoreButton.isEnabled = builtIns().size < Parser.BUILT_IN.size
+    private fun updateRestoreLink() {
+        restoreLink.isVisible = builtIns().size < Parser.BUILT_IN.size
     }
 
     private fun uniqueName(base: String): String {
