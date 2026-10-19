@@ -126,6 +126,9 @@ class TemplatesPanel(
     private var counting: Job? = null
     private var countingFor: Pair<String, Int>? = null
 
+    /** What to call once the running count is done. */
+    private val waiting = ArrayList<() -> Unit>()
+
     private val table = object : JTable(model) {
         override fun getToolTipText(e: MouseEvent): String? {
             val (template, variable) = variableAt(e.point) ?: return super.getToolTipText(e)
@@ -236,13 +239,19 @@ class TemplatesPanel(
 
     /**
      * Counts the values of [variable] (a template and its variable) unless they are counted already, then calls
-     * [then]; a count for another variable stops.
+     * [then], also when a count of it already runs (a right-click while the hover's count runs); a count for another
+     * variable stops, and what waited on it is not called.
      */
     private fun countValues(variable: Pair<String, Int>, then: () -> Unit) {
         if (variable in counted) return then()
-        if (countingFor == variable && counting?.isActive == true) return
+        if (countingFor == variable && counting?.isActive == true) {
+            waiting += then
+            return
+        }
         counting?.cancel()
         countingFor = variable
+        waiting.clear()
+        waiting += then
         counting = scope.launch {
             val found = try {
                 values(variable.first, variable.second)
@@ -253,7 +262,9 @@ class TemplatesPanel(
                 null
             }
             counted[variable] = found
-            then()
+            val done = waiting.toList()
+            waiting.clear()
+            done.forEach { it() }
         }
     }
 
