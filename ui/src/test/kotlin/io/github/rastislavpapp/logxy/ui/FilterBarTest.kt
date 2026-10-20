@@ -93,7 +93,7 @@ private class VisualOnlyHost : LogViewHost {
         }
     }
     override val uiDispatcher: CoroutineDispatcher = Dispatchers.Unconfined
-    override fun detailPane(): DetailPane = PlainDetailArea()
+    override fun detailPane(): DetailPane? = null
     override fun queryText(onApply: () -> Unit): QueryText? = null
     override val settingsDialogs: SettingsDialogs? = null
     override fun chooseParsersPerFile(

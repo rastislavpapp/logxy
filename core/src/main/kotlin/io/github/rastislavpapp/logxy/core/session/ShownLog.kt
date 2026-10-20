@@ -3,6 +3,7 @@ package io.github.rastislavpapp.logxy.core.session
 import io.github.rastislavpapp.logxy.core.filter.Narrowing
 import io.github.rastislavpapp.logxy.core.log.Level
 import io.github.rastislavpapp.logxy.core.log.Records
+import io.github.rastislavpapp.logxy.core.log.RowText
 import io.github.rastislavpapp.logxy.core.log.Schema
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -138,8 +139,15 @@ class ShownLog internal constructor(private val loaded: LoadedLog) {
     fun timestamp(record: Int): Long? = if (ended) null else records.timestamp(record)
 
     /** Display text of every field of [record], each cut to its first line and at most [maxBytes]. */
-    fun rowValues(record: Int, maxBytes: Int): Array<String> =
-        if (ended) Array(schema.fields.size) { "" } else records.rowValues(record, maxBytes)
+    fun rowValues(record: Int, maxBytes: Int): Array<String> = row(record, maxBytes, 0).values
+
+    /** See [Records.row]; empty values and no more lines once the shown log ended. */
+    fun row(record: Int, maxBytes: Int, countBytes: Int): RowText =
+        if (ended) RowText(Array(schema.fields.size) { "" }, 0) else records.row(record, maxBytes, countBytes)
+
+    /** See [Records.laterLines]. */
+    fun laterLines(record: Int, maxBytes: Int, cutMark: String): String =
+        if (ended) "" else records.laterLines(record, maxBytes, cutMark)
 
     /** The whole value of [field] in [record]: all its lines, not cut. */
     fun fieldText(record: Int, field: Int): String = if (ended) "" else records.fieldText(record, field)

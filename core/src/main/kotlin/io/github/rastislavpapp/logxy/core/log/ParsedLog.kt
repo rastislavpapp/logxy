@@ -143,16 +143,17 @@ class ParsedLog private constructor(
         parser = parser,
     )
 
-    override fun rowValues(record: Int, maxBytes: Int): Array<String> {
+    override fun row(record: Int, maxBytes: Int, countBytes: Int): RowText {
         val segment = segmentOf(record)
         val columns = segments[segment]
         val local = record - segmentFirst[segment]
         val start = columns.starts[local]
         // A record can be huge, e.g. a whole file of lines that do not match the parser.
         val recordLength = minOf(recordEnd(record) - start, Int.MAX_VALUE / 2L).toInt()
+        val counted = minOf(countBytes, recordLength)
 
-        // One read covers every span shown in the row.
-        var needed = 0
+        // One read covers every span shown in the row, and the bytes whose lines are counted.
+        var needed = counted
         for (field in storage.fields.indices) {
             if (storage.fields[field].type != ColumnType.SPAN) continue
             val length = columns.spanLength(field, local)
@@ -164,8 +165,11 @@ class ParsedLog private constructor(
             needed = maxOf(needed, relative + shown)
         }
         val bytes = if (needed > 0) read(start, minOf(needed, recordLength)) else EMPTY
+        // The record's own line end starts no line.
+        val countEnd = if (counted == recordLength) Bytes.trimLineEnd(bytes, 0, counted) else counted
+        val moreLines = Bytes.countLineFeeds(bytes, 0, countEnd)
 
-        return Array(schema.fields.size) { field ->
+        val values = Array(schema.fields.size) { field ->
             val key = schema.fields[field].mapKey
             if (key != null) return@Array mapValue(columns, local, key, bytes, maxBytes)
             columns.valueText(field, local, parser, dictionaries[field]) ?: run {
@@ -185,6 +189,7 @@ class ParsedLog private constructor(
                 }
             }
         }
+        return RowText(values, moreLines)
     }
 
     override fun fieldText(record: Int, field: Int): String {
@@ -203,6 +208,20 @@ class ParsedLog private constructor(
         val end = if (complete) Bytes.trimLineEnd(bytes, 0, bytes.size) else bytes.size
         if (complete) parser.detailText(bytes, 0, end)?.let { return it }
         return Bytes.utf8Text(bytes, 0, end, maxBytes)
+    }
+
+    override fun laterLines(record: Int, maxBytes: Int, cutMark: String): String {
+        val start = recordStart(record)
+        val length = recordEnd(record) - start
+        val bytes = read(start, minOf(length, maxBytes + 2L).toInt())
+        val complete = bytes.size.toLong() == length
+        val end = if (complete) Bytes.trimLineEnd(bytes, 0, bytes.size) else bytes.size
+        var from = 0
+        while (from < end && bytes[from] != Bytes.LF) from++
+        if (from == end) return ""
+        from++
+        // The line end can lie just past maxBytes, read for the trimming.
+        return Bytes.utf8Text(bytes, from, end, (maxBytes - from).coerceAtLeast(0), cutMark)
     }
 
     override fun sourceText(record: Int): String {

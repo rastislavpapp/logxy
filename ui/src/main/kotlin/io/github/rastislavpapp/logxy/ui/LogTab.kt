@@ -70,7 +70,6 @@ import javax.swing.Timer
 import javax.swing.TransferHandler
 import javax.swing.text.JTextComponent
 
-private const val MAX_DETAIL_BYTES = 1024 * 1024
 private const val MAX_TITLE_CHARS = 40
 private const val MAX_RULE_CHARS = 1000
 private val RANGE_OPS = listOf(QueryOp.AT_LEAST, QueryOp.ABOVE, QueryOp.AT_MOST, QueryOp.BELOW)
@@ -84,15 +83,15 @@ private const val FLOATING_TOP_GAP = 6
 private const val FLOATING_RIGHT_GAP = 24
 
 /** The views around a [LogTab]'s rows, which the user can show and hide one by one where the host offers it. */
-enum class LogPart { FILTER, HISTOGRAM, DETAIL, TEMPLATES }
+enum class LogPart { FILTER, HISTOGRAM, TEMPLATES }
 
 /**
- * One open file, or several merged: shows the records of its [LogSession], with the filter bar and the
- * detail pane. [openFiles] opens dropped files; [openEach] opens files in tabs of their own. [filter]
+ * One open file, or several merged: shows the records of its [LogSession], with the filter bar and, if the host has
+ * one, the detail pane. [openFiles] opens dropped files; [openEach] opens files in tabs of their own. [filter]
  * is applied once the records are there. [origin] tells which files were extracted from zips or decompressed.
  * The [host] keeps the settings and gives what only the app or the plugin has. With [togglesParts], the
- * [shownParts] are shown or hidden as set, and the detail and the templates side by side; else the detail and the
- * templates are tabs below the rows, which a divider arrow hides.
+ * [shownParts] are shown or hidden as set; else the detail and the templates are tabs below the rows, which a divider
+ * arrow hides.
  */
 class LogTab(
     paths: List<Path>,
@@ -148,7 +147,7 @@ class LogTab(
     /** The full path, or one per line for a merge; files from archives as `container!/entry`. */
     val description: String get() = paths.joinToString("\n") { (origin(it) ?: it).toString() }
     private val content = JPanel(BorderLayout())
-    private val detail = host.detailPane()
+    private val detail: DetailPane? = host.detailPane()
     private val filterBar = FilterBar(::applyFilter, columnNames, host)
     private val findBar = host.findView(this, ::searchFor) { forward -> find(forward) }
 
@@ -182,16 +181,14 @@ class LogTab(
         ::canChart,
     )
 
-    private val detailView = JScrollPane(
-        detail.component,
-        ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED,
-        ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER,
-    )
-
     /** Below the table, unless [togglesParts]: the selected record, or the message templates of the shown rows. */
     private val bottomTabs by lazy {
         JTabbedPane().apply {
-            addTab("Detail", detailView)
+            if (detail != null) {
+                val vertical = ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED
+                val horizontal = ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER
+                addTab("Detail", JScrollPane(detail.component, vertical, horizontal))
+            }
             addTab("Templates", templates)
         }
     }
@@ -203,8 +200,7 @@ class LogTab(
     var shownParts: Set<LogPart> = LogPart.entries.toSet()
         set(value) {
             if (value == field) return
-            val bottomChanged = (LogPart.DETAIL in value) != (LogPart.DETAIL in field) ||
-                (LogPart.TEMPLATES in value) != (LogPart.TEMPLATES in field)
+            val bottomChanged = (LogPart.TEMPLATES in value) != (LogPart.TEMPLATES in field)
             field = value
             filterBar.isVisible = filterReady && LogPart.FILTER in value
             histogramBar?.isVisible = LogPart.HISTOGRAM in value
@@ -861,7 +857,7 @@ class LogTab(
         templates.canFilter = shown.schema.hasTemplates()
         setFilterVisible(true)
 
-        detail.show("")
+        detail?.show("")
         table.resizedWidths = rememberedWidths
         rowsView = if (findBar.floats) {
             FloatingTopRight(scrollPane, findBar.component)
@@ -895,18 +891,9 @@ class LogTab(
     /** Lays out the rows and, below them, the detail and the templates as tabs, or those of [shownParts]. */
     private fun showParts() {
         val rows = rowsPanel ?: return
-        val detailShown = LogPart.DETAIL in shownParts
-        val templatesShown = LogPart.TEMPLATES in shownParts
         val bottom = when {
             !togglesParts -> bottomTabs
-            detailShown && templatesShown -> look.horizontalSplit().apply {
-                leftComponent = detailView
-                rightComponent = templates
-                resizeWeight = 0.5
-                border = null
-            }
-            detailShown -> detailView
-            templatesShown -> templates
+            LogPart.TEMPLATES in shownParts -> templates
             else -> null
         }
         content.removeAll()
@@ -948,6 +935,7 @@ class LogTab(
 
     /** Shows the record at [row] of the shown log, or nothing if there is none. */
     private fun showDetail(model: LogTableModel, row: Int) {
+        val detail = detail ?: return
         val record = model.recordAtIndexOrNull(row)
         detail.show(if (record != null) model.shown.recordText(record, MAX_DETAIL_BYTES) else "")
         // A long record, e.g. with a stack trace, shows where the find bar's text is.
@@ -956,6 +944,7 @@ class LogTab(
 
     /** Shows [record] again if it is selected; it may have grown, e.g. by a stack trace written after it. */
     private fun refreshDetail(record: Int) {
+        val detail = detail ?: return
         val model = model ?: return
         val row = table?.selection?.lead ?: return
         if (model.recordAtIndexOrNull(row) != record) return
@@ -980,7 +969,7 @@ class LogTab(
             }
             val matches = query?.let(Highlighter::of) ?: Highlighter.NONE
             table?.matches = matches
-            detail.matches = matches
+            detail?.matches = matches
             filterBar.showError(null)
         } catch (e: QueryException) {
             filterBar.showError(e.message)
@@ -1014,7 +1003,7 @@ class LogTab(
 
     /** Opens the find bar, to find the text selected in the detail pane if it is one line. */
     fun showFind() {
-        findBar.open(detail.component.selectedText?.takeIf { it.isNotBlank() && '\n' !in it })
+        findBar.open(detail?.component?.selectedText?.takeIf { it.isNotBlank() && '\n' !in it })
     }
 
     /** Marks [search] and finds the records it matches, going to the first from the current one on. */
@@ -1022,7 +1011,7 @@ class LogTab(
         this.search = search
         foundMarks = search?.let(Highlighter::of) ?: Highlighter.NONE
         table?.found = foundMarks
-        detail.found = foundMarks
+        detail?.found = foundMarks
         if (!findBar.isOpen) table?.requestFocusInWindow()
         pendingFind = null
         try {
@@ -1098,6 +1087,11 @@ class LogTab(
         if (index < 0 || model.recordAtIndex(index) != record) return
         session.follow = false
         scrollPane.selectRow(index, scroll = index !in scrollPane.firstVisibleRow..scrollPane.lastVisibleRow)
+        // A find past the record's first line expands its row, and shows that line.
+        val local = index - model.windowStart
+        if (local !in 0..<table.rowCount) return
+        val y = table.showFound(local)
+        if (y >= 0) scrollPane.showInRow(index, y, table.rowHeight)
     }
 
     /** Shows how many records the search found, and which of them is selected. */
@@ -1306,6 +1300,7 @@ class LogTab(
 
         override fun recordsGrew(changed: IntArray) {
             model?.recordsGrew(changed)
+            table?.recordsGrew(changed)
             changed.forEach(::refreshDetail)
         }
 

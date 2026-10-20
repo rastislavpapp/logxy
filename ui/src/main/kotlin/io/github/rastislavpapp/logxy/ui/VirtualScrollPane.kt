@@ -36,7 +36,8 @@ interface RowWindow {
 
 /**
  * Scroll pane for tables with more rows than `JTable` can lay out (its height is an int number of
- * pixels). The table holds a window of rows, and a separate scroll bar counts rows of the whole list.
+ * pixels). The table holds a window of rows, and a separate scroll bar counts rows of the whole list. Rows may differ
+ * in height: where they lie is the table's to tell, by `getCellRect` and `rowAtPoint`.
  */
 class VirtualScrollPane(private val table: JTable, private val window: RowWindow) : JPanel(BorderLayout()) {
 
@@ -69,11 +70,31 @@ class VirtualScrollPane(private val table: JTable, private val window: RowWindow
     /** Whether the user scrolling to the end turns [follow] back on. */
     var resumeFollowAtEnd: () -> Boolean = { false }
 
-    private val visibleRows get() = maxOf(1, viewport.extentSize.height / table.rowHeight)
+    private val viewY get() = viewport.viewPosition.y
 
-    private val topRow get() = window.windowStart + viewport.viewPosition.y / table.rowHeight
+    private val viewHeight get() = viewport.extentSize.height
 
-    private val atEnd get() = topRow + visibleRows >= window.totalRowCount
+    /** Rows of the table at least partly in view; at least 1. */
+    private val visibleRows get() = maxOf(1, localRowAt(viewY + viewHeight - 1) - localRowAt(viewY) + 1)
+
+    private val topRow get() = window.windowStart + maxOf(0, localRowAt(viewY))
+
+    private val atEnd
+        get() = window.windowStart + table.rowCount >= window.totalRowCount && viewY + viewHeight >= table.height
+
+    /** The row of the table at [y]: the first or the last one when [y] is above or below them; -1 if none. */
+    private fun localRowAt(y: Int): Int {
+        if (table.rowCount == 0) return -1
+        val row = table.rowAtPoint(Point(0, y))
+        return when {
+            row >= 0 -> row
+            y < 0 -> 0
+            else -> table.rowCount - 1
+        }
+    }
+
+    /** The y of the table's [row]. */
+    private fun rowTop(row: Int) = table.getCellRect(row, 0, true).y
 
     init {
         val headerSpacer = object : JComponent() {
@@ -89,7 +110,8 @@ class VirtualScrollPane(private val table: JTable, private val window: RowWindow
         scrollBar.addAdjustmentListener {
             if (!updatingScrollBar) {
                 if (it.value + visibleRows < window.totalRowCount) follow = false
-                scrollToRow(it.value)
+                // The bar's end shows the end of the last row, which may be taller than the view.
+                if (it.value + scrollBar.visibleAmount >= scrollBar.maximum) scrollToEnd() else scrollToRow(it.value)
                 resumeFollowIfAtEnd()
             }
         }
@@ -104,7 +126,11 @@ class VirtualScrollPane(private val table: JTable, private val window: RowWindow
         installJumpActions()
     }
 
-    fun scrollToEnd() = scrollToRow(window.totalRowCount)
+    /** Scrolls to the bottom of the last row, also of one taller than the view. */
+    fun scrollToEnd() {
+        scrollToRow(window.totalRowCount)
+        setViewY(table.height)
+    }
 
     private fun resumeFollowIfAtEnd() {
         if (!follow && atEnd && resumeFollowAtEnd()) follow = true
@@ -127,12 +153,28 @@ class VirtualScrollPane(private val table: JTable, private val window: RowWindow
     /** Index of the lowest visible row in the whole list; below [firstVisibleRow] if there are no rows. */
     val lastVisibleRow get() = minOf(topRow + visibleRows, window.totalRowCount) - 1
 
-    /** Selects [row] of the whole list; with [scroll], first scrolls it into the middle of the view. */
+    /**
+     * Selects [row] of the whole list; with [scroll], first scrolls it into the middle of the view, or its top to the
+     * top of the view if it is taller.
+     */
     fun selectRow(row: Int, scroll: Boolean = true) {
         if (row < 0 || row >= window.totalRowCount) return
-        if (scroll) scrollToRow(row - visibleRows / 2)
+        if (scroll) {
+            scrollToRow(row)
+            val cell = table.getCellRect(row - window.windowStart, 0, true)
+            setViewY(cell.y - maxOf(0, (viewHeight - cell.height) / 2))
+        }
         val local = row - window.windowStart
         if (local in 0..<table.rowCount) table.selectionModel.setSelectionInterval(local, local)
+    }
+
+    /** Scrolls the part [y] to [y] + [height] of [row] of the whole list into view, if it is not; e.g. a line of it. */
+    fun showInRow(row: Int, y: Int, height: Int) {
+        scrollPane.validate()
+        val local = row - window.windowStart
+        if (local !in 0..<table.rowCount) return
+        val top = rowTop(local) + y
+        if (top < viewY || top + height > viewY + viewHeight) setViewY(top - (viewHeight - height) / 2)
     }
 
     /** Call after rows were appended to the list. */
@@ -144,11 +186,14 @@ class VirtualScrollPane(private val table: JTable, private val window: RowWindow
     fun scrollToRow(row: Int) {
         // The table may just have grown; its height must be current before positioning the view.
         scrollPane.validate()
-        val top = row.coerceIn(0, maxOf(0, window.totalRowCount - visibleRows))
-        if (top < window.windowStart || top + visibleRows > window.windowStart + table.rowCount) {
+        val top = row.coerceIn(0, maxOf(0, window.totalRowCount - 1))
+        // Rows of rowHeight would fill the view; taller ones fill it with fewer.
+        val rowsInView = maxOf(1, viewHeight / table.rowHeight)
+        if (top < window.windowStart || top + rowsInView > window.windowStart + table.rowCount) {
             moveWindow(top - WINDOW_ROWS / 2)
         }
-        setViewY((top - window.windowStart) * table.rowHeight)
+        val local = top - window.windowStart
+        if (local in 0..<table.rowCount) setViewY(rowTop(local))
     }
 
     private fun onViewChanged() {
@@ -182,11 +227,16 @@ class VirtualScrollPane(private val table: JTable, private val window: RowWindow
     /** Moves the window to start near [start] without changing what is on screen. */
     private fun moveWindow(start: Int) {
         val newStart = start.coerceIn(0, maxOf(0, window.totalRowCount - table.rowCount))
-        val delta = newStart - window.windowStart
-        if (delta == 0) return
-        val viewY = viewport.viewPosition.y - delta * table.rowHeight
+        if (newStart == window.windowStart) return
+        // The row at the top of the view, and how far into it the view starts, stay.
+        val localTop = maxOf(0, localRowAt(viewY))
+        val offset = if (table.rowCount > 0) viewY - rowTop(localTop) else 0
+        val top = window.windowStart + localTop
         window.windowStart = newStart
-        setViewY(viewY)
+        // Rows of other heights may have come into the window.
+        scrollPane.validate()
+        val local = (top - newStart).coerceIn(0, maxOf(0, table.rowCount - 1))
+        setViewY(if (table.rowCount > 0) rowTop(local) + offset else 0)
     }
 
     private fun setViewY(y: Int) {
@@ -194,13 +244,17 @@ class VirtualScrollPane(private val table: JTable, private val window: RowWindow
         viewport.viewPosition = Point(0, y.coerceIn(0, maxY))
     }
 
+    // By pixels, a row's height per row turned, so the wheel also scrolls through a row taller than the view.
     private fun onWheel(e: MouseWheelEvent) {
         val perNotch = if (e.scrollType == MouseWheelEvent.WHEEL_UNIT_SCROLL) e.scrollAmount else visibleRows
         val rows = e.preciseWheelRotation * perNotch + wheelRemainder
         val whole = rows.toInt()
         wheelRemainder = rows - whole
         if (rows < 0) follow = false
-        if (whole != 0) scrollToRow(topRow + whole)
+        if (whole != 0) {
+            scrollPane.validate()
+            setViewY(viewY + whole * table.rowHeight)
+        }
         if (rows > 0) resumeFollowIfAtEnd()
         e.consume()
     }

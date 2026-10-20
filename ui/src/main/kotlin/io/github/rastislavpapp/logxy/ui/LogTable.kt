@@ -9,14 +9,25 @@ import java.awt.Color
 import java.awt.Component
 import java.awt.Font
 import java.awt.Graphics
+import java.awt.Graphics2D
+import java.awt.Point
 import java.awt.Rectangle
+import java.awt.event.ActionEvent
+import java.awt.event.MouseAdapter
+import java.awt.event.MouseEvent
+import javax.swing.AbstractAction
 import javax.swing.JLabel
 import javax.swing.JTable
+import javax.swing.KeyStroke
 import javax.swing.SwingConstants
 import javax.swing.SwingUtilities
 import javax.swing.UIManager
+import javax.swing.border.CompoundBorder
+import javax.swing.border.EmptyBorder
 import javax.swing.event.TableModelEvent
+import javax.swing.plaf.basic.BasicGraphicsUtils
 import javax.swing.table.DefaultTableCellRenderer
+import javax.swing.table.TableCellRenderer
 
 private const val CELL_PADDING = 12
 
@@ -29,6 +40,21 @@ private const val CLIP = "..."
  */
 private const val MIN_LAST_COLUMN_CHARS = 40
 
+/** What an expanded record ends with when it is longer than [MAX_DETAIL_BYTES]. */
+private const val CUT_MARK = "… cut at 1 MB"
+
+/** Ends the first line of an expanded row; collapses it when clicked. */
+private const val COLLAPSE_MARKER = " ▾"
+
+/** Keeps the pixel rows of the table's window within an int, however long the expanded records. */
+private const val MAX_ROW_HEIGHT = 1 shl 22
+
+/** Background of text matched by the filter, translucent to suit light and dark looks. */
+val HIGHLIGHT_COLOR = Color(255, 200, 0, 110)
+
+/** Background of text the find bar found; unlike the filter's, also shown on selected rows. */
+val FOUND_COLOR = Color(40, 200, 90, 130)
+
 /** The text color of [level]: red for errors, yellow for warnings, dim for debug output, else [default]. */
 fun levelColor(level: Level?, default: Color): Color = when (level) {
     Level.ERROR, Level.FATAL -> look.error
@@ -37,7 +63,10 @@ fun levelColor(level: Level?, default: Color): Color = when (level) {
     else -> default
 }
 
-/** Table of log records; the last column always fills the viewport and long values are cut. */
+/**
+ * Table of log records; the last column always fills the viewport and long values are cut. A record of several lines
+ * shows its first, with a marker that expands its row to all of them in the last column.
+ */
 class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
 
     private val rowSelection = WindowSelectionModel(logModel)
@@ -47,6 +76,26 @@ class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
 
     /** The columns of [widths] whose width the user dragged; the others' follow the records shown. */
     private val resized = HashSet<Any>()
+
+    /** Records whose rows show all their lines; they stay so while rows come and go, e.g. by a filter. */
+    private val expanded = HashSet<Int>()
+
+    /** The text of each of [expanded], read once it is painted. */
+    private val expandedTexts = HashMap<Int, ExpandedText>()
+
+    /** Where the rows lie; null when they must be laid out again, e.g. after the rows or [expanded] changed. */
+    private var rowHeights: RowHeights? = null
+
+    /** The width of the last column [rowHeights] wrapped expanded rows to. */
+    private var wrapWidth = -1
+
+    private val expandedRenderer = ExpandedRenderer()
+
+    /** Measures the cells' insets. */
+    private val plainRenderer = DefaultTableCellRenderer()
+
+    /** Whether the last click on a row was on its marker, so the double click it starts toggles nothing more. */
+    private var clickedMarker = false
 
     /**
      * The widths in pixels the user dragged columns to, by field name, also of hidden columns; set ones count as
@@ -85,6 +134,20 @@ class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
         tableHeader.reorderingAllowed = false
         (tableHeader.defaultRenderer as? JLabel)?.horizontalAlignment = SwingConstants.LEADING
         updateLook()
+        installExpandKeys()
+        addMouseListener(object : MouseAdapter() {
+            override fun mouseClicked(e: MouseEvent) {
+                if (!SwingUtilities.isLeftMouseButton(e)) return
+                val row = rowAtPoint(e.point)
+                if (row < 0) return
+                if (e.clickCount == 1) {
+                    clickedMarker = isOnMarker(row, e.point)
+                    if (clickedMarker) toggleExpanded(row)
+                } else if (e.clickCount == 2 && !clickedMarker) {
+                    toggleExpanded(row)
+                }
+            }
+        })
     }
 
     /** The selected rows of the shown log, not only of those the table holds. */
@@ -94,11 +157,24 @@ class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
     override fun selectAll() = rowSelection.selectAll()
 
     // Extending goes from the anchor wherever it is; outside the rows the table holds, JTable would not see it.
+    // An expanded row scrolls only its first line into view: all of it would move the view under a click on it.
     override fun changeSelection(rowIndex: Int, columnIndex: Int, toggle: Boolean, extend: Boolean) {
-        if (!extend) return super.changeSelection(rowIndex, columnIndex, toggle, extend)
-        if (toggle) rowSelection.extendKeepingOthers(rowIndex) else rowSelection.extendTo(rowIndex)
-        columnModel.selectionModel.setSelectionInterval(columnIndex, columnIndex)
-        if (autoscrolls) scrollRectToVisible(getCellRect(rowIndex, columnIndex, false))
+        val scroll = autoscrolls
+        autoscrolls = false
+        try {
+            if (extend) {
+                if (toggle) rowSelection.extendKeepingOthers(rowIndex) else rowSelection.extendTo(rowIndex)
+                columnModel.selectionModel.setSelectionInterval(columnIndex, columnIndex)
+            } else {
+                super.changeSelection(rowIndex, columnIndex, toggle, extend)
+            }
+        } finally {
+            autoscrolls = scroll
+        }
+        if (!scroll) return
+        val cell = getCellRect(rowIndex, columnIndex, false)
+        cell.height = minOf(cell.height, rowHeight)
+        scrollRectToVisible(cell)
     }
 
     // JTable spreads spare width over all columns; give it all to the last one, unless the user is
@@ -111,6 +187,9 @@ class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
             last.preferredWidth = maxOf(last.minWidth, width - others)
         }
         super.doLayout()
+        // Expanded rows wrap to the last column: as it gets wider or narrower, they get lower or higher.
+        val column = expandingColumn()
+        if (expanded.isNotEmpty() && column >= 0 && columnModel.getColumn(column).width != wrapWidth) layOutRowsAgain()
     }
 
     override fun updateUI() {
@@ -125,7 +204,13 @@ class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
         // Also called from JTable's constructor, before the selection model is set.
         @Suppress("SENSELESS_COMPARISON")
         val columnsChanged = rowSelection != null && (e == null || e.firstRow == TableModelEvent.HEADER_ROW)
+
+        // Any change may move the expanded rows, e.g. when the window moves; JTable asks where rows are meanwhile.
+        @Suppress("SENSELESS_COMPARISON")
+        val hasExpanded = expanded != null && expanded.isNotEmpty()
+        if (hasExpanded) rowHeights = null
         if (columnsChanged) rowSelection.keeping { super.tableChanged(e) } else super.tableChanged(e)
+        if (hasExpanded) layOutRowsAgain()
     }
 
     // Columns are created again when the model's columns change, e.g. some are hidden.
@@ -138,7 +223,175 @@ class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
         if (ready) {
             setUpColumns()
             restoreWidths()
+            // The expanded text starts with the last column's value, which may now be another field's.
+            expandedTexts.clear()
         }
+    }
+
+    // Rows are rowHeight high but the expanded ones: JTable's own per-row heights would be lost each time the
+    // window moves or the rows are replaced, so the rows are laid out here.
+    override fun getRowHeight(row: Int): Int = rowLayout()?.height(row) ?: super.getRowHeight(row)
+
+    override fun getCellRect(row: Int, column: Int, includeSpacing: Boolean): Rectangle {
+        val rect = super.getCellRect(row, column, includeSpacing)
+        val heights = rowLayout() ?: return rect
+        // JTable puts each row at row × its own height.
+        if (row in 0..<rowCount) rect.y += heights.top(row) - row * heights.height(row)
+        return rect
+    }
+
+    override fun rowAtPoint(point: Point): Int {
+        val heights = rowLayout() ?: return super.rowAtPoint(point)
+        return heights.rowAt(point.y, rowCount)
+    }
+
+    override fun getCellRenderer(row: Int, column: Int): TableCellRenderer =
+        if (expanded.isNotEmpty() && column == expandingColumn() && isExpanded(row)) {
+            expandedRenderer
+        } else {
+            super.getCellRenderer(row, column)
+        }
+
+    /** Whether [row] of the window shows a record of several lines, which it can show all of. */
+    fun isExpandable(row: Int): Boolean = expandingColumn() >= 0 && logModel.moreLines(row) > 0
+
+    /** Whether [row] of the window shows all lines of its record. */
+    fun isExpanded(row: Int): Boolean = logModel.recordAt(row) in expanded
+
+    /** Shows all lines of the record at [row] of the window, if it has several, or only its first. */
+    fun setExpanded(row: Int, expand: Boolean) {
+        if (expand && !isExpandable(row)) return
+        val record = logModel.recordAt(row)
+        val changed = if (expand) expanded.add(record) else expanded.remove(record)
+        if (!changed) return
+        if (!expand) expandedTexts.remove(record)
+        layOutRowsAgain()
+    }
+
+    private fun toggleExpanded(row: Int) = setExpanded(row, !isExpanded(row))
+
+    /** Call after the [changed] records got more text, e.g. a stack trace written after them. */
+    fun recordsGrew(changed: IntArray) {
+        for (record in changed) expandedTexts.remove(record)
+        if (expanded.isNotEmpty()) layOutRowsAgain()
+    }
+
+    /**
+     * Expands [row] of the window if what the find bar found shows only past its record's first line; then, or if
+     * it was expanded already, the y within the row of the first line with a find there. -1 if there is none past the
+     * first line.
+     */
+    fun showFound(row: Int): Int {
+        val column = expandingColumn()
+        if (column < 0 || found.isEmpty || !isExpandable(row)) return -1
+        if (!isExpanded(row)) {
+            val shownInRow = (0..<columnCount).any { cell ->
+                val field = logModel.fieldAt(cell) ?: return@any false
+                found.ranges(field.name, getValueAt(row, cell) as String).isNotEmpty()
+            }
+            if (shownInRow) return -1
+        }
+        val field = logModel.fieldAt(column)!!.name
+        val ranges = expandedText(row, column).found(found, field)
+        val wrapped = wrapped(row, column)
+        val line = if (ranges.isEmpty()) 0 else wrapped.lineOf(ranges[0])
+        if (line == 0) return -1
+        setExpanded(row, true)
+        return firstLineTop() + line * lineHeight()
+    }
+
+    /** The last column, where expanded rows show their records; -1 if it shows no field, e.g. the line numbers. */
+    private fun expandingColumn(): Int {
+        val column = columnCount - 1
+        return if (column >= 0 && logModel.fieldAt(column) != null) column else -1
+    }
+
+    /** Lays out the rows again soon: [expanded] or what they show changed. */
+    private fun layOutRowsAgain() {
+        rowHeights = null
+        revalidate()
+        repaint()
+    }
+
+    /** Where the rows lie; null while all are rowHeight high, so JTable lays them out. */
+    private fun rowLayout(): RowHeights? {
+        // Also called from JTable's constructor, before the expanded records are set.
+        @Suppress("SENSELESS_COMPARISON")
+        if (expanded == null || expanded.isEmpty()) return null
+        val known = rowHeights
+        if (known != null) return if (known.isUniform) null else known
+        val column = expandingColumn()
+        val rows = ArrayList<Int>()
+        val heights = ArrayList<Int>()
+        if (column >= 0) {
+            for (record in expanded) {
+                val index = logModel.indexOfRecord(record)
+                if (index < 0 || logModel.recordAtIndex(index) != record) continue
+                val row = index - logModel.windowStart
+                if (row !in 0..<rowCount) continue
+                rows += row
+                heights += expandedHeight(row, column)
+            }
+        }
+        wrapWidth = if (column >= 0) columnModel.getColumn(column).width else -1
+        val laidOut = RowHeights(rowHeight, rows.toIntArray(), heights.toIntArray())
+        rowHeights = laidOut
+        return if (laidOut.isUniform) null else laidOut
+    }
+
+    private fun expandedHeight(row: Int, column: Int): Int {
+        val lines = wrapped(row, column).lineCount.toLong()
+        val height = lines * lineHeight() + rowHeight - lineHeight()
+        return minOf(height, MAX_ROW_HEIGHT.toLong()).toInt()
+    }
+
+    private fun lineHeight() = getFontMetrics(font).height
+
+    /** The y of the first line's text in a row, as a label centers it in a row of rowHeight. */
+    private fun firstLineTop() = (rowHeight - lineHeight()) / 2
+
+    private fun expandedText(row: Int, column: Int): ExpandedText {
+        val record = logModel.recordAt(row)
+        return expandedTexts.getOrPut(record) {
+            val laterLines = logModel.shown.laterLines(record, MAX_DETAIL_BYTES, CUT_MARK)
+            ExpandedText.of(getValueAt(row, column) as String, laterLines)
+        }
+    }
+
+    /** The expanded text at [row] wrapped to the width of [column], its first line leaving room for the marker. */
+    private fun wrapped(row: Int, column: Int): WrappedText {
+        plainRenderer.getTableCellRendererComponent(this, "", false, false, row, column)
+        val insets = plainRenderer.insets
+        val charWidth = getFontMetrics(font).charWidth('0')
+        val chars = (columnModel.getColumn(column).width - insets.left - insets.right) / charWidth
+        return expandedText(row, column).wrapped(chars, chars - COLLAPSE_MARKER.length)
+    }
+
+    /** Whether [point] is on the marker that expands or collapses [row]. */
+    private fun isOnMarker(row: Int, point: Point): Boolean {
+        val column = columnAtPoint(point)
+        if (column != expandingColumn()) return false
+        val prepared = prepareRenderer(getCellRenderer(row, column), row, column)
+        val renderer = prepared as? CellRenderer ?: return false
+        val cell = getCellRect(row, column, false)
+        renderer.setBounds(0, 0, cell.width, cell.height)
+        return renderer.markerBounds()?.contains(point.x - cell.x, point.y - cell.y) == true
+    }
+
+    // → and ← would move between cells, which the table does not select: they expand and collapse the lead row.
+    private fun installExpandKeys() {
+        fun bind(keys: String, name: String, expand: Boolean) {
+            actionMap.put(name, object : AbstractAction() {
+                override fun actionPerformed(e: ActionEvent) {
+                    val row = selection.lead - logModel.windowStart
+                    if (row in 0..<rowCount && selection.lead in selection) setExpanded(row, expand)
+                }
+            })
+            val inputMap = getInputMap(WHEN_ANCESTOR_OF_FOCUSED_COMPONENT)
+            keys.split(",").forEach { inputMap.put(KeyStroke.getKeyStroke(it.trim()), name) }
+        }
+        bind("RIGHT, KP_RIGHT", "logxyExpandRow", expand = true)
+        bind("LEFT, KP_LEFT", "logxyCollapseRow", expand = false)
     }
 
     /** Heads the columns with their names again, e.g. after a rename; widths stay. */
@@ -158,6 +411,7 @@ class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
         widths.keys.retainAll(resized)
         setUpColumns()
         restoreWidths()
+        rowHeights = null
     }
 
     private fun rememberWidths() {
@@ -187,7 +441,7 @@ class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
             // By the field, not the header, so a renamed column keeps its width.
             tableColumn.identifier = field?.name ?: "#"
             tableColumn.cellRenderer = when {
-                field == null -> DefaultTableCellRenderer().apply {
+                field == null -> CellRenderer().apply {
                     horizontalAlignment = SwingConstants.RIGHT
                     foreground = UIManager.getColor("Label.disabledForeground")
                 }
@@ -224,11 +478,11 @@ class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
 
     /** The longest of the first values, e.g. file names. */
     private fun sampleWidest(column: Int): Int =
-        (0..<minOf(rowCount, 1000)).maxOfOrNull { (getValueAt(it, column) as String).length } ?: 0
+        (0..<minOf(rowCount, 1000)).maxOfOrNull { logModel.sampleText(it, column).length } ?: 0
 
     /** Timestamps all have the layout's width; measure the first one. */
     private fun sampleLength(column: Int, fallback: Int): Int =
-        (0..<minOf(rowCount, 100)).map { (getValueAt(it, column) as String).length }.firstOrNull { it > 0 } ?: fallback
+        (0..<minOf(rowCount, 100)).map { logModel.sampleText(it, column).length }.firstOrNull { it > 0 } ?: fallback
 
     /**
      * The character of the text in the cell at [row] and [column] that is painted at [x]; -1 if none is, e.g. past
@@ -270,10 +524,64 @@ class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
         return if (shown == text) text.length else (shown.length - CLIP.length).coerceAtLeast(0)
     }
 
-    /** Paints the matches behind the text of left-aligned cells. */
-    private open inner class HighlightRenderer : DefaultTableCellRenderer() {
+    /** Fills [ranges] of [text], drawn from [x] and [y], that fall in `[from, to)`: the marks of one line. */
+    private fun mark(g: Graphics, text: String, from: Int, to: Int, ranges: IntArray, x: Int, y: Int, color: Color) {
+        if (ranges.isEmpty()) return
+        val metrics = g.fontMetrics
+        g.color = color
+        // The first range ending past from: ranges are sorted and do not overlap.
+        var low = 0
+        var high = ranges.size / 2
+        while (low < high) {
+            val middle = (low + high) ushr 1
+            if (ranges[middle * 2 + 1] <= from) low = middle + 1 else high = middle
+        }
+        var i = low * 2
+        while (i < ranges.size && ranges[i] < to) {
+            val start = maxOf(ranges[i], from)
+            val end = minOf(ranges[i + 1], to)
+            val left = x + metrics.stringWidth(text.substring(from, start))
+            g.fillRect(left, y, metrics.stringWidth(text.substring(start, end)), metrics.height + 2)
+            i += 2
+        }
+    }
+
+    /** A cell's text at the top of a row taller than rowHeight, where it would be in a row of rowHeight. */
+    private open inner class CellRenderer : DefaultTableCellRenderer() {
+        protected var isSelected = false
+
+        override fun getTableCellRendererComponent(
+            table: JTable, value: Any?, isSelected: Boolean, hasFocus: Boolean, row: Int, column: Int,
+        ): Component {
+            super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column)
+            this.isSelected = isSelected
+            val tall = getRowHeight(row) > rowHeight
+            verticalAlignment = if (tall) TOP else CENTER
+            if (tall) {
+                val insets = insets
+                val top = (rowHeight - insets.top - insets.bottom - getFontMetrics(font).height) / 2
+                border = CompoundBorder(border, EmptyBorder(top, 0, 0, 0))
+            }
+            return this
+        }
+
+        /** Where the marker that expands or collapses the row is, in the cell; null if it has none. */
+        open fun markerBounds(): Rectangle? = null
+
+        /** Draws [marker] dimmed, unless the row is selected, in the font [g] has. */
+        protected fun drawMarker(g: Graphics, marker: String, x: Int, baseline: Int) {
+            g.color = if (isSelected) foreground else UIManager.getColor("Label.disabledForeground")
+            BasicGraphicsUtils.drawString(this, g as Graphics2D, marker, x.toFloat(), baseline.toFloat())
+        }
+    }
+
+    /** Paints the matches behind the text of left-aligned cells; ends a record's first line with its marker. */
+    private open inner class HighlightRenderer : CellRenderer() {
         private var ranges = IntArray(0)
         private var foundRanges = IntArray(0)
+
+        /** After the text of a record with more lines: the marker, and how many there are. */
+        private var more = ""
 
         override fun getTableCellRendererComponent(
             table: JTable, value: Any?, isSelected: Boolean, hasFocus: Boolean, row: Int, column: Int,
@@ -286,12 +594,34 @@ class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
                 matches.ranges(field.name, value)
             }
             foundRanges = if (field == null || value !is String) IntArray(0) else found.ranges(field.name, value)
+            val moreLines = if (column == expandingColumn()) logModel.moreLines(row) else 0
+            more = when (moreLines) {
+                0 -> ""
+                1 -> " ▸ … +1 line"
+                else -> " ▸ … +$moreLines lines"
+            }
+            // The text is cut before the marker rather than under it.
+            if (more.isNotEmpty()) border = CompoundBorder(border, EmptyBorder(0, 0, 0, moreWidth()))
             return this
         }
 
+        private fun moreWidth() = getFontMetrics(font).stringWidth(more)
+
+        override fun markerBounds(): Rectangle? {
+            if (more.isEmpty()) return null
+            val textBounds = Rectangle()
+            layOut(this, text, textBounds)
+            return Rectangle(textBounds.x + textBounds.width, textBounds.y, moreWidth(), textBounds.height)
+        }
+
         override fun paintComponent(g: Graphics) {
+            val marked = ranges.isNotEmpty() || foundRanges.isNotEmpty()
+            if (!marked && more.isEmpty()) return super.paintComponent(g)
             var cleared = false
-            if (ranges.isNotEmpty() || foundRanges.isNotEmpty()) {
+            // Marks stop where a cut value's "..." begins.
+            val textBounds = Rectangle()
+            val visible = layOut(this, text, textBounds)
+            if (marked) {
                 // An opaque cell, e.g. a selected one, would paint its background over the marks: paint it first.
                 if (isOpaque) {
                     g.color = background
@@ -299,25 +629,17 @@ class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
                     isOpaque = false
                     cleared = true
                 }
-                val metrics = getFontMetrics(font)
-                val textBounds = Rectangle()
-                // Marks stop where a cut value's "..." begins.
-                val visible = layOut(this, text, textBounds)
-                fun mark(ranges: IntArray, color: Color) {
-                    g.color = color
-                    for (i in ranges.indices step 2) {
-                        val start = ranges[i]
-                        val end = minOf(ranges[i + 1], visible)
-                        if (start >= end) break
-                        val x = textBounds.x + metrics.stringWidth(text.substring(0, start))
-                        g.fillRect(x, 1, metrics.stringWidth(text.substring(start, end)), height - 2)
-                    }
-                }
-                mark(ranges, HIGHLIGHT_COLOR)
-                mark(foundRanges, FOUND_COLOR)
+                g.font = font
+                mark(g, text, 0, visible, ranges, textBounds.x, textBounds.y - 1, HIGHLIGHT_COLOR)
+                mark(g, text, 0, visible, foundRanges, textBounds.x, textBounds.y - 1, FOUND_COLOR)
             }
             super.paintComponent(g)
             if (cleared) isOpaque = true
+            if (more.isNotEmpty()) {
+                g.font = font
+                val baseline = textBounds.y + getFontMetrics(font).ascent
+                drawMarker(g, more, textBounds.x + textBounds.width, baseline)
+            }
         }
     }
 
@@ -328,6 +650,59 @@ class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
             super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column)
             if (!isSelected) foreground = levelColor(logModel.level(row), table.foreground)
             return this
+        }
+    }
+
+    /** All lines of an expanded row's record, wrapped to the column; paints only the lines in view. */
+    private inner class ExpandedRenderer : CellRenderer() {
+        private var wrapped: WrappedText? = null
+        private var ranges = IntArray(0)
+        private var foundRanges = IntArray(0)
+
+        override fun getTableCellRendererComponent(
+            table: JTable, value: Any?, isSelected: Boolean, hasFocus: Boolean, row: Int, column: Int,
+        ): Component {
+            // The lines are painted here, not by the label.
+            super.getTableCellRendererComponent(table, "", isSelected, hasFocus, row, column)
+            val field = logModel.fieldAt(column)!!.name
+            val text = expandedText(row, column)
+            wrapped = wrapped(row, column)
+            ranges = if (isSelected) IntArray(0) else text.matches(matches, field)
+            foundRanges = text.found(found, field)
+            return this
+        }
+
+        override fun markerBounds(): Rectangle? {
+            val wrapped = wrapped ?: return null
+            val metrics = getFontMetrics(font)
+            val x = insets.left + metrics.stringWidth(wrapped.text.substring(0, wrapped.end(0)))
+            return Rectangle(x, insets.top, metrics.stringWidth(COLLAPSE_MARKER), metrics.height)
+        }
+
+        override fun paintComponent(g: Graphics) {
+            super.paintComponent(g)
+            val wrapped = wrapped ?: return
+            val text = wrapped.text
+            val metrics = getFontMetrics(font)
+            val lineHeight = metrics.height
+            val clip = g.clipBounds ?: Rectangle(0, 0, width, height)
+            val top = insets.top
+            val left = insets.left
+            val first = ((clip.y - top) / lineHeight).coerceAtLeast(0)
+            val last = minOf(wrapped.lineCount - 1, (clip.y + clip.height - top) / lineHeight)
+            g.font = font
+            for (line in first..last) {
+                val y = top + line * lineHeight
+                val from = wrapped.start(line)
+                val to = wrapped.end(line)
+                mark(g, text, from, to, ranges, left, y - 1, HIGHLIGHT_COLOR)
+                mark(g, text, from, to, foundRanges, left, y - 1, FOUND_COLOR)
+                g.color = foreground
+                val shown = text.substring(from, to)
+                val baseline = y + metrics.ascent
+                BasicGraphicsUtils.drawString(this, g as Graphics2D, shown, left.toFloat(), baseline.toFloat())
+                if (line == 0) drawMarker(g, COLLAPSE_MARKER, left + metrics.stringWidth(shown), baseline)
+            }
         }
     }
 }

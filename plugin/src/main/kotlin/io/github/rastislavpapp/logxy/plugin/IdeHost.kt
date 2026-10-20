@@ -8,7 +8,6 @@ import io.github.rastislavpapp.logxy.core.query.TextSearch
 import io.github.rastislavpapp.logxy.ui.DetailPane
 import io.github.rastislavpapp.logxy.ui.FindView
 import io.github.rastislavpapp.logxy.ui.LogViewHost
-import io.github.rastislavpapp.logxy.ui.PlainDetailArea
 import io.github.rastislavpapp.logxy.ui.QueryText
 import io.github.rastislavpapp.logxy.ui.SettingsDialogs
 import io.github.rastislavpapp.logxy.ui.UiState
@@ -22,7 +21,7 @@ import kotlin.coroutines.CoroutineContext
 
 /**
  * The IDE's side of the views in [project]: settings in the IDE's storage and pages of its Settings, UI state in its
- * properties, its search bar, the visual filter editor only and a plain detail pane.
+ * properties, its search bar, the visual filter editor only and no detail pane.
  */
 class IdeHost(private val project: Project) : LogViewHost, SettingsDialogs {
 
@@ -32,7 +31,8 @@ class IdeHost(private val project: Project) : LogViewHost, SettingsDialogs {
 
     override val uiDispatcher: CoroutineDispatcher get() = EdtDispatcher
 
-    override fun detailPane(): DetailPane = PlainDetailArea()
+    // Expanded rows show records whole.
+    override fun detailPane(): DetailPane? = null
 
     override fun queryText(onApply: () -> Unit): QueryText? = null
 

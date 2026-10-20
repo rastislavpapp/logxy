@@ -149,13 +149,6 @@ fun viewActions(view: RunLogView): ActionGroup = DefaultActionGroup(
     ),
     PartToggle(
         view,
-        LogPart.DETAIL,
-        "Detail",
-        "Show the selected record's whole text",
-        AllIcons.Actions.PreviewDetails,
-    ),
-    PartToggle(
-        view,
         LogPart.TEMPLATES,
         "Templates",
         "Show the message templates of the shown records",

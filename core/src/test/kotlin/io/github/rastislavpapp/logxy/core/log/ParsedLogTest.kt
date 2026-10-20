@@ -100,6 +100,44 @@ class ParsedLogTest {
     }
 
     @Test
+    fun `a row tells how many lines its record has after the first`() {
+        parse(sample).use { log ->
+            assertEquals(listOf(0, 0, 2, 0), List(4) { log.row(it, 1000, 10_000).moreLines })
+            assertEquals("Failed - retrying", log.row(2, 1000, 10_000).values[4])
+        }
+    }
+
+    @Test
+    fun `lines are counted in the bytes asked for only`() {
+        val first = "2026-10-01 08:00:00.001 [main] ERROR a.B - Failed\r\n"
+        parse(first + "at x\r\n".repeat(100)).use { log ->
+            assertEquals(100, log.row(0, 1000, 10_000).moreLines)
+            // Ten further lines of 6 bytes, the last without its \n.
+            assertEquals(10, log.row(0, 1000, first.length + 6 * 10 - 1).moreLines)
+        }
+    }
+
+    @Test
+    fun `later lines are the record after its first line, as written`() {
+        parse(sample).use { log ->
+            assertEquals(
+                "java.lang.IllegalStateException: boom\n\tat com.example.Db.query(Db.java:10)",
+                log.laterLines(2, 10_000, "…"),
+            )
+            assertEquals("", log.laterLines(1, 10_000, "…"))
+        }
+    }
+
+    @Test
+    fun `later lines are cut with the mark`() {
+        val first = "2026-10-01 08:00:00.001 [main] ERROR a.B - Failed\n"
+        parse(first + "abcdefghij\nklm\n").use { log ->
+            assertEquals("abcde (cut)", log.laterLines(0, first.length + 5, " (cut)"))
+            assertEquals("abcdefghij\nklm", log.laterLines(0, first.length + 14, " (cut)"))
+        }
+    }
+
+    @Test
     fun `long values are cut`() {
         parse("2026-10-01 08:00:00.001 [main] INFO  a.B - ${"x".repeat(50)}\n").use { log ->
             assertEquals("x".repeat(10) + "…", log.rowValues(0, 10)[4])

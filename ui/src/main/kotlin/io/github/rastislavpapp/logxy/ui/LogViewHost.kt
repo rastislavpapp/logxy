@@ -25,8 +25,8 @@ interface LogViewHost {
     /** Runs coroutines on the UI thread; the views' work starts there. */
     val uiDispatcher: CoroutineDispatcher
 
-    /** A fresh pane for the selected record's whole text. */
-    fun detailPane(): DetailPane
+    /** A fresh pane for the selected record's whole text; null for none, the expanded rows showing it. */
+    fun detailPane(): DetailPane?
 
     /**
      * A fresh editor for the filter's text form (Advanced), applying with [onApply]; null offers only the visual

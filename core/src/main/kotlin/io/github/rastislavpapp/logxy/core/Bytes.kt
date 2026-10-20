@@ -81,12 +81,18 @@ internal object Bytes {
         return true
     }
 
-    /** `bytes[from, to)` as UTF-8 text; beyond [maxBytes] cut at a character boundary and ending with `…`. */
-    fun utf8Text(bytes: ByteArray, from: Int, to: Int, maxBytes: Int): String {
+    /** `bytes[from, to)` as UTF-8 text; beyond [maxBytes] cut at a character boundary and ending with [cutMark]. */
+    fun utf8Text(bytes: ByteArray, from: Int, to: Int, maxBytes: Int, cutMark: String = "…"): String {
         if (to - from <= maxBytes) return String(bytes, from, to - from, Charsets.UTF_8)
         var end = from + maxBytes
         while (end > from && (bytes[end].toInt() and 0xC0) == 0x80) end--
-        return String(bytes, from, end - from, Charsets.UTF_8) + "…"
+        return String(bytes, from, end - from, Charsets.UTF_8) + cutMark
+    }
+
+    fun countLineFeeds(bytes: ByteArray, from: Int, to: Int): Int {
+        var count = 0
+        for (i in from..<to) if (bytes[i] == LF) count++
+        return count
     }
 
     /**
