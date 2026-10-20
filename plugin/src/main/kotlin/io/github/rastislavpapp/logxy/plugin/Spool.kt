@@ -11,32 +11,46 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardOpenOption
 
-// CSI sequences (colours, cursor moves); ColoredProcessHandler already decodes them, a plain OSProcessHandler does not.
-private val ANSI = Regex("\u001B\\[[0-?]*[ -/]*[@-~]")
 private val UNSAFE_IN_NAME = Regex("[^A-Za-z0-9._-]")
+private const val MAX_NAME = 60
 
 /**
- * A run's stdout and stderr, in arrival order, without ANSI codes and IDE system lines, appended to [path]. The
- * process reads its streams on separate threads, so writes are serialized; [onGrew] and [onExit] run on those threads.
+ * A run's stdout and stderr, in arrival order, without ANSI codes and IDE system lines (the command line, "Process
+ * finished"), appended to [path]. The process's streams are read on threads of their own, so writes are serialized;
+ * [onGrew] and [onExit] run on those threads.
  */
 class Spool private constructor(val path: Path) : ProcessListener {
 
     private val channel = FileChannel.open(path, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE)
 
+    // Per stream: a code split across chunks of one stream must not swallow the other's text.
+    private val stdout = AnsiStripper()
+    private val stderr = AnsiStripper()
+
     @Volatile var onGrew: () -> Unit = {}
 
     @Volatile var onExit: (exitCode: Int) -> Unit = {}
+
+    /** Line breaks written so far. */
+    @Volatile var lines = 0
+        private set
 
     /** The exit code once the process ended, else null. */
     @Volatile var exitCode: Int? = null
         private set
 
     override fun onTextAvailable(event: ProcessEvent, outputType: Key<*>) {
-        if (!ProcessOutputType.isStdout(outputType) && !ProcessOutputType.isStderr(outputType)) return
-        val bytes = ByteBuffer.wrap(ANSI.replace(event.text, "").toByteArray())
+        val stripper = when {
+            ProcessOutputType.isStdout(outputType) -> stdout
+            ProcessOutputType.isStderr(outputType) -> stderr
+            else -> return
+        }
         synchronized(this) {
             if (!channel.isOpen) return
+            val text = stripper.strip(event.text)
+            val bytes = ByteBuffer.wrap(text.toByteArray())
             while (bytes.hasRemaining()) channel.write(bytes)
+            lines += text.count { it == '\n' }
         }
         onGrew()
     }
@@ -48,19 +62,19 @@ class Spool private constructor(val path: Path) : ProcessListener {
     }
 
     companion object {
-        /** A fresh file for a run of [configuration], deleting the files of its earlier runs. */
-        fun start(configuration: String): Spool {
+        /**
+         * A fresh file for a run of the configuration [id] names, in the IDE's system directory, deleting the files
+         * of its earlier runs.
+         */
+        fun start(id: String): Spool {
             val dir = Files.createDirectories(PathManager.getSystemDir().resolve("logxy/runs"))
-            val name = configuration.replace(UNSAFE_IN_NAME, "_").take(MAX_NAME)
-            val hash = Integer.toHexString(configuration.hashCode())
-            val key = "$name-$hash"
+            val name = id.replace(UNSAFE_IN_NAME, "_").take(MAX_NAME)
+            val key = "$name-${Integer.toHexString(id.hashCode())}"
             val all = Files.list(dir).use { files -> files.toList() }
             val earlier = all.filter { "${it.fileName}".startsWith("$key-") }
-            // An earlier run's tab may still read its file; on Windows that file cannot go yet.
+            // An earlier run's view may still read its file; on Windows that file cannot go yet.
             for (file in earlier) runCatching { Files.delete(file) }
             return Spool(dir.resolve("$key-${System.currentTimeMillis()}.log"))
         }
-
-        private const val MAX_NAME = 60
     }
 }

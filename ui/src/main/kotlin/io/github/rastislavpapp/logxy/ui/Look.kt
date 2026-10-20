@@ -72,6 +72,9 @@ interface Look {
     /** Shows [label] as a heading. */
     fun heading(label: JLabel)
 
+    /** A split pane with one component above the other; a look whose own divider does not fit replaces it. */
+    fun verticalSplit(): JSplitPane = JSplitPane(JSplitPane.VERTICAL_SPLIT)
+
     /** Offers only the one-touch arrow that hides [split]'s bottom component, and brings it back. */
     fun expandableBottomOnly(split: JSplitPane)
 

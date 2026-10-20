@@ -192,8 +192,15 @@ class LogTab(
         isEnabled = false
     }
 
-    /** Names of the columns the user hid; kept when the file is read again. */
-    private var hiddenColumns = emptySet<String>()
+    /**
+     * Names of the columns the user hid, kept when the file is read again; they may be set before the records are
+     * there. Names that would hide every column hide none.
+     */
+    var hiddenColumns = emptySet<String>()
+        set(value) {
+            field = value
+            model?.let(::applyHiddenColumns)
+        }
     private var progressTimer: Timer? = null
     private var filterTimer: Timer? = null
     private var searchTimer: Timer? = null
@@ -364,7 +371,7 @@ class LogTab(
         }
         fun update() {
             val hidden = model.columnChoices.filterIndexed { i, _ -> !boxes[i].isSelected }
-            hideColumns(hidden.map { it.name }.toSet())
+            hiddenColumns = hidden.map { it.name }.toSet()
             enableBoxes()
         }
         boxes.forEach { box ->
@@ -390,11 +397,11 @@ class LogTab(
         val popup = JPopupMenu()
         popup.add(JMenuItem("Hide “$name”").apply {
             isEnabled = model.columnChoices.count { it.name !in hiddenColumns } > 1
-            addActionListener { hideColumns(hiddenColumns + field.name) }
+            addActionListener { hiddenColumns += field.name }
         })
         popup.add(JMenuItem("Show All Columns").apply {
             isEnabled = hiddenColumns.isNotEmpty()
-            addActionListener { hideColumns(emptySet()) }
+            addActionListener { hiddenColumns = emptySet() }
         })
         popup.addSeparator()
         fun askName(onRename: (String) -> Unit) =
@@ -654,9 +661,10 @@ class LogTab(
         }
     }
 
-    private fun hideColumns(names: Set<String>) {
-        hiddenColumns = names
-        model?.hiddenColumns = names
+    // Hiding every column happens when the file changed meanwhile, or the names were remembered for another parser.
+    private fun applyHiddenColumns(model: LogTableModel) {
+        val leavesSome = model.columnChoices.any { it.name !in hiddenColumns }
+        model.hiddenColumns = if (leavesSome) hiddenColumns else emptySet()
     }
 
     private fun autoLabel() = if (session.parserDetected) "Auto: ${session.parser.name}" else "Auto-detect"
@@ -723,9 +731,7 @@ class LogTab(
 
     private fun showTable(shown: ShownLog) {
         val model = LogTableModel(shown, columnNames)
-        // Columns hidden before stay hidden, unless that would hide them all (the file changed meanwhile).
-        val leavesSome = model.columnChoices.any { it.name !in hiddenColumns }
-        model.hiddenColumns = if (leavesSome) hiddenColumns else emptySet()
+        applyHiddenColumns(model)
         val table = LogTable(model)
         columnsButton.isEnabled = true
         table.addMouseListener(object : MouseAdapter() {
@@ -800,7 +806,7 @@ class LogTab(
         rowsView = FloatingTopRight(scrollPane, findBar)
         // No arrows: the charts close by their ×. The height they are dragged to holds while the tab is open.
         chartSplit = chartPanel?.let {
-            JSplitPane(JSplitPane.VERTICAL_SPLIT).apply {
+            look.verticalSplit().apply {
                 border = null
                 addPropertyChangeListener(JSplitPane.DIVIDER_LOCATION_PROPERTY) {
                     if (isShowing) chartHeight = dividerLocation
@@ -813,7 +819,9 @@ class LogTab(
             histogramBar?.let { add(it, BorderLayout.NORTH) }
             add(rowsHolder, BorderLayout.CENTER)
         }
-        val split = JSplitPane(JSplitPane.VERTICAL_SPLIT, rowsPanel, bottomTabs).apply {
+        val split = look.verticalSplit().apply {
+            topComponent = rowsPanel
+            bottomComponent = bottomTabs
             resizeWeight = 0.75
             isOneTouchExpandable = true
             // Only the arrow that hides the bottom tabs, and brings them back; not the one that hides the rows.

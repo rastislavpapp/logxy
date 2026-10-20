@@ -3,7 +3,9 @@
     <name>logxy</name>
     <vendor>Rastislav Papp</vendor>
     <description><![CDATA[
-        Spike: shows a run's output in a logxy view inside the Run tool window, next to the console.
+        Shows a run's output in a logxy view in the Run tool window: parsed columns, the visual filter editor,
+        the time histogram and live follow. A Console | logxy switch above the console picks the view, remembered
+        per run configuration.
     ]]></description>
 
     <depends>com.intellij.modules.platform</depends>
@@ -12,4 +14,12 @@
         <listener class="io.github.rastislavpapp.logxy.plugin.RunCapture"
                   topic="com.intellij.execution.ExecutionListener"/>
     </projectListeners>
+
+    <actions>
+        <action id="logxy.ImportAppSettings" class="io.github.rastislavpapp.logxy.plugin.ImportAppSettings"
+                text="Import Settings from logxy App"
+                description="Copy the standalone logxy app's parsers, saved filters and level mappings">
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+        </action>
+    </actions>
 </idea-plugin>
