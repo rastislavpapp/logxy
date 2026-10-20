@@ -6,6 +6,7 @@ import io.github.rastislavpapp.logxy.core.query.QueryException
 import io.github.rastislavpapp.logxy.core.query.QueryOp
 import io.github.rastislavpapp.logxy.core.query.QueryParser
 import io.github.rastislavpapp.logxy.core.template.Templates
+import io.github.rastislavpapp.logxy.ui.QueryText
 import org.fife.ui.autocomplete.AutoCompletion
 import org.fife.ui.autocomplete.BasicCompletion
 import org.fife.ui.autocomplete.DefaultCompletionProvider
@@ -25,12 +26,15 @@ import javax.swing.AbstractAction
 import javax.swing.KeyStroke
 import javax.swing.event.DocumentEvent
 import javax.swing.event.DocumentListener
+import javax.swing.text.JTextComponent
 import javax.swing.text.Segment
 
 private const val SYNTAX_STYLE = "text/x-logxy-query"
 
 /** Editor for the text form of a filter: highlighting, completion, and syntax errors underlined as you type. */
-class QueryTextArea(private val onApply: () -> Unit) : RSyntaxTextArea(3, 60) {
+class QueryTextArea(private val onApply: () -> Unit) : RSyntaxTextArea(3, 60), QueryText {
+
+    override val component: JTextComponent get() = this
 
     // `{` and `}` are part of words, so `{2` completes to `{2}`.
     private val completions = object : DefaultCompletionProvider() {
@@ -73,12 +77,12 @@ class QueryTextArea(private val onApply: () -> Unit) : RSyntaxTextArea(3, 60) {
     }
 
     /** Lets go of what outlives this area otherwise: completion listens to look-and-feel changes app-wide. */
-    fun release() {
+    override fun release() {
         autoCompletion.uninstall()
     }
 
     /** Field names offered by completion, besides keywords, operators and levels. */
-    fun setFields(fields: List<String>) {
+    override fun setFields(fields: List<String>) {
         this.fields = fields
         fillCompletions()
     }

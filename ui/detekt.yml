@@ -1,0 +1,10 @@
+# Added to gradle/detekt.yml for this module only.
+
+style:
+  ForbiddenImport:
+    active: true
+    forbiddenImports:
+      - value: 'com.formdev.*'
+        reason: 'IntelliJ does not run FlatLaf: the look goes through Look, which the app implements with FlatLaf.'
+      - value: 'kotlinx.coroutines.swing.*'
+        reason: 'The plugin uses the IDE''s coroutines, without the Swing dispatcher: the host gives the UI one.'

@@ -1,5 +1,6 @@
 package io.github.rastislavpapp.logxy.app
 
+import io.github.rastislavpapp.logxy.ui.Look
 import java.awt.Taskbar
 import javax.swing.JDialog
 import javax.swing.JFrame
@@ -9,6 +10,7 @@ fun main(args: Array<String>) {
     Logging.init()
     if (Restart.atStartup(args.toList())) return
     SwingUtilities.invokeLater {
+        Look.current = FlatLook
         Themes.installFonts()
         if (AppState[AppState.TITLE_BAR] != "false") {
             // FlatLaf draws the title bars itself, with the menu bar inside, IntelliJ-style.
@@ -18,7 +20,7 @@ fun main(args: Array<String>) {
         Themes.apply(Themes.saved())
         // The macOS dock shows a generic Java icon unless told otherwise; elsewhere the window icons suffice.
         if (Taskbar.isTaskbarSupported() && Taskbar.getTaskbar().isSupported(Taskbar.Feature.ICON_IMAGE)) {
-            Taskbar.getTaskbar().iconImage = Icons.logo(256).image
+            Taskbar.getTaskbar().iconImage = Logo.icon(256).image
         }
         MainFrame().apply {
             isVisible = true

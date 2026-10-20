@@ -14,7 +14,7 @@ import javax.swing.KeyStroke
 
 /** Chooses the parser of each of a merge's [files], starting from [current]; [chosenParsers] is null if cancelled. */
 class FileParsersDialog(
-    owner: Window,
+    owner: Window?,
     files: List<Path>,
     names: List<String>,
     descriptions: List<String>,

@@ -1,13 +1,13 @@
 package io.github.rastislavpapp.logxy.app
 
 import io.github.rastislavpapp.logxy.core.config.Settings
-import io.github.rastislavpapp.logxy.core.session.SettingsStore
+import io.github.rastislavpapp.logxy.ui.WritableSettings
 import org.slf4j.LoggerFactory
 import java.awt.Component
 import javax.swing.JOptionPane
 
 /** The settings in use, loaded at startup; listeners hear about saved changes. Used on the EDT only. */
-object AppSettings : SettingsStore {
+object AppSettings : WritableSettings {
 
     private val log = LoggerFactory.getLogger(AppSettings::class.java)
     private val path = Settings.defaultPath()
@@ -28,8 +28,7 @@ object AppSettings : SettingsStore {
         listeners.toList().forEach { it() }
     }
 
-    /** Saves [settings]; on failure tells the user (over [parent]) and returns false. */
-    fun updateOrShowError(parent: Component, settings: Settings): Boolean = try {
+    override fun updateOrShowError(parent: Component, settings: Settings): Boolean = try {
         update(settings)
         true
     } catch (e: Exception) {

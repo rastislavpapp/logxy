@@ -20,7 +20,7 @@ val appVersion: String? = MainFrame::class.java.`package`?.implementationVersion
 fun showAbout(owner: Component) {
     val muted = UIManager.getColor("Label.disabledForeground")
     val panel = JPanel(MigLayout("insets 8 16 0 16, wrap 1, gapy 4", "[center]")).apply {
-        add(JLabel(Icons.logo(96)), "gapbottom 8")
+        add(JLabel(Logo.icon(96)), "gapbottom 8")
         add(JLabel("logxy").apply { putClientProperty(FlatClientProperties.STYLE_CLASS, "h1") })
         add(JLabel(appVersion?.let { "Version $it" } ?: "Development build").apply { foreground = muted })
         add(JLabel("Fast desktop viewer for large log files."), "gaptop 8")

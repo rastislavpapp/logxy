@@ -20,6 +20,10 @@ import io.github.rastislavpapp.logxy.core.open.SessionFiles
 import io.github.rastislavpapp.logxy.core.open.TabAction
 import io.github.rastislavpapp.logxy.core.open.TabPlan
 import io.github.rastislavpapp.logxy.core.parse.Parser
+import io.github.rastislavpapp.logxy.ui.FileDropHandler
+import io.github.rastislavpapp.logxy.ui.Icons
+import io.github.rastislavpapp.logxy.ui.LogTab
+import io.github.rastislavpapp.logxy.ui.ProgressDialog
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -110,7 +114,7 @@ class MainFrame : JFrame("logxy") {
 
     init {
         defaultCloseOperation = WindowConstants.EXIT_ON_CLOSE
-        iconImages = FlatSVGUtils.createWindowIconImages(Icons.LOGO_PATH)
+        iconImages = FlatSVGUtils.createWindowIconImages(Logo.PATH)
         jMenuBar = createMenuBar()
         // The title bar is full of controls, and the tab names the file; the title still names the window elsewhere.
         rootPane.putClientProperty(FlatClientProperties.TITLE_BAR_SHOW_TITLE, false)
@@ -210,7 +214,7 @@ class MainFrame : JFrame("logxy") {
         })
         add(JMenu("Help").apply {
             mnemonic = KeyEvent.VK_H
-            add(menuItem("About logxy", Icons.logo(16), null) { showAbout(this@MainFrame) })
+            add(menuItem("About logxy", Logo.icon(16), null) { showAbout(this@MainFrame) })
         })
         // The selected tab's controls; the space after them drags the window.
         add(Box.createHorizontalStrut(12))
@@ -497,7 +501,8 @@ class MainFrame : JFrame("logxy") {
     }
 
     private fun insertTab(index: Int, session: SessionFiles) {
-        val tab = LogTab(session.paths, ::openFiles, ::openEach, session.filter, ::originOf, session.parsers) {
+        val paths = session.paths
+        val tab = LogTab(paths, AppHost, ::openFiles, ::openEach, session.filter, ::originOf, session.parsers) {
             updateStatus()
         }
         tabs.insertTab(tab.title, if (tab.isMerged) Icons.merged else Icons.logFile, tab, tab.description, index)

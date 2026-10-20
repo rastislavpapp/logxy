@@ -6,6 +6,7 @@ import io.github.rastislavpapp.logxy.core.formatByteSize
 import io.github.rastislavpapp.logxy.core.index.MIN_VECTOR_BITS
 import io.github.rastislavpapp.logxy.core.index.NewlineScanner
 import io.github.rastislavpapp.logxy.core.index.VectorSupport
+import io.github.rastislavpapp.logxy.ui.Icons
 import net.miginfocom.swing.MigLayout
 import javax.swing.JCheckBox
 import javax.swing.JLabel

@@ -2,25 +2,22 @@ package io.github.rastislavpapp.logxy.app
 
 import com.formdev.flatlaf.FlatLaf
 import io.github.rastislavpapp.logxy.core.query.Highlighter
+import io.github.rastislavpapp.logxy.ui.DetailPane
+import io.github.rastislavpapp.logxy.ui.FOUND_COLOR
+import io.github.rastislavpapp.logxy.ui.HIGHLIGHT_COLOR
 import org.fife.ui.rsyntaxtextarea.AbstractTokenMakerFactory
 import org.fife.ui.rsyntaxtextarea.RSyntaxTextArea
 import org.fife.ui.rsyntaxtextarea.Theme
 import org.fife.ui.rsyntaxtextarea.Token
 import org.fife.ui.rsyntaxtextarea.TokenMakerBase
 import org.fife.ui.rsyntaxtextarea.TokenMakerFactory
-import java.awt.Color
 import java.awt.Font
 import javax.swing.UIManager
 import javax.swing.text.DefaultHighlighter
+import javax.swing.text.JTextComponent
 import javax.swing.text.Segment
 
 private const val SYNTAX_STYLE = "text/x-logxy-record"
-
-/** Background of text matched by the filter, translucent to suit light and dark looks. */
-val HIGHLIGHT_COLOR = Color(255, 200, 0, 110)
-
-/** Background of text the find bar found; unlike the filter's, also shown on selected rows. */
-val FOUND_COLOR = Color(40, 200, 90, 130)
 
 /** Applies the editor colors matching the light or dark look and the monospaced UI font. */
 fun RSyntaxTextArea.applyEditorTheme() {
@@ -34,21 +31,21 @@ fun RSyntaxTextArea.applyEditorTheme() {
 }
 
 /** Read-only view of a whole record, its stack trace highlighted. */
-class LogDetailArea : RSyntaxTextArea() {
+class LogDetailArea : RSyntaxTextArea(), DetailPane {
 
     private var initialized = false
     private val painter = DefaultHighlighter.DefaultHighlightPainter(HIGHLIGHT_COLOR)
     private val foundPainter = DefaultHighlighter.DefaultHighlightPainter(FOUND_COLOR)
 
-    /** Marks what this filter matched in the shown text. */
-    var matches: Highlighter = Highlighter.NONE
+    override val component: JTextComponent get() = this
+
+    override var matches: Highlighter = Highlighter.NONE
         set(value) {
             field = value
             mark()
         }
 
-    /** Marks what the find bar found in the shown text. */
-    var found: Highlighter = Highlighter.NONE
+    override var found: Highlighter = Highlighter.NONE
         set(value) {
             field = value
             mark()
@@ -56,8 +53,7 @@ class LogDetailArea : RSyntaxTextArea() {
 
     private var foundRanges = IntArray(0)
 
-    /** Where the find bar's text first occurs in the shown text; 0 if it does not. */
-    val firstFound: Int get() = foundRanges.firstOrNull() ?: 0
+    override val firstFound: Int get() = foundRanges.firstOrNull() ?: 0
 
     init {
         (TokenMakerFactory.getDefaultInstance() as AbstractTokenMakerFactory)
@@ -77,8 +73,7 @@ class LogDetailArea : RSyntaxTextArea() {
         if (initialized) applyTheme()
     }
 
-    /** Shows [value] with the matches marked. */
-    fun show(value: String) {
+    override fun show(value: String) {
         text = value
         mark()
     }
