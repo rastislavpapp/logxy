@@ -2,6 +2,8 @@
 .gradle/
 build/
 .kotlin/
+# IntelliJ Platform Gradle plugin cache
+.intellijPlatform/
 
 # IntelliJ IDEA
 .idea/
@@ -21,3 +23,6 @@ tools/gui-sandbox/out/
 
 # Benchmark baseline of a machine other than the committed one
 tools/benchmark-baseline.local.properties
+
+# The spike's demo project keeps its run configurations
+!/plugin/demo/.idea/

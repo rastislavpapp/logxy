@@ -1,7 +1,8 @@
 plugins {
     id("logxy.kotlin")
     // Runs JMH's annotation processor, which generates the code that runs the @Benchmark methods.
-    alias(libs.plugins.kotlin.kapt)
+    // In the Kotlin Gradle plugin, which the convention plugins already put on the classpath.
+    id("org.jetbrains.kotlin.kapt")
     application
 }
 
