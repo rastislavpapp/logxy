@@ -55,6 +55,19 @@ class Spool private constructor(val path: Path) : ProcessListener {
         onGrew()
     }
 
+    /** Empties the file, as Clear All empties a console; what the process writes next starts it again. */
+    fun clear() {
+        synchronized(this) {
+            if (channel.isOpen) {
+                channel.truncate(0)
+            } else {
+                FileChannel.open(path, StandardOpenOption.WRITE).use { it.truncate(0) }
+            }
+            lines = 0
+        }
+        onGrew()
+    }
+
     override fun processTerminated(event: ProcessEvent) {
         synchronized(this) { channel.close() }
         exitCode = event.exitCode

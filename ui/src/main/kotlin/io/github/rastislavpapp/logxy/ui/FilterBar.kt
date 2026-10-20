@@ -195,6 +195,9 @@ class FilterBar(private val onApply: () -> Unit, names: ColumnNames, private val
     /** The text form as typed; empty without one. */
     private val typed: String get() = textArea?.text.orEmpty()
 
+    /** Called when rules are added from outside the bar, e.g. a cell's menu, so a hidden bar can show what changed. */
+    var onRulesAdded: () -> Unit = {}
+
     /** Adds [rule] to the filter, joined with AND, and applies it. */
     fun addRule(rule: Query) = addRules(listOf(rule))
 
@@ -248,6 +251,7 @@ class FilterBar(private val onApply: () -> Unit, names: ColumnNames, private val
         }
         if (textMode.isSelected) textArea?.text = QueryPrinter.print(combined) else editor.setQuery(combined)
         applyFilter()
+        onRulesAdded()
     }
 
     /** Shows how far a slow filter got, from 0 to 1; null hides it. */

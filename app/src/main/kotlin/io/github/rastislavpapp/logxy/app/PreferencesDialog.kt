@@ -2,9 +2,11 @@ package io.github.rastislavpapp.logxy.app
 
 import com.formdev.flatlaf.FlatLaf
 import com.formdev.flatlaf.util.ColorFunctions
-import io.github.rastislavpapp.logxy.core.config.Settings
 import io.github.rastislavpapp.logxy.core.config.VmOptions
 import io.github.rastislavpapp.logxy.core.parse.Parser
+import io.github.rastislavpapp.logxy.ui.LevelsPage
+import io.github.rastislavpapp.logxy.ui.ParsersPage
+import io.github.rastislavpapp.logxy.ui.SettingsPage
 import net.miginfocom.swing.MigLayout
 import java.awt.CardLayout
 import java.awt.Color
@@ -15,7 +17,6 @@ import java.io.IOException
 import java.nio.file.Path
 import javax.swing.BorderFactory
 import javax.swing.DefaultListCellRenderer
-import javax.swing.Icon
 import javax.swing.JButton
 import javax.swing.JDialog
 import javax.swing.JLabel
@@ -37,20 +38,11 @@ private fun sidebarBackground(): Color {
     return if (FlatLaf.isLafDark()) ColorFunctions.lighten(panel, 0.03f) else ColorFunctions.darken(panel, 0.03f)
 }
 
-/** A section of the preferences; all sections are saved together. */
-abstract class PreferencesPage(val title: String, val icon: Icon) : JPanel() {
-    /** Why the page cannot be saved as it is, or null. */
-    open fun problem(): String? = null
-
-    /** [settings] with this page's values. */
-    abstract fun applyTo(settings: Settings): Settings
-
-    /** Where this page's values are saved, for the dialog's footer. */
-    open val savedIn: String get() = "Saved in ${AppSettings.location}"
-}
+/** Where [page]'s values are saved, for the dialog's footer. */
+private fun savedIn(page: SettingsPage) = (page as? JvmPage)?.savedIn ?: "Saved in ${AppSettings.location}"
 
 /**
- * The app's settings, one section per page, opening on [section] (or the last one shown).
+ * The app's settings, one section per page, all saved together, opening on [section] (or the last one shown).
  * The parser being edited previews [previewFile]; [offerUse] adds a button that uses the selected parser for it.
  * [adopt] is added to the parsers as a new one.
  */
@@ -69,9 +61,9 @@ class PreferencesDialog(
     var parserToUse: Parser? = null
         private set
 
-    private val parsers = ParsersPage(previewFile, select, adopt)
+    private val parsers = ParsersPage(AppSettings.current, previewFile, select, adopt)
     private val jvm = JvmPage()
-    private val pages = listOf(parsers, LevelsPage(), jvm, OpeningPage())
+    private val pages = listOf(parsers, LevelsPage(AppSettings.current), jvm, OpeningPage())
     private val cards = CardLayout()
     private val content = JPanel(cards)
     private val heading = JLabel().apply { putClientProperty("FlatLaf.styleClass", "h3") }
@@ -86,7 +78,7 @@ class PreferencesDialog(
             override fun getListCellRendererComponent(
                 list: JList<*>?, value: Any?, index: Int, isSelected: Boolean, cellHasFocus: Boolean,
             ): Component {
-                val page = value as PreferencesPage
+                val page = value as SettingsPage
                 super.getListCellRendererComponent(list, page.title, index, isSelected, cellHasFocus)
                 icon = page.icon
                 return this
@@ -102,8 +94,8 @@ class PreferencesDialog(
             val page = navigation.selectedValue ?: return@addListSelectionListener
             heading.text = page.title
             cards.show(content, page.title)
-            savedIn.text = page.savedIn
-            savedIn.toolTipText = page.savedIn
+            savedIn.text = savedIn(page)
+            savedIn.toolTipText = savedIn(page)
             AppState[AppState.PREFERENCES_SECTION] = Section.entries[navigation.selectedIndex].name
         }
         val remembered = Section.entries.firstOrNull { it.name == AppState[AppState.PREFERENCES_SECTION] }

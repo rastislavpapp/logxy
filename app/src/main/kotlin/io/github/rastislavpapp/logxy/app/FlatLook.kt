@@ -49,6 +49,12 @@ object FlatLook : Look {
         button.putClientProperty(FlatClientProperties.BUTTON_TYPE, FlatClientProperties.BUTTON_TYPE_TOOLBAR_BUTTON)
     }
 
+    // FlatLaf's minimum button width would pad a text this plain.
+    override fun link(button: AbstractButton) {
+        button.putClientProperty(FlatClientProperties.MINIMUM_WIDTH, 0)
+        button.foreground = UIManager.getColor("Component.linkColor")
+    }
+
     override fun accentToggle(text: String, icon: Icon?): JToggleButton = JToggleButton(text, icon).apply {
         putClientProperty("FlatLaf.style", "selectedBackground: \$Component.accentColor; selectedForeground: #ffffff")
         flat(this)

@@ -1,12 +1,12 @@
 package io.github.rastislavpapp.logxy.plugin
 
 import com.intellij.ide.util.PropertiesComponent
-import com.intellij.openapi.application.PathManager
-import com.intellij.openapi.diagnostic.logger
-import com.intellij.openapi.ui.Messages
-import io.github.rastislavpapp.logxy.core.config.Settings
+import com.intellij.openapi.options.ShowSettingsUtil
+import com.intellij.openapi.project.Project
 import io.github.rastislavpapp.logxy.core.parse.Parser
+import io.github.rastislavpapp.logxy.core.query.TextSearch
 import io.github.rastislavpapp.logxy.ui.DetailPane
+import io.github.rastislavpapp.logxy.ui.FindView
 import io.github.rastislavpapp.logxy.ui.LogViewHost
 import io.github.rastislavpapp.logxy.ui.PlainDetailArea
 import io.github.rastislavpapp.logxy.ui.QueryText
@@ -14,20 +14,19 @@ import io.github.rastislavpapp.logxy.ui.SettingsDialogs
 import io.github.rastislavpapp.logxy.ui.UiState
 import io.github.rastislavpapp.logxy.ui.WritableSettings
 import kotlinx.coroutines.CoroutineDispatcher
-import java.awt.Component
 import java.awt.Window
 import java.nio.file.Path
+import javax.swing.JComponent
 import javax.swing.SwingUtilities
 import kotlin.coroutines.CoroutineContext
 
 /**
- * The IDE's side of the views: settings in the IDE's config directory, UI state in its properties, the visual filter
- * editor only and a plain detail pane. There are no settings dialogs yet, so the views offer no editing of parsers;
- * [ImportAppSettings] brings in the app's.
+ * The IDE's side of the views in [project]: settings in the IDE's storage and pages of its Settings, UI state in its
+ * properties, its search bar, the visual filter editor only and a plain detail pane.
  */
-object IdeHost : LogViewHost {
+class IdeHost(private val project: Project) : LogViewHost, SettingsDialogs {
 
-    override val settings: WritableSettings get() = IdeSettings
+    override val settings: WritableSettings get() = IdeSettings.instance
 
     override val state: UiState get() = IdeUiState
 
@@ -37,7 +36,20 @@ object IdeHost : LogViewHost {
 
     override fun queryText(onApply: () -> Unit): QueryText? = null
 
-    override val settingsDialogs: SettingsDialogs? get() = null
+    override fun findView(tab: JComponent, onSearch: (TextSearch?) -> Unit, onFind: (Boolean) -> Unit): FindView =
+        IdeFindView(project, tab, onSearch, onFind)
+
+    override val settingsDialogs: SettingsDialogs get() = this
+
+    // The page cannot pick the parser for the file as the app's can: the IDE's dialog has only OK and Cancel.
+    override fun editParsers(owner: Window?, file: Path, select: Parser, offerUse: Boolean, adopt: Parser?): Parser? {
+        ShowSettingsUtil.getInstance().editConfigurable(project, ParsersConfigurable(file, select, adopt))
+        return null
+    }
+
+    override fun editLevelMapping(owner: Window?) {
+        ShowSettingsUtil.getInstance().editConfigurable(project, LevelsConfigurable())
+    }
 
     // A run's view shows one file, which is never a merge.
     override fun chooseParsersPerFile(
@@ -49,47 +61,6 @@ object IdeHost : LogViewHost {
     ): List<Parser?>? = null
 
     override val moreMemoryHint get() = "Give the IDE more memory in Help › Change Memory Settings to copy more."
-}
-
-/**
- * The plugin's settings, in `logxy/logxy.properties` of the IDE's config directory: apart from the app's, as both
- * may run at once. Used on the UI thread only.
- */
-object IdeSettings : WritableSettings {
-
-    private val log = logger<IdeSettings>()
-    private val path: Path by lazy { PathManager.getConfigDir().resolve("logxy/logxy.properties") }
-    private val listeners = ArrayList<() -> Unit>()
-
-    override var current: Settings = load()
-        private set
-
-    private fun load(): Settings = try {
-        Settings.load(path)
-    } catch (e: Exception) {
-        log.warn("logxy: cannot read settings from $path", e)
-        Settings()
-    }
-
-    override fun updateOrShowError(parent: Component, settings: Settings): Boolean {
-        try {
-            Settings.save(path, settings)
-        } catch (e: Exception) {
-            Messages.showErrorDialog(parent, "Cannot write $path:\n${e.message}", "Cannot Save")
-            return false
-        }
-        current = settings
-        listeners.toList().forEach { it() }
-        return true
-    }
-
-    override fun addListener(listener: () -> Unit) {
-        listeners += listener
-    }
-
-    override fun removeListener(listener: () -> Unit) {
-        listeners -= listener
-    }
 }
 
 /** The views' UI state, among the IDE's application properties. */

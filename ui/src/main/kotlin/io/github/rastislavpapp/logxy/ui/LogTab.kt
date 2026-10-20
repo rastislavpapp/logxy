@@ -83,11 +83,16 @@ private const val SEARCH_PROGRESS_DELAY_MILLIS = 200
 private const val FLOATING_TOP_GAP = 6
 private const val FLOATING_RIGHT_GAP = 24
 
+/** The views around a [LogTab]'s rows, which the user can show and hide one by one where the host offers it. */
+enum class LogPart { FILTER, HISTOGRAM, DETAIL, TEMPLATES }
+
 /**
  * One open file, or several merged: shows the records of its [LogSession], with the filter bar and the
  * detail pane. [openFiles] opens dropped files; [openEach] opens files in tabs of their own. [filter]
  * is applied once the records are there. [origin] tells which files were extracted from zips or decompressed.
- * The [host] keeps the settings and gives what only the app or the plugin has.
+ * The [host] keeps the settings and gives what only the app or the plugin has. With [togglesParts], the
+ * [shownParts] are shown or hidden as set, and the detail and the templates side by side; else the detail and the
+ * templates are tabs below the rows, which a divider arrow hides.
  */
 class LogTab(
     paths: List<Path>,
@@ -98,6 +103,7 @@ class LogTab(
     private val origin: (Path) -> ArchiveOrigin? = { null },
     /** The parser chosen for each of [paths], null (or missing) to detect it. */
     parsers: List<Parser?> = emptyList(),
+    private val togglesParts: Boolean = false,
     private val onStatusChanged: () -> Unit,
 ) : JPanel(BorderLayout()) {
 
@@ -144,7 +150,7 @@ class LogTab(
     private val content = JPanel(BorderLayout())
     private val detail = host.detailPane()
     private val filterBar = FilterBar(::applyFilter, columnNames, host)
-    private val findBar = FindBar(::searchFor) { forward -> find(forward) }
+    private val findBar = host.findView(this, ::searchFor) { forward -> find(forward) }
 
     /** Variables charted under the histogram; they stay when the file is read again. */
     private val variableCharts: VariableCharts = VariableCharts(scope, session::variableSeries).apply {
@@ -176,12 +182,44 @@ class LogTab(
         ::canChart,
     )
 
-    /** Below the table: the selected record, or the message templates of the shown rows. */
-    private val bottomTabs = JTabbedPane().apply {
-        val vertical = ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED
-        addTab("Detail", JScrollPane(detail.component, vertical, ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER))
-        addTab("Templates", templates)
+    private val detailView = JScrollPane(
+        detail.component,
+        ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED,
+        ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER,
+    )
+
+    /** Below the table, unless [togglesParts]: the selected record, or the message templates of the shown rows. */
+    private val bottomTabs by lazy {
+        JTabbedPane().apply {
+            addTab("Detail", detailView)
+            addTab("Templates", templates)
+        }
     }
+
+    /**
+     * The parts that show, once the records are there; all unless [togglesParts]. Rules added from outside the
+     * filter bar, e.g. from a cell's menu, show it.
+     */
+    var shownParts: Set<LogPart> = LogPart.entries.toSet()
+        set(value) {
+            if (value == field) return
+            val bottomChanged = (LogPart.DETAIL in value) != (LogPart.DETAIL in field) ||
+                (LogPart.TEMPLATES in value) != (LogPart.TEMPLATES in field)
+            field = value
+            filterBar.isVisible = filterReady && LogPart.FILTER in value
+            histogramBar?.isVisible = LogPart.HISTOGRAM in value
+            showCharts()
+            if (bottomChanged && togglesParts) showParts()
+            revalidate()
+            repaint()
+            onPartsChanged()
+        }
+
+    /** Called when [shownParts] changed, also when the tab showed a part itself. */
+    var onPartsChanged: () -> Unit = {}
+
+    /** Whether the records are there, so the filter bar shows if [shownParts] has it. */
+    private var filterReady = false
     private val followButton = accentToggle(Icons.follow, "Follow (tail)").apply {
         addActionListener { session.follow = isSelected }
     }
@@ -201,6 +239,20 @@ class LogTab(
             field = value
             model?.let(::applyHiddenColumns)
         }
+
+    /**
+     * The widths in pixels the user dragged columns to, by field name, kept when the file is read again; they may be
+     * set before the records are there.
+     */
+    var columnWidths: Map<String, Int>
+        get() = table?.resizedWidths ?: rememberedWidths
+        set(value) {
+            rememberedWidths = value
+            table?.resizedWidths = value
+        }
+
+    /** [columnWidths] while there is no table, e.g. while the file is read again. */
+    private var rememberedWidths = emptyMap<String, Int>()
     private var progressTimer: Timer? = null
     private var filterTimer: Timer? = null
     private var searchTimer: Timer? = null
@@ -217,6 +269,9 @@ class LogTab(
     /** Where the table goes: alone, or under the charts in [chartSplit] while there are some. */
     private val rowsHolder = JPanel(BorderLayout())
     private var rowsView: JComponent? = null
+
+    /** The histogram above [rowsHolder]; null until the records are there. */
+    private var rowsPanel: JComponent? = null
 
     /** Where the charts' divider was dragged to; -1 until it is, for their own height. */
     private var chartHeight = -1
@@ -270,6 +325,7 @@ class LogTab(
         add(content, BorderLayout.CENTER)
         showParser()
         filter?.let(filterBar::load)
+        filterBar.onRulesAdded = { shownParts += LogPart.FILTER }
         // Over all records: the shown rows may already be narrowed by the very rule being edited.
         filterBar.variableValues = { template, variable, onValues ->
             scope.launch {
@@ -291,8 +347,8 @@ class LogTab(
      * Auto, raw text, the user's parsers (editable), the built-in ones; plus the parser in use if it is none of
      * those.
      */
-    private fun showParsers() {
-        if (isMerged) return showMergedParsers()
+    private fun showParsers(anchor: JComponent = parserButton) {
+        if (isMerged) return showMergedParsers(anchor)
         val chosen = session.chosenParser
         val known = host.settings.current.knownParsers
         val items = buildList {
@@ -311,14 +367,14 @@ class LogTab(
             }
             if (detected != null) add(PopupItem("Save Detected Parser…") { editParsers(detected, adopt = true) })
         }
-        showPopupList(parserButton, items)
+        showPopupList(anchor, items)
     }
 
     /**
      * Like [showParsers], but a parser applies to all files of the merge; "Choose Parser per File" opens
      * the table of files and their parsers, also checked when the files' parsers differ.
      */
-    private fun showMergedParsers() {
+    private fun showMergedParsers(anchor: JComponent) {
         val chosen = session.chosenParsers
         val mixed = chosen.distinct().size > 1
         // The parser of all files when not mixed; null is Auto-detect.
@@ -336,7 +392,7 @@ class LogTab(
                 add(PopupItem("Edit Parsers", Icons.settings) { editParsers(session.parser) })
             }
         }
-        showPopupList(parserButton, items)
+        showPopupList(anchor, items)
     }
 
     /** A parser menu entry; the user's own parsers can be edited from it, if the host has the settings dialog. */
@@ -357,7 +413,7 @@ class LogTab(
     }
 
     /** Checks for the columns to show; the menu stays open while they are toggled. */
-    private fun showColumns() {
+    private fun showColumns(anchor: JComponent = columnsButton) {
         val model = model ?: return
         val popup = JPopupMenu()
         val boxes = model.columnChoices.map { field ->
@@ -386,7 +442,7 @@ class LogTab(
             }
         })
         enableBoxes()
-        popup.show(columnsButton, 0, columnsButton.height)
+        popup.show(anchor, 0, anchor.height)
     }
 
     /** The right-click menu of a column header: hide that column, rename it, or show all again. */
@@ -624,8 +680,9 @@ class LogTab(
         popup.show(table, x, y)
     }
 
-    /** Whether variables can be charted: the records have templates and times, so the histogram shows. */
-    private fun canChart() = histogramBar != null && model?.shown?.schema?.hasTemplates() == true
+    /** Whether variables can be charted: the records have templates and times, and the histogram shows. */
+    private fun canChart() =
+        histogramBar != null && LogPart.HISTOGRAM in shownParts && model?.shown?.schema?.hasTemplates() == true
 
     /**
      * The menu item that charts, or stops charting, [variable] of [template], whose value in the clicked record is
@@ -642,11 +699,12 @@ class LogTab(
         }
     }
 
-    /** Puts the charts between the histogram and the rows while there are some. */
+    /** Puts the charts between the histogram and the rows while there are some, and the histogram shows. */
     private fun showCharts() {
         val view = rowsView ?: return
         val split = chartSplit
-        val wanted = if (split != null && variableCharts.all.isNotEmpty()) split else view
+        val charts = variableCharts.all.isNotEmpty() && LogPart.HISTOGRAM in shownParts
+        val wanted = if (split != null && charts) split else view
         if (rowsHolder.componentCount > 0 && rowsHolder.getComponent(0) === wanted) return
         rowsHolder.removeAll()
         if (wanted === split) {
@@ -700,7 +758,8 @@ class LogTab(
     }
 
     private fun setFilterVisible(visible: Boolean) {
-        filterBar.isVisible = visible
+        filterReady = visible
+        filterBar.isVisible = visible && LogPart.FILTER in shownParts
     }
 
     private fun showProgress(fraction: () -> Double) {
@@ -803,7 +862,15 @@ class LogTab(
         setFilterVisible(true)
 
         detail.show("")
-        rowsView = FloatingTopRight(scrollPane, findBar)
+        table.resizedWidths = rememberedWidths
+        rowsView = if (findBar.floats) {
+            FloatingTopRight(scrollPane, findBar.component)
+        } else {
+            JPanel(BorderLayout()).apply {
+                add(findBar.component, BorderLayout.NORTH)
+                add(scrollPane, BorderLayout.CENTER)
+            }
+        }
         // No arrows: the charts close by their ×. The height they are dragged to holds while the tab is open.
         chartSplit = chartPanel?.let {
             look.verticalSplit().apply {
@@ -815,20 +882,52 @@ class LogTab(
         }
         rowsHolder.removeAll()
         showCharts()
-        val rowsPanel = JPanel(BorderLayout()).apply {
+        histogramBar?.isVisible = LogPart.HISTOGRAM in shownParts
+        rowsPanel = JPanel(BorderLayout()).apply {
             histogramBar?.let { add(it, BorderLayout.NORTH) }
             add(rowsHolder, BorderLayout.CENTER)
         }
-        val split = look.verticalSplit().apply {
-            topComponent = rowsPanel
-            bottomComponent = bottomTabs
-            resizeWeight = 0.75
-            isOneTouchExpandable = true
-            // Only the arrow that hides the bottom tabs, and brings them back; not the one that hides the rows.
-            look.expandableBottomOnly(this)
-            border = null
+        showParts()
+        scrollPane.follow = session.follow
+        applyFilter()
+    }
+
+    /** Lays out the rows and, below them, the detail and the templates as tabs, or those of [shownParts]. */
+    private fun showParts() {
+        val rows = rowsPanel ?: return
+        val detailShown = LogPart.DETAIL in shownParts
+        val templatesShown = LogPart.TEMPLATES in shownParts
+        val bottom = when {
+            !togglesParts -> bottomTabs
+            detailShown && templatesShown -> look.horizontalSplit().apply {
+                leftComponent = detailView
+                rightComponent = templates
+                resizeWeight = 0.5
+                border = null
+            }
+            detailShown -> detailView
+            templatesShown -> templates
+            else -> null
         }
         content.removeAll()
+        if (bottom == null) {
+            content.add(rows, BorderLayout.CENTER)
+            content.revalidate()
+            content.repaint()
+            return
+        }
+        val split = look.verticalSplit().apply {
+            topComponent = rows
+            bottomComponent = bottom
+            resizeWeight = 0.75
+            // Parts the host toggles have no arrows; else only the one that hides the bottom tabs, and brings them
+            // back, not the one that hides the rows.
+            if (!togglesParts) {
+                isOneTouchExpandable = true
+                look.expandableBottomOnly(this)
+            }
+            border = null
+        }
         content.add(split, BorderLayout.CENTER)
         content.validate()
         content.repaint()
@@ -845,8 +944,6 @@ class LogTab(
                 saveDivider.restart()
             }
         }
-        scrollPane.follow = session.follow
-        applyFilter()
     }
 
     /** Shows the record at [row] of the shown log, or nothing if there is none. */
@@ -926,7 +1023,7 @@ class LogTab(
         foundMarks = search?.let(Highlighter::of) ?: Highlighter.NONE
         table?.found = foundMarks
         detail.found = foundMarks
-        if (!findBar.isVisible) table?.requestFocusInWindow()
+        if (!findBar.isOpen) table?.requestFocusInWindow()
         pendingFind = null
         try {
             session.search(search)
@@ -1088,7 +1185,29 @@ class LogTab(
     /** See [LogSession.grew]; callable from any thread. */
     fun fileGrew() = session.grew()
 
-    fun focusFilter() = filterBar.focusFilter()
+    fun focusFilter() {
+        shownParts += LogPart.FILTER
+        filterBar.focusFilter()
+    }
+
+    /** Whether new records are scrolled to as they come; see [fileControls]. */
+    var follow: Boolean
+        get() = session.follow
+        set(value) {
+            session.follow = value
+        }
+
+    /** What the parser button of [fileControls] says, for a host that shows the controls in a toolbar of its own. */
+    val parserText: String get() = parserButton.text
+
+    /** Opens the parser menu of [fileControls] under [anchor] instead, e.g. a button of the host's toolbar. */
+    fun showParserMenu(anchor: JComponent) = showParsers(anchor)
+
+    /** Whether the columns can be chosen yet: the records are there. */
+    val canChooseColumns: Boolean get() = columnsButton.isEnabled
+
+    /** Opens the columns menu of [fileControls] under [anchor] instead. */
+    fun showColumnsMenu(anchor: JComponent) = showColumns(anchor)
 
     /** Goes to the next record with the find bar's text, or the previous; opens the bar if it is closed. */
     fun findNext(forward: Boolean) = find(forward)
@@ -1143,10 +1262,12 @@ class LogTab(
         override fun shownEnded() {
             columnsButton.isEnabled = false
             showSearchProgress(false)
+            table?.let { rememberedWidths = it.resizedWidths }
             histogramBar = null
             chartPanel = null
             chartSplit = null
             rowsView = null
+            rowsPanel = null
             templates.reset()
             variableCharts.reset()
             // The table may still be painted until indexing shows its progress: with no rows.

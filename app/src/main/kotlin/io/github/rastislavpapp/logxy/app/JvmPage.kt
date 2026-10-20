@@ -7,6 +7,8 @@ import io.github.rastislavpapp.logxy.core.index.MIN_VECTOR_BITS
 import io.github.rastislavpapp.logxy.core.index.NewlineScanner
 import io.github.rastislavpapp.logxy.core.index.VectorSupport
 import io.github.rastislavpapp.logxy.ui.Icons
+import io.github.rastislavpapp.logxy.ui.SettingsPage
+import io.github.rastislavpapp.logxy.ui.addNote
 import net.miginfocom.swing.MigLayout
 import javax.swing.JCheckBox
 import javax.swing.JLabel
@@ -18,7 +20,7 @@ import javax.swing.JTextField
  * in the launcher's [VmOptions] rather than the [Settings], and apply only to a newly started JVM. Without the
  * packaged launcher there is nothing to keep them in, so the page only tells.
  */
-class JvmPage : PreferencesPage("JVM", Icons.memory) {
+class JvmPage : SettingsPage("JVM", Icons.memory) {
 
     private val vmOptions = Restart.vmOptions
 
@@ -61,7 +63,8 @@ class JvmPage : PreferencesPage("JVM", Icons.memory) {
         }
     }
 
-    override val savedIn: String
+    /** Where the options are saved, for the dialog's footer: not in the settings file the other pages share. */
+    val savedIn: String
         get() = vmOptions?.let { "JVM options are saved in ${it.user}" }
             ?: "Not saved: started without its launcher, logxy has no JVM options file"
 

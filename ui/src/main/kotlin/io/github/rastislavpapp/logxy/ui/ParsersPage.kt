@@ -1,4 +1,4 @@
-package io.github.rastislavpapp.logxy.app
+package io.github.rastislavpapp.logxy.ui
 
 import io.github.rastislavpapp.logxy.core.config.Settings
 import io.github.rastislavpapp.logxy.core.log.Field
@@ -6,9 +6,6 @@ import io.github.rastislavpapp.logxy.core.parse.Parser
 import io.github.rastislavpapp.logxy.core.parse.ParserPreview
 import io.github.rastislavpapp.logxy.core.parse.PreviewLine
 import io.github.rastislavpapp.logxy.core.parse.RoleKeys
-import io.github.rastislavpapp.logxy.ui.ColumnNames
-import io.github.rastislavpapp.logxy.ui.Icons
-import io.github.rastislavpapp.logxy.ui.showColumnRename
 import net.miginfocom.swing.MigLayout
 import java.awt.Component
 import java.awt.event.MouseAdapter
@@ -36,14 +33,15 @@ import javax.swing.table.DefaultTableCellRenderer
 private const val PREVIEW_LINES = 200
 
 /**
- * Edits the saved parsers, with a preview of [previewFile] read by the one being edited.
+ * Edits the parsers of [settings], with a preview of [previewFile] read by the one being edited.
  * [adopt], e.g. a detected parser, is added as a new one.
  */
 class ParsersPage(
+    settings: Settings,
     private val previewFile: Path?,
     select: Parser?,
     adopt: Parser? = null,
-) : PreferencesPage("Parsers", Icons.settings) {
+) : SettingsPage("Parsers", Icons.settings) {
 
     private class Entry(val parser: Parser, val builtIn: Boolean)
 
@@ -100,8 +98,8 @@ class ParsersPage(
         deleteButton = listToolbar.addButton(Icons.remove, "Delete the selected parser") { deleteSelected() }
         listToolbar.addButton(Icons.copy, "Duplicate the selected parser") { duplicateSelected() }
 
-        AppSettings.current.parsers.forEach { entries.addElement(Entry(it, builtIn = false)) }
-        AppSettings.current.builtInParsers.forEach { entries.addElement(Entry(it, builtIn = true)) }
+        settings.parsers.forEach { entries.addElement(Entry(it, builtIn = false)) }
+        settings.builtInParsers.forEach { entries.addElement(Entry(it, builtIn = true)) }
         updateRestoreLink()
 
         layout = MigLayout("fill, insets 0", "[grow]", "[grow]")
@@ -179,7 +177,9 @@ class ParsersPage(
             add(status, "span 2, wmin 0")
             add(JScrollPane(previewTable), "span 2, grow, push")
         }
-        return JSplitPane(JSplitPane.HORIZONTAL_SPLIT, left, right).apply {
+        return look.horizontalSplit().apply {
+            leftComponent = left
+            rightComponent = right
             resizeWeight = 0.25
             border = null
         }
@@ -256,7 +256,7 @@ class ParsersPage(
             parser?.compile()
         } catch (e: Exception) {
             status.text = e.message ?: e.toString()
-            status.foreground = UIManager.getColor("Component.error.focusedBorderColor")
+            status.foreground = look.errorText
             previewModel.show(null, emptyList())
             return
         }
@@ -429,7 +429,7 @@ class ParsersPage(
                 foreground = when {
                     line.values != null -> table.foreground
                     line.continuation -> UIManager.getColor("Label.disabledForeground")
-                    else -> UIManager.getColor("Actions.Red")
+                    else -> look.error
                 }
             }
             return this

@@ -1,4 +1,4 @@
-package io.github.rastislavpapp.logxy.app
+package io.github.rastislavpapp.logxy.ui
 
 import java.awt.Container
 import java.awt.Dimension

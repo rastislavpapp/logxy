@@ -66,8 +66,16 @@ data class Settings(
             }
         }
 
+        /** Reads settings from a properties file, as [fromProperties]; a missing file means default settings. */
+        fun load(path: Path): Settings =
+            if (Files.exists(path)) fromProperties(PropertiesFiles.load(path)) else Settings()
+
+        /** Writes [settings] to [path], replacing the file only once the new one is complete. */
+        fun save(path: Path, settings: Settings) =
+            PropertiesFiles.store(path, toProperties(settings), "logxy settings")
+
         /**
-         * Reads settings from a properties file, e.g.:
+         * Reads settings from properties, e.g.:
          * ```
          * parser.1.name=My app
          * parser.1.type=pattern
@@ -85,13 +93,10 @@ data class Settings(
          * open.mode=merge
          * open.subfolders=false
          * ```
-         * Level names are stored only once the user changed them, and then completely. A missing file
-         * means default settings; entries that cannot be read are skipped.
+         * Level names are stored only once the user changed them, and then completely. Entries that cannot be read
+         * are skipped.
          */
-        fun load(path: Path): Settings {
-            if (!Files.exists(path)) return Settings()
-            val properties = PropertiesFiles.load(path)
-
+        fun fromProperties(properties: Properties): Settings {
             val parsers = numbered(properties, "parser")
                 .mapNotNull { n -> readParser(properties, "parser.$n.") }
                 .filter { it != Parser.Raw }
@@ -122,8 +127,8 @@ data class Settings(
             return Settings(parsers, levelMapping, filters, openMode, includeSubfolders, deletedBuiltIns)
         }
 
-        /** Writes [settings] to [path], replacing the file only once the new one is complete. */
-        fun save(path: Path, settings: Settings) {
+        /** [settings] as [fromProperties] reads them. */
+        fun toProperties(settings: Settings): Properties {
             val properties = Properties()
             settings.parsers.filter { it != Parser.Raw }.forEachIndexed { i, parser ->
                 writeParser(properties, "parser.${i + 1}.", parser)
@@ -140,7 +145,7 @@ data class Settings(
                 properties["level-names"] = "custom"
                 settings.levels.names.forEach { (text, level) -> properties["level.$text"] = level.name }
             }
-            PropertiesFiles.store(path, properties, "logxy settings")
+            return properties
         }
 
         /** Reads the parser stored under [prefix] (e.g. `parser.1.`); null if it is incomplete. */

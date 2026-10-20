@@ -37,9 +37,12 @@ class RunCapture(private val project: Project) : ExecutionListener {
             return
         }
         val memory = RunMemory(project, configurationId(env))
-        // Disposed with the tab, e.g. when a rerun replaces it.
-        val installed = ConsoleSwap.install(descriptor) { console ->
-            RunLogView(console, spool, memory).also { Disposer.register(descriptor, it) }
+        // Disposed with the tab, e.g. when a rerun replaces it; the run tab's toolbar finds it on the handler.
+        val installed = ConsoleSwap.install(descriptor) { console, toolbar ->
+            RunLogView(console, toolbar, spool, memory, IdeHost(project)).also {
+                Disposer.register(descriptor, it)
+                handler.putUserData(RunLogView.KEY, it)
+            }
         }
         if (!installed) log.warn("logxy: found no console in the run tab of ${env.runProfile.name}")
     }

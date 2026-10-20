@@ -6,7 +6,6 @@ import java.awt.Graphics
 import java.awt.Graphics2D
 import java.awt.RenderingHints
 import java.awt.event.ActionEvent
-import java.text.NumberFormat
 import javax.swing.AbstractAction
 import javax.swing.JLabel
 import javax.swing.JPanel
@@ -30,7 +29,13 @@ private const val ARC = 10
 class FindBar(
     private val onSearch: (TextSearch?) -> Unit,
     private val onFind: (forward: Boolean) -> Unit,
-) : JPanel(MigLayout("insets 6 8 6 6, gap 2 2, hidemode 3, wrap 4", "[300!, fill]4[][][]")) {
+) : JPanel(MigLayout("insets 6 8 6 6, gap 2 2, hidemode 3, wrap 4", "[300!, fill]4[][][]")), FindView {
+
+    override val component get() = this
+
+    override val floats get() = true
+
+    override val isOpen get() = isVisible
 
     private val matchCase = fieldToggle("inline/matchCase", "Match case")
     private val wholeWords = fieldToggle("inline/exactWords", "Words")
@@ -106,8 +111,7 @@ class FindBar(
         onFind(forward)
     }
 
-    /** Shows the bar and selects its text for typing over; with [text], looks for that instead. */
-    fun open(text: String? = null) {
+    override fun open(text: String?) {
         val wasVisible = isVisible
         isVisible = true
         if (text != null && text != input.text) {
@@ -126,35 +130,11 @@ class FindBar(
         searchNow()
     }
 
-    /**
-     * Shows how many records match: [total]. While searching, which [progress] (from 0 to 1) says, or null [total]
-     * does, [total] is how many were found so far, null if not known. [current] is the position among them of the
-     * selected record, from 1, or 0 if it is none (or, while searching, not final yet).
-     */
-    fun showCount(current: Int, total: Int?, progress: Double? = null) {
+    override fun showCount(current: Int, total: Int?, progress: Double?) {
         showError(null)
-        val numbers = NumberFormat.getIntegerInstance()
-        count.text = when {
-            input.text.isEmpty() -> ""
-            total == null || progress != null -> searchingText(current, total, progress, numbers)
-            total == 0 -> "No matches"
-            current > 0 -> "${numbers.format(current)} of ${numbers.format(total)}"
-            total == 1 -> "1 match"
-            else -> "${numbers.format(total)} matches"
-        }
+        count.text = findCountText(input.text, current, total, progress)
         count.foreground = UIManager.getColor("Label.foreground")
         showCountLine()
-    }
-
-    /** What the count says while searching: [total] is what was found so far, null if unknown. */
-    private fun searchingText(current: Int, total: Int?, progress: Double?, numbers: NumberFormat): String {
-        val percent = if (progress != null && progress > 0) "${(progress * 100).toInt()} %" else null
-        return when {
-            total == null || total == 0 -> if (percent != null) "Searching $percent" else "Searching…"
-            current > 0 -> "${numbers.format(current)} of ${numbers.format(total)}+"
-            percent != null -> "${numbers.format(total)} so far · $percent"
-            else -> "${numbers.format(total)} so far"
-        }
     }
 
     private fun showCountLine() {
@@ -164,8 +144,7 @@ class FindBar(
         repaint()
     }
 
-    /** Marks the text as wrong, e.g. an invalid regex, or shows it is fine again if [message] is null. */
-    fun showError(message: String?) {
+    override fun showError(message: String?) {
         look.outlineError(input, message != null)
         input.toolTipText = message
         if (message != null) {
