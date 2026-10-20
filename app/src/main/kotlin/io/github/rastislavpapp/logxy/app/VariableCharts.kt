@@ -155,6 +155,16 @@ class VariableCharts(
         onChanged()
     }
 
+    /** Stops charting every variable, also those still read for the first time. */
+    fun removeAll() {
+        if (charts.isEmpty()) return
+        throttle.stop()
+        job?.cancel()
+        for (chart in charts) chart.slicing?.cancel()
+        charts.clear()
+        onChanged()
+    }
+
     /** Reads the values of every chart again, for other shown rows; forgets what other variables came to. */
     fun refresh() {
         throttle.stop()

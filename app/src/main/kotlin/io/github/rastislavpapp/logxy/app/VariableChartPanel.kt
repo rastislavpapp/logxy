@@ -17,6 +17,7 @@ import java.awt.geom.Path2D
 import java.time.Instant
 import java.time.ZoneId
 import javax.swing.JComponent
+import javax.swing.JMenuItem
 import javax.swing.JPopupMenu
 import javax.swing.JRadioButtonMenuItem
 import javax.swing.SwingUtilities
@@ -47,7 +48,8 @@ private const val MAX_BELOW_ZERO = 0.5
  * The variables charted in [charts], over the times of [timeline] (of the histogram bar above, so the two line up),
  * in one plot: per chart a line of its [VariableChart.metric] per slice of [CHART_GROUP] histogram slices. Each line
  * has its own scale, as their units differ, and all have 0 on one shared line; the left edge labels each scale's
- * ends in its chart's color. A legend row above switches a chart's metric (its label) or closes it (×).
+ * ends in its chart's color. A legend row above switches a chart's metric (its label) or closes it (×); a × at its
+ * right end closes all, as does the context menu, which also closes them one by one.
  *
  * At the [pointer]'s time, set while the mouse is over this plot or the histogram, a line crosses the plot with each
  * chart's value there beside it; [onPointer] hears where the mouse points here. Clicking calls [onJumpToRecord] with
@@ -108,10 +110,19 @@ class VariableChartPanel(private val charts: VariableCharts, private val timelin
     /** Where the legend's labels and close marks were painted, and their charts. */
     private val legend = mutableListOf<LegendEntry>()
 
+    /** Where the close mark under the mouse was painted, so it is painted brighter; null if none. */
+    private var hoveredClose: Rectangle? = null
+        set(value) {
+            if (field == value) return
+            field = value
+            repaint()
+        }
+
     /** The lines as last painted, for the pointer and clicks. */
     private val lines = mutableListOf<Line>()
 
-    private class LegendEntry(val bounds: Rectangle, val chart: VariableChart, val closes: Boolean)
+    /** A label, which switches [chart]'s metric, or a close mark: of [chart], or of all charts if that is null. */
+    private class LegendEntry(val bounds: Rectangle, val chart: VariableChart?, val closes: Boolean)
 
     /** [chart]'s [values] of [slices] as painted: [zeroY] where 0 is, [scale] pixels per unit. */
     private class Line(
@@ -128,11 +139,12 @@ class VariableChartPanel(private val charts: VariableCharts, private val timelin
         toolTipText = ""
         val mouse = object : MouseAdapter() {
             override fun mousePressed(e: MouseEvent) {
+                if (e.isPopupTrigger) return showMenu(e)
                 if (!SwingUtilities.isLeftMouseButton(e)) return
-                val entry = legend.firstOrNull { it.bounds.contains(e.point) }
+                val entry = legendAt(e)
                 when {
-                    entry?.closes == true -> charts.remove(entry.chart)
-                    entry != null -> showMetrics(entry)
+                    entry?.closes == true -> entry.chart?.let(charts::remove) ?: charts.removeAll()
+                    entry?.chart != null -> showMetrics(entry.chart, entry.bounds)
                     e.y >= plotTop -> {
                         pressX = e.x
                         dragging = false
@@ -141,6 +153,8 @@ class VariableChartPanel(private val charts: VariableCharts, private val timelin
             }
 
             override fun mouseReleased(e: MouseEvent) {
+                // Where the menu opens on release, as on Windows.
+                if (e.isPopupTrigger) return showMenu(e)
                 if (pressX < 0) return
                 pressX = -1
                 val range = dragged
@@ -152,8 +166,9 @@ class VariableChartPanel(private val charts: VariableCharts, private val timelin
             }
 
             override fun mouseMoved(e: MouseEvent) {
-                val onLegend = legend.any { it.bounds.contains(e.point) }
-                cursor = if (onLegend) Cursor.getPredefinedCursor(Cursor.HAND_CURSOR) else null
+                val entry = legendAt(e)
+                cursor = if (entry != null) Cursor.getPredefinedCursor(Cursor.HAND_CURSOR) else null
+                hoveredClose = entry?.takeIf { it.closes }?.bounds
                 point(if (e.y >= plotTop) e.x else null)
             }
 
@@ -164,7 +179,10 @@ class VariableChartPanel(private val charts: VariableCharts, private val timelin
                 if (dragging) drag(pressX, e.x)
             }
 
-            override fun mouseExited(e: MouseEvent) = point(null)
+            override fun mouseExited(e: MouseEvent) {
+                hoveredClose = null
+                point(null)
+            }
         }
         addMouseListener(mouse)
         addMouseMotionListener(mouse)
@@ -199,24 +217,42 @@ class VariableChartPanel(private val charts: VariableCharts, private val timelin
     private fun slicing(timeline: Timeline) =
         Triple(timeline.from, timeline.sliceWidth * CHART_GROUP, (timeline.count + CHART_GROUP - 1) / CHART_GROUP)
 
+    private fun legendAt(e: MouseEvent) = legend.firstOrNull { it.bounds.contains(e.point) }
+
     override fun getToolTipText(e: MouseEvent): String? {
-        val entry = legend.firstOrNull { it.bounds.contains(e.point) } ?: return null
+        val entry = legendAt(e) ?: return null
+        val chart = entry.chart ?: return "Stop charting all variables"
         if (entry.closes) return "Stop charting"
-        val label = escapeHtml(entry.chart.label)
+        val label = escapeHtml(chart.label)
         return "<html>$label<br><small>Click to choose what is charted</small></html>"
     }
 
-    private fun showMetrics(entry: LegendEntry) {
+    private fun showMetrics(chart: VariableChart, bounds: Rectangle) {
         val popup = JPopupMenu()
         for (metric in VariableMetric.entries) {
-            popup.add(JRadioButtonMenuItem(metric.title, metric == entry.chart.metric).apply {
+            popup.add(JRadioButtonMenuItem(metric.title, metric == chart.metric).apply {
                 addActionListener {
-                    entry.chart.metric = metric
+                    chart.metric = metric
                     repaint()
                 }
             })
         }
-        popup.show(this, entry.bounds.x, entry.bounds.y + entry.bounds.height)
+        popup.show(this, bounds.x, bounds.y + bounds.height)
+    }
+
+    /** Stops charting one variable, or all. */
+    private fun showMenu(e: MouseEvent) {
+        val all = charts.all
+        if (all.isEmpty()) return
+        val popup = JPopupMenu()
+        for (chart in all) {
+            popup.add(JMenuItem("Stop Charting “${chart.label.cut(MAX_MENU_CHARS)}”").apply {
+                addActionListener { charts.remove(chart) }
+            })
+        }
+        popup.addSeparator()
+        popup.add(JMenuItem("Stop Charting All").apply { addActionListener { charts.removeAll() } })
+        popup.show(this, e.x, e.y)
     }
 
     /** Goes to the record behind the line nearest to [e] at its time. */
@@ -267,7 +303,10 @@ class VariableChartPanel(private val charts: VariableCharts, private val timelin
         }
     }
 
-    /** Per chart its color, metric and label, and a ×; labels are cut shorter until the row fits. */
+    /**
+     * Per chart its color, metric and label, and a ×; labels are cut shorter until the row fits beside the × at its
+     * right end, which closes all.
+     */
     private fun paintLegend(g2: Graphics2D) {
         legend.clear()
         val metrics = g2.fontMetrics
@@ -275,11 +314,13 @@ class VariableChartPanel(private val charts: VariableCharts, private val timelin
         val chip = metrics.ascent * 2 / 3
         val close = metrics.stringWidth(CLOSE)
         val besideLabel = chip + UIScale.scale(4 + 4 + LEGEND_GAP) + close
+        val closeAllX = width - UIScale.scale(4 + 2) - close
+        paintClose(g2, closeAllX, baseline, LegendEntry(closeBounds(closeAllX, close), chart = null, closes = true))
         val all = charts.all
         fun texts(maxChars: Int) = all.map { "${it.metric.short} · ${it.label.cut(maxChars)}" }
         var maxChars = MAX_LEGEND_CHARS
         var texts = texts(maxChars)
-        while (maxChars > 1 && UIScale.scale(4) + texts.sumOf { besideLabel + metrics.stringWidth(it) } > width) {
+        while (maxChars > 1 && UIScale.scale(4) + texts.sumOf { besideLabel + metrics.stringWidth(it) } > closeAllX) {
             texts = texts(--maxChars)
         }
         var x = UIScale.scale(4)
@@ -293,11 +334,19 @@ class VariableChartPanel(private val charts: VariableCharts, private val timelin
             x += metrics.stringWidth(text)
             legend += LegendEntry(Rectangle(start, 0, x - start, legendHeight), chart, closes = false)
             x += UIScale.scale(4)
-            g2.color = UIManager.getColor("Label.disabledForeground")
-            g2.drawString(CLOSE, x, baseline)
-            legend += LegendEntry(Rectangle(x - 2, 0, close + 4, legendHeight), chart, closes = true)
+            paintClose(g2, x, baseline, LegendEntry(closeBounds(x, close), chart, closes = true))
             x += close + UIScale.scale(LEGEND_GAP)
         }
+    }
+
+    private fun closeBounds(x: Int, width: Int) = Rectangle(x - 2, 0, width + 4, legendHeight)
+
+    /** A × at [x], brighter while the mouse is over it. */
+    private fun paintClose(g2: Graphics2D, x: Int, baseline: Int, entry: LegendEntry) {
+        val hovered = entry.bounds == hoveredClose
+        g2.color = UIManager.getColor(if (hovered) "Label.foreground" else "Label.disabledForeground")
+        g2.drawString(CLOSE, x, baseline)
+        legend += entry
     }
 
     private fun paintMarked(g2: Graphics2D, timeline: Timeline, from: Long, to: Long) {
