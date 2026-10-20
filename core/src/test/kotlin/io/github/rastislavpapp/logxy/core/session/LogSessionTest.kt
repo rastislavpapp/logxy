@@ -43,6 +43,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
@@ -973,20 +974,14 @@ class LogSessionTest {
     @Test
     fun `a file said to have grown is read at once, not at the next poll`() = runBlocking {
         val file = Files.writeString(dir.resolve("pushed.log"), lines(10))
-        // Old, so the session sees a finished file and polls it only every 2 s.
+        // Old, so the session sees a finished file and polls it at the slow pace, which starts with the load: a poll
+        // is still far off when the push comes right after it.
         Files.setLastModifiedTime(file, FileTime.from(Instant.now().minus(Duration.ofHours(1))))
         val (session, shown) = open(file, Recorder())
         append(file, lines(5))
         session.grew()
-        val size = withTimeoutOrNull(1_000) {
-            var size = 0
-            while (size != 15) {
-                delay(20)
-                size = withContext(ui) { shown.size }
-            }
-            size
-        }
-        assertEquals(15, size)
+        val read = withTimeoutOrNull(1_000) { while (withContext(ui) { shown.size } < 15) delay(20) }
+        assertNotNull(read)
     }
 
     @Test
