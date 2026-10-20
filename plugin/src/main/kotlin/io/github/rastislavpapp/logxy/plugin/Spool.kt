@@ -13,6 +13,7 @@ import java.nio.file.StandardOpenOption
 
 // CSI sequences (colours, cursor moves); ColoredProcessHandler already decodes them, a plain OSProcessHandler does not.
 private val ANSI = Regex("\u001B\\[[0-?]*[ -/]*[@-~]")
+private val UNSAFE_IN_NAME = Regex("[^A-Za-z0-9._-]")
 
 /**
  * A run's stdout and stderr, in arrival order, without ANSI codes and IDE system lines, appended to [path]. The
@@ -50,12 +51,13 @@ class Spool private constructor(val path: Path) : ProcessListener {
         /** A fresh file for a run of [configuration], deleting the files of its earlier runs. */
         fun start(configuration: String): Spool {
             val dir = Files.createDirectories(PathManager.getSystemDir().resolve("logxy/runs"))
-            val key = configuration.replace(Regex("[^A-Za-z0-9._-]"), "_").take(MAX_NAME) +
-                "-" + Integer.toHexString(configuration.hashCode())
-            Files.list(dir).use { files ->
-                // An earlier run's tab may still read its file; on Windows that file cannot go yet.
-                files.filter { it.fileName.toString().startsWith("$key-") }.forEach { runCatching { Files.delete(it) } }
-            }
+            val name = configuration.replace(UNSAFE_IN_NAME, "_").take(MAX_NAME)
+            val hash = Integer.toHexString(configuration.hashCode())
+            val key = "$name-$hash"
+            val all = Files.list(dir).use { files -> files.toList() }
+            val earlier = all.filter { "${it.fileName}".startsWith("$key-") }
+            // An earlier run's tab may still read its file; on Windows that file cannot go yet.
+            for (file in earlier) runCatching { Files.delete(file) }
             return Spool(dir.resolve("$key-${System.currentTimeMillis()}.log"))
         }
 

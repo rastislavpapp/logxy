@@ -96,6 +96,7 @@ class LogxyConsole(
 
     override fun dispose() {
         spool.onGrew = {}
+        spool.onExit = {}
         tab?.dispose()
     }
 

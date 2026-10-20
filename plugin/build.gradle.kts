@@ -7,7 +7,7 @@ plugins {
 dependencies {
     implementation(project(":app"))
     intellijPlatform {
-        intellijIdea("2026.1.5")
+        intellijIdea(libs.versions.intellij.idea)
     }
 }
 

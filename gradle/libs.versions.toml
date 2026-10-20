@@ -10,6 +10,8 @@ log4j = "2.26.1"
 detekt = "2.0.0-alpha.6"
 jmh = "1.37"
 intellij-platform = "2.19.0"
+# The IDE the plugin compiles against: the oldest it supports.
+intellij-idea = "2026.1.5"
 
 [libraries]
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinx-coroutines" }
@@ -34,7 +36,7 @@ junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher
 kotlin-gradle-plugin = { module = "org.jetbrains.kotlin:kotlin-gradle-plugin", version.ref = "kotlin" }
 zstd-jni = { module = "com.github.luben:zstd-jni", version = "1.5.7-23" }
 intellij-platform-gradle-plugin = { module = "org.jetbrains.intellij.platform:intellij-platform-gradle-plugin", version.ref = "intellij-platform" }
-detekt-gradle-plugin ={ module = "dev.detekt:detekt-gradle-plugin", version.ref = "detekt" }
+detekt-gradle-plugin = { module = "dev.detekt:detekt-gradle-plugin", version.ref = "detekt" }
 detekt-rules-ktlint-wrapper = { module = "dev.detekt:detekt-rules-ktlint-wrapper", version.ref = "detekt" }
 # Benchmarks in tools: forks, warm-up and per-fork results.
 jmh-core = { module = "org.openjdk.jmh:jmh-core", version.ref = "jmh" }

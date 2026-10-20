@@ -170,7 +170,7 @@ class LogSession internal constructor(
         }
     private var job: Job? = null
 
-    // Conflated: a burst of pushes while the files are read wakes the next look once, which then reads it all.
+    // Conflated: a burst of pushes while the files are read wakes the next poll once, which then reads it all.
     private val pushes = Channel<Unit>(Channel.CONFLATED)
     private val settingsListener = { settingsChanged() }
 
@@ -314,8 +314,8 @@ class LogSession internal constructor(
     }
 
     /**
-     * Tells that a file grew, so it is read now rather than at the next poll, which waits up to half a second for a
-     * live file. For a writer that knows when it appended, such as a console capturing a process's output. Callable
+     * Tells that a file grew, so it is read now rather than at the next poll, which takes a noticeable moment even for
+     * a live file. For a writer that knows when it appended, such as a console capturing a process's output. Callable
      * from any thread; the session still checks the files itself, so a push for a file that did not change is harmless.
      */
     fun grew() {
