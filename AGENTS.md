@@ -23,7 +23,7 @@ Fast desktop log viewer (Kotlin, Swing, FlatLaf, Gradle).
 
 ## Trying the app
 
-Check UI behaviour in the GUI sandbox (`tools/gui-sandbox/gui.sh`), which keeps the app off the user's desktop: follow `docs/agents/gui-sandbox.md`.
+Check UI behaviour in the GUI sandbox (`tools/gui-sandbox/gui.sh`), which keeps the app off the user's desktop: follow `docs/agents/gui-sandbox.md`. The IntelliJ plugin runs in the same sandbox: follow `docs/agents/ide-sandbox.md`.
 
 ## Commits
 
