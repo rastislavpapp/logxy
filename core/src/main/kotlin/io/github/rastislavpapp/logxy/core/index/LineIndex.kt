@@ -9,6 +9,7 @@ import io.github.rastislavpapp.logxy.core.log.Columns
 import io.github.rastislavpapp.logxy.core.log.Level
 import io.github.rastislavpapp.logxy.core.log.LevelMapping
 import io.github.rastislavpapp.logxy.core.log.LogData
+import io.github.rastislavpapp.logxy.core.log.RowText
 import io.github.rastislavpapp.logxy.core.log.Schema
 import io.github.rastislavpapp.logxy.core.readFully
 import kotlinx.coroutines.Dispatchers
@@ -88,7 +89,9 @@ class LineIndex private constructor(
 
     override val recordCount get() = starts.size
 
-    override fun rowValues(record: Int, maxBytes: Int) = arrayOf(lineText(record, maxBytes))
+    override fun row(record: Int, maxBytes: Int, countBytes: Int) = RowText(arrayOf(lineText(record, maxBytes)), 0)
+
+    override fun laterLines(record: Int, maxBytes: Int, cutMark: String) = ""
 
     override fun filterSnapshot(): RecordSnapshot = LineSnapshot(lineCount, indexedSize, channels, starts)
 

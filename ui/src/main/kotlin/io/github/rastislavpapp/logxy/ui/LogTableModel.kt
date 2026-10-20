@@ -9,6 +9,9 @@ import javax.swing.table.AbstractTableModel
 /** Longest value prefix shown in the table; the rest is cut off. */
 const val MAX_DISPLAY_BYTES = 4096
 
+/** Longest record prefix shown whole, in the detail pane or an expanded row; the rest is cut off. */
+const val MAX_DETAIL_BYTES = 1024 * 1024
+
 private const val TAB_WIDTH = 4
 private const val CACHE_SIZE = 1024
 
@@ -51,6 +54,7 @@ class LogTableModel(val shown: ShownLog, private val names: ColumnNames) : Abstr
     // Direct-mapped cache: repaints ask for the same few visible rows over and over.
     private val cachedRows = IntArray(CACHE_SIZE) { -1 }
     private val cachedValues = arrayOfNulls<Array<String>>(CACHE_SIZE)
+    private val cachedMoreLines = IntArray(CACHE_SIZE)
 
     override val totalRowCount get() = shown.size
 
@@ -132,13 +136,37 @@ class LogTableModel(val shown: ShownLog, private val names: ColumnNames) : Abstr
     /** Canonical level of the record shown in [row], if the parser has levels. */
     fun level(row: Int): Level? = shown.level(recordAt(row))
 
+    /**
+     * How many lines the record shown in [row] has after its first, of its first [MAX_DETAIL_BYTES]; from the read of
+     * the row's values.
+     */
+    fun moreLines(row: Int): Int {
+        val record = recordAt(row)
+        values(record)
+        return cachedMoreLines[record and (CACHE_SIZE - 1)]
+    }
+
+    /**
+     * The text of [column] in [row], as [getValueAt] has it, for measuring many rows: not counting the record's lines,
+     * which reads far into a long record, nor keeping it.
+     */
+    fun sampleText(row: Int, column: Int): String {
+        val record = recordAt(row)
+        val field = fieldIndex(column) ?: return "${record + 1}"
+        val slot = record and (CACHE_SIZE - 1)
+        if (cachedRows[slot] == record) return cachedValues[slot]!![field]
+        return expandTabs(shown.rowValues(record, MAX_DISPLAY_BYTES)[field])
+    }
+
     private fun values(record: Int): Array<String> {
         val slot = record and (CACHE_SIZE - 1)
         if (cachedRows[slot] == record) return cachedValues[slot]!!
-        val values = shown.rowValues(record, MAX_DISPLAY_BYTES)
+        val row = shown.row(record, MAX_DISPLAY_BYTES, MAX_DETAIL_BYTES)
+        val values = row.values
         for (i in values.indices) values[i] = expandTabs(values[i])
         cachedRows[slot] = record
         cachedValues[slot] = values
+        cachedMoreLines[slot] = row.moreLines
         return values
     }
 

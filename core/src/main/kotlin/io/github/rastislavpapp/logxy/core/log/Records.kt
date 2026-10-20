@@ -21,13 +21,25 @@ interface Records {
     fun timestampNanos(record: Int): Long
 
     /** Display text of every field of [record], each cut to its first line and at most [maxBytes]. */
-    fun rowValues(record: Int, maxBytes: Int): Array<String>
+    fun rowValues(record: Int, maxBytes: Int): Array<String> = row(record, maxBytes, 0).values
+
+    /**
+     * Like [rowValues], with how many lines [record] has after its first, counted in its first [countBytes] bytes:
+     * the read that gets the values reaches that far, so a cut record shows a count of the part read.
+     */
+    fun row(record: Int, maxBytes: Int, countBytes: Int): RowText
 
     /** The whole value of [field] in [record]: all its lines, not cut. */
     fun fieldText(record: Int, field: Int): String
 
     /** The whole record as it appears in the file, cut at [maxBytes]. */
     fun recordText(record: Int, maxBytes: Int): String
+
+    /**
+     * The lines of [record] after its first, as written; empty if it has none. Of the record's first [maxBytes]
+     * bytes, ending with [cutMark] if it is longer.
+     */
+    fun laterLines(record: Int, maxBytes: Int, cutMark: String): String
 
     /** The bytes of [record] exactly as in the file, its line ends included, decoded as UTF-8. */
     fun sourceText(record: Int): String
@@ -36,3 +48,6 @@ interface Records {
         const val NO_TIMESTAMP = Columns.ABSENT_TIMESTAMP
     }
 }
+
+/** A row's [values], as [Records.rowValues], and how many lines its record has after the first. */
+class RowText(val values: Array<String>, val moreLines: Int)

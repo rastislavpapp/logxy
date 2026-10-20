@@ -68,6 +68,19 @@ class MergedLogTest {
     }
 
     @Test
+    fun `merged rows tell their record's later lines`() {
+        val traced = parse("t.log", withoutThread, """
+            2026-10-01 10:00:01.300 ERROR app.B - B1
+            java.lang.IllegalStateException: boom
+        """)
+        merge(fileA, traced).use { log ->
+            assertEquals(listOf(1, 0, 0), List(log.recordCount) { log.row(it, 1000, 10_000).moreLines })
+            assertEquals("B1", log.row(0, 1000, 10_000).values.last())
+            assertEquals("java.lang.IllegalStateException: boom", log.laterLines(0, 10_000, "…"))
+        }
+    }
+
+    @Test
     fun `a file starting earlier comes first, records without time keep their place`() {
         val late = parse("late.log", withThread, """
             2026-10-01 11:00:00.000 [main] INFO  app.L - late

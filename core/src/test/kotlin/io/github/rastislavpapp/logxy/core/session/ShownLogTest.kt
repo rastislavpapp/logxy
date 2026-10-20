@@ -5,6 +5,7 @@ import io.github.rastislavpapp.logxy.core.log.AppendedData
 import io.github.rastislavpapp.logxy.core.log.Level
 import io.github.rastislavpapp.logxy.core.log.ParsedLog
 import io.github.rastislavpapp.logxy.core.log.Records
+import io.github.rastislavpapp.logxy.core.log.RowText
 import io.github.rastislavpapp.logxy.core.log.Schema
 import io.github.rastislavpapp.logxy.core.merge.MergedLog
 import io.github.rastislavpapp.logxy.core.parse.CompiledPattern
@@ -36,9 +37,10 @@ class ShownLogTest {
         override val isRaw = true
         override fun level(record: Int): Level? = levels[record]
         override fun timestampNanos(record: Int) = times[record]
-        override fun rowValues(record: Int, maxBytes: Int) = arrayOf("r$record")
+        override fun row(record: Int, maxBytes: Int, countBytes: Int) = RowText(arrayOf("r$record"), 0)
         override fun fieldText(record: Int, field: Int) = "r$record"
         override fun recordText(record: Int, maxBytes: Int) = "r$record"
+        override fun laterLines(record: Int, maxBytes: Int, cutMark: String) = ""
         override fun sourceText(record: Int) = "r$record\n"
     }
 

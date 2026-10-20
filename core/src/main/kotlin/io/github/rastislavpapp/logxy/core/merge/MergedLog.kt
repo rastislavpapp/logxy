@@ -9,6 +9,7 @@ import io.github.rastislavpapp.logxy.core.log.Level
 import io.github.rastislavpapp.logxy.core.log.LogData
 import io.github.rastislavpapp.logxy.core.log.Records
 import io.github.rastislavpapp.logxy.core.log.Role
+import io.github.rastislavpapp.logxy.core.log.RowText
 import io.github.rastislavpapp.logxy.core.log.Schema
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -84,18 +85,22 @@ class MergedLog private constructor(
 
     override fun timestampNanos(record: Int): Long = parts[part(record)].timestampNanos(record(record))
 
-    override fun rowValues(record: Int, maxBytes: Int): Array<String> {
+    override fun row(record: Int, maxBytes: Int, countBytes: Int): RowText {
         val part = part(record)
-        val values = parts[part].rowValues(record(record), maxBytes)
-        return Array(schema.fields.size) { field ->
+        val row = parts[part].row(record(record), maxBytes, countBytes)
+        val values = Array(schema.fields.size) { field ->
             if (field == MergedSchema.SOURCE) return@Array names[part]
             val partField = merged.partField(part, field)
-            if (partField < 0) "" else values[partField]
+            if (partField < 0) "" else row.values[partField]
         }
+        return RowText(values, row.moreLines)
     }
 
     override fun recordText(record: Int, maxBytes: Int): String =
         parts[part(record)].recordText(record(record), maxBytes)
+
+    override fun laterLines(record: Int, maxBytes: Int, cutMark: String): String =
+        parts[part(record)].laterLines(record(record), maxBytes, cutMark)
 
     override fun fieldText(record: Int, field: Int): String {
         val part = part(record)
