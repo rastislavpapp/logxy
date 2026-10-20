@@ -45,6 +45,24 @@ class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
     /** Column widths by name, kept when columns are hidden or shown; not of the last column, which fills the rest. */
     private val widths = HashMap<Any, Int>()
 
+    /** The columns of [widths] whose width the user dragged; the others' follow the records shown. */
+    private val resized = HashSet<Any>()
+
+    /**
+     * The widths in pixels the user dragged columns to, by field name, also of hidden columns; set ones count as
+     * dragged.
+     */
+    var resizedWidths: Map<String, Int>
+        get() {
+            rememberWidths()
+            return resized.mapNotNull { id -> widths[id]?.let { "$id" to it } }.toMap()
+        }
+        set(value) {
+            widths.putAll(value)
+            resized.addAll(value.keys)
+            restoreWidths()
+        }
+
     /** Marks what the filter matched in the cells. */
     var matches: Highlighter = Highlighter.NONE
         set(value) {
@@ -86,6 +104,7 @@ class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
     // JTable spreads spare width over all columns; give it all to the last one, unless the user is
     // dragging a column border (then JTable keeps the dragged widths as the new preferred ones).
     override fun doLayout() {
+        tableHeader?.resizingColumn?.let { resized += it.identifier }
         if (tableHeader?.resizingColumn == null && columnModel.columnCount > 0) {
             val last = columnModel.getColumn(columnModel.columnCount - 1)
             val others = (0..<columnModel.columnCount - 1).sumOf { columnModel.getColumn(it).preferredWidth }
@@ -135,9 +154,10 @@ class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
         // A plain Font, not a FontUIResource, so a theme switch does not replace it.
         font = Font(base.name, base.style, base.size)
         rowHeight = getFontMetrics(font).height + 4
-        // Widths are measured in the new font.
-        widths.clear()
+        // Widths are measured in the new font; only the dragged ones stay.
+        widths.keys.retainAll(resized)
         setUpColumns()
+        restoreWidths()
     }
 
     private fun rememberWidths() {

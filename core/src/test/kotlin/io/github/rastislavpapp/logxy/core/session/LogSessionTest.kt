@@ -997,6 +997,21 @@ class LogSessionTest {
     }
 
     @Test
+    fun `a file emptied and written again is read again`() = runBlocking {
+        val file = Files.writeString(dir.resolve("cleared.log"), lines(100))
+        val recorder = Recorder()
+        val (session, _) = open(file, recorder)
+        Files.writeString(file, "")
+        session.grew()
+        val empty = withTimeout(10_000) { recorder.loads.receive() }
+        assertEquals(0, withContext(ui) { empty.size })
+        append(file, lines(3))
+        session.grew()
+        val read = withTimeoutOrNull(5_000) { while (withContext(ui) { session.shown?.size } != 3) delay(20) }
+        assertNotNull(read)
+    }
+
+    @Test
     fun `merged files follow appends to all of them, filtered`() = runBlocking {
         val a = Files.writeString(dir.resolve("a.log"), lines(300))
         val b = Files.writeString(dir.resolve("b.log"), lines(200))

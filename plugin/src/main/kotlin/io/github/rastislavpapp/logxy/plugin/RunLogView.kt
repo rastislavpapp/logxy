@@ -1,14 +1,15 @@
 package io.github.rastislavpapp.logxy.plugin
 
+import com.intellij.ide.ActivityTracker
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.actionSystem.ActionManager
-import com.intellij.openapi.actionSystem.ActionUpdateThread
-import com.intellij.openapi.actionSystem.AnActionEvent
-import com.intellij.openapi.actionSystem.DefaultActionGroup
-import com.intellij.openapi.actionSystem.ToggleAction
-import com.intellij.openapi.actionSystem.ex.ActionUtil
-import com.intellij.util.ui.JBUI
+import com.intellij.openapi.actionSystem.IdeActions
+import com.intellij.openapi.project.DumbAwareAction
+import com.intellij.openapi.util.Key
+import io.github.rastislavpapp.logxy.core.config.SavedFilter
+import io.github.rastislavpapp.logxy.core.parse.Parser
 import io.github.rastislavpapp.logxy.core.session.SessionStatus
+import io.github.rastislavpapp.logxy.ui.LogPart
 import io.github.rastislavpapp.logxy.ui.LogTab
 import io.github.rastislavpapp.logxy.ui.Look
 import io.github.rastislavpapp.logxy.ui.count
@@ -28,42 +29,60 @@ private const val DETECT_LINES = 20
 /** Or this long after the first output, for a program that prints little. */
 private const val DETECT_WAIT_MILLIS = 1500
 
+/** Where [RunLogView.shownParts] is kept: one choice for all runs. */
+private const val PARTS_KEY = "run.parts"
+
 /**
- * A run's console and a logxy view of its [spool], with a Console | logxy switch above them; [memory] keeps the
- * choice, the filter and the hidden columns for the next run. The view is made once logxy shows and there is enough
- * output to detect its parser.
+ * A run's console or a logxy view of its [spool], as the run tab's toolbar switches them; [memory] keeps the
+ * choice and the columns for the next run, which starts unfiltered. The view is made once logxy shows and there is
+ * enough output to detect its parser. While it shows, the view's actions take the place of the console's [toolbar].
+ * The IDE's Find, Find Next and Find Previous search its records.
  */
 class RunLogView(
     console: JComponent,
+    private val toolbar: ConsoleToolbar,
     private val spool: Spool,
     private val memory: RunMemory,
-) : JPanel(BorderLayout()), Disposable {
+    private val host: IdeHost,
+) : JPanel(CardLayout()), Disposable {
 
-    private val cards = CardLayout()
-    private val center = JPanel(cards)
+    private val cards = layout as CardLayout
     private val logPanel = JPanel(BorderLayout()).apply {
         add(JLabel("Waiting for output…", SwingConstants.CENTER))
     }
-    private val controls = JPanel(BorderLayout()).apply { isOpaque = false }
-    private val status = JLabel().apply { border = JBUI.Borders.empty(0, 8) }
 
-    /** Set on the UI thread; read on the process's threads, which push new output to it. */
-    @Volatile private var tab: LogTab? = null
+    /** The view once made; set on the UI thread, read on the process's threads, which push new output to it. */
+    @Volatile var tab: LogTab? = null
+        private set
     private val checkScheduled = AtomicBoolean()
     private var waitTimer: Timer? = null
-    private var showsLogxy = memory.showsLogxy
+    private val actions = viewActions(this)
+
+    /** Whether Clear All emptied the output: no view is made of it while it stays empty, also once the run ends. */
+    private var cleared = false
+
+    /** What the view had before Clear All, for the one made after it. */
+    private var kept: Kept? = null
+
+    private class Kept(val parsers: List<Parser?>, val filter: SavedFilter)
+
+    var showsLogxy = memory.showsLogxy
+        private set
+
+    /** The parts shown besides the rows, the same for all runs: none at first, so a run shows its rows alone. */
+    var shownParts: Set<LogPart>
+        get() = tab?.shownParts ?: rememberedParts()
+        set(value) {
+            val tab = tab
+            if (tab != null) tab.shownParts = value else rememberParts(value)
+        }
 
     init {
-        center.add(console, CONSOLE)
-        center.add(logPanel, LOGXY)
-        val bar = JPanel(BorderLayout()).apply {
-            add(viewSwitch(), BorderLayout.WEST)
-            add(controls, BorderLayout.CENTER)
-            add(status, BorderLayout.EAST)
-            border = JBUI.Borders.customLineBottom(JBUI.CurrentTheme.ToolWindow.borderColor())
-        }
-        add(bar, BorderLayout.NORTH)
-        add(center, BorderLayout.CENTER)
+        add(console, CONSOLE)
+        add(logPanel, LOGXY)
+        bind(IdeActions.ACTION_FIND) { it.showFind() }
+        bind(IdeActions.ACTION_FIND_NEXT) { it.findNext(forward = true) }
+        bind(IdeActions.ACTION_FIND_PREVIOUS) { it.findNext(forward = false) }
 
         spool.onGrew = {
             val tab = tab
@@ -78,7 +97,7 @@ class RunLogView(
         }
         spool.onExit = {
             SwingUtilities.invokeLater {
-                showStatus()
+                statusChanged()
                 makeTabIfReady()
                 remember()
             }
@@ -86,26 +105,50 @@ class RunLogView(
         showView(showsLogxy)
     }
 
-    /** The Console | logxy switch, as toggles in an IDE toolbar. */
-    private fun viewSwitch(): JComponent {
-        val group = DefaultActionGroup(ViewToggle("Console", logxy = false), ViewToggle("logxy", logxy = true))
-        val toolbar = ActionManager.getInstance().createActionToolbar("LogxyRunView", group, true)
-        toolbar.targetComponent = this
-        return toolbar.component
+    /** Runs [action] on the view by the shortcuts of the IDE action [id], while the focus is in the view. */
+    private fun bind(id: String, action: (LogTab) -> Unit) {
+        val shortcuts = ActionManager.getInstance().getAction(id)?.shortcutSet ?: return
+        DumbAwareAction.create { tab?.let(action) }.registerCustomShortcutSet(shortcuts, logPanel, this)
     }
 
-    private fun showView(logxy: Boolean) {
+    /** Shows logxy, or the console. */
+    fun showView(logxy: Boolean) {
         showsLogxy = logxy
         memory.showsLogxy = logxy
-        cards.show(center, if (logxy) LOGXY else CONSOLE)
-        controls.isVisible = logxy
+        cards.show(this, if (logxy) LOGXY else CONSOLE)
+        toolbar.show(if (logxy) actions else null, this)
         makeTabIfReady()
-        showStatus()
+        statusChanged()
+    }
+
+    /**
+     * Empties the view, as Clear All empties the console; the console keeps its text. The view is made anew from the
+     * output that follows, with the parser and the filter it had: reading the emptied file again would detect no
+     * parser in it.
+     */
+    fun clear() {
+        val old = tab
+        // Before the file is emptied, so the output that follows waits for the new view.
+        tab = null
+        spool.clear()
+        cleared = true
+        if (old != null) {
+            remember(old)
+            kept = Kept(old.chosenParsers, old.filter)
+            old.dispose()
+        }
+        logPanel.removeAll()
+        logPanel.add(JLabel("No output since Clear All", SwingConstants.CENTER))
+        logPanel.revalidate()
+        logPanel.repaint()
+        makeTabIfReady()
+        statusChanged()
     }
 
     /** Makes the view if logxy shows and the output is enough to detect its parser, or will be after a wait. */
     private fun makeTabIfReady() {
         if (tab != null || !showsLogxy) return
+        if (spool.lines == 0 && cleared) return
         val ended = spool.exitCode != null
         if (spool.lines >= DETECT_LINES || ended) return makeTab()
         if (spool.lines == 0) return
@@ -119,41 +162,59 @@ class RunLogView(
     private fun makeTab() {
         if (tab != null) return
         waitTimer?.stop()
+        waitTimer = null
         Look.current = IdeLook
         val made = LogTab(
             listOf(spool.path),
-            IdeHost,
+            host,
             openFiles = {},
             openEach = {},
-            filter = memory.filter,
-            onStatusChanged = ::showStatus,
+            filter = kept?.filter,
+            parsers = kept?.parsers.orEmpty(),
+            togglesParts = true,
+            onStatusChanged = ::statusChanged,
         )
         made.hiddenColumns = memory.hiddenColumns
+        made.columnWidths = memory.columnWidths
+        made.shownParts = rememberedParts()
+        made.onPartsChanged = { rememberParts(made.shownParts) }
         logPanel.removeAll()
         logPanel.add(made)
         logPanel.revalidate()
-        controls.add(made.fileControls, BorderLayout.WEST)
-        controls.revalidate()
         tab = made
+        statusChanged()
     }
 
     /** The records shown while logxy shows, and the exit code once the process ended. */
-    private fun showStatus() {
-        val parts = ArrayList<String>()
-        val (_, records, shown) = tab?.status ?: SessionStatus()
-        if (showsLogxy && records != null) {
-            val all = count(records, "record")
-            parts += if (shown == null) all else "${"%,d".format(shown)} of $all"
+    val statusText: String
+        get() {
+            val parts = ArrayList<String>()
+            val (_, records, shown) = tab?.status ?: SessionStatus()
+            if (showsLogxy && records != null) {
+                val all = count(records, "record")
+                parts += if (shown == null) all else "${"%,d".format(shown)} of $all"
+            }
+            spool.exitCode?.let { parts += "exited with code $it" }
+            return parts.joinToString(" · ")
         }
-        spool.exitCode?.let { parts += "exited with code $it" }
-        status.text = parts.joinToString(" · ")
+
+    // The toolbar shows the status and the state of the view: it updates soon after.
+    private fun statusChanged() = ActivityTracker.getInstance().inc()
+
+    private fun rememberedParts(): Set<LogPart> {
+        val names = IdeUiState[PARTS_KEY].orEmpty().split(',')
+        return LogPart.entries.filter { it.name in names }.toSet()
+    }
+
+    private fun rememberParts(parts: Set<LogPart>) {
+        IdeUiState[PARTS_KEY] = parts.joinToString(",") { it.name }
     }
 
     // Also on exit, not only on dispose: a pinned run tab outlives the next run, which reads the memory.
-    private fun remember() {
-        val tab = tab ?: return
-        memory.filter = tab.filter
+    private fun remember(tab: LogTab? = this.tab) {
+        tab ?: return
         memory.hiddenColumns = tab.hiddenColumns
+        memory.columnWidths = tab.columnWidths
     }
 
     override fun dispose() {
@@ -164,23 +225,11 @@ class RunLogView(
         tab?.dispose()
     }
 
-    /** One side of the switch: selected while it shows. */
-    private inner class ViewToggle(text: String, private val logxy: Boolean) : ToggleAction(text) {
-        init {
-            templatePresentation.putClientProperty(ActionUtil.SHOW_TEXT_IN_TOOLBAR, true)
-        }
+    companion object {
+        private const val CONSOLE = "console"
+        private const val LOGXY = "logxy"
 
-        override fun isSelected(e: AnActionEvent) = showsLogxy == logxy
-
-        override fun setSelected(e: AnActionEvent, state: Boolean) {
-            if (state) showView(logxy)
-        }
-
-        override fun getActionUpdateThread() = ActionUpdateThread.EDT
-    }
-
-    private companion object {
-        const val CONSOLE = "console"
-        const val LOGXY = "logxy"
+        /** The view of a run, on its process handler, where the run tab's top toolbar finds it. */
+        val KEY = Key.create<RunLogView>("logxy.view")
     }
 }

@@ -114,6 +114,18 @@ object IdeLook : Look {
         override fun updateUI() = setUI(LineDividerUI())
     }
 
+    override fun horizontalSplit(): JSplitPane = object : JSplitPane(HORIZONTAL_SPLIT) {
+        override fun updateUI() = setUI(LineDividerUI())
+    }
+
+    // IntelliJ's button UI makes buttons at least 72 pixels wide; Basic draws the text alone.
+    override fun link(button: AbstractButton) {
+        button.setUI(BasicButtonUI())
+        button.addPropertyChangeListener("UI") { if (button.ui !is BasicButtonUI) button.setUI(BasicButtonUI()) }
+        button.isFocusPainted = false
+        button.foreground = JBUI.CurrentTheme.Link.Foreground.ENABLED
+    }
+
     // IntelliJ's split panes offer no choice of arrows.
     override fun expandableBottomOnly(split: JSplitPane) {}
 
@@ -124,7 +136,11 @@ object IdeLook : Look {
                 g.color = UIUtil.getPanelBackground()
                 g.fillRect(0, 0, width, height)
                 g.color = IdeLook.border
-                g.fillRect(0, height / 2, width, 1)
+                if (orientation == JSplitPane.VERTICAL_SPLIT) {
+                    g.fillRect(0, height / 2, width, 1)
+                } else {
+                    g.fillRect(width / 2, 0, 1, height)
+                }
                 // The one-touch arrows.
                 paintComponents(g)
             }

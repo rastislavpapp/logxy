@@ -3,11 +3,13 @@ package io.github.rastislavpapp.logxy.ui
 import io.github.rastislavpapp.logxy.core.config.Settings
 import io.github.rastislavpapp.logxy.core.parse.Parser
 import io.github.rastislavpapp.logxy.core.query.Highlighter
+import io.github.rastislavpapp.logxy.core.query.TextSearch
 import io.github.rastislavpapp.logxy.core.session.SettingsStore
 import kotlinx.coroutines.CoroutineDispatcher
 import java.awt.Component
 import java.awt.Window
 import java.nio.file.Path
+import javax.swing.JComponent
 import javax.swing.text.JTextComponent
 
 /**
@@ -31,6 +33,13 @@ interface LogViewHost {
      * editor.
      */
     fun queryText(onApply: () -> Unit): QueryText?
+
+    /**
+     * A fresh view for finding text in the records of [tab], which reports what to find with [onSearch] (null once
+     * closed) and asks to go to the next match, or the previous, with [onFind].
+     */
+    fun findView(tab: JComponent, onSearch: (TextSearch?) -> Unit, onFind: (forward: Boolean) -> Unit): FindView =
+        FindBar(onSearch, onFind)
 
     /** Opens the parser and level settings from the views' menus; null if the host has no such dialogs. */
     val settingsDialogs: SettingsDialogs?

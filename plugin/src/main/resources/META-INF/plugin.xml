@@ -4,8 +4,8 @@
     <vendor>Rastislav Papp</vendor>
     <description><![CDATA[
         Shows a run's output in a logxy view in the Run tool window: parsed columns, the visual filter editor,
-        the time histogram and live follow. A Console | logxy switch above the console picks the view, remembered
-        per run configuration.
+        the time histogram and live follow. A Console | logxy switch in the run tab's toolbar picks the view,
+        remembered per run configuration. Parsers and log levels are set in Settings › Tools › logxy.
     ]]></description>
 
     <depends>com.intellij.modules.platform</depends>
@@ -15,11 +15,27 @@
                   topic="com.intellij.execution.ExecutionListener"/>
     </projectListeners>
 
+    <extensions defaultExtensionNs="com.intellij">
+        <applicationConfigurable parentId="tools" id="logxy" displayName="logxy"
+                                 instance="io.github.rastislavpapp.logxy.plugin.LogxyConfigurable"/>
+        <applicationConfigurable parentId="logxy" id="logxy.parsers" displayName="Parsers"
+                                 instance="io.github.rastislavpapp.logxy.plugin.ParsersConfigurable"/>
+        <applicationConfigurable parentId="logxy" id="logxy.levels" displayName="Log Levels"
+                                 instance="io.github.rastislavpapp.logxy.plugin.LevelsConfigurable"/>
+    </extensions>
+
     <actions>
-        <action id="logxy.ImportAppSettings" class="io.github.rastislavpapp.logxy.plugin.ImportAppSettings"
-                text="Import Settings from logxy App"
-                description="Copy the standalone logxy app's parsers, saved filters and level mappings">
-            <add-to-group group-id="ToolsMenu" anchor="last"/>
-        </action>
+        <!-- In every run tab's top toolbar; the actions hide in tabs without a logxy view. -->
+        <group id="logxy.RunToolbar">
+            <separator/>
+            <action id="logxy.ShowConsole" class="io.github.rastislavpapp.logxy.plugin.ShowConsole"
+                    text="Console" description="Show the run's console"/>
+            <action id="logxy.ShowLogxy" class="io.github.rastislavpapp.logxy.plugin.ShowLogxy"
+                    text="logxy" description="Show the run's output in parsed columns"/>
+            <action id="logxy.ChooseParser" class="io.github.rastislavpapp.logxy.plugin.ChooseParser"
+                    text="Parser" description="Parser: how lines are split into columns"/>
+            <action id="logxy.Status" class="io.github.rastislavpapp.logxy.plugin.RunStatus" text="Status"/>
+            <add-to-group group-id="RunTab.TopToolbar" anchor="last"/>
+        </group>
     </actions>
 </idea-plugin>

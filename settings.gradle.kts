@@ -9,9 +9,7 @@ plugins {
 
 rootProject.name = "logxy"
 
-include("core", "ui", "app", "tools")
-// The IntelliJ plugin downloads a whole IDE to build, so only with -Pplugin.
-if (providers.gradleProperty("plugin").isPresent) include("plugin")
+include("core", "ui", "app", "tools", "plugin")
 
 dependencyResolutionManagement {
     repositoriesMode = RepositoriesMode.FAIL_ON_PROJECT_REPOS

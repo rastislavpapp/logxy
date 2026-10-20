@@ -1,6 +1,5 @@
-package io.github.rastislavpapp.logxy.app
+package io.github.rastislavpapp.logxy.ui
 
-import com.formdev.flatlaf.FlatClientProperties
 import java.awt.Cursor
 import java.awt.event.FocusAdapter
 import java.awt.event.FocusEvent
@@ -9,17 +8,14 @@ import java.awt.event.MouseEvent
 import java.awt.font.TextAttribute
 import javax.swing.BorderFactory
 import javax.swing.JButton
-import javax.swing.UIManager
 
-/** A borderless button in FlatLaf's link color, with a hand cursor and an underline while the mouse is over it. */
+/** A borderless button in the link color, with a hand cursor and an underline while the mouse is over it. */
 class LinkButton(label: String, action: () -> Unit) : JButton(label) {
     init {
         isContentAreaFilled = false
-        // FlatLaf's button border and minimum width would pad and clip a text this plain.
+        look.link(this)
         border = BorderFactory.createEmptyBorder()
-        putClientProperty(FlatClientProperties.MINIMUM_WIDTH, 0)
         cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
-        foreground = UIManager.getColor("Component.linkColor")
         addActionListener { action() }
         val plain = font
         // An underline attribute leaves the text as wide as it was, unlike an HTML <u>.

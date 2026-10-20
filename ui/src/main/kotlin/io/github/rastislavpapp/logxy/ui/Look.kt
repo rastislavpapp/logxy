@@ -75,6 +75,12 @@ interface Look {
     /** A split pane with one component above the other; a look whose own divider does not fit replaces it. */
     fun verticalSplit(): JSplitPane = JSplitPane(JSplitPane.VERTICAL_SPLIT)
 
+    /** A split pane with one component beside the other, as [verticalSplit]. */
+    fun horizontalSplit(): JSplitPane = JSplitPane(JSplitPane.HORIZONTAL_SPLIT)
+
+    /** Draws [button] as a link: its text in the link colour, without the button's background or minimum width. */
+    fun link(button: AbstractButton)
+
     /** Offers only the one-touch arrow that hides [split]'s bottom component, and brings it back. */
     fun expandableBottomOnly(split: JSplitPane)
 

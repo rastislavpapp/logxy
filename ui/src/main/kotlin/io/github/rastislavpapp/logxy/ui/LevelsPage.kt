@@ -1,9 +1,8 @@
-package io.github.rastislavpapp.logxy.app
+package io.github.rastislavpapp.logxy.ui
 
 import io.github.rastislavpapp.logxy.core.config.Settings
 import io.github.rastislavpapp.logxy.core.log.Level
 import io.github.rastislavpapp.logxy.core.log.LevelMapping
-import io.github.rastislavpapp.logxy.ui.Icons
 import net.miginfocom.swing.MigLayout
 import javax.swing.DefaultCellEditor
 import javax.swing.JComboBox
@@ -12,8 +11,8 @@ import javax.swing.table.AbstractTableModel
 
 private const val TEXT_COLUMN_WIDTH = 300
 
-/** Edits which level texts in logs mean which [Level]; starts from the current table, built-in names included. */
-class LevelsPage : PreferencesPage("Log Levels", Icons.levels) {
+/** Edits which level texts in logs mean which [Level]; starts from the table of [settings], built-in names included. */
+class LevelsPage(settings: Settings) : SettingsPage("Log Levels", Icons.levels) {
 
     private class Row(var name: String, var level: Level)
 
@@ -22,7 +21,7 @@ class LevelsPage : PreferencesPage("Log Levels", Icons.levels) {
     private val table = JTable(model)
 
     init {
-        show(AppSettings.current.levels)
+        show(settings.levels)
         table.columnModel.getColumn(1).cellEditor = DefaultCellEditor(JComboBox(Level.entries.toTypedArray()))
         table.rowHeight = maxOf(table.rowHeight, JComboBox<Level>().preferredSize.height)
         table.autoCreateRowSorter = true
@@ -71,18 +70,22 @@ class LevelsPage : PreferencesPage("Log Levels", Icons.levels) {
         model.fireTableDataChanged()
     }
 
-    private fun named(): List<Row> {
-        if (table.isEditing) table.cellEditor.stopCellEditing()
+    /** The rows that name a text; with [stopEditing], after a cell being edited takes its value. */
+    private fun named(stopEditing: Boolean = true): List<Row> {
+        if (stopEditing && table.isEditing) table.cellEditor.stopCellEditing()
         return rows.filter { it.name.isNotBlank() }
     }
+
+    private fun mapping(rows: List<Row>) = LevelMapping(rows.associate { it.name.trim() to it.level })
 
     override fun problem(): String? {
         val duplicate = named().groupBy { LevelMapping.normalize(it.name) }.entries.firstOrNull { it.value.size > 1 }
         return duplicate?.let { "Log Levels: “${it.key}” is listed more than once." }
     }
 
-    override fun applyTo(settings: Settings) =
-        settings.copy(levels = LevelMapping(named().associate { it.name.trim() to it.level }))
+    override fun applyTo(settings: Settings) = settings.copy(levels = mapping(named()))
+
+    override fun isModified(settings: Settings) = mapping(named(stopEditing = false)) != settings.levels
 
     private inner class RowsModel : AbstractTableModel() {
         override fun getRowCount() = rows.size

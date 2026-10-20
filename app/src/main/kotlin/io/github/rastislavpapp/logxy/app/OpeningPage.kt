@@ -3,6 +3,7 @@ package io.github.rastislavpapp.logxy.app
 import io.github.rastislavpapp.logxy.core.config.OpenMode
 import io.github.rastislavpapp.logxy.core.config.Settings
 import io.github.rastislavpapp.logxy.ui.Icons
+import io.github.rastislavpapp.logxy.ui.SettingsPage
 import net.miginfocom.swing.MigLayout
 import java.awt.Component
 import javax.swing.BorderFactory
@@ -13,7 +14,7 @@ import javax.swing.JLabel
 import javax.swing.JList
 
 /** Whether opening files asks how to open them, or always does the same. */
-class OpeningPage : PreferencesPage("Opening Files", Icons.open) {
+class OpeningPage : SettingsPage("Opening Files", Icons.open) {
 
     private val ask = JCheckBox("Ask questions when opening files")
     private val modeLabel = JLabel("Open files:")

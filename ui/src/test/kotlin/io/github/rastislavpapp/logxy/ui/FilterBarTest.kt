@@ -120,6 +120,7 @@ private object PlainLook : Look {
     override val smallFont = Font(Font.SANS_SERIF, Font.PLAIN, 10)
     override val cellMargins = Insets(0, 0, 0, 0)
     override fun flat(button: AbstractButton) {}
+    override fun link(button: AbstractButton) {}
     override fun accentToggle(text: String, icon: Icon?) = JToggleButton(text, icon)
     override fun trailingComponent(field: JTextField, component: JComponent) {}
     override fun leadingIcon(field: JTextField, icon: Icon) {}
