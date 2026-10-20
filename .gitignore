@@ -24,5 +24,8 @@ tools/gui-sandbox/out/
 # Benchmark baseline of a machine other than the committed one
 tools/benchmark-baseline.local.properties
 
-# The spike's demo project keeps its run configurations
+# The spike's demo project keeps its run configurations, but not what an IDE writes when it opens it
 !/plugin/demo/.idea/
+/plugin/demo/.idea/workspace.xml
+/plugin/demo/.idea/vcs.xml
+/plugin/demo/out/
