@@ -1,6 +1,7 @@
 [versions]
 kotlin = "2.4.21"
-# The IntelliJ plugin uses the IDE's copy, 1.10.2 in 2026.1 and 2026.2; 1.11 is not binary compatible with it.
+# The oldest supported IntelliJ's version, for the app too: the plugin always gets the IDE's copy, and `core` built
+# against a newer one may not link with it (1.11 is not binary compatible with 2026.1's and 2026.2's 1.10.2).
 kotlinx-coroutines = "1.10.2"
 flatlaf = "3.7.2"
 junit = "6.1.3"
