@@ -6,6 +6,7 @@ plugins {
 
 dependencies {
     implementation(project(":app"))
+    implementation(project(":ui"))
     intellijPlatform {
         intellijIdea(libs.versions.intellij.idea)
     }

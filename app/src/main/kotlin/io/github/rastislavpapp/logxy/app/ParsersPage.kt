@@ -6,6 +6,9 @@ import io.github.rastislavpapp.logxy.core.parse.Parser
 import io.github.rastislavpapp.logxy.core.parse.ParserPreview
 import io.github.rastislavpapp.logxy.core.parse.PreviewLine
 import io.github.rastislavpapp.logxy.core.parse.RoleKeys
+import io.github.rastislavpapp.logxy.ui.ColumnNames
+import io.github.rastislavpapp.logxy.ui.Icons
+import io.github.rastislavpapp.logxy.ui.showColumnRename
 import net.miginfocom.swing.MigLayout
 import java.awt.Component
 import java.awt.event.MouseAdapter

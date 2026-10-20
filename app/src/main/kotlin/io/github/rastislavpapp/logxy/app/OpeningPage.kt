@@ -2,6 +2,7 @@ package io.github.rastislavpapp.logxy.app
 
 import io.github.rastislavpapp.logxy.core.config.OpenMode
 import io.github.rastislavpapp.logxy.core.config.Settings
+import io.github.rastislavpapp.logxy.ui.Icons
 import net.miginfocom.swing.MigLayout
 import java.awt.Component
 import javax.swing.BorderFactory

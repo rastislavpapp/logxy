@@ -16,6 +16,7 @@ Fast desktop log viewer (Kotlin, Swing, FlatLaf, Gradle).
 ## Rules
 
 - `core` must not depend on `java.awt` / `javax.swing`.
+- `ui` holds the Swing views the app and the IntelliJ plugin share: no FlatLaf and no `kotlinx-coroutines-swing` there (detekt enforces it). The look goes through `Look`, settings and the app-only parts through `LogViewHost`.
 - Prefer primitive arrays over boxed collections or per-row objects for anything that scales with file size.
 - Declare all dependency and plugin versions in `gradle/libs.versions.toml`. Do not add dependencies without a clear reason.
 - Speed is the top goal: after a change to parsing, indexing, filtering or merging, run `./gradlew -q :tools:benchmark`. If it fails, find the cause; for a slow or noisy row, see `docs/agents/benchmarks.md`.

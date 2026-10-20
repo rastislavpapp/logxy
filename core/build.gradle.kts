@@ -5,6 +5,7 @@ plugins {
 
 kotlin {
     compilerOptions.freeCompilerArgs.add("-Xadd-modules=$VECTOR_MODULE")
+    compilerOptions.apiVersion = PLUGIN_KOTLIN_API
 }
 
 tasks.test {

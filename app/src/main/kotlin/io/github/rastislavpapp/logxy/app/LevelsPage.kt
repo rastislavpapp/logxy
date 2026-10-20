@@ -3,6 +3,7 @@ package io.github.rastislavpapp.logxy.app
 import io.github.rastislavpapp.logxy.core.config.Settings
 import io.github.rastislavpapp.logxy.core.log.Level
 import io.github.rastislavpapp.logxy.core.log.LevelMapping
+import io.github.rastislavpapp.logxy.ui.Icons
 import net.miginfocom.swing.MigLayout
 import javax.swing.DefaultCellEditor
 import javax.swing.JComboBox

@@ -3,7 +3,10 @@ package io.github.rastislavpapp.logxy.plugin
 import com.intellij.ide.util.PropertiesComponent
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.project.Project
-import io.github.rastislavpapp.logxy.app.LogTab
+import io.github.rastislavpapp.logxy.app.AppHost
+import io.github.rastislavpapp.logxy.app.FlatLook
+import io.github.rastislavpapp.logxy.ui.LogTab
+import io.github.rastislavpapp.logxy.ui.Look
 import java.awt.BorderLayout
 import java.awt.CardLayout
 import java.awt.FlowLayout
@@ -85,7 +88,8 @@ class LogxyConsole(
     private fun makeTab() {
         if (tab != null) return
         LafShim.apply()
-        val made = LogTab(listOf(spool.path), openFiles = {}, openEach = {}, onStatusChanged = {})
+        Look.current = FlatLook
+        val made = LogTab(listOf(spool.path), AppHost, openFiles = {}, openEach = {}, onStatusChanged = {})
         logPanel.removeAll()
         logPanel.add(made)
         logPanel.revalidate()

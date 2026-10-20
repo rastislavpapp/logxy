@@ -7,7 +7,7 @@ plugins {
 }
 
 dependencies {
-    implementation(project(":core"))
+    implementation(project(":ui"))
     implementation(libs.kotlinx.coroutines.swing)
     implementation(libs.flatlaf)
     implementation(libs.flatlaf.extras)

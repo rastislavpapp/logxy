@@ -2,6 +2,10 @@ package io.github.rastislavpapp.logxy.app
 
 import io.github.rastislavpapp.logxy.core.parse.Parser
 import io.github.rastislavpapp.logxy.core.parse.mismatch
+import io.github.rastislavpapp.logxy.ui.Icons
+import io.github.rastislavpapp.logxy.ui.PopupItem
+import io.github.rastislavpapp.logxy.ui.escapeHtml
+import io.github.rastislavpapp.logxy.ui.showPopupList
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
