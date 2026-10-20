@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Spike (#86): runs an IntelliJ IDEA with the plugin in the GUI sandbox, on the demo project, off the host desktop.
+# Runs an IntelliJ IDEA with the plugin in the GUI sandbox, on the demo project, off the host desktop.
 # Usage: ide-sandbox.sh IDE_HOME
 #   IDE_HOME: an unpacked IDEA, e.g. the one Gradle downloaded for the plugin, or a Toolbox install.
 # Build the plugin first (./gradlew -q -Pplugin :plugin:buildPlugin). The container takes the GUI sandbox's name, so
