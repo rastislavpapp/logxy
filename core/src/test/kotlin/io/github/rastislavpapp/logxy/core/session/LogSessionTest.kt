@@ -35,6 +35,9 @@ import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardOpenOption
+import java.nio.file.attribute.FileTime
+import java.time.Duration
+import java.time.Instant
 import java.util.concurrent.Executors
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -965,6 +968,25 @@ class LogSessionTest {
         assertEquals(emptyList(), awaitShown(session, file, npe))
         append(file, "java.lang.NullPointerException: boom\n\tat a.B(B.java:1)\n")
         assertEquals(listOf(9), awaitShown(session, file, npe))
+    }
+
+    @Test
+    fun `a file said to have grown is read at once, not at the next poll`() = runBlocking {
+        val file = Files.writeString(dir.resolve("pushed.log"), lines(10))
+        // Old, so the session sees a finished file and polls it only every 2 s.
+        Files.setLastModifiedTime(file, FileTime.from(Instant.now().minus(Duration.ofHours(1))))
+        val (session, shown) = open(file, Recorder())
+        append(file, lines(5))
+        session.grew()
+        val size = withTimeoutOrNull(1_000) {
+            var size = 0
+            while (size != 15) {
+                delay(20)
+                size = withContext(ui) { shown.size }
+            }
+            size
+        }
+        assertEquals(15, size)
     }
 
     @Test

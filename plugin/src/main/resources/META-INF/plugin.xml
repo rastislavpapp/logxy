@@ -1,0 +1,15 @@
+<idea-plugin>
+    <id>io.github.rastislavpapp.logxy</id>
+    <name>logxy</name>
+    <vendor>Rastislav Papp</vendor>
+    <description><![CDATA[
+        Spike: shows a run's output in a logxy view inside the Run tool window, next to the console.
+    ]]></description>
+
+    <depends>com.intellij.modules.platform</depends>
+
+    <projectListeners>
+        <listener class="io.github.rastislavpapp.logxy.plugin.RunCapture"
+                  topic="com.intellij.execution.ExecutionListener"/>
+    </projectListeners>
+</idea-plugin>

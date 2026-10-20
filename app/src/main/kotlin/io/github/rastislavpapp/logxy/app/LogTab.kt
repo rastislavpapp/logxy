@@ -1085,6 +1085,9 @@ class LogTab(
 
     fun reloadFile() = session.reload()
 
+    /** See [LogSession.grew]; callable from any thread. */
+    fun fileGrew() = session.grew()
+
     fun focusFilter() = filterBar.focusFilter()
 
     /** Goes to the next record with the find bar's text, or the previous; opens the bar if it is closed. */

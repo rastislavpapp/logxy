@@ -3,9 +3,13 @@ pluginManagement {
     includeBuild("gradle/plugins")
 }
 
+plugins {
+    id("logxy.intellij-platform")
+}
+
 rootProject.name = "logxy"
 
-include("core", "app", "tools")
+include("core", "app", "tools", "plugin")
 
 dependencyResolutionManagement {
     repositoriesMode = RepositoriesMode.FAIL_ON_PROJECT_REPOS

@@ -33,6 +33,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
@@ -41,6 +42,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.Path
@@ -167,6 +169,9 @@ class LogSession internal constructor(
             sourceNames = MergedLog.sourceNames(paths, origin)
         }
     private var job: Job? = null
+
+    // Conflated: a burst of pushes while the files are read wakes the next look once, which then reads it all.
+    private val pushes = Channel<Unit>(Channel.CONFLATED)
     private val settingsListener = { settingsChanged() }
 
     /** The saved parsers before the latest change, to tell a detected saved parser from a guess of the same name. */
@@ -306,6 +311,15 @@ class LogSession internal constructor(
     fun start() {
         settings.addListener(settingsListener)
         launchLoad()
+    }
+
+    /**
+     * Tells that a file grew, so it is read now rather than at the next poll, which waits up to half a second for a
+     * live file. For a writer that knows when it appended, such as a console capturing a process's output. Callable
+     * from any thread; the session still checks the files itself, so a push for a file that did not change is harmless.
+     */
+    fun grew() {
+        pushes.trySend(Unit)
     }
 
     /** Uses [parser] for a single file from now on, or detects the parser if null; reads the file again. */
@@ -615,7 +629,7 @@ class LogSession internal constructor(
 
     private suspend fun watch() {
         while (true) {
-            delay(if (isLive) LIVE_POLL_MILLIS else STATIC_POLL_MILLIS)
+            withTimeoutOrNull(if (isLive) LIVE_POLL_MILLIS else STATIC_POLL_MILLIS) { pushes.receive() }
             val loaded = loaded ?: return
             try {
                 val oldRecordCount = loaded.records.recordCount

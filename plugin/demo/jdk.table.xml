@@ -1,0 +1,25 @@
+<application>
+  <component name="ProjectJdkTable">
+    <jdk version="2">
+      <name value="25" />
+      <type value="JavaSDK" />
+      <version value="java version &quot;25&quot;" />
+      <homePath value="/opt/java/openjdk" />
+      <roots>
+        <annotationsPath>
+          <root type="composite" />
+        </annotationsPath>
+        <classPath>
+          <root type="composite" />
+        </classPath>
+        <javadocPath>
+          <root type="composite" />
+        </javadocPath>
+        <sourcePath>
+          <root type="composite" />
+        </sourcePath>
+      </roots>
+      <additional />
+    </jdk>
+  </component>
+</application>
