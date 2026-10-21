@@ -73,6 +73,9 @@ class ConsoleToolbar internal constructor(content: Content, private val root: JC
     // The shown group as the one child, not its children: a toolbar inlines a non-popup group, and
     // `getChildren` is the IDE's to call.
     private inner class Shown : ActionGroup(), DumbAware {
-        override fun getChildren(e: AnActionEvent?): Array<AnAction> = shown?.let { arrayOf(it) } ?: consoleActions
+        override fun getChildren(e: AnActionEvent?): Array<AnAction> {
+            val actions = shown
+            return if (actions != null) arrayOf(actions) else consoleActions
+        }
     }
 }
