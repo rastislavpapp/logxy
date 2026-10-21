@@ -2,11 +2,52 @@
     <id>io.github.rastislavpapp.logxy</id>
     <name>logxy</name>
     <vendor>Rastislav Papp</vendor>
+    <!-- The Plugins page's overview; its core features match the README's Features list, so keep the two in step. -->
     <description><![CDATA[
-        Shows a run's output in a logxy view in the Run tool window: parsed columns, the visual filter editor,
-        the time histogram and live follow. A Console | logxy switch in the run tab's toolbar picks the view,
-        remembered per run configuration. Parsers and log levels are set in Settings › Tools › logxy.
+<p><b>Turn the Run console into a log viewer.</b> logxy shows a run's output as a table of parsed
+columns (time, level, thread, logger, message) that you can filter, search and follow live, right
+in the Run tool window.</p>
+
+<p>A busy application prints thousands of lines, and the console offers a text search. With logxy
+you can filter down to the warnings and errors of one logger in the last minute, and see on a
+timeline where they cluster.</p>
+
+<ul>
+  <li><b>Formats detected for you.</b> Log4j, logback, Spring Boot, Python logging and more are
+      recognised from the first lines. For a format logxy doesn't know, it infers a parser from
+      the lines themselves. You can also define your own with a pattern, a regex or a JSON key
+      mapping, or save a detected one and adjust it.</li>
+  <li><b>Visual filters.</b> Combine conditions on any column in all / any / none groups:
+      contains, wildcards, regular expressions, level and time ranges. Right-click a cell to copy
+      it or filter by its value. Save filters for later.</li>
+  <li><b>Time histogram.</b> Record volume with warnings and errors over time, and where search
+      matches fall. Click to jump there, drag to narrow to a time range.</li>
+  <li><b>Templates.</b> logxy groups lines that are the same message with different values:
+      <code>Request 4711 done in 12 ms</code> and <code>Request 4712 done in 230 ms</code> are both
+      <code>Request {1} done in {2} ms</code>. The Templates panel lists these message kinds with
+      how often each occurs, so you can show or hide a whole kind at once, and chart a value, such
+      as the duration, over time.</li>
+  <li><b>Out of the way.</b> A Console | logxy switch in the run tab's toolbar, remembered per run
+      configuration along with the columns you hide and resize. The IDE's console stays one
+      click away, for stack-trace links and typing into the program.</li>
+</ul>
+
+<p>Works in any JetBrains IDE from 2026.1, for any run configuration that starts a process.
+Parsers, saved filters and log levels are set in <i>Settings › Tools › logxy</i>.</p>
+
+<p>logxy is also a <a href="https://github.com/rastislavpapp/logxy">desktop app</a>, fast and
+memory-efficient on large logs, with merging of several files into one.</p>
     ]]></description>
+
+    <change-notes><![CDATA[
+<h3>0.1.0</h3>
+<p>First release.</p>
+<ul>
+  <li>A logxy view of each run's output, switched with Console | logxy in the run tab's toolbar.</li>
+  <li>Parsed columns, the visual filter editor, the time histogram, templates and live follow.</li>
+  <li>Settings › Tools › logxy for parsers, saved filters and log levels, importable from the logxy app.</li>
+</ul>
+    ]]></change-notes>
 
     <depends>com.intellij.modules.platform</depends>
 

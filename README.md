@@ -10,6 +10,8 @@
 
 ## Features
 
+<!-- The IntelliJ plugin's overview in plugin/src/main/resources/META-INF/plugin.xml describes the shared features too; keep the two in step. -->
+
 - **Large files.** Multi-GB logs open in seconds and scroll smoothly.
 - **Structured parsing.** Log4j and logback patterns, Spring Boot's default log output, JSON lines (logstash and ECS style), logfmt, CSV files with a header row (`.csv`, comma or semicolon separated), MDC maps (one column per key) and raw text. logxy picks the right parser automatically, and you can define your own with a pattern, a regex or a JSON key mapping.
 - **Filtering.** Combine conditions on any column with AND, OR and NOT, either in a visual editor or as a text expression such as `level >= WARN AND thread == "main*"`. Wildcards, regular expressions, case-sensitive matching, level and time ranges are supported. Save filters for later.
@@ -20,6 +22,12 @@
 - **Themes.** Light and dark, with a choice of FlatLaf and IntelliJ themes.
 
 ![The Open Files dialog merging a log4j-style file with a JSON-lines file](docs/images/open-files.png)
+
+## IntelliJ plugin
+
+The plugin turns the Run console of any JetBrains IDE into a log viewer. A run's output shows as parsed columns that you can filter, search and follow live, with the time histogram and templates beside them. The format is detected from the first lines, and a Console | logxy switch in the run tab's toolbar keeps the IDE's own console one click away.
+
+![A Spring Boot run in the plugin's logxy view, filtered to warnings and errors outside one logger](docs/images/plugin/run-view.png)
 
 ## Download
 
