@@ -740,6 +740,8 @@ class LogTab(
             box.revalidate()
         }
         bar.axisBelow = !underCharts
+        // Under the charts, the split's divider follows.
+        axis.lineBelow = !(underCharts && look.dividerLine)
         axis.isVisible = underCharts || bar.isVisible
     }
 
