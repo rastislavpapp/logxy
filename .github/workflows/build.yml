@@ -9,8 +9,6 @@ on:
 permissions:
   contents: read
 
-# The plugin builds against an unpacked IDE of about 4 GB, kept in .intellijPlatform/ides. The latest release that
-# verifyPlugin also checks is not part of the key, so a new one is downloaded until the version catalog changes.
 jobs:
   build:
     strategy:
@@ -28,10 +26,6 @@ jobs:
           distribution: temurin
           java-version: 25
       - uses: gradle/actions/setup-gradle@v6
-      - uses: actions/cache@v5
-        with:
-          path: .intellijPlatform/ides
-          key: ides-${{ runner.os }}-build-${{ hashFiles('gradle/libs.versions.toml') }}
       - run: ./gradlew build
 
   verify-plugin:
@@ -43,10 +37,6 @@ jobs:
           distribution: temurin
           java-version: 25
       - uses: gradle/actions/setup-gradle@v6
-      - uses: actions/cache@v5
-        with:
-          path: .intellijPlatform/ides
-          key: ides-${{ runner.os }}-verify-${{ hashFiles('gradle/libs.versions.toml') }}
       - run: ./gradlew :plugin:verifyPlugin
       - uses: actions/upload-artifact@v7
         if: always()
