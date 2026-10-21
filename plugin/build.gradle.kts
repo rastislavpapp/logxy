@@ -32,7 +32,7 @@ dependencies {
     implementation(files(expuiIcons))
     intellijPlatform {
         intellijIdea(libs.versions.intellij.idea)
-        pluginVerifier()
+        pluginVerifier(libs.versions.intellij.plugin.verifier)
     }
 }
 
@@ -53,13 +53,6 @@ intellijPlatform {
     }
     buildSearchableOptions = false
     instrumentCode = false
-    // Unpacks each IDE once into .intellijPlatform/ides/IU-<version>, a folder CI can cache, rather than into
-    // Gradle's transforms.
-    caching {
-        ides {
-            enabled = true
-        }
-    }
     // `untilBuild` is open, so every newer IDE counts as supported: verifyPlugin checks the binary against the oldest
     // and the latest release, or with -PverifyEap against the latest EAP alone.
     pluginVerification {
@@ -71,15 +64,8 @@ intellijPlatform {
                 channels = listOf(if (eap) Channel.EAP else Channel.RELEASE)
             }
         }
-        failureLevel = listOf(
-            FailureLevel.COMPATIBILITY_PROBLEMS,
-            FailureLevel.INVALID_PLUGIN,
-            FailureLevel.MISSING_DEPENDENCIES,
-            FailureLevel.INTERNAL_API_USAGES,
-            FailureLevel.SCHEDULED_FOR_REMOVAL_API_USAGES,
-            FailureLevel.OVERRIDE_ONLY_API_USAGES,
-            FailureLevel.NON_EXTENDABLE_API_USAGES,
-        )
+        // Deprecations are only reported: a newer IDE's replacement is often missing from the oldest supported one.
+        failureLevel = FailureLevel.ALL - FailureLevel.DEPRECATED_API_USAGES
         // Online, the verifier downloads about 1 GB of Marketplace plugins per IDE that the IDE's own plugins depend
         // on; the plugin depends on the platform alone, so the verdicts are the same without them.
         freeArgs = listOf("-offline")
