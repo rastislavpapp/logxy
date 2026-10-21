@@ -78,6 +78,9 @@ interface Look {
     /** A split pane with one component beside the other, as [verticalSplit]. */
     fun horizontalSplit(): JSplitPane = JSplitPane(JSplitPane.HORIZONTAL_SPLIT)
 
+    /** Whether the splits' dividers draw a line of their own, so a component beside one needs no edge there. */
+    val dividerLine: Boolean get() = false
+
     /** Draws [button] as a link: its text in the link colour, without the button's background or minimum width. */
     fun link(button: AbstractButton)
 
