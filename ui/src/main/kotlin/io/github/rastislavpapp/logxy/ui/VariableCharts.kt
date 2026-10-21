@@ -103,7 +103,7 @@ class VariableChart internal constructor(val template: String, val variable: Int
  * The variables charted in one tab, in the order they were added, each with its own color. Values are read through
  * [read], one pass per template for all its charted variables, for the shown rows, and kept until [refresh] reads them
  * again; [onChanged] hears of charts added or removed and of new values or slices. A variable read for the first time
- * is shown only if it holds a number; else [onNoNumbers] hears of it. Use on the UI thread.
+ * is shown only if it holds a number, which [onShown] hears of; else [onNoNumbers] does. Use on the UI thread.
  */
 class VariableCharts(
     private val scope: CoroutineScope,
@@ -118,6 +118,12 @@ class VariableCharts(
 
     var onChanged: () -> Unit = {}
     var onNoNumbers: (VariableChart) -> Unit = {}
+
+    /** Hears of a chart first shown, once its values are read and found to hold numbers. */
+    var onShown: (VariableChart) -> Unit = {}
+
+    /** Hears when the last chart is closed, by [remove] or [removeAll]. */
+    var onAllRemoved: () -> Unit = {}
 
     /** The charts shown, without those still read for the first time. */
     val all: List<VariableChart> get() = charts.filter { it.shown }
@@ -153,6 +159,7 @@ class VariableCharts(
         chart.slicing?.cancel()
         charts -= chart
         onChanged()
+        if (charts.isEmpty()) onAllRemoved()
     }
 
     /** Stops charting every variable, also those still read for the first time. */
@@ -163,6 +170,7 @@ class VariableCharts(
         for (chart in charts) chart.slicing?.cancel()
         charts.clear()
         onChanged()
+        onAllRemoved()
     }
 
     /** Reads the values of every chart again, for other shown rows; forgets what other variables came to. */
@@ -236,11 +244,13 @@ class VariableCharts(
                     chart.values = read
                     if (read == null) continue
                     summaries[template to chart.variable] = VariableSummary(read)
-                    if (!chart.shown && read.numbers == 0) {
+                    if (chart.shown) continue
+                    if (read.numbers == 0) {
                         charts -= chart
                         onNoNumbers(chart)
                     } else {
                         chart.shown = true
+                        onShown(chart)
                     }
                 }
                 onChanged()
