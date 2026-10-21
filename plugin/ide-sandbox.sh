@@ -15,15 +15,24 @@ size=${GUI_SIZE:-1600x1000}
 engine=${GUI_ENGINE:-$(command -v podman >/dev/null && echo podman || echo docker)}
 zip=$(ls "$here"/build/distributions/*.zip)
 
+# Git Bash would otherwise rewrite container paths such as /ide into Windows paths.
+export MSYS_NO_PATHCONV=1
+
+host_path() { if command -v cygpath >/dev/null; then cygpath -w "$1"; else echo "$1"; fi; }
+
 run_opts=()
-if [[ $engine == podman ]]; then run_opts+=(--userns=keep-id); else run_opts+=(--user "$(id -u):$(id -g)"); fi
-run_opts+=(--security-opt label=disable)
+if [[ $(uname -s) == Linux ]]; then
+  # The IDE's log must be owned by the host user, and SELinux would block the bind mounts.
+  if [[ $engine == podman ]]; then run_opts+=(--userns=keep-id); else run_opts+=(--user "$(id -u):$(id -g)"); fi
+  run_opts+=(--security-opt label=disable)
+fi
 
 "$engine" image inspect logxy-gui-sandbox >/dev/null 2>&1 || "$gui/gui.sh" build
 "$engine" rm -f logxy-gui >/dev/null 2>&1 || true
 mkdir -p "$out"
 "$engine" run -d --name logxy-gui "${run_opts[@]}" -e HOME=/tmp --shm-size=1g \
-  -v "$ide:/ide:ro" -v "$zip:/plugin.zip:ro" -v "$here/demo:/demo:ro" -v "$out:/out" \
+  -v "$(host_path "$ide"):/ide:ro" -v "$(host_path "$zip"):/plugin.zip:ro" -v "$(host_path "$here/demo"):/demo:ro" \
+  -v "$(host_path "$out"):/out" \
   logxy-gui-sandbox bash -c "
     set -e
     mkdir -p /tmp/ide/config/options /tmp/ide/plugins
