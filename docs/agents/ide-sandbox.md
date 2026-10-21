@@ -9,7 +9,7 @@
    - Gradle unpacks the version the plugin compiles against, and those `verifyPlugin` checks, into its transforms cache, `~/.gradle/caches/<gradle version>/transforms/<hash>/transformed/idea-<version>`; list them with `find ~/.gradle/caches -maxdepth 5 -type d -path '*/transformed/idea-*'`. `./gradlew -q :plugin:verifyPlugin` fetches the latest release too, `-PverifyEap` the latest EAP.
    - A Toolbox install works too (`~/.local/share/JetBrains/Toolbox/apps/intellij-idea` on Linux). It is mounted read-only.
 3. **Start** with `plugin/ide-sandbox.sh IDE_HOME`. Each start begins with fresh IDE settings. The IDE opens in free mode, without consent, tips or trust dialogs, after about 20 s.
-4. **Run** one of the demo's run configurations: "JVM app" (`src/Demo.java`) or "Shell script" (`demo.sh`). Both print log lines, a stack trace or ANSI colours now and then, and echo what is typed into the console.
+4. **Run** one of the demo's run configurations: "JVM app" (`src/Demo.java`) or "Shell script" (`demo.sh`). Both print log lines, a stack trace or ANSI colours now and then, and echo what is typed into the console. "Busy app" (`src/BusyApp.java`) prints a web shop's Spring Boot 3 log, ten minutes of history at once and then live, with bursts of warnings and errors: for screenshots and checks that need realistic output. "Busy app, custom format" prints the same in a pipe-delimited layout that only parser inference covers.
 5. **Drive it as a loop** with `gui.sh shot`, `click`, `key` and `type`, as in `gui-sandbox.md`: a full shot to learn the layout, then crops.
 6. **Check the log**: `grep -A20 SEVERE tools/gui-sandbox/out/ide-log/idea.log`. The IDE names the plugin it blames. The plugin's own lines start with `logxy:`. The log appends across starts, so move `ide-log/` aside before a restart.
 7. **Stop** with `gui.sh stop`.
@@ -21,4 +21,5 @@
 - **Keys**: `ctrl+shift+apostrophe` maximizes whichever tool window has focus, not necessarily the Run one.
 - **Console links**: a running console scrolls on, so stop the process before clicking a link in it.
 - **Inside the container**: the IDE's system directory is `/tmp/ide/system`, so the run spool files are in `/tmp/ide/system/logxy/runs`. The demo project is a copy at `/tmp/demo`. Look with `gui.sh exec ls ...`.
+- **Screenshots** for `docs/images/plugin/` are 1200x800 of the IDE alone: start with `GUI_SIZE=1200x819`, maximize the window by double-clicking its title bar, and crop with `gui.sh shot NAME 0 19 1200 800`. Escape in the logxy view clears its filter.
 - **No Python**: neither IDE bundles the Python plugin, so the shell script stands in for a non-JVM run.
