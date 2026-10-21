@@ -1,0 +1,29 @@
+name: Plugin vs IntelliJ EAP
+
+# The latest EAP, weekly rather than on every push: it warns of an IDE change months ahead, and an EAP may break what
+# its release will fix, so it must not block a build.
+on:
+  schedule:
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-plugin:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 25
+      - uses: gradle/actions/setup-gradle@v6
+      - run: ./gradlew :plugin:verifyPlugin -PverifyEap
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: plugin-verifier-eap
+          path: plugin/build/reports/pluginVerifier/
+          if-no-files-found: ignore

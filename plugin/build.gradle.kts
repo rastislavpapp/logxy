@@ -1,3 +1,7 @@
+import org.jetbrains.intellij.platform.gradle.IntelliJPlatformType
+import org.jetbrains.intellij.platform.gradle.models.ProductRelease.Channel
+import org.jetbrains.intellij.platform.gradle.tasks.VerifyPluginTask.FailureLevel
+
 // The IntelliJ plugin: a logxy view of a run's output in the Run tool window, from the shared views in `ui`.
 plugins {
     id("logxy.kotlin")
@@ -28,6 +32,7 @@ dependencies {
     implementation(files(expuiIcons))
     intellijPlatform {
         intellijIdea(libs.versions.intellij.idea)
+        pluginVerifier()
     }
 }
 
@@ -48,6 +53,37 @@ intellijPlatform {
     }
     buildSearchableOptions = false
     instrumentCode = false
+    // Unpacks each IDE once into .intellijPlatform/ides/IU-<version>, a folder CI can cache, rather than into
+    // Gradle's transforms.
+    caching {
+        ides {
+            enabled = true
+        }
+    }
+    // `untilBuild` is open, so every newer IDE counts as supported: verifyPlugin checks the binary against the oldest
+    // and the latest release, or with -PverifyEap against the latest EAP alone.
+    pluginVerification {
+        ides {
+            val eap = providers.gradleProperty("verifyEap").isPresent
+            if (!eap) current()
+            latest {
+                types = listOf(IntelliJPlatformType.IntellijIdea)
+                channels = listOf(if (eap) Channel.EAP else Channel.RELEASE)
+            }
+        }
+        failureLevel = listOf(
+            FailureLevel.COMPATIBILITY_PROBLEMS,
+            FailureLevel.INVALID_PLUGIN,
+            FailureLevel.MISSING_DEPENDENCIES,
+            FailureLevel.INTERNAL_API_USAGES,
+            FailureLevel.SCHEDULED_FOR_REMOVAL_API_USAGES,
+            FailureLevel.OVERRIDE_ONLY_API_USAGES,
+            FailureLevel.NON_EXTENDABLE_API_USAGES,
+        )
+        // Online, the verifier downloads about 1 GB of Marketplace plugins per IDE that the IDE's own plugins depend
+        // on; the plugin depends on the platform alone, so the verdicts are the same without them.
+        freeArgs = listOf("-offline")
+    }
 }
 
 interface Services {
