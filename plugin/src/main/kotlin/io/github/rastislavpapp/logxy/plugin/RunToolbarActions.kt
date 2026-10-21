@@ -144,8 +144,16 @@ fun viewActions(view: RunLogView): ActionGroup = DefaultActionGroup(
         view,
         LogPart.HISTOGRAM,
         "Time Histogram",
-        "Show the records over time, and charts of their values",
+        "Show the records over time",
         LogxyIcons.histogram,
+    ),
+    PartToggle(
+        view,
+        LogPart.CHARTS,
+        "Variable Charts",
+        "Show the charts of template variables over time",
+        LogxyIcons.chart,
+        unavailable = { if (it.tab?.hasCharts == true) null else "Nothing is charted: click a variable in Templates" },
     ),
     PartToggle(
         view,
@@ -192,16 +200,28 @@ private class ClearRun(private val view: RunLogView) :
     override fun actionPerformed(e: AnActionEvent) = view.clear()
 }
 
-/** Shows or hides [part] of the view; the choice holds for all runs. */
+/**
+ * Shows or hides [part] of the view; the choice holds for all runs. Disabled while [unavailable] tells why, which
+ * then stands for the description.
+ */
 private class PartToggle(
     private val view: RunLogView,
     private val part: LogPart,
     text: String,
-    description: String,
+    private val description: String,
     icon: Icon,
+    private val unavailable: (RunLogView) -> String? = { null },
 ) : DumbAwareToggleAction(text, description, icon) {
 
-    override fun isSelected(e: AnActionEvent) = part in view.shownParts
+    override fun update(e: AnActionEvent) {
+        super.update(e)
+        val why = unavailable(view)
+        e.presentation.isEnabled = why == null
+        e.presentation.description = why ?: description
+    }
+
+    // Off while unavailable, also if a run before left it on: it shows nothing.
+    override fun isSelected(e: AnActionEvent) = part in view.shownParts && unavailable(view) == null
 
     override fun setSelected(e: AnActionEvent, state: Boolean) {
         view.shownParts = if (state) view.shownParts + part else view.shownParts - part
@@ -214,4 +234,7 @@ private class PartToggle(
 object LogxyIcons {
     /** Bars of counts over time. */
     val histogram: Icon = IconLoader.getIcon("/icons/histogram.svg", LogxyIcons::class.java)
+
+    /** A line of values over time. */
+    val chart: Icon = IconLoader.getIcon("/icons/chart.svg", LogxyIcons::class.java)
 }

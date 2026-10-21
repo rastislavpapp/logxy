@@ -44,11 +44,12 @@ private const val DOT_SIZE = 6f
 private const val MAX_BELOW_ZERO = 0.5
 
 /**
- * The variables charted in [charts], over the times of [timeline] (of the histogram bar above, so the two line up),
- * in one plot: per chart a line of its [VariableChart.metric] per slice of [CHART_GROUP] histogram slices. Each line
- * has its own scale, as their units differ, and all have 0 on one shared line; the left edge labels each scale's
- * ends in its chart's color. A legend row above switches a chart's metric (its label) or closes it (×); a × at its
- * right end closes all, as does the context menu, which also closes them one by one.
+ * The variables charted in [charts], over the times of [timeline] at this plot's width (the histogram bar's slicing,
+ * so the two line up when both show, also while the bar is hidden), in one plot: per chart a line of its
+ * [VariableChart.metric] per slice of [CHART_GROUP] histogram slices. Each line has its own scale, as their units
+ * differ, and all have 0 on one shared line; the left edge labels each scale's ends in its chart's color. A legend
+ * over the plot's top switches a chart's metric (its label) or closes it (×); a × at its right end closes all,
+ * as does the context menu, which also closes them one by one.
  *
  * At the [pointer]'s time, set while the mouse is over this plot or the histogram, a line crosses the plot with each
  * chart's value there beside it; [onPointer] hears where the mouse points here. Clicking calls [onJumpToRecord] with
@@ -56,7 +57,10 @@ private const val MAX_BELOW_ZERO = 0.5
  * Dragging selects whole slices of the histogram, as dragging there does: [onDragged] hears the times while
  * dragging, [onRange] once dropped.
  */
-class VariableChartPanel(private val charts: VariableCharts, private val timeline: () -> Timeline?) : JComponent() {
+class VariableChartPanel(
+    private val charts: VariableCharts,
+    private val timeline: (width: Int) -> Timeline?,
+) : JComponent() {
 
     var onPointer: (time: Long?) -> Unit = {}
     var onJump: (time: Long) -> Unit = {}
@@ -168,7 +172,7 @@ class VariableChartPanel(private val charts: VariableCharts, private val timelin
                 val entry = legendAt(e)
                 cursor = if (entry != null) Cursor.getPredefinedCursor(Cursor.HAND_CURSOR) else null
                 hoveredClose = entry?.takeIf { it.closes }?.bounds
-                point(if (e.y >= plotTop) e.x else null)
+                point(if (entry == null && e.y >= plotTop) e.x else null)
             }
 
             override fun mouseDragged(e: MouseEvent) {
@@ -189,7 +193,7 @@ class VariableChartPanel(private val charts: VariableCharts, private val timelin
 
     /** Selects the histogram's slices from the one at [x1] to the one at [x2]. */
     private fun drag(x1: Int, x2: Int) {
-        val timeline = timeline() ?: return
+        val timeline = timeline(width) ?: return
         fun slice(x: Int) = Math.floorDiv(timeline.timeAt(x) - timeline.from, timeline.sliceWidth)
         val first = minOf(slice(x1), slice(x2))
         val last = maxOf(slice(x1), slice(x2))
@@ -197,18 +201,18 @@ class VariableChartPanel(private val charts: VariableCharts, private val timelin
     }
 
     private fun point(x: Int?) {
-        val time = x?.let { timeline()?.timeAt(it) }
+        val time = x?.let { timeline(width)?.timeAt(it) }
         pointer = time
         onPointer(time)
     }
 
     private val labelFont get() = look.smallFont
     private val legendHeight get() = getFontMetrics(labelFont).height + look.scale(LEGEND_PADDING * 2)
-    private val plotTop get() = legendHeight + look.scale(PLOT_PADDING)
-    private val plotBottom get() = height - 1 - look.scale(PLOT_PADDING)
+    private val plotTop get() = look.scale(PLOT_PADDING)
+    private val plotBottom get() = height - look.scale(PLOT_PADDING)
 
     override fun getPreferredSize(): Dimension =
-        Dimension(0, legendHeight + look.scale(PLOT_HEIGHTS * HISTOGRAM_HEIGHT + 2 * PLOT_PADDING) + 1)
+        Dimension(0, look.scale(PLOT_HEIGHTS * HISTOGRAM_HEIGHT + 2 * PLOT_PADDING))
 
     override fun getMinimumSize() = preferredSize
 
@@ -256,7 +260,7 @@ class VariableChartPanel(private val charts: VariableCharts, private val timelin
 
     /** Goes to the record behind the line nearest to [e] at its time. */
     private fun jump(e: MouseEvent) {
-        val time = timeline()?.timeAt(e.x) ?: return
+        val time = timeline(width)?.timeAt(e.x) ?: return
         var best: Line? = null
         var bestSlice = -1
         var distance = Double.POSITIVE_INFINITY
@@ -284,29 +288,32 @@ class VariableChartPanel(private val charts: VariableCharts, private val timelin
         val g2 = g.create() as Graphics2D
         try {
             g2.color = UIManager.getColor("Table.background")
+            // No border at the bottom: the time axis is right under it.
             g2.fillRect(0, 0, width, height)
-            g2.color = look.border
-            g2.fillRect(0, height - 1, width, 1)
             g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
             g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON)
             g2.font = labelFont
-            paintLegend(g2)
             lines.clear()
-            val timeline = timeline() ?: return
-            markedTimes?.let { (from, to) -> paintMarked(g2, timeline, from, to) }
-            (dragged ?: draggedTimes)?.let { (from, to) -> paintDragged(g2, timeline, from, to) }
-            paintLines(g2, timeline)
-            pointer?.let { paintPointer(g2, timeline, it) }
+            val timeline = timeline(width)
+            var scaleLabels = 0
+            if (timeline != null) {
+                markedTimes?.let { (from, to) -> paintMarked(g2, timeline, from, to) }
+                (dragged ?: draggedTimes)?.let { (from, to) -> paintDragged(g2, timeline, from, to) }
+                scaleLabels = paintLines(g2, timeline)
+            }
+            paintLegend(g2, scaleLabels)
+            if (timeline != null) pointer?.let { paintPointer(g2, timeline, it) }
         } finally {
             g2.dispose()
         }
     }
 
     /**
-     * Per chart its color, metric and label, and a ×; labels are cut shorter until the row fits beside the × at its
-     * right end, which closes all.
+     * Over the top of the plot, right of the [scaleLabels] pixels the scales' top labels take at the left edge: per
+     * chart its color, metric and label, and a ×; on the background, so lines do not hide it. Labels are cut shorter
+     * until the row fits beside the × at its right end, which closes all.
      */
-    private fun paintLegend(g2: Graphics2D) {
+    private fun paintLegend(g2: Graphics2D, scaleLabels: Int) {
         legend.clear()
         val metrics = g2.fontMetrics
         val baseline = look.scale(LEGEND_PADDING) + metrics.ascent
@@ -314,15 +321,18 @@ class VariableChartPanel(private val charts: VariableCharts, private val timelin
         val close = metrics.stringWidth(CLOSE)
         val besideLabel = chip + look.scale(4 + 4 + LEGEND_GAP) + close
         val closeAllX = width - look.scale(4 + 2) - close
-        paintClose(g2, closeAllX, baseline, LegendEntry(closeBounds(closeAllX, close), chart = null, closes = true))
         val all = charts.all
         fun texts(maxChars: Int) = all.map { "${it.metric.short} · ${it.label.cut(maxChars)}" }
+        val start = maxOf(look.scale(4), scaleLabels + look.scale(LEGEND_GAP))
         var maxChars = MAX_LEGEND_CHARS
         var texts = texts(maxChars)
-        while (maxChars > 1 && look.scale(4) + texts.sumOf { besideLabel + metrics.stringWidth(it) } > closeAllX) {
+        while (maxChars > 1 && start + texts.sumOf { besideLabel + metrics.stringWidth(it) } > closeAllX) {
             texts = texts(--maxChars)
         }
-        var x = look.scale(4)
+        var x = start
+        g2.color = withAlpha(UIManager.getColor("Table.background"), 0.85f)
+        g2.fillRect(x - look.scale(4), 0, width - x + look.scale(4), legendHeight)
+        paintClose(g2, closeAllX, baseline, LegendEntry(closeBounds(closeAllX, close), chart = null, closes = true))
         for ((chart, text) in all.zip(texts)) {
             val start = x
             g2.color = chart.color
@@ -370,9 +380,10 @@ class VariableChartPanel(private val charts: VariableCharts, private val timelin
 
     /**
      * Each chart's line on its own scale, with 0 on one line for all: as far up as the chart reaching furthest below
-     * 0 needs, at most [MAX_BELOW_ZERO] of the way while some line is above. Its ends are labeled at the left.
+     * 0 needs, at most [MAX_BELOW_ZERO] of the way while some line is above. Its ends are labeled at the left; returns
+     * how wide the labels at the top are, in pixels from the left edge.
      */
-    private fun paintLines(g2: Graphics2D, timeline: Timeline) {
+    private fun paintLines(g2: Graphics2D, timeline: Timeline): Int {
         val (from, sliceWidth, count) = slicing(timeline)
         // Per chart, how far above and below 0 its scale must reach.
         class Range(
@@ -426,6 +437,7 @@ class VariableChartPanel(private val charts: VariableCharts, private val timelin
         paintLabels(g2, bottomLabels, plotBottom.toInt() - bottomLabels.size * metrics.height)
         val zeroTop = (zeroY - metrics.height).toInt().coerceAtLeast(plotTop.toInt() + topLabels.size * metrics.height)
         paintLabels(g2, listOf("0" to UIManager.getColor("Label.disabledForeground")), zeroTop)
+        return topLabels.maxOfOrNull { look.scale(6) + metrics.stringWidth(it.first) } ?: 0
     }
 
     /** Through the middle of each slice with a value, broken where there is none; a lone value is a dot. */
