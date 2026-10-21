@@ -82,6 +82,11 @@ private const val SEARCH_PROGRESS_DELAY_MILLIS = 200
 private const val FLOATING_TOP_GAP = 6
 private const val FLOATING_RIGHT_GAP = 24
 
+private val EDGE = BottomEdge()
+
+/** Under the histogram when the time axis is not: as much room as above the chart, so it does not touch the line. */
+private val PADDED_EDGE = BottomEdge(HISTOGRAM_PADDING)
+
 /** The views around a [LogTab]'s rows, which the user can show and hide one by one where the host offers it. */
 enum class LogPart { FILTER, HISTOGRAM, CHARTS, TEMPLATES }
 
@@ -728,10 +733,19 @@ class LogTab(
         }
     }
 
-    /** One time axis, at the bottom of the charts and the histogram, whichever of them show. */
+    /** A box for [content], if any, that [placeTimeAxis] can add the time axis under. */
+    private fun boxOf(content: JComponent?) = JPanel(BorderLayout()).apply {
+        if (content != null) add(content, BorderLayout.CENTER)
+    }
+
+    /**
+     * One time axis, at the bottom of the charts and the histogram, whichever of them show; the boxes they are in
+     * draw the line under them.
+     */
     private fun placeTimeAxis(underCharts: Boolean) {
         val axis = timeAxis ?: return
         val bar = histogramBar ?: return
+        val histogramBox = histogramBox ?: return
         val box = (if (underCharts) chartBox else histogramBox) ?: return
         if (axis.parent !== box) {
             val from = axis.parent
@@ -739,10 +753,14 @@ class LogTab(
             from?.revalidate()
             box.revalidate()
         }
-        bar.axisBelow = !underCharts
-        // Under the charts, the split's divider follows.
-        axis.lineBelow = !(underCharts && look.dividerLine)
         axis.isVisible = underCharts || bar.isVisible
+        histogramBox.border = when {
+            !bar.isVisible -> null
+            underCharts -> PADDED_EDGE
+            else -> EDGE
+        }
+        // Under the charts, the split's divider follows, and draws its own line in a look that has one.
+        chartBox?.border = if (underCharts && !look.dividerLine) EDGE else null
     }
 
     // Hiding every column happens when the file changed meanwhile, or the names were remembered for another parser.
@@ -906,8 +924,8 @@ class LogTab(
             }
         }
         timeAxis = histogramBar?.let { TimeAxis(it::timeline) }
-        chartBox = chartPanel?.let { JPanel(BorderLayout()).apply { add(it, BorderLayout.CENTER) } }
-        val histogramBox = JPanel(BorderLayout()).apply { histogramBar?.let { add(it, BorderLayout.CENTER) } }
+        chartBox = chartPanel?.let(::boxOf)
+        val histogramBox = boxOf(histogramBar)
         this.histogramBox = histogramBox
         histogramBar?.isVisible = LogPart.HISTOGRAM in shownParts
         rowsHolder.removeAll()
