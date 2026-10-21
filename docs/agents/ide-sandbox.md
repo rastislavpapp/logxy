@@ -6,7 +6,7 @@
 
 1. **Build the plugin**: `./gradlew -q :plugin:buildPlugin`. Rebuild and start again after every code change.
 2. **Pick the IDE.** The script takes an unpacked IDEA as its argument; check against the oldest supported version and the newest.
-   - Gradle unpacks the version the plugin compiles against, and those `verifyPlugin` checks, into `.intellijPlatform/ides/IU-<version>`; pass it as an absolute path. `./gradlew -q :plugin:verifyPlugin` fetches the latest release too, `-PverifyEap` the latest EAP.
+   - Gradle unpacks the version the plugin compiles against, and those `verifyPlugin` checks, into its transforms cache, `~/.gradle/caches/<gradle version>/transforms/<hash>/transformed/idea-<version>`; list them with `find ~/.gradle/caches -maxdepth 5 -type d -path '*/transformed/idea-*'`. `./gradlew -q :plugin:verifyPlugin` fetches the latest release too, `-PverifyEap` the latest EAP.
    - A Toolbox install works too (`~/.local/share/JetBrains/Toolbox/apps/intellij-idea` on Linux). It is mounted read-only.
 3. **Start** with `plugin/ide-sandbox.sh IDE_HOME`. Each start begins with fresh IDE settings. The IDE opens in free mode, without consent, tips or trust dialogs, after about 20 s.
 4. **Run** one of the demo's run configurations: "JVM app" (`src/Demo.java`) or "Shell script" (`demo.sh`). Both print log lines, a stack trace or ANSI colours now and then, and echo what is typed into the console.

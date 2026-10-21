@@ -1,0 +1,30 @@
+name: Verify plugin
+
+on:
+  workflow_call:
+    inputs:
+      eap:
+        description: Verify against the latest EAP instead of the oldest and the latest release
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  verify-plugin:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 25
+      - uses: gradle/actions/setup-gradle@v6
+      - run: ./gradlew :plugin:verifyPlugin ${{ inputs.eap && '-PverifyEap' || '' }}
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: plugin-verifier${{ inputs.eap && '-eap' || '' }}
+          path: plugin/build/reports/pluginVerifier/
+          if-no-files-found: ignore

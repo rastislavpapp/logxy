@@ -54,7 +54,7 @@ The logo's source is `app/src/main/resources/logxy.svg`. The packaging icons in 
 
 ## Releasing (maintainers)
 
-Push an `X.Y.Z` tag on a commit in `main`. The release workflow builds and tests on Windows and Linux, stamps that version on the packages (the code stays at `-SNAPSHOT`; the release passes `-Pversion`) and creates a GitHub release with the jar, the Windows zip and the Linux tarball. Running the workflow by hand does a dry run that publishes nothing.
+Push an `X.Y.Z` tag on a commit in `main`. The release workflow builds and tests on Windows and Linux, verifies the IntelliJ plugin against the oldest supported and the latest IntelliJ release, stamps that version on the packages (the code stays at `-SNAPSHOT`; the release passes `-Pversion`) and creates a GitHub release with the jar, the Windows zip, the Linux tarball and the plugin zip. A new IntelliJ release that breaks the plugin blocks the release too, until the plugin is fixed. Running the workflow by hand does a dry run that publishes nothing.
 
 ```sh
 git tag 0.1.0 && git push origin 0.1.0
