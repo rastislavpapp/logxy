@@ -12,7 +12,6 @@ import java.awt.event.MouseEvent
 import java.awt.geom.Path2D
 import java.time.Instant
 import java.time.ZoneId
-import java.time.format.DateTimeFormatter
 import javax.swing.JComponent
 import javax.swing.JMenuItem
 import javax.swing.JPopupMenu
@@ -23,30 +22,13 @@ import kotlin.math.sqrt
 
 /** Of the chart, without the time labels under it. */
 internal const val HISTOGRAM_HEIGHT = 40
-private const val TICK_HEIGHT = 3
 private const val MATCH_STRIP_HEIGHT = 3
 
 /** Pixels per slice of time: wide enough that counts are not mostly noise, narrow enough to look continuous. */
 private const val SLICE_WIDTH = 2
 
-/** Space a time label needs around it, in pixels. */
-private const val LABEL_GAP = 24
-
 /** How far the mouse must move, in pixels, before a press becomes a drag. */
 internal const val DRAG_THRESHOLD = 3
-
-private const val MILLI = 1_000_000L
-private const val SECOND = 1_000 * MILLI
-private const val MINUTE = 60 * SECOND
-private const val HOUR = 60 * MINUTE
-private const val DAY = 24 * HOUR
-
-private val TICK_STEPS = longArrayOf(
-    MILLI, 2 * MILLI, 5 * MILLI, 10 * MILLI, 20 * MILLI, 50 * MILLI, 100 * MILLI, 200 * MILLI, 500 * MILLI,
-    SECOND, 2 * SECOND, 5 * SECOND, 10 * SECOND, 15 * SECOND, 30 * SECOND,
-    MINUTE, 2 * MINUTE, 5 * MINUTE, 10 * MINUTE, 15 * MINUTE, 30 * MINUTE,
-    HOUR, 2 * HOUR, 3 * HOUR, 6 * HOUR, 12 * HOUR, DAY, 2 * DAY, 7 * DAY, 30 * DAY,
-)
 
 /**
  * Shown records over time: their volume as an area, with lines for warnings and errors over it on the same
@@ -57,9 +39,11 @@ private val TICK_STEPS = longArrayOf(
  * Clicking calls [onJump] with the slice there; dragging calls [onRange] with the times covered; the
  * context menu calls [onShowAllTimes] when [hasTimeRange].
  *
- * At the [pointer]'s time, set while the mouse is over this bar or another on the same [timeline], a line crosses
+ * At the [pointer]'s time, set while the mouse is over this bar or another on its [timeline], a line crosses
  * the chart with the counts of the slice there beside it; [onPointer] hears where the mouse points here. Likewise
  * [draggedTimes] shows a drag over such a bar, and [onDragged] hears of one here.
+ *
+ * A [TimeAxis] labels the times, under this bar or under the charts below it.
  */
 class TimeHistogramBar(
     private val histogram: () -> TimeHistogram?,
@@ -102,13 +86,6 @@ class TimeHistogramBar(
         }
 
     var onPointer: (time: Long?) -> Unit = {}
-
-    /** The times as last painted; null before, or while there is no histogram. */
-    var timeline: Timeline? = null
-        private set
-
-    /** Hears when [timeline] changes, e.g. as records come or the bar is resized. */
-    var onTimelineChanged: () -> Unit = {}
 
     private val zone = ZoneId.systemDefault()
     private var pressX = -1
@@ -222,7 +199,7 @@ class TimeHistogramBar(
     }
 
     private fun point(x: Int) {
-        val time = timeline?.timeAt(x)
+        val time = timeline(width)?.timeAt(x)
         pointer = time
         onPointer(time)
     }
@@ -241,21 +218,44 @@ class TimeHistogramBar(
     private val chartTop get() = look.scale(4)
     private val chartBottom get() = chartTop + look.scale(HISTOGRAM_HEIGHT)
 
-    override fun getPreferredSize(): Dimension {
-        val labels = getFontMetrics(labelFont).height
-        return Dimension(0, chartBottom + look.scale(TICK_HEIGHT) + labels + look.scale(2))
-    }
+    /** Whether the [TimeAxis] is right under this bar: then it ticks off from the chart's bottom, with no border. */
+    var axisBelow = true
+        set(value) {
+            if (field == value) return
+            field = value
+            revalidate()
+            repaint()
+        }
+
+    override fun getPreferredSize() = Dimension(0, if (axisBelow) chartBottom else chartBottom + chartTop + 1)
 
     override fun getMinimumSize() = preferredSize
 
+    /**
+     * The times as this bar slices them when [width] pixels wide, also while it is hidden, so a chart of the same
+     * width lines up with it; null while there is no histogram.
+     */
+    fun timeline(width: Int): Timeline? {
+        val histogram = histogram() ?: return null
+        val (first, group, count) = layout(histogram, width) ?: return null
+        val from = histogram.binStart(first)
+        return Timeline(from, histogram.binStart(first + group) - from, count, width)
+    }
+
     private fun slices(): Slices? {
         val histogram = histogram() ?: return null
+        val (first, group, count) = layout(histogram, width) ?: return null
+        return Slices(histogram, first, group, count, found())
+    }
+
+    /** The slices of [histogram] over [width] pixels: the first bin, bins per slice and slices; null if none. */
+    private fun layout(histogram: TimeHistogram, width: Int): Triple<Int, Int, Int>? {
         if (histogram.isEmpty || width <= 0) return null
         val most = maxOf(1, width / look.scale(SLICE_WIDTH))
         var group = 1
         fun count() = histogram.lastBin / group - histogram.firstBin / group + 1
         while (count() > most) group *= 2
-        return Slices(histogram, histogram.firstBin / group * group, group, count(), found())
+        return Triple(histogram.firstBin / group * group, group, count())
     }
 
     private fun sliceX(slices: Slices, slice: Int) = (slice.toLong() * width / slices.count).toInt()
@@ -272,15 +272,11 @@ class TimeHistogramBar(
         try {
             g2.color = UIManager.getColor("Table.background")
             g2.fillRect(0, 0, width, height)
-            g2.color = look.border
-            g2.fillRect(0, height - 1, width, 1)
-            val slices = slices()
-            val timeline = slices?.let { Timeline(it.start(0), it.start(1) - it.start(0), it.count, width) }
-            if (timeline != this.timeline) {
-                this.timeline = timeline
-                onTimelineChanged()
+            if (!axisBelow) {
+                g2.color = look.border
+                g2.fillRect(0, height - 1, width, 1)
             }
-            if (slices == null) return
+            val slices = slices() ?: return
             g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
             // One scale for all, so a line's height means as many records as the area's.
             val peak = sqrt(maxOf(1, slices.totals.max()).toDouble())
@@ -299,7 +295,6 @@ class TimeHistogramBar(
                 paintRegion(g2, from, sliceX(slices, it.last + 1).toDouble(), accent, 0.3f)
             }
             draggedTimes?.let { (from, to) -> paintRegion(g2, timeX(slices, from), timeX(slices, to), accent, 0.3f) }
-            paintTicks(g2, slices)
             pointer?.let { paintPointer(g2, slices, it) }
         } finally {
             g2.dispose()
@@ -392,54 +387,7 @@ class TimeHistogramBar(
         g2.fillRect(right - 1, 0, 1, chartBottom)
     }
 
-    /** Ticks at round times, labeled as far apart as the labels need. */
-    private fun paintTicks(g2: Graphics2D, slices: Slices) {
-        g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON)
-        g2.font = labelFont
-        val metrics = g2.fontMetrics
-        val from = slices.start(0)
-        val to = slices.start(slices.count)
-        val multiDay = localDay(from) != localDay(to - 1)
-        val span = to - from
-        var step = TICK_STEPS.last()
-        var formatter = tickFormatter(step, multiDay)
-        for (candidate in TICK_STEPS) {
-            val candidateFormatter = tickFormatter(candidate, multiDay)
-            val label = candidateFormatter.format(Instant.ofEpochSecond(0, from))
-            val labelWidth = metrics.stringWidth(label) + look.scale(LABEL_GAP)
-            if (candidate.toDouble() / span * width >= labelWidth) {
-                step = candidate
-                formatter = candidateFormatter
-                break
-            }
-        }
-        // Round in local time, so hours and days start where the clock says.
-        val offset = zone.rules.getOffset(Instant.ofEpochSecond(0, from)).totalSeconds * SECOND
-        var tick = Math.floorDiv(from + offset + step - 1, step) * step - offset
-        val y = chartBottom + look.scale(TICK_HEIGHT) + metrics.ascent
-        while (tick < to) {
-            val x = timeX(slices, tick).toInt()
-            g2.color = look.border
-            g2.fillRect(x, chartBottom, 1, look.scale(TICK_HEIGHT))
-            val label = formatter.format(Instant.ofEpochSecond(0, tick))
-            val labelX = (x - metrics.stringWidth(label) / 2).coerceIn(0, width - metrics.stringWidth(label))
-            g2.color = UIManager.getColor("Label.disabledForeground")
-            g2.drawString(label, labelX, y)
-            tick += step
-        }
-    }
-
     private fun localDay(time: Long) = Instant.ofEpochSecond(0, time).atZone(zone).toLocalDate()
-
-    private fun tickFormatter(step: Long, multiDay: Boolean): DateTimeFormatter {
-        val pattern = when {
-            step >= DAY -> "MM-dd"
-            step >= MINUTE -> if (multiDay) "MM-dd HH:mm" else "HH:mm"
-            step >= SECOND -> "HH:mm:ss"
-            else -> "HH:mm:ss.SSS"
-        }
-        return DateTimeFormatter.ofPattern(pattern).withZone(zone)
-    }
 
     /** The line at [time], and beside it the slice's time and counts. */
     private fun paintPointer(g2: Graphics2D, slices: Slices, time: Long) {

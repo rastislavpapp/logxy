@@ -83,7 +83,7 @@ private const val FLOATING_TOP_GAP = 6
 private const val FLOATING_RIGHT_GAP = 24
 
 /** The views around a [LogTab]'s rows, which the user can show and hide one by one where the host offers it. */
-enum class LogPart { FILTER, HISTOGRAM, TEMPLATES }
+enum class LogPart { FILTER, HISTOGRAM, CHARTS, TEMPLATES }
 
 /**
  * One open file, or several merged: shows the records of its [LogSession], with the filter bar and, if the host has
@@ -169,6 +169,9 @@ class LogTab(
                 )
             }
         }
+        onShown = { shownParts += LogPart.CHARTS }
+        // Where parts are toggled, Charts is off with nothing to chart; elsewhere all parts stay shown.
+        onAllRemoved = { if (togglesParts) shownParts -= LogPart.CHARTS }
     }
     private val templates: TemplatesPanel = TemplatesPanel(
         scope,
@@ -210,6 +213,9 @@ class LogTab(
             repaint()
             onPartsChanged()
         }
+
+    /** Whether a variable is charted, so [LogPart.CHARTS] has something to show. */
+    val hasCharts: Boolean get() = variableCharts.all.isNotEmpty()
 
     /** Called when [shownParts] changed, also when the tab showed a part itself. */
     var onPartsChanged: () -> Unit = {}
@@ -261,6 +267,13 @@ class LogTab(
     /** The variable charts under the histogram, and the rows under them; null while there is no histogram. */
     private var chartPanel: VariableChartPanel? = null
     private var chartSplit: JSplitPane? = null
+
+    /** The times under the charts while they show, else under the histogram; see [placeTimeAxis]. */
+    private var timeAxis: TimeAxis? = null
+
+    /** The charts with the axis under them, and the histogram with it; null while there is no histogram. */
+    private var chartBox: JComponent? = null
+    private var histogramBox: JComponent? = null
 
     /** Where the table goes: alone, or under the charts in [chartSplit] while there are some. */
     private val rowsHolder = JPanel(BorderLayout())
@@ -676,9 +689,8 @@ class LogTab(
         popup.show(table, x, y)
     }
 
-    /** Whether variables can be charted: the records have templates and times, and the histogram shows. */
-    private fun canChart() =
-        histogramBar != null && LogPart.HISTOGRAM in shownParts && model?.shown?.schema?.hasTemplates() == true
+    /** Whether variables can be charted: the records have templates and times. */
+    private fun canChart() = histogramBar != null && model?.shown?.schema?.hasTemplates() == true
 
     /**
      * The menu item that charts, or stops charting, [variable] of [template], whose value in the clicked record is
@@ -695,16 +707,17 @@ class LogTab(
         }
     }
 
-    /** Puts the charts between the histogram and the rows while there are some, and the histogram shows. */
+    /** Puts the charts between the histogram and the rows while there are some, and they are a shown part. */
     private fun showCharts() {
         val view = rowsView ?: return
         val split = chartSplit
-        val charts = variableCharts.all.isNotEmpty() && LogPart.HISTOGRAM in shownParts
+        val charts = variableCharts.all.isNotEmpty() && LogPart.CHARTS in shownParts
         val wanted = if (split != null && charts) split else view
+        placeTimeAxis(underCharts = wanted === split)
         if (rowsHolder.componentCount > 0 && rowsHolder.getComponent(0) === wanted) return
         rowsHolder.removeAll()
         if (wanted === split) {
-            split.topComponent = chartPanel
+            split.topComponent = chartBox
             split.bottomComponent = view
         }
         rowsHolder.add(wanted, BorderLayout.CENTER)
@@ -713,6 +726,21 @@ class LogTab(
         if (wanted === split) {
             if (chartHeight > 0) split.dividerLocation = chartHeight else split.resetToPreferredSizes()
         }
+    }
+
+    /** One time axis, at the bottom of the charts and the histogram, whichever of them show. */
+    private fun placeTimeAxis(underCharts: Boolean) {
+        val axis = timeAxis ?: return
+        val bar = histogramBar ?: return
+        val box = (if (underCharts) chartBox else histogramBox) ?: return
+        if (axis.parent !== box) {
+            val from = axis.parent
+            box.add(axis, BorderLayout.SOUTH)
+            from?.revalidate()
+            box.revalidate()
+        }
+        bar.axisBelow = !underCharts
+        axis.isVisible = underCharts || bar.isVisible
     }
 
     // Hiding every column happens when the file changed meanwhile, or the names were remembered for another parser.
@@ -828,7 +856,7 @@ class LogTab(
             }
         }
         val chartPanel = histogramBar?.let { bar ->
-            VariableChartPanel(variableCharts) { bar.timeline }.apply {
+            VariableChartPanel(variableCharts, bar::timeline).apply {
                 onJump = ::jumpToTime
                 onJumpToRecord = ::jumpToRecord
                 onRange = bar.onRange
@@ -836,7 +864,6 @@ class LogTab(
                 bar.onPointer = { pointer = it }
                 onDragged = { bar.draggedTimes = it }
                 bar.onDragged = { draggedTimes = it }
-                bar.onTimelineChanged = ::repaint
             }
         }
         table.selectionModel.addListSelectionListener { event ->
@@ -876,11 +903,15 @@ class LogTab(
                 }
             }
         }
+        timeAxis = histogramBar?.let { TimeAxis(it::timeline) }
+        chartBox = chartPanel?.let { JPanel(BorderLayout()).apply { add(it, BorderLayout.CENTER) } }
+        val histogramBox = JPanel(BorderLayout()).apply { histogramBar?.let { add(it, BorderLayout.CENTER) } }
+        this.histogramBox = histogramBox
+        histogramBar?.isVisible = LogPart.HISTOGRAM in shownParts
         rowsHolder.removeAll()
         showCharts()
-        histogramBar?.isVisible = LogPart.HISTOGRAM in shownParts
         rowsPanel = JPanel(BorderLayout()).apply {
-            histogramBar?.let { add(it, BorderLayout.NORTH) }
+            add(histogramBox, BorderLayout.NORTH)
             add(rowsHolder, BorderLayout.CENTER)
         }
         showParts()
@@ -1260,6 +1291,9 @@ class LogTab(
             histogramBar = null
             chartPanel = null
             chartSplit = null
+            timeAxis = null
+            chartBox = null
+            histogramBox = null
             rowsView = null
             rowsPanel = null
             templates.reset()
@@ -1327,6 +1361,9 @@ class LogTab(
         override fun histogramChanged() {
             showMarkedTimes()
             histogramBar?.repaint()
+            // Their times are the histogram's.
+            chartPanel?.repaint()
+            timeAxis?.repaint()
         }
 
         override fun followChanged(follow: Boolean) {
