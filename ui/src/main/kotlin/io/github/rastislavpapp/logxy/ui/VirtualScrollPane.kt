@@ -8,6 +8,7 @@ import java.awt.event.KeyAdapter
 import java.awt.event.KeyEvent
 import java.awt.event.MouseWheelEvent
 import javax.swing.AbstractAction
+import javax.swing.BorderFactory
 import javax.swing.JComponent
 import javax.swing.JPanel
 import javax.swing.JScrollBar
@@ -44,7 +45,8 @@ class VirtualScrollPane(private val table: JTable, private val window: RowWindow
     private val scrollPane = JScrollPane(
         table, ScrollPaneConstants.VERTICAL_SCROLLBAR_NEVER, ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER,
     ).apply {
-        border = null
+        // Not null: a table puts the look's own scroll pane border, an outline, in place of a null one.
+        border = BorderFactory.createEmptyBorder()
         isWheelScrollingEnabled = false
     }
     private val viewport get() = scrollPane.viewport

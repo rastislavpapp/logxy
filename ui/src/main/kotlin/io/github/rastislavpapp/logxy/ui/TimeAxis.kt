@@ -38,6 +38,14 @@ class TimeAxis(private val timeline: (width: Int) -> Timeline?) : JComponent() {
     private val zone = ZoneId.systemDefault()
     private val labelFont get() = look.smallFont
 
+    /** Whether a line in the border colour closes the strip at the bottom. */
+    var lineBelow = true
+        set(value) {
+            if (field == value) return
+            field = value
+            repaint()
+        }
+
     override fun getPreferredSize(): Dimension {
         val labels = getFontMetrics(labelFont).height
         return Dimension(0, look.scale(TICK_HEIGHT) + labels + look.scale(2))
@@ -50,8 +58,10 @@ class TimeAxis(private val timeline: (width: Int) -> Timeline?) : JComponent() {
         try {
             g2.color = UIManager.getColor("Table.background")
             g2.fillRect(0, 0, width, height)
-            g2.color = look.border
-            g2.fillRect(0, height - 1, width, 1)
+            if (lineBelow) {
+                g2.color = look.border
+                g2.fillRect(0, height - 1, width, 1)
+            }
             timeline(width)?.let { paintTicks(g2, it) }
         } finally {
             g2.dispose()

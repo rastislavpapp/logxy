@@ -118,6 +118,8 @@ object IdeLook : Look {
         override fun updateUI() = setUI(LineDividerUI())
     }
 
+    override val dividerLine: Boolean get() = true
+
     // IntelliJ's button UI makes buttons at least 72 pixels wide; Basic draws the text alone.
     override fun link(button: AbstractButton) {
         button.setUI(BasicButtonUI())
