@@ -142,8 +142,7 @@ class TemplatesPanel(
     }
     private val summary = JLabel(" ")
 
-    // Not null: a table puts the look's own scroll pane border, an outline, in place of a null one.
-    private val scrollPane = JScrollPane(table).apply { border = EmptyBorder(0, 0, 0, 0) }
+    private val scrollPane = JScrollPane(table).apply { border = NO_OUTLINE }
     private val placeholders = Placeholders()
     private val center = JPanel(CardLayout()).apply {
         add(scrollPane, TABLE_CARD)

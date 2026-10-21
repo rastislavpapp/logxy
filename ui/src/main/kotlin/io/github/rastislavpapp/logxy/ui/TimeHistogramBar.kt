@@ -10,7 +10,6 @@ import java.awt.RenderingHints
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import java.awt.geom.Path2D
-import java.time.Instant
 import java.time.ZoneId
 import javax.swing.JComponent
 import javax.swing.JMenuItem
@@ -22,6 +21,9 @@ import kotlin.math.sqrt
 
 /** Of the chart, without the time labels under it. */
 internal const val HISTOGRAM_HEIGHT = 40
+
+/** Above the chart; as much is left under it when the time axis is not right below. */
+internal const val HISTOGRAM_PADDING = 4
 private const val MATCH_STRIP_HEIGHT = 3
 
 /** Pixels per slice of time: wide enough that counts are not mostly noise, narrow enough to look continuous. */
@@ -92,14 +94,11 @@ class TimeHistogramBar(
     private var dragging = false
     private var selection: IntRange? = null
 
-    /** The histogram as painted: [count] slices of [group] bins each, the first starting at bin [first]. */
-    private class Slices(
-        val histogram: TimeHistogram,
-        val first: Int,
-        val group: Int,
-        val count: Int,
-        found: TimeHistogram?,
-    ) {
+    /** The histogram as painted, sliced by [layout]. */
+    private class Slices(val histogram: TimeHistogram, layout: SliceLayout, found: TimeHistogram?) {
+        val first = layout.first
+        val group = layout.group
+        val count = layout.count
         val totals = IntArray(count)
         val warnings = IntArray(count)
         val errors = IntArray(count)
@@ -215,19 +214,10 @@ class TimeHistogramBar(
 
     private val labelFont get() = look.smallFont
 
-    private val chartTop get() = look.scale(4)
+    private val chartTop get() = look.scale(HISTOGRAM_PADDING)
     private val chartBottom get() = chartTop + look.scale(HISTOGRAM_HEIGHT)
 
-    /** Whether the [TimeAxis] is right under this bar: then it ticks off from the chart's bottom, with no border. */
-    var axisBelow = true
-        set(value) {
-            if (field == value) return
-            field = value
-            revalidate()
-            repaint()
-        }
-
-    override fun getPreferredSize() = Dimension(0, if (axisBelow) chartBottom else chartBottom + chartTop + 1)
+    override fun getPreferredSize() = Dimension(0, chartBottom)
 
     override fun getMinimumSize() = preferredSize
 
@@ -244,18 +234,21 @@ class TimeHistogramBar(
 
     private fun slices(): Slices? {
         val histogram = histogram() ?: return null
-        val (first, group, count) = layout(histogram, width) ?: return null
-        return Slices(histogram, first, group, count, found())
+        val layout = layout(histogram, width) ?: return null
+        return Slices(histogram, layout, found())
     }
 
-    /** The slices of [histogram] over [width] pixels: the first bin, bins per slice and slices; null if none. */
-    private fun layout(histogram: TimeHistogram, width: Int): Triple<Int, Int, Int>? {
+    /** [count] slices of [group] bins each, the first starting at bin [first]. */
+    private data class SliceLayout(val first: Int, val group: Int, val count: Int)
+
+    /** The slices of [histogram] over [width] pixels; null if none. */
+    private fun layout(histogram: TimeHistogram, width: Int): SliceLayout? {
         if (histogram.isEmpty || width <= 0) return null
         val most = maxOf(1, width / look.scale(SLICE_WIDTH))
         var group = 1
         fun count() = histogram.lastBin / group - histogram.firstBin / group + 1
         while (count() > most) group *= 2
-        return Triple(histogram.firstBin / group * group, group, count())
+        return SliceLayout(histogram.firstBin / group * group, group, count())
     }
 
     private fun sliceX(slices: Slices, slice: Int) = (slice.toLong() * width / slices.count).toInt()
@@ -272,10 +265,6 @@ class TimeHistogramBar(
         try {
             g2.color = UIManager.getColor("Table.background")
             g2.fillRect(0, 0, width, height)
-            if (!axisBelow) {
-                g2.color = look.border
-                g2.fillRect(0, height - 1, width, 1)
-            }
             val slices = slices() ?: return
             g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
             // One scale for all, so a line's height means as many records as the area's.
@@ -387,8 +376,6 @@ class TimeHistogramBar(
         g2.fillRect(right - 1, 0, 1, chartBottom)
     }
 
-    private fun localDay(time: Long) = Instant.ofEpochSecond(0, time).atZone(zone).toLocalDate()
-
     /** The line at [time], and beside it the slice's time and counts. */
     private fun paintPointer(g2: Graphics2D, slices: Slices, time: Long) {
         val slice = Math.floorDiv(time - slices.start(0), slices.start(1) - slices.start(0))
@@ -397,7 +384,7 @@ class TimeHistogramBar(
         val x = timeX(slices, time).toInt()
         paintPointerLine(g2, x, 0, chartBottom)
         g2.font = labelFont
-        val multiDay = localDay(slices.start(0)) != localDay(slices.start(slices.count) - 1)
+        val multiDay = spansDays(slices.start(0), slices.start(slices.count), zone)
         val counts = buildList {
             add(count(slices.totals[i], "record"))
             slices.errors[i].takeIf { it > 0 }?.let { add(count(it, "error")) }

@@ -17,6 +17,7 @@ import javax.swing.JTable
 import javax.swing.KeyStroke
 import javax.swing.ScrollPaneConstants
 import javax.swing.SwingUtilities
+import javax.swing.border.Border
 
 /** Rows the table holds at once; small enough that rows × row height fits Swing's int pixel coordinates. */
 const val WINDOW_ROWS = 1_000_000
@@ -26,6 +27,9 @@ private const val EDGE_ROWS = 50_000
 
 private val UPWARD_KEYS = setOf(KeyEvent.VK_UP, KeyEvent.VK_KP_UP, KeyEvent.VK_PAGE_UP, KeyEvent.VK_HOME)
 private val DOWNWARD_KEYS = setOf(KeyEvent.VK_DOWN, KeyEvent.VK_KP_DOWN, KeyEvent.VK_PAGE_DOWN)
+
+/** A scroll pane's border round a table: not null, which a table replaces with the look's own, an outline. */
+internal val NO_OUTLINE: Border = BorderFactory.createEmptyBorder()
 
 /** A table model that shows [WINDOW_ROWS] rows of a larger list, starting at [windowStart]. */
 interface RowWindow {
@@ -45,8 +49,7 @@ class VirtualScrollPane(private val table: JTable, private val window: RowWindow
     private val scrollPane = JScrollPane(
         table, ScrollPaneConstants.VERTICAL_SCROLLBAR_NEVER, ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER,
     ).apply {
-        // Not null: a table puts the look's own scroll pane border, an outline, in place of a null one.
-        border = BorderFactory.createEmptyBorder()
+        border = NO_OUTLINE
         isWheelScrollingEnabled = false
     }
     private val viewport get() = scrollPane.viewport
