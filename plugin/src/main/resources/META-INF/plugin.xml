@@ -2,7 +2,8 @@
     <id>io.github.rastislavpapp.logxy</id>
     <name>logxy</name>
     <vendor>Rastislav Papp</vendor>
-    <!-- The Plugins page's overview; its core features match the README's Features list, so keep the two in step. -->
+    <!-- The Plugins page's overview; its core features match the README's Features list, so keep the two in step.
+         Marketplace's rules for the name, overview and icon: docs/agents/plugin-listing.md. -->
     <description><![CDATA[
 <p><b>Turn the Run console into a log viewer.</b> logxy shows a run's output as a table of parsed
 columns (time, level, thread, logger, message) that you can filter, search and follow live, right
