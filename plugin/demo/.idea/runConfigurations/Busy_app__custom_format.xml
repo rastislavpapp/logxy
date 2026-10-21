@@ -1,0 +1,10 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="Busy app, custom format" type="Application" factoryName="Application">
+    <option name="MAIN_CLASS_NAME" value="BusyApp" />
+    <option name="PROGRAM_PARAMETERS" value="custom" />
+    <module name="demo" />
+    <method v="2">
+      <option name="Make" enabled="true" />
+    </method>
+  </configuration>
+</component>
