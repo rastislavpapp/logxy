@@ -12,11 +12,11 @@ What JetBrains requires of the plugin's name, overview, icon and screenshots, fr
 
 - The first 40 characters are an English summary: they show in search results.
 - English first, correct spelling and grammar. No length limit.
-- No marketing adjectives ("simple", "lightweight", "professional"), no unverifiable claims, no donation links, no promotion of unrelated services, no keyword stuffing.
+- Direct wording, without marketing adjectives ("simple", "lightweight", "professional"). A plain statement of what a feature does is fine, e.g. the desktop app being fast and memory-efficient on large logs, which is the project's goal and what the benchmarks measure.
+- No donation links, no promotion of unrelated services, no keyword stuffing.
 - Every link valid and related to the plugin.
 - Most HTML works, inside CDATA. Screenshots belong in the Marketplace Media gallery, uploaded by hand; an `<img>` in the description is discouraged (600–800 px wide if used) and must never break.
-- Its core features match the README's Features list; keep the two in step.
-
+- It picks from the README's Features list what matters in a run's output: formats beyond the common ones (JSON lines, logfmt, CSV) go under "and more", and the app's large-file features stay out. What both name, keep in step.
 ## Icon
 
 - `META-INF/pluginIcon.svg`, SVG only, 40×40, with at least 2 px transparent padding (the artwork within 36×36). Shown at 40 px in lists and 80 px on details pages. Ideally under 2–3 kB.
