@@ -1,14 +1,17 @@
 package io.github.rastislavpapp.logxy.ui
 
+import java.awt.Component
 import java.awt.Dimension
 import java.awt.Graphics
 import java.awt.Graphics2D
+import java.awt.Insets
 import java.awt.RenderingHints
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import javax.swing.JComponent
 import javax.swing.UIManager
+import javax.swing.border.AbstractBorder
 
 private const val TICK_HEIGHT = 3
 
@@ -38,14 +41,6 @@ class TimeAxis(private val timeline: (width: Int) -> Timeline?) : JComponent() {
     private val zone = ZoneId.systemDefault()
     private val labelFont get() = look.smallFont
 
-    /** Whether a line in the border colour closes the strip at the bottom. */
-    var lineBelow = true
-        set(value) {
-            if (field == value) return
-            field = value
-            repaint()
-        }
-
     override fun getPreferredSize(): Dimension {
         val labels = getFontMetrics(labelFont).height
         return Dimension(0, look.scale(TICK_HEIGHT) + labels + look.scale(2))
@@ -58,10 +53,6 @@ class TimeAxis(private val timeline: (width: Int) -> Timeline?) : JComponent() {
         try {
             g2.color = UIManager.getColor("Table.background")
             g2.fillRect(0, 0, width, height)
-            if (lineBelow) {
-                g2.color = look.border
-                g2.fillRect(0, height - 1, width, 1)
-            }
             timeline(width)?.let { paintTicks(g2, it) }
         } finally {
             g2.dispose()
@@ -74,7 +65,7 @@ class TimeAxis(private val timeline: (width: Int) -> Timeline?) : JComponent() {
         val metrics = g2.fontMetrics
         val from = timeline.from
         val to = timeline.to
-        val multiDay = localDay(from) != localDay(to - 1)
+        val multiDay = spansDays(from, to, zone)
         val span = to - from
         var step = TICK_STEPS.last()
         var formatter = tickFormatter(step, multiDay)
@@ -104,8 +95,6 @@ class TimeAxis(private val timeline: (width: Int) -> Timeline?) : JComponent() {
         }
     }
 
-    private fun localDay(time: Long) = Instant.ofEpochSecond(0, time).atZone(zone).toLocalDate()
-
     private fun tickFormatter(step: Long, multiDay: Boolean): DateTimeFormatter {
         val pattern = when {
             step >= DAY -> "MM-dd"
@@ -114,5 +103,25 @@ class TimeAxis(private val timeline: (width: Int) -> Timeline?) : JComponent() {
             else -> "HH:mm:ss.SSS"
         }
         return DateTimeFormatter.ofPattern(pattern).withZone(zone)
+    }
+}
+
+/**
+ * Closes the histogram or the charts at the bottom: [padding] unscaled pixels of the table's background, then a line
+ * in the border colour. Both are read as painted, so they follow a change of theme or scale.
+ */
+internal class BottomEdge(private val padding: Int = 0) : AbstractBorder() {
+
+    override fun getBorderInsets(c: Component, insets: Insets): Insets {
+        insets.set(0, 0, look.scale(padding) + 1, 0)
+        return insets
+    }
+
+    override fun paintBorder(c: Component, g: Graphics, x: Int, y: Int, width: Int, height: Int) {
+        val bottom = look.scale(padding) + 1
+        g.color = UIManager.getColor("Table.background")
+        g.fillRect(x, y + height - bottom, width, bottom - 1)
+        g.color = look.border
+        g.fillRect(x, y + height - 1, width, 1)
     }
 }

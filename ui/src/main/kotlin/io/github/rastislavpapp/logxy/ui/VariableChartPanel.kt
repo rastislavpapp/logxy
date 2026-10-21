@@ -13,7 +13,6 @@ import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import java.awt.geom.Ellipse2D
 import java.awt.geom.Path2D
-import java.time.Instant
 import java.time.ZoneId
 import javax.swing.JComponent
 import javax.swing.JMenuItem
@@ -487,7 +486,7 @@ class VariableChartPanel(
         val slice = Math.floorDiv(time - from, sliceWidth)
         if (slice !in 0..<count) return
         val sliceFrom = from + slice * sliceWidth
-        val multiDay = localDay(timeline.from) != localDay(timeline.to - 1)
+        val multiDay = spansDays(timeline.from, timeline.to, zone)
         val readout = mutableListOf(
             formatTimeRange(sliceFrom, sliceFrom + sliceWidth, zone, multiDay) to
                 UIManager.getColor("Label.disabledForeground"),
@@ -502,8 +501,6 @@ class VariableChartPanel(
         }
         paintReadout(g2, x, plotTop, width, readout)
     }
-
-    private fun localDay(time: Long) = Instant.ofEpochSecond(0, time).atZone(zone).toLocalDate()
 
     /** The smallest of 1, 2, 2.5 or 5 times a power of ten that is at least [value]; 0 for 0. */
     private fun niceCeil(value: Double): Double {

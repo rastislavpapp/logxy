@@ -153,7 +153,7 @@ fun viewActions(view: RunLogView): ActionGroup = DefaultActionGroup(
         "Variable Charts",
         "Show the charts of template variables over time",
         LogxyIcons.chart,
-        unavailable = { if (it.tab?.hasCharts == true) null else "Nothing is charted: click a variable in Templates" },
+        unavailable = ::whyNoCharts,
     ),
     PartToggle(
         view,
@@ -163,6 +163,9 @@ fun viewActions(view: RunLogView): ActionGroup = DefaultActionGroup(
         AllIcons.Nodes.Template,
     ),
 )
+
+private fun whyNoCharts(view: RunLogView): String? =
+    if (view.tab?.hasCharts == true) null else "Nothing is charted: click a variable in Templates"
 
 private class FollowRun(private val view: RunLogView) :
     DumbAwareToggleAction("Follow", "Scroll to new records as they come", AllIcons.RunConfigurations.Scroll_down) {

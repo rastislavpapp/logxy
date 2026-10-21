@@ -58,6 +58,12 @@ internal fun paintReadout(g2: Graphics2D, x: Int, top: Int, width: Int, lines: L
     }
 }
 
+/** Whether the times from [from] to [to] (nanoseconds, exclusive) fall on more than one day in [zone]. */
+internal fun spansDays(from: Long, to: Long, zone: ZoneId): Boolean {
+    fun day(time: Long) = Instant.ofEpochSecond(0, time).atZone(zone).toLocalDate()
+    return day(from) != day(to - 1)
+}
+
 /** The time from [from] to [to] (nanoseconds), to the millisecond if shorter than a second; dated if [multiDay]. */
 internal fun formatTimeRange(from: Long, to: Long, zone: ZoneId, multiDay: Boolean): String {
     val time = if (to - from < NANOS_PER_SECOND) "HH:mm:ss.SSS" else "HH:mm:ss"
