@@ -8,6 +8,8 @@
 #   key KEYS...        xdotool key names, one press each: ctrl+f Return Escape Page_Down shift+Tab
 #   clip               the clipboard's size in bytes, its first line and its last
 #   windows            visible windows with position and size
+#   wait TITLE [SECS]  wait up to SECS (default 60) for a visible window whose title matches the regex TITLE
+#   pause SECS         wait SECS, e.g. for a dialog or a run to settle; the host shell may refuse a plain sleep
 #   logs               the app's stdout and stderr
 #   exec CMD...        run a command inside the container
 #   build | stop       build the image | stop and remove the sandbox
@@ -86,8 +88,11 @@ case "${1:-}" in
   clip)   in_box bash -c 'timeout 60 xclip -o -selection clipboard > /tmp/clip || exit 1
             echo "$(wc -c < /tmp/clip) bytes"; head -1 /tmp/clip | cut -c1-200; tail -1 /tmp/clip | cut -c1-200' ;;
   windows) in_box bash -c 'for w in $(xdotool search --onlyvisible --name .); do echo "$w $(xdotool getwindowname $w)"; xdotool getwindowgeometry $w | tail -2; done' ;;
+  wait)   in_box timeout "${3:-60}" bash -c 'until xdotool search --onlyvisible --name "$1" >/dev/null 2>&1; do sleep 0.5; done' _ "$2" \
+            || { echo "no window matching '$2' after ${3:-60} s" >&2; exit 1; } ;;
+  pause)  in_box sleep "$2" ;;
   exec)   shift; in_box "$@" ;;
   logs)   cat "$out/app.log" ;;
   stop)   "$engine" rm -f "$name" >/dev/null && echo stopped ;;
-  *) sed -n '3,15p' "$0" | cut -c3-; exit 1 ;;
+  *) sed -n '3,17p' "$0" | cut -c3-; exit 1 ;;
 esac
