@@ -65,13 +65,11 @@ changelog {
 
 intellijPlatform {
     pluginConfiguration {
-        // The released version's section, or Unreleased in a snapshot build.
         changeNotes = provider {
             with(changelog) {
-                renderItem(
-                    (getOrNull(version.get()) ?: getUnreleased()).withHeader(false).withEmptySections(false),
-                    Changelog.OutputType.HTML,
-                )
+                // A snapshot build has no section of its own yet.
+                val section = getOrNull(version.get()) ?: getUnreleased()
+                renderItem(section.withHeader(false).withEmptySections(false), Changelog.OutputType.HTML)
             }
         }
         ideaVersion {
