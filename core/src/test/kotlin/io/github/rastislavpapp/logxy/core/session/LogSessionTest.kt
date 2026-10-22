@@ -616,7 +616,7 @@ class LogSessionTest {
         var scripted: Scripted? = null
         val recorder = Recorder()
         val session = withContext(ui) {
-            LogSession(listOf(file), scope, NoSettings, recorder, { null }, emptyList()) { loaded ->
+            LogSession(listOf(file), scope, NoSettings, recorder, { null }, emptyList(), null) { loaded ->
                 Scripted(loaded.newFilter(), search.condition()).also {
                     it.file = file
                     scripted = it
@@ -849,7 +849,7 @@ class LogSessionTest {
         var recording: Recording? = null
         val recorder = Recorder()
         val session = withContext(ui) {
-            LogSession(listOf(file), scope, NoSettings, recorder, { null }, emptyList()) { loaded ->
+            LogSession(listOf(file), scope, NoSettings, recorder, { null }, emptyList(), null) { loaded ->
                 Recording(loaded.newFilter(), search.condition()).also { recording = it }
             }.also { it.start() }
         }
@@ -1273,5 +1273,93 @@ class LogSessionTest {
         }
         val title = withTimeout(10_000) { recorder.problem.await() }
         assertTrue(title.startsWith("other.log does not match"), title)
+    }
+
+    private fun preamble(count: Int) = "> Task :run\n".repeat(count)
+
+    private suspend fun openRedetecting(
+        file: Path,
+        recorder: Recorder,
+        redetection: Redetection,
+        chosen: Parser? = null,
+    ): LogSession {
+        val session = withContext(ui) {
+            LogSession(listOf(file), scope, NoSettings, recorder, chosen = listOf(chosen), redetection = redetection)
+                .also { it.start() }
+        }
+        withTimeout(10_000) { recorder.loads.receive() }
+        return session
+    }
+
+    @Test
+    fun `a file of preamble reads as raw text until records follow, then as their parser with the preamble kept`() =
+        runBlocking {
+            val file = Files.writeString(dir.resolve("run.log"), preamble(30))
+            val recorder = Recorder()
+            val session = openRedetecting(file, recorder, Redetection(windowMillis = 30_000, gapMillis = 100))
+            assertEquals(Parser.Raw, withContext(ui) { session.parser })
+            append(file, lines(10))
+            val shown = withTimeout(10_000) { recorder.loads.receive() }
+            withContext(ui) {
+                assertTrue(session.parser != Parser.Raw)
+                assertEquals(40, shown.size)
+                session.dispose()
+            }
+        }
+
+    @Test
+    fun `records appended after the window closed do not switch the parser`() = runBlocking {
+        val file = Files.writeString(dir.resolve("late.log"), preamble(30))
+        val recorder = Recorder()
+        val session = openRedetecting(file, recorder, Redetection(windowMillis = 200, gapMillis = 100))
+        delay(500)
+        append(file, lines(10))
+        assertEquals(null, withTimeoutOrNull(1500) { recorder.loads.receive() })
+        assertEquals(Parser.Raw, withContext(ui) { session.parser })
+        withContext(ui) { session.dispose() }
+    }
+
+    @Test
+    fun `a parser the user picked is never detected again, Raw text included`() = runBlocking {
+        val file = Files.writeString(dir.resolve("picked.log"), preamble(30))
+        val recorder = Recorder()
+        val session = openRedetecting(file, recorder, Redetection(gapMillis = 100), chosen = Parser.Raw)
+        append(file, lines(10))
+        assertEquals(null, withTimeoutOrNull(1500) { recorder.loads.receive() })
+        withContext(ui) { session.dispose() }
+    }
+
+    @Test
+    fun `a session whose first detection found a parser is never detected again`() = runBlocking {
+        val file = Files.writeString(dir.resolve("parsed.log"), lines(30))
+        val recorder = Recorder()
+        val session = openRedetecting(file, recorder, Redetection(gapMillis = 100))
+        append(file, preamble(10))
+        assertEquals(null, withTimeoutOrNull(1500) { recorder.loads.receive() })
+        withContext(ui) { session.dispose() }
+    }
+
+    @Test
+    fun `detection runs once more over the full output when the writer ends, whatever the gap`() = runBlocking {
+        val file = Files.writeString(dir.resolve("ended.log"), preamble(30))
+        val recorder = Recorder()
+        val session = openRedetecting(file, recorder, Redetection(windowMillis = 30_000, gapMillis = 60_000))
+        append(file, lines(10))
+        assertEquals(null, withTimeoutOrNull(1500) { recorder.loads.receive() })
+        session.writerEnded()
+        withTimeout(10_000) { recorder.loads.receive() }
+        withContext(ui) {
+            assertTrue(session.parser != Parser.Raw)
+            session.dispose()
+        }
+    }
+
+    @Test
+    fun `a merge refuses redetection`() {
+        val a = Files.writeString(dir.resolve("a.log"), lines(10))
+        val b = Files.writeString(dir.resolve("b.log"), lines(10))
+        assertFailsWith<IllegalArgumentException> {
+            LogSession(listOf(a, b), scope, NoSettings, Recorder(), redetection = Redetection())
+        }
     }
 }

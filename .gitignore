@@ -30,4 +30,6 @@ tools/benchmark-baseline.local.properties
 /logxy-intellij-plugin/demo/*/.idea/workspace.xml
 /logxy-intellij-plugin/demo/*/.idea/vcs.xml
 /logxy-intellij-plugin/demo/*/out/
+/logxy-intellij-plugin/demo/spring/build/
+/logxy-intellij-plugin/demo/spring/.gradle/
 __pycache__/

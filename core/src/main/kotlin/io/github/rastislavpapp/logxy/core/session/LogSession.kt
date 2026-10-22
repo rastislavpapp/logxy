@@ -124,11 +124,21 @@ interface SessionListener {
 }
 
 /**
+ * When a single file read as Raw text is detected again: the output of a process starts with a preamble that
+ * hides the parser of the records after it, so the first detection finds none.
+ *
+ * @property windowMillis how long after the session starts a detection is retried.
+ * @property gapMillis the least time between two detections.
+ */
+class Redetection(val windowMillis: Long = 30_000, val gapMillis: Long = 1_000)
+
+/**
  * One or more open files without their UI: indexes them in the background, merges several by time
  * (see [MergedLog]), follows changes to them, and filters them. Not thread-safe: use it, and run
  * [scope], on one thread (the UI thread); [listener] is called there. [origin] tells which files were
  * extracted from zips or decompressed, for naming them. [chosen] holds the parser the
- * user picked for each of the paths, null (or missing) to detect it.
+ * user picked for each of the paths, null (or missing) to detect it. [redetection] turns on detecting
+ * the parser of a single file again while it reads as Raw text; a merge refuses it.
  */
 class LogSession internal constructor(
     paths: List<Path>,
@@ -137,6 +147,7 @@ class LogSession internal constructor(
     private val listener: SessionListener,
     private val origin: (Path) -> ArchiveOrigin?,
     chosen: List<Parser?>,
+    private val redetection: Redetection?,
     /** Filters the records of a load; tests watch what it is asked. */
     private val engineOf: (LoadedLog) -> RecordFilter,
 ) {
@@ -147,7 +158,8 @@ class LogSession internal constructor(
         listener: SessionListener,
         origin: (Path) -> ArchiveOrigin? = { null },
         chosen: List<Parser?> = emptyList(),
-    ) : this(paths, scope, settings, listener, origin, chosen, { it.newFilter() })
+        redetection: Redetection? = null,
+    ) : this(paths, scope, settings, listener, origin, chosen, redetection, { it.newFilter() })
 
     constructor(path: Path, scope: CoroutineScope, settings: SettingsStore, listener: SessionListener) :
         this(listOf(path), scope, settings, listener)
@@ -161,7 +173,17 @@ class LogSession internal constructor(
 
     init {
         require(paths.isNotEmpty()) { "A session needs a file" }
+        require(redetection == null || paths.size == 1) { "A merge takes a parser per file" }
     }
+
+    // Redetection: when the session started and a detection last ran (nanoTime), whether the file grew since, and
+    // whether its writer is done.
+    private var startedNanos = 0L
+    private var redetectedNanos = 0L
+    private var grewSinceDetection = false
+
+    @Volatile private var writerEnded = false
+    private var endRetried = false
 
     private var sources = paths.mapIndexed { i, path -> Source(path, chosen.getOrNull(i)) }
         set(value) {
@@ -310,7 +332,18 @@ class LogSession internal constructor(
     /** Starts the first load and listens to settings changes; call once, after the listener is ready for events. */
     fun start() {
         settings.addListener(settingsListener)
+        startedNanos = System.nanoTime()
+        redetectedNanos = startedNanos
         launchLoad()
+    }
+
+    /**
+     * Tells that nothing more will be written to the file, e.g. its process ended: a session with [Redetection]
+     * detects its parser once more over the whole file if its window is still open. Callable from any thread.
+     */
+    fun writerEnded() {
+        writerEnded = true
+        pushes.trySend(Unit)
     }
 
     /**
@@ -527,7 +560,13 @@ class LogSession internal constructor(
                                 source.known = FileSnapshot.take(source.path)
                                     ?: throw IOException("${source.path.fileName}: file not found")
                                 source.parser = source.chosen ?: Parser.detect(source.path, preferred, builtIn)
-                                val log = source.parser.open(source.path, progresses[i], levels, options)
+                                val log = source.parser.open(
+                                    source.path,
+                                    progresses[i],
+                                    levels,
+                                    options,
+                                    detected = source.chosen == null,
+                                )
                                 opened += log
                                 source.log = log
                             } catch (e: Throwable) {
@@ -675,6 +714,7 @@ class LogSession internal constructor(
                 }
                 problem = problems.joinToString(", ").ifEmpty { null }
                 if (grown) {
+                    grewSinceDetection = true
                     when (loaded.settle()) {
                         Appended.MERGE_AGAIN -> {
                             reload()
@@ -700,8 +740,40 @@ class LogSession internal constructor(
                 currentCoroutineContext().ensureActive()
                 problem = e.message ?: e.javaClass.simpleName
             }
+            if (redetectionDue()) {
+                val current = settings.current
+                val path = sources.first().path
+                val found = withContext(Dispatchers.IO) {
+                    runCatching { Parser.detect(path, current.parsers, current.builtInParsers) }
+                }
+                redetectedNanos = System.nanoTime()
+                if (found.getOrNull().let { it != null && it != Parser.Raw }) {
+                    reload()
+                    return
+                }
+            }
             updateStatus()
         }
+    }
+
+    /**
+     * Whether the file, read as Raw text by detection, is to be detected again now: inside the window, at most once
+     * per gap after it grew, and once more when its writer ended. Never after the user picked a parser.
+     */
+    private fun redetectionDue(): Boolean {
+        redetection ?: return false
+        val source = sources.first()
+        if (source.chosen != null || source.parser != Parser.Raw) return false
+        val now = System.nanoTime()
+        if ((now - startedNanos) / NANOS_PER_MILLI > redetection.windowMillis) return false
+        if (writerEnded && !endRetried) {
+            endRetried = true
+            return true
+        }
+        if (!grewSinceDetection) return false
+        if ((now - redetectedNanos) / NANOS_PER_MILLI < redetection.gapMillis) return false
+        grewSinceDetection = false
+        return true
     }
 
     private fun settingsChanged() {
@@ -1200,5 +1272,6 @@ class LogSession internal constructor(
         const val LIVE_POLL_MILLIS = 500L
         const val STATIC_POLL_MILLIS = 2000L
         const val FILTERING_INDICATOR_MILLIS = 200L
+        const val NANOS_PER_MILLI = 1_000_000L
     }
 }

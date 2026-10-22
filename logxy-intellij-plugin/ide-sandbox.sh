@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Runs an IntelliJ-based IDE with the plugin in the GUI sandbox, on its demo project, off the host desktop.
-# Usage: ide-sandbox.sh IDE_HOME
+# Usage: ide-sandbox.sh IDE_HOME [DEMO]
 #   IDE_HOME: an unpacked Linux IntelliJ IDEA or PyCharm, e.g. one Gradle downloaded for the plugin, or a Toolbox
 #   install. PyCharm opens demo/python, other IDEs demo/java.
+#   DEMO: the demo project to open instead: python, java or spring (a Spring Boot app built by Gradle, which the
+#   container downloads Gradle and the dependencies for).
 # Build the plugin first (./gradlew -q :logxy-intellij-plugin:buildPlugin). The container takes the GUI sandbox's name, so
 # tools/gui-sandbox/gui.sh shot, click, key, type and stop drive it; the IDE's log goes to out/ide-log/idea.log.
 set -euo pipefail
@@ -27,6 +29,8 @@ case $(product productCode) in
   PY | PC) demo=python ;;
   *) demo=java ;;
 esac
+# A second argument names another demo project, e.g. spring.
+demo=${2:-$demo}
 
 # Git Bash would otherwise rewrite container paths such as /ide into Windows paths.
 export MSYS_NO_PATHCONV=1
