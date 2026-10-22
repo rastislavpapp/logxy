@@ -6,8 +6,8 @@ import kotlin.time.TimeMark
 import kotlin.time.TimeSource
 
 /**
- * When a single file read as Raw text is detected again: the output of a process starts with a preamble that
- * hides the parser of the records after it, so the first detection finds none.
+ * Settings for detecting the parser of a single file again while it reads as Raw text. A process's output can start
+ * with a preamble, so the first detection may see no records yet and find no parser.
  *
  * @property window how long after the session starts a detection is retried.
  * @property gap the least time between two detections while the file grows.
