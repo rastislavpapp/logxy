@@ -9,7 +9,7 @@ plugins {
 
 rootProject.name = "logxy"
 
-include("core", "ui", "app", "tools", "plugin")
+include("core", "ui", "app", "tools", "logxy-intellij-plugin")
 
 dependencyResolutionManagement {
     repositoriesMode = RepositoriesMode.FAIL_ON_PROJECT_REPOS

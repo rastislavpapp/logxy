@@ -2,7 +2,7 @@
 # Runs an IntelliJ IDEA with the plugin in the GUI sandbox, on the demo project, off the host desktop.
 # Usage: ide-sandbox.sh IDE_HOME
 #   IDE_HOME: an unpacked IDEA, e.g. the one Gradle downloaded for the plugin, or a Toolbox install.
-# Build the plugin first (./gradlew -q :plugin:buildPlugin). The container takes the GUI sandbox's name, so
+# Build the plugin first (./gradlew -q :logxy-intellij-plugin:buildPlugin). The container takes the GUI sandbox's name, so
 # tools/gui-sandbox/gui.sh shot, click, key, type and stop drive it; the IDE's log goes to out/ide-log/idea.log.
 set -euo pipefail
 

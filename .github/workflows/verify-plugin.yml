@@ -21,10 +21,10 @@ jobs:
           distribution: temurin
           java-version: 25
       - uses: gradle/actions/setup-gradle@v6
-      - run: ./gradlew :plugin:verifyPlugin ${{ inputs.eap && '-PverifyEap' || '' }}
+      - run: ./gradlew :logxy-intellij-plugin:verifyPlugin ${{ inputs.eap && '-PverifyEap' || '' }}
       - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: plugin-verifier${{ inputs.eap && '-eap' || '' }}
-          path: plugin/build/reports/pluginVerifier/
+          path: logxy-intellij-plugin/build/reports/pluginVerifier/
           if-no-files-found: ignore
