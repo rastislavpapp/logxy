@@ -24,8 +24,10 @@ tools/gui-sandbox/out/
 # Benchmark baseline of a machine other than the committed one
 tools/benchmark-baseline.local.properties
 
-# The spike's demo project keeps its run configurations, but not what an IDE writes when it opens it
-!/logxy-intellij-plugin/demo/.idea/
-/logxy-intellij-plugin/demo/.idea/workspace.xml
-/logxy-intellij-plugin/demo/.idea/vcs.xml
-/logxy-intellij-plugin/demo/out/
+# The plugin's demo projects keep their module and run configurations, but not what an IDE writes when it opens them
+!/logxy-intellij-plugin/demo/*/.idea/
+!/logxy-intellij-plugin/demo/*/*.iml
+/logxy-intellij-plugin/demo/*/.idea/workspace.xml
+/logxy-intellij-plugin/demo/*/.idea/vcs.xml
+/logxy-intellij-plugin/demo/*/out/
+__pycache__/
