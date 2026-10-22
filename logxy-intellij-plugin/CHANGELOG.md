@@ -4,7 +4,7 @@ What's new in the logxy IntelliJ plugin, shown as its change notes in the IDE an
 
 ## Unreleased
 
-- Runs in IntelliJ-based IDEs from 2025.2, no longer only from 2026.1.
+- Runs in IntelliJ-based IDEs from 2025.3, no longer only from 2026.1.
 
 ## 0.1.0 - 2026-10-22
 
