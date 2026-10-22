@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Runs an IntelliJ IDEA with the plugin in the GUI sandbox, on the demo project, off the host desktop.
+# Runs an IntelliJ-based IDE with the plugin in the GUI sandbox, on its demo project, off the host desktop.
 # Usage: ide-sandbox.sh IDE_HOME
-#   IDE_HOME: an unpacked IDEA, e.g. the one Gradle downloaded for the plugin, or a Toolbox install.
+#   IDE_HOME: an unpacked Linux IDE (IntelliJ IDEA, PyCharm or Android Studio), e.g. one Gradle downloaded for the
+#   plugin, or a Toolbox install. PyCharm opens demo/python, the others demo/java.
 # Build the plugin first (./gradlew -q :logxy-intellij-plugin:buildPlugin). The container takes the GUI sandbox's name, so
 # tools/gui-sandbox/gui.sh shot, click, key, type and stop drive it; the IDE's log goes to out/ide-log/idea.log.
 set -euo pipefail
@@ -13,7 +14,19 @@ gui=$root/tools/gui-sandbox
 out=${GUI_OUT:-$gui/out}
 size=${GUI_SIZE:-1600x1000}
 engine=${GUI_ENGINE:-$(command -v podman >/dev/null && echo podman || echo docker)}
-zip=$(ls "$here"/build/distributions/*.zip)
+# The newest build; signPlugin's -signed copy is the same plugin.
+zip=$(ls -t "$here"/build/distributions/logxy-intellij-plugin-*.zip | grep -v -- -signed | head -1)
+
+# The first value of a key in product-info.json; the first launch entry is the Linux one in a Linux IDE.
+product() { grep -o "\"$1\": *\"[^\"]*\"" "$ide/product-info.json" | head -1 | sed 's/.*: *"//; s/"$//'; }
+launcher=$(product launcherPath)
+vmoptions=$(product vmOptionsFilePath)
+# The launcher reads its options from e.g. PYCHARM_VM_OPTIONS.
+vmoptions_var=$(product envVarBaseName)_VM_OPTIONS
+case $(product productCode) in
+  PY | PC) demo=python ;;
+  *) demo=java ;;
+esac
 
 # Git Bash would otherwise rewrite container paths such as /ide into Windows paths.
 export MSYS_NO_PATHCONV=1
@@ -31,7 +44,7 @@ fi
 "$engine" rm -f logxy-gui >/dev/null 2>&1 || true
 mkdir -p "$out"
 "$engine" run -d --name logxy-gui "${run_opts[@]}" -e HOME=/tmp --shm-size=1g \
-  -v "$(host_path "$ide"):/ide:ro" -v "$(host_path "$zip"):/plugin.zip:ro" -v "$(host_path "$here/demo"):/demo:ro" \
+  -v "$(host_path "$ide"):/ide:ro" -v "$(host_path "$zip"):/plugin.zip:ro" -v "$(host_path "$here/demo/$demo"):/demo:ro" \
   -v "$(host_path "$out"):/out" \
   logxy-gui-sandbox bash -c "
     set -e
@@ -40,7 +53,7 @@ mkdir -p "$out"
     cp /demo/jdk.table.xml /tmp/ide/config/options/
     cd /tmp/ide/plugins && jar xf /plugin.zip
     # The IDE's own options, then: no consent, tips or trust dialogs, and the sandbox's own directories.
-    { cat /ide/bin/idea64.vmoptions; printf '%s\n' \
+    { cat /ide/$vmoptions; printf '%s\n' \
         -Didea.config.path=/tmp/ide/config -Didea.system.path=/tmp/ide/system -Didea.plugins.path=/tmp/ide/plugins \
         -Didea.log.path=/out/ide-log -Djb.consents.confirmation.enabled=false '-Djb.privacy.policy.text=<!--999.999-->' \
         -Didea.trust.all.projects=true -Dide.show.tips.on.startup.default.value=false -Didea.initially.ask.config=never \
@@ -48,5 +61,5 @@ mkdir -p "$out"
     Xvfb :99 -screen 0 ${size}x24 -nolisten tcp &
     until xdpyinfo >/dev/null 2>&1; do sleep 0.1; done
     openbox &
-    IDEA_VM_OPTIONS=/tmp/ide/idea.vmoptions exec /ide/bin/idea /tmp/demo > /out/ide.out 2>&1" >/dev/null
-echo "started $(cat "$ide/build.txt") with $engine; screenshots via $gui/gui.sh shot"
+    $vmoptions_var=/tmp/ide/idea.vmoptions exec /ide/$launcher /tmp/demo > /out/ide.out 2>&1" >/dev/null
+echo "started $(cat "$ide/build.txt") on demo/$demo with $engine; screenshots via $gui/gui.sh shot"
