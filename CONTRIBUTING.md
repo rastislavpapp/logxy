@@ -48,7 +48,7 @@ The logo's source is `app/src/main/resources/logxy.svg`. The packaging icons in 
 ## Pull requests
 
 - Branch from `main` and keep each pull request to one change.
-- `./gradlew build` must pass; it runs the tests and detekt.
+- `./gradlew build` must pass; it runs the tests and detekt, and fails when the app or the plugin bundles a library missing from [THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md).
 - Follow the commit rules in [AGENTS.md](AGENTS.md#commits).
 - Describe what changed and how you checked it. A screenshot helps for UI changes.
 

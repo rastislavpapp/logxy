@@ -22,6 +22,18 @@ val expuiIcons = tasks.register<Jar>("expuiIcons") {
     from(intellijIcons.elements.map { jars -> jars.map { archives.zipTree(it) } }) { include("expui/**") }
 }
 
+tasks.processResources {
+    from(rootProject.files("LICENSE", "THIRD-PARTY-LICENSES.md")) { into("META-INF") }
+}
+
+val checkThirdPartyLicenses = tasks.register<CheckThirdPartyLicenses>("checkThirdPartyLicenses") {
+    bundled(configurations.runtimeClasspath.get())
+    bundled(intellijIcons)
+    licenses = rootProject.layout.projectDirectory.file("THIRD-PARTY-LICENSES.md")
+}
+
+tasks.check { dependsOn(checkThirdPartyLicenses) }
+
 // Tests run on the IDE's runtime, which lacks the Vector API module; core falls back without it, as in the IDE.
 tasks.test {
     jvmArgs = jvmArgs.orEmpty() - listOf("--add-modules", VECTOR_MODULE)
