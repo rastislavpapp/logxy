@@ -59,6 +59,17 @@ class FilterBarTest {
     }
 
     @Test
+    fun `a renamed field keeps its conditions without applying them`() = onUiThread {
+        val bar = FilterBar({ applied++ }, ColumnNames(), host)
+        bar.load(SavedFilter("orders", null, "Line == \"*Order*\""))
+
+        bar.renameField("Line", "Message")
+
+        assertEquals(1, applied)
+        assertEquals("Message == \"*Order*\"", bar.current().query)
+    }
+
+    @Test
     fun `a remembered Advanced mode does not hide the visual editor`() = onUiThread {
         host.state[UiState.FILTER_MODE] = "advanced"
         val bar = FilterBar({ applied++ }, ColumnNames(), host)

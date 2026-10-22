@@ -124,15 +124,6 @@ interface SessionListener {
 }
 
 /**
- * When a single file read as Raw text is detected again: the output of a process starts with a preamble that
- * hides the parser of the records after it, so the first detection finds none.
- *
- * @property windowMillis how long after the session starts a detection is retried.
- * @property gapMillis the least time between two detections.
- */
-class Redetection(val windowMillis: Long = 30_000, val gapMillis: Long = 1_000)
-
-/**
  * One or more open files without their UI: indexes them in the background, merges several by time
  * (see [MergedLog]), follows changes to them, and filters them. Not thread-safe: use it, and run
  * [scope], on one thread (the UI thread); [listener] is called there. [origin] tells which files were
@@ -176,14 +167,7 @@ class LogSession internal constructor(
         require(redetection == null || paths.size == 1) { "A merge takes a parser per file" }
     }
 
-    // Redetection: when the session started and a detection last ran (nanoTime), whether the file grew since, and
-    // whether its writer is done.
-    private var startedNanos = 0L
-    private var redetectedNanos = 0L
-    private var grewSinceDetection = false
-
-    @Volatile private var writerEnded = false
-    private var endRetried = false
+    private val redetectionClock = redetection?.let(::RedetectionClock)
 
     private var sources = paths.mapIndexed { i, path -> Source(path, chosen.getOrNull(i)) }
         set(value) {
@@ -332,8 +316,7 @@ class LogSession internal constructor(
     /** Starts the first load and listens to settings changes; call once, after the listener is ready for events. */
     fun start() {
         settings.addListener(settingsListener)
-        startedNanos = System.nanoTime()
-        redetectedNanos = startedNanos
+        redetectionClock?.start()
         launchLoad()
     }
 
@@ -342,7 +325,7 @@ class LogSession internal constructor(
      * detects its parser once more over the whole file if its window is still open. Callable from any thread.
      */
     fun writerEnded() {
-        writerEnded = true
+        redetectionClock?.writerEnded()
         pushes.trySend(Unit)
     }
 
@@ -554,7 +537,9 @@ class LogSession internal constructor(
             // fewer.
             val defaults = IndexOptions()
             val readChannels = maxOf(minOf(4, defaults.parallelism), defaults.parallelism / sources.size)
-            val options = defaults.copy(readChannels = readChannels)
+            // A process's output, which redetection is for, may start with lines before its first record.
+            val preamble = redetection != null && sources.first().chosen == null
+            val options = defaults.copy(readChannels = readChannels, preamble = preamble)
             // Files under the split size are parsed by one thread each, so a folder of them needs several at once.
             val permits = Semaphore(options.parallelism)
             coroutineScope {
@@ -567,13 +552,7 @@ class LogSession internal constructor(
                                 source.known = FileSnapshot.take(source.path)
                                     ?: throw IOException("${source.path.fileName}: file not found")
                                 source.parser = source.chosen ?: Parser.detect(source.path, preferred, builtIn)
-                                val log = source.parser.open(
-                                    source.path,
-                                    progresses[i],
-                                    levels,
-                                    options,
-                                    detected = source.chosen == null,
-                                )
+                                val log = source.parser.open(source.path, progresses[i], levels, options)
                                 opened += log
                                 source.log = log
                             } catch (e: Throwable) {
@@ -673,7 +652,7 @@ class LogSession internal constructor(
         }
     }
 
-    /** Follows the files until they need to be read again, which it returns true for, or there is nothing to follow. */
+    /** Follows the files; returns true when they must be read again, false when there is nothing left to follow. */
     private suspend fun watch(): Boolean {
         while (true) {
             withTimeoutOrNull(if (isLive) LIVE_POLL_MILLIS else STATIC_POLL_MILLIS) { pushes.receive() }
@@ -719,7 +698,7 @@ class LogSession internal constructor(
                 }
                 problem = problems.joinToString(", ").ifEmpty { null }
                 if (grown) {
-                    grewSinceDetection = true
+                    redetectionClock?.grew()
                     when (loaded.settle()) {
                         Appended.MERGE_AGAIN -> return true
                         Appended.NEW_FIELDS -> listener.fieldsShown()
@@ -748,7 +727,6 @@ class LogSession internal constructor(
                 val found = withContext(Dispatchers.IO) {
                     runCatching { Parser.detect(path, current.parsers, current.builtInParsers) }
                 }
-                redetectedNanos = System.nanoTime()
                 val detected = found.getOrNull()
                 if (detected != null && detected != Parser.Raw) return true
             }
@@ -756,24 +734,10 @@ class LogSession internal constructor(
         }
     }
 
-    /**
-     * Whether the file, read as Raw text by detection, is to be detected again now: inside the window, at most once
-     * per gap after it grew, and once more when its writer ended. Never after the user picked a parser.
-     */
+    /** Whether the file, read as Raw text by detection, is to be detected again now; never after the user picked. */
     private fun redetectionDue(): Boolean {
-        redetection ?: return false
         val source = sources.first()
-        if (source.chosen != null || source.parser != Parser.Raw) return false
-        val now = System.nanoTime()
-        if ((now - startedNanos) / NANOS_PER_MILLI > redetection.windowMillis) return false
-        if (writerEnded && !endRetried) {
-            endRetried = true
-            return true
-        }
-        if (!grewSinceDetection) return false
-        if ((now - redetectedNanos) / NANOS_PER_MILLI < redetection.gapMillis) return false
-        grewSinceDetection = false
-        return true
+        return source.chosen == null && source.parser == Parser.Raw && redetectionClock?.due() == true
     }
 
     private fun settingsChanged() {
@@ -1272,6 +1236,5 @@ class LogSession internal constructor(
         const val LIVE_POLL_MILLIS = 500L
         const val STATIC_POLL_MILLIS = 2000L
         const val FILTERING_INDICATOR_MILLIS = 200L
-        const val NANOS_PER_MILLI = 1_000_000L
     }
 }

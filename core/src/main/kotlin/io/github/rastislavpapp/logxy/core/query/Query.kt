@@ -33,6 +33,16 @@ sealed interface Query {
     }
 }
 
+/** This query with its rules on the field [from], in any case, on [to] instead. */
+fun Query.Group.withField(from: String, to: String): Query.Group = copy(
+    items = items.map { item ->
+        when (item) {
+            is Query.Group -> item.withField(from, to)
+            is Query.Rule -> if (item.field.equals(from, ignoreCase = true)) item.copy(field = to) else item
+        }
+    },
+)
+
 /** A comparison in a query rule, written as [symbol]; each `NOT_` op is the negation of the one before it. */
 enum class QueryOp(val symbol: String) {
     /** Wildcard match ignoring case. */

@@ -276,18 +276,13 @@ fun Parser.mismatch(path: Path): String? {
     }
 }
 
-/**
- * Indexes [path] with this parser. A parser the user picked must start the file with an entry it reads, or this
- * fails with [ParserMismatchException]. A [detected] one, chosen by [Parser.detect], does not: the lines before its
- * first entry, a preamble, are records of their own with only a message.
- */
+/** Indexes [path] with this parser. */
 suspend fun Parser.open(
     path: Path,
     progress: IndexProgress = IndexProgress(),
     levels: LevelMapping = LevelMapping.DEFAULT,
     options: IndexOptions = IndexOptions(),
-    detected: Boolean = false,
 ): LogData {
     val compiled = compile() ?: return LineIndex.build(path, progress, options)
-    return ParsedLog.build(path, compiled, progress, options, detected).also { it.levelMapping = levels }
+    return ParsedLog.build(path, compiled, progress, options).also { it.levelMapping = levels }
 }

@@ -346,23 +346,20 @@ class ParsedLog private constructor(
         /**
          * Parses [path] on [Dispatchers.IO]; cancelling the calling coroutine stops it. Throws
          * [io.github.rastislavpapp.logxy.core.parse.ParserMismatchException] if the file does not fit [parser], unless
-         * [detected] is set. A detected parser matched entries in a longer start of the file than the check looks at,
-         * so the lines before the first entry, a preamble, are not a mismatch but a record each with only a message,
-         * except those that look like continuations.
+         * it may start with a preamble ([IndexOptions.preamble]).
          */
         suspend fun build(
             path: Path,
             parser: CompiledParser,
             progress: IndexProgress = IndexProgress(),
             options: IndexOptions = IndexOptions(),
-            detected: Boolean = false,
         ): ParsedLog = withContext(Dispatchers.IO) {
             val channels = ReadChannels.open(path, options.readChannels)
             try {
                 val channel = channels.main
                 val size = channel.size()
                 progress.totalBytes = size
-                if (!detected) ParserCheck.check(channel, size, parser.newMatcher())
+                if (!options.preamble) ParserCheck.check(channel, size, parser.newMatcher())
                 val count = options.rangeCount(size)
 
                 // Ranges must start where records start, so each can be parsed on its own.
@@ -373,7 +370,7 @@ class ParsedLog private constructor(
                 }.awaitAll()
                 for (i in 1..count) bounds[i] = bounds[i].coerceIn(bounds[i - 1], size)
 
-                val (storage, parsed) = parseAll(channels, bounds, parser, progress, preamble = detected)
+                val (storage, parsed) = parseAll(channels, bounds, parser, progress, options.preamble)
                 ensureActive()
 
                 val segments = ArrayList<Columns>()
@@ -524,7 +521,8 @@ class ParsedLog private constructor(
             val multiLine = parser.multiLine
             val messageField = out.schema.indexOf(Role.MESSAGE)
             var inRecord = hasPrevious
-            var matchedAny = hasPrevious
+            // Only the file's start can be a preamble: the other ranges start at a record.
+            var inPreamble = preamble && from == 0L
             var tail = Tail(from, lastLineComplete = true, lastLineStartedRecord = false)
             var lines = 0
             // Header lines are skipped wherever the file is read from its start, also again when one is unfinished.
@@ -537,13 +535,13 @@ class ParsedLog private constructor(
                     continue
                 }
                 val matched = matcher.match(reader.buffer, reader.lineFrom, reader.lineTo)
-                // Without multi-line records, only blank lines continue one.
-                val preambleLine = preamble && !matchedAny &&
+                val preambleLine = inPreamble &&
                     !ParserCheck.looksLikeContinuation(reader.buffer, reader.lineFrom, reader.lineTo)
+                // Without multi-line records, only blank lines continue one.
                 val startsRecord = matched || !inRecord || preambleLine ||
                     (!multiLine && !Bytes.isBlank(reader.buffer, reader.lineFrom, reader.lineTo))
-                if (matched) matchedAny = true
                 if (matched) {
+                    inPreamble = false
                     out.beginRecord(reader.lineStart)
                     matcher.write(out)
                 } else if (startsRecord) {

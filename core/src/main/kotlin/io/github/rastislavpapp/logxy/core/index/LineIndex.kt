@@ -36,6 +36,11 @@ data class IndexOptions(
     val bufferSize: Int = 1024 * 1024,
     /** Channels per file where positional reads are serial (Windows); fewer when many files are open together. */
     val readChannels: Int = parallelism,
+    /**
+     * Whether the file may start with a preamble: lines before its first record, each a record of its own with only
+     * a message, except those that look like continuations. Without it a parser must read one of the first lines.
+     */
+    val preamble: Boolean = false,
 ) {
     init {
         require(parallelism >= 1) { "parallelism must be at least 1" }
