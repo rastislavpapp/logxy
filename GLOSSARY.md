@@ -24,6 +24,14 @@ _Avoid_: index, line
 A saved description of how to split a file's lines into records and fields. Each is of one parser kind (pattern, regex, JSON, …); built-in parsers ship with the app and are tried on every file opened.
 _Avoid_: format, layout
 
+**Raw text**:
+The parser of a file no other parser reads: each line is a record with only a message.
+_Avoid_: unparsed, plain text
+
+**Preamble**:
+The lines at the start of a file before its first record, such as a build tool's or a framework's startup output; each is a record of its own with only a message.
+_Avoid_: banner, startup noise
+
 **Message template**:
 The first line of a record's message with its variable parts, such as numbers and ids, replaced by `{1}`, `{2}`, … numbered from the left, as in `Request {1} done in {2} ms`. Records with the same template are the same kind of message.
 _Avoid_: pattern (a parser kind), message pattern
