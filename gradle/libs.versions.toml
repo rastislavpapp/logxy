@@ -13,6 +13,8 @@ jmh = "1.37"
 intellij-platform = "2.19.0"
 # The IDE the plugin compiles against: the oldest it supports.
 intellij-idea = "2026.1.5"
+# The oldest release of the other verified IDE on the same platform, 261.
+pycharm = "2026.1"
 intellij-plugin-verifier = "1.411"
 
 [libraries]

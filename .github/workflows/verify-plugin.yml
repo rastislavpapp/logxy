@@ -13,6 +13,10 @@ permissions:
 
 jobs:
   verify-plugin:
+    strategy:
+      fail-fast: false
+      matrix:
+        ide: [idea, pycharm]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -21,10 +25,10 @@ jobs:
           distribution: temurin
           java-version: 25
       - uses: gradle/actions/setup-gradle@v6
-      - run: ./gradlew :logxy-intellij-plugin:verifyPlugin ${{ inputs.eap && '-PverifyEap' || '' }}
+      - run: ./gradlew :logxy-intellij-plugin:verifyPlugin -PverifyIde=${{ matrix.ide }} ${{ inputs.eap && '-PverifyEap' || '' }}
       - uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: plugin-verifier${{ inputs.eap && '-eap' || '' }}
+          name: plugin-verifier-${{ matrix.ide }}${{ inputs.eap && '-eap' || '' }}
           path: logxy-intellij-plugin/build/reports/pluginVerifier/
           if-no-files-found: ignore
