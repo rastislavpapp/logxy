@@ -54,6 +54,8 @@ mkdir -p "$out"
     set -e
     mkdir -p /tmp/ide/config/options /tmp/ide/plugins
     cp -r /demo /tmp/demo
+    # Written by the Gradle import once it is done, which is how to tell when it is: never copied from an earlier one.
+    rm -rf /tmp/demo/.idea/libraries
     cp /demo/jdk.table.xml /tmp/ide/config/options/
     cd /tmp/ide/plugins && jar xf /plugin.zip
     # The IDE's own options, then: no consent, tips or trust dialogs, and the sandbox's own directories.
