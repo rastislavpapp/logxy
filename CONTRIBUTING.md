@@ -4,7 +4,7 @@ Thanks for your interest. Issues and pull requests are welcome. For anything big
 
 ## Reporting bugs and requesting features
 
-Use [GitHub Issues](https://github.com/rastislavpapp/logxy/issues). For a bug, include your OS, the Java version, the logxy version (Help › About), which parser logxy picked for the file and, if you can share it, a few lines of the file that trigger the problem; the bug report form has a Log sample field for them.
+Use [GitHub Issues](https://github.com/rastislavpapp/logxy/issues). For a bug, include your OS, the Java version, the logxy version (Help › About; for the IntelliJ plugin, the IDE and its version, and the plugin's version from Settings › Plugins), which parser logxy picked for the file and, if you can share it, a few lines of the file that trigger the problem; the bug report form has a Log sample field for them.
 
 ## Setting up
 

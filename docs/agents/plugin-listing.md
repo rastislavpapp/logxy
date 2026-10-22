@@ -20,7 +20,7 @@ What JetBrains requires of the plugin's name, overview, icon and screenshots, fr
 ## Icon
 
 - `META-INF/pluginIcon.svg`, SVG only, 40×40, with at least 2 px transparent padding (the artwork within 36×36). Shown at 40 px in lists and 80 px on details pages. Ideally under 2–3 kB.
-- Optional `pluginIcon_dark.svg` for dark themes; with it present, `pluginIcon.svg` serves light themes only.
+- `pluginIcon_dark.svg` for dark themes, the same artwork with a lighter tile; with it present, `pluginIcon.svg` serves light themes only, so change the two together.
 - No text in the logo, nothing resembling the Plugin Template's default logo or a JetBrains product logo.
 
 ## Screenshots
