@@ -521,7 +521,14 @@ class LogSession internal constructor(
 
     private fun launchLoad() {
         job = scope.launch {
-            if (load()) watch()
+            // The watch's reloads run in this coroutine rather than by [reload]: a job that cancels itself and
+            // launches the next load may lose it, as IntelliJ ties what is dispatched to the EDT to the calling
+            // coroutine.
+            while (load()) {
+                if (!watch()) break
+                // The files must be read again, e.g. truncated, or redetection found their parser.
+                closeLogs()
+            }
         }
     }
 
@@ -666,10 +673,11 @@ class LogSession internal constructor(
         }
     }
 
-    private suspend fun watch() {
+    /** Follows the files until they need to be read again, which it returns true for, or there is nothing to follow. */
+    private suspend fun watch(): Boolean {
         while (true) {
             withTimeoutOrNull(if (isLive) LIVE_POLL_MILLIS else STATIC_POLL_MILLIS) { pushes.receive() }
-            val loaded = loaded ?: return
+            val loaded = loaded ?: return false
             try {
                 val oldRecordCount = loaded.records.recordCount
                 val changed = ArrayList<Int>()
@@ -677,7 +685,7 @@ class LogSession internal constructor(
                 var grown = false
                 var promoted = false
                 for ((part, source) in sources.withIndex()) {
-                    val log = source.log ?: return
+                    val log = source.log ?: return false
                     // A failing file must not keep what the others appended from being merged and shown.
                     try {
                         val current = withContext(Dispatchers.IO) { FileSnapshot.take(source.path) }
@@ -686,10 +694,7 @@ class LogSession internal constructor(
                                 problems += if (isMerged) "${source.path.fileName} not found" else "file not found"
                                 continue
                             }
-                            FileChange.SHRUNK, FileChange.REPLACED -> {
-                                reload()
-                                return
-                            }
+                            FileChange.SHRUNK, FileChange.REPLACED -> return true
                             FileChange.GROWN -> {
                                 val appended = withContext(Dispatchers.IO) { log.readAppended(current!!.size) }
                                 loaded.append(part, appended).let { if (it >= 0) changed += it }
@@ -716,10 +721,7 @@ class LogSession internal constructor(
                 if (grown) {
                     grewSinceDetection = true
                     when (loaded.settle()) {
-                        Appended.MERGE_AGAIN -> {
-                            reload()
-                            return
-                        }
+                        Appended.MERGE_AGAIN -> return true
                         Appended.NEW_FIELDS -> listener.fieldsShown()
                         Appended.GREW -> {}
                     }
@@ -747,10 +749,8 @@ class LogSession internal constructor(
                     runCatching { Parser.detect(path, current.parsers, current.builtInParsers) }
                 }
                 redetectedNanos = System.nanoTime()
-                if (found.getOrNull().let { it != null && it != Parser.Raw }) {
-                    reload()
-                    return
-                }
+                val detected = found.getOrNull()
+                if (detected != null && detected != Parser.Raw) return true
             }
             updateStatus()
         }
