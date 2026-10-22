@@ -4,6 +4,8 @@ What's new in the logxy IntelliJ plugin, shown as its change notes in the IDE an
 
 ## Unreleased
 
+## 0.1.0 - 2026-10-22
+
 First release.
 
 - A logxy view of each run's output, switched with Console | logxy in the run tab's toolbar.
