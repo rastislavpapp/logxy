@@ -92,13 +92,23 @@ intellijPlatform {
         password = providers.environmentVariable("PRIVATE_KEY_PASSWORD")
     }
     // `untilBuild` is open, so every newer IDE counts as supported: verifyPlugin checks the binary against the oldest
-    // and the latest release, or with -PverifyEap against the latest EAP alone.
+    // and the latest release, or with -PverifyEap against the latest EAP alone. One IDE per run, picked with
+    // -PverifyIde (IntelliJ IDEA by default), so CI verifies them in parallel.
     pluginVerification {
         ides {
             val eap = providers.gradleProperty("verifyEap").isPresent
-            if (!eap) current()
+            val ide = providers.gradleProperty("verifyIde").getOrElse("idea")
+            val (type, oldest) = when (ide) {
+                "idea" -> IntelliJPlatformType.IntellijIdea to null
+                "pycharm" -> IntelliJPlatformType.PyCharm to libs.versions.pycharm
+                else -> throw GradleException("-PverifyIde=$ide: expected idea or pycharm")
+            }
+            if (!eap) {
+                // IntelliJ IDEA's oldest is the IDE the plugin compiles against.
+                if (oldest == null) current() else create(type, oldest)
+            }
             latest {
-                types = listOf(IntelliJPlatformType.IntellijIdea)
+                types = listOf(type)
                 channels = listOf(if (eap) Channel.EAP else Channel.RELEASE)
             }
         }

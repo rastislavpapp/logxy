@@ -1,6 +1,6 @@
-name: Plugin vs IntelliJ EAP
+name: Plugin vs IDE EAPs
 
-# The latest EAP, weekly rather than on every push: it warns of an IDE change months ahead, and an EAP may break what
+# The latest EAP of each verified IDE, weekly rather than on every push: it warns of an IDE change months ahead, and an EAP may break what
 # its release will fix, so it must not block a build.
 on:
   schedule:
