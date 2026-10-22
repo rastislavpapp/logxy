@@ -41,11 +41,10 @@ dependencies {
     implementation(project(":ui"))
     implementation(files(expuiIcons))
     intellijPlatform {
-        // 2025.2 is the last release with a separate Community edition; the unified IntelliJ IDEA starts at 2025.3.
-        intellijIdeaCommunity(libs.versions.intellij.idea)
+        intellijIdea(libs.versions.intellij.idea)
         pluginVerifier(libs.versions.intellij.plugin.verifier)
     }
-    // 2025.2's test framework starts with every JUnit 5 run and sets up a logger built on JUnit 4's rules.
+    // 2025.3's test framework starts with every JUnit 5 run and sets up a logger built on JUnit 4's rules.
     testRuntimeOnly(libs.junit4)
 }
 
@@ -72,7 +71,11 @@ intellijPlatform {
             }
         }
         ideaVersion {
-            sinceBuild = "252"
+            // The build of the IDE it compiles against: 2025.3 is 253.
+            sinceBuild = libs.versions.intellij.idea.map { version ->
+                val (year, release) = version.split('.')
+                year.takeLast(2) + release
+            }
             untilBuild = provider { null }
         }
     }

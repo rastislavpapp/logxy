@@ -1,7 +1,16 @@
 [versions]
 kotlin = "2.4.21"
-# The oldest supported IntelliJ's version, for the app too: the plugin always gets the IDE's copy, and `core` built
-# against a newer one may not link with it (2025.2 ships 1.10.1, and 1.11 is not binary compatible with 2026.2's 1.10.2).
+# The oldest supported IDE, which the plugin compiles against; the plugin's `sinceBuild` is derived from it. The next
+# four entries follow it: what it ships, and so what the plugin and the modules it bundles are built for.
+intellij-idea = "2025.3"
+# The oldest release of the other verified IDE on the same platform.
+pycharm = "2025.3"
+# Its JBR's Java version.
+oldest-ide-jdk = "21"
+# Its Kotlin stdlib's API level.
+oldest-ide-kotlin-api = "2.2"
+# Its coroutines, for the app too: the plugin always gets the IDE's copy, and `core` built against a newer one may not
+# link with it (1.11 is not binary compatible with the 1.10.x the IDEs ship).
 kotlinx-coroutines = "1.10.1"
 flatlaf = "3.7.2"
 junit = "6.1.3"
@@ -11,10 +20,6 @@ log4j = "2.26.1"
 detekt = "2.0.0-alpha.6"
 jmh = "1.37"
 intellij-platform = "2.19.0"
-# The IDE the plugin compiles against: the oldest it supports.
-intellij-idea = "2025.2"
-# The oldest release of the other verified IDE on the same platform, 252.
-pycharm = "2025.2"
 intellij-plugin-verifier = "1.411"
 
 [libraries]
