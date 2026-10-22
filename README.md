@@ -25,9 +25,15 @@
 
 ## IntelliJ plugin
 
-The plugin turns the Run console of any JetBrains IDE into a log viewer. A run's output shows as parsed columns that you can filter, search and follow live, with the time histogram and templates beside them. The format is detected from the first lines, and a Console | logxy switch in the run tab's toolbar keeps the IDE's own console one click away.
+The plugin turns the Run console of IntelliJ IDEA and other IntelliJ-based IDEs into a log viewer. A run's output shows as parsed columns that you can filter, search and follow live, with the time histogram and templates beside them. The format is detected from the first lines, and a Console | logxy switch in the run tab's toolbar keeps the IDE's own console one click away.
 
 ![A Spring Boot run in the plugin's logxy view, filtered to warnings and errors outside one logger](docs/images/plugin/run-view.png)
+
+To install it, in an IDE from 2026.1 on:
+
+1. Download `logxy-intellij-plugin-<version>.zip` from the [Releases page](https://github.com/rastislavpapp/logxy/releases).
+2. In *Settings › Plugins*, click the gear icon, then *Install Plugin from Disk…*, and pick the zip.
+3. Run something: the run tab's toolbar has the Console | logxy switch.
 
 ## Download
 
@@ -57,4 +63,4 @@ This project is developed with the help of AI coding tools, primarily [Claude Co
 
 ## License
 
-[MIT](LICENSE) © Rastislav Papp
+[MIT](LICENSE) © Rastislav Papp. The libraries and fonts the app and the plugin bundle, and their licences, are listed in [THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md).
