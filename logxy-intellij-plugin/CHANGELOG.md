@@ -5,6 +5,7 @@ What's new in the logxy IntelliJ plugin, shown as its change notes in the IDE an
 ## Unreleased
 
 - Runs in IntelliJ-based IDEs from 2025.3, no longer only from 2026.1.
+- Startup lines before a run's first log record, such as Gradle's tasks, no longer leave the whole run as raw text.
 
 ## 0.1.0 - 2026-10-22
 
