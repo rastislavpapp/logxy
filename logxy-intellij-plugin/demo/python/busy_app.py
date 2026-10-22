@@ -1,4 +1,4 @@
-"""Logs a busy web shop's backend with Python's logging, in the layout logxy knows as "Python logging".
+"""Logs a busy web shop's backend with Python's logging, for logxy's "Python logging" parser.
 
 It starts with ten minutes of backdated history, so the time histogram has a shape at once, then logs live; an
 incident with retries and errors comes now and then, its errors with a traceback. Like most Python services, it logs

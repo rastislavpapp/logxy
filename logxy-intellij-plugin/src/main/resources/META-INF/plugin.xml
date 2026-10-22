@@ -69,7 +69,7 @@ memory-efficient on large logs, with merging of several files into one.</p>
             <action id="logxy.ChooseParser" class="io.github.rastislavpapp.logxy.plugin.ChooseParser"
                     text="Parser" description="Parser: how lines are split into columns"/>
             <action id="logxy.Status" class="io.github.rastislavpapp.logxy.plugin.RunStatus" text="Status"
-                    description="The view's record count and the run's exit code"/>
+                    description="The records in the shown log and the run's exit code"/>
             <add-to-group group-id="RunTab.TopToolbar" anchor="last"/>
         </group>
     </actions>
