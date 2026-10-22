@@ -28,7 +28,7 @@ The script reads the IDE from its `product-info.json`: its launcher, its options
 
 ## Checking in PyCharm
 
-The plugin verifier only checks the binary against PyCharm's API. A check in PyCharm itself covers what it does differently: a Python run configuration, Python's logging layout and tracebacks, the run tab's toolbar. It was done once, for the first Marketplace release; repeat it when the run capture, the run tab's toolbar or the console swap change, or when the oldest supported version moves.
+The plugin verifier only checks the binary against PyCharm's API. A check in PyCharm itself covers what it does differently: a Python run configuration, Python's logging output and tracebacks, the run tab's toolbar. It was done once, for the first Marketplace release; repeat it when the run capture, the run tab's toolbar or the console swap change, or when the oldest supported version moves.
 
 1. `./gradlew -q :logxy-intellij-plugin:verifyPlugin -PverifyIde=pycharm`, which also unpacks PyCharm's oldest supported and latest release.
 2. Start the sandbox on each, as above. PyCharm opens `demo/python` with the container's `/usr/bin/python3` as the interpreter, and starts in free mode.
