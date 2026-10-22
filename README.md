@@ -10,7 +10,7 @@
 
 ## Features
 
-<!-- The IntelliJ plugin's overview in plugin/src/main/resources/META-INF/plugin.xml describes the shared features too; keep the two in step. -->
+<!-- The IntelliJ plugin's overview in logxy-intellij-plugin/src/main/resources/META-INF/plugin.xml describes the shared features too; keep the two in step. -->
 
 - **Large files.** Multi-GB logs open in seconds and scroll smoothly.
 - **Structured parsing.** Log4j and logback patterns, Spring Boot's default log output, Python's logging, JSON lines (logstash and ECS style), logfmt, CSV files with a header row (`.csv`, comma or semicolon separated), MDC maps (one column per key) and raw text. logxy picks the right parser automatically, and you can define your own with a pattern, a regex or a JSON key mapping.

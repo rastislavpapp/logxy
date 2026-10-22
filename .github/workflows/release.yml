@@ -63,14 +63,14 @@ jobs:
       - run: ./gradlew -Pversion="$VERSION" :app:nativeArchive
       # The plugin zip is the same on every OS, so only Linux builds it.
       - if: runner.os == 'Linux'
-        run: ./gradlew -Pversion="$VERSION" :plugin:buildPlugin
+        run: ./gradlew -Pversion="$VERSION" :logxy-intellij-plugin:buildPlugin
       - name: Collect packages
         run: |
           mkdir dist
           cp app/build/dist/* dist/
           if [[ $RUNNER_OS == Linux ]]; then
             cp app/build/libs/logxy.jar "dist/logxy-$VERSION.jar"
-            cp "plugin/build/distributions/plugin-$VERSION.zip" "dist/logxy-intellij-plugin-$VERSION.zip"
+            cp "logxy-intellij-plugin/build/distributions/logxy-intellij-plugin-$VERSION.zip" dist/
           fi
       - uses: actions/upload-artifact@v7
         with:
