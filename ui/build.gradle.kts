@@ -1,12 +1,8 @@
 // The Swing views the app and the IntelliJ plugin share. The plugin runs them under IntelliJ's look and feel and
 // with the IDE's coroutines, so this module names neither FlatLaf nor kotlinx-coroutines-swing (see detekt.yml).
 plugins {
-    id("logxy.kotlin")
+    id("logxy.plugin-bundled")
     `java-library`
-}
-
-kotlin {
-    compilerOptions.apiVersion = PLUGIN_KOTLIN_API
 }
 
 detekt {

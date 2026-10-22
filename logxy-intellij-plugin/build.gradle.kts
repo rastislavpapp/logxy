@@ -5,13 +5,9 @@ import org.jetbrains.intellij.platform.gradle.tasks.VerifyPluginTask.FailureLeve
 
 // The IntelliJ plugin: a logxy view of a run's output in the Run tool window, from the shared views in `ui`.
 plugins {
-    id("logxy.kotlin")
+    id("logxy.plugin-bundled")
     id("org.jetbrains.intellij.platform")
     alias(libs.plugins.changelog)
-}
-
-kotlin {
-    compilerOptions.apiVersion = PLUGIN_KOTLIN_API
 }
 
 // The views use the new-UI icons by their `expui/` paths, which the IDE's own jars do not have; only those are bundled.
@@ -45,9 +41,12 @@ dependencies {
     implementation(project(":ui"))
     implementation(files(expuiIcons))
     intellijPlatform {
-        intellijIdea(libs.versions.intellij.idea)
+        // 2025.2 is the last release with a separate Community edition; the unified IntelliJ IDEA starts at 2025.3.
+        intellijIdeaCommunity(libs.versions.intellij.idea)
         pluginVerifier(libs.versions.intellij.plugin.verifier)
     }
+    // 2025.2's test framework starts with every JUnit 5 run and sets up a logger built on JUnit 4's rules.
+    testRuntimeOnly(libs.junit4)
 }
 
 // The IDE provides the Kotlin stdlib, coroutines and SLF4J; second copies in the plugin would clash with them.
@@ -73,7 +72,7 @@ intellijPlatform {
             }
         }
         ideaVersion {
-            sinceBuild = "261"
+            sinceBuild = "252"
             untilBuild = provider { null }
         }
     }

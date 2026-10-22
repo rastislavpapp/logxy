@@ -33,7 +33,7 @@ timeline where they cluster.</p>
       click away, for stack-trace links and typing into the program.</li>
 </ul>
 
-<p>Works in IntelliJ IDEA and other IntelliJ-based IDEs from 2026.1, for any run configuration that starts a process.
+<p>Works in IntelliJ IDEA and other IntelliJ-based IDEs from 2025.2, for any run configuration that starts a process.
 Parsers, saved filters and log levels are set in <i>Settings › Tools › logxy</i>.</p>
 
 <p>logxy is also a <a href="https://github.com/rastislavpapp/logxy">desktop app</a>, fast and
