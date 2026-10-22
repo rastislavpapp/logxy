@@ -33,8 +33,15 @@ application {
 
 // As a resource, so it reaches the fat jar ahead of the libraries' META-INF/LICENSE files: the first copy wins there.
 tasks.processResources {
-    from(rootProject.file("LICENSE")) { into("META-INF") }
+    from(rootProject.files("LICENSE", "THIRD-PARTY-LICENSES.md")) { into("META-INF") }
 }
+
+val checkThirdPartyLicenses = tasks.register<CheckThirdPartyLicenses>("checkThirdPartyLicenses") {
+    bundled(configurations.runtimeClasspath.get())
+    licenses = rootProject.layout.projectDirectory.file("THIRD-PARTY-LICENSES.md")
+}
+
+tasks.check { dependsOn(checkThirdPartyLicenses) }
 
 tasks.jar {
     manifest {
@@ -119,7 +126,7 @@ val jpackage = tasks.register<Exec>("jpackage") {
 
 fun AbstractArchiveTask.nativeArchive(extension: String) {
     from(jpackage)
-    from(rootProject.file("LICENSE")) { into("logxy") }
+    from(rootProject.files("LICENSE", "THIRD-PARTY-LICENSES.md")) { into("logxy") }
     val platform = if (windows) "windows-x64" else "linux-x64"
     archiveFileName = "logxy-$version-$platform.$extension"
     destinationDirectory = layout.buildDirectory.dir("dist")
