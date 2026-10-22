@@ -54,11 +54,27 @@ The logo's source is `app/src/main/resources/logxy.svg`. The packaging icons in 
 
 ## Releasing (maintainers)
 
-Push an `X.Y.Z` tag on a commit in `main`. The release workflow builds and tests on Windows and Linux, verifies the IntelliJ plugin against the oldest supported and the latest IntelliJ release, stamps that version on the packages (the code stays at `-SNAPSHOT`; the release passes `-Pversion`) and creates a GitHub release with the jar, the Windows zip, the Linux tarball and the plugin zip. A new IntelliJ release that breaks the plugin blocks the release too, until the plugin is fixed. Running the workflow by hand does a dry run that publishes nothing.
+The app and the plugin share one version. Before tagging, turn the plugin changelog's Unreleased section into the version's section, and commit that to `main`:
+
+```sh
+./gradlew -q :logxy-intellij-plugin:patchChangelog -Pversion=0.1.0
+```
+
+Then push an `X.Y.Z` tag on a commit in `main`. The release workflow builds and tests on Windows and Linux, verifies the IntelliJ plugin against the oldest supported and the latest release of each verified IDE, stamps that version on the packages (the code stays at `-SNAPSHOT`; the release passes `-Pversion`) and creates a GitHub release with the jar, the Windows zip, the Linux tarball and the plugin zip. A new IDE release that breaks the plugin blocks the release too, until the plugin is fixed. Running the workflow by hand does a dry run that publishes nothing.
 
 ```sh
 git tag 0.1.0 && git push origin 0.1.0
 ```
+
+A tag without a section in `logxy-intellij-plugin/CHANGELOG.md` fails the release. When the section has entries, the workflow then publishes the plugin, signed, to JetBrains Marketplace; when it has none, the plugin did not change and Marketplace gets no new version, so Marketplace versions may skip numbers. The GitHub release always has the plugin zip.
+
+**The plugin's changelog** lists what a plugin user notices. Changes in `core` or `ui` that show in the plugin get an entry too, not only those in `logxy-intellij-plugin`.
+
+**Marketplace setup**, once:
+
+1. Upload the first version's zip from the GitHub release by hand on [plugins.jetbrains.com](https://plugins.jetbrains.com/plugin/add) (Marketplace takes a new plugin no other way) and accept the developer agreement. JetBrains reviews it before it is listed.
+2. On the plugin's Marketplace page, set the licence link (MIT), the source code and issue tracker URLs, the tags (Logging, Run) and the screenshots from `docs/images/plugin/`.
+3. Run `logxy-intellij-plugin/marketplace-secrets.sh`: it makes the signing key and certificate and sets them and the Marketplace token as the workflow's secrets. Until `PUBLISH_TOKEN` is set, releases skip the Marketplace publish. The certificate is valid for a year; run the script again to renew it.
 
 ## AI-assisted contributions
 

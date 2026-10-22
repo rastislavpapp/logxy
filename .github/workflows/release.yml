@@ -18,6 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
+      publish-plugin: ${{ steps.changelog.outputs.publish-plugin }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -37,6 +38,25 @@ jobs:
           [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] \
             || { echo "::error::'$version' is not MAJOR.MINOR.PATCH"; exit 1; }
           echo "version=$version" >> "$GITHUB_OUTPUT"
+      - if: github.event_name == 'push'
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 25
+      - if: github.event_name == 'push'
+        uses: gradle/actions/setup-gradle@v6
+      # A tag needs a section in the plugin's changelog, which patchChangelog makes. Without entries, the tag changed
+      # nothing in the plugin, so JetBrains Marketplace gets no new version; the zip still goes on the GitHub release.
+      - id: changelog
+        if: github.event_name == 'push'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          notes=$(./gradlew -q :logxy-intellij-plugin:getChangelog --project-version="$VERSION" \
+            --no-header --no-summary --no-links --no-empty-sections) \
+            || { echo "::error::logxy-intellij-plugin/CHANGELOG.md has no $VERSION section"; exit 1; }
+          [[ -n ${notes//[[:space:]]/} ]] && publish=true || publish=false
+          echo "publish-plugin=$publish" >> "$GITHUB_OUTPUT"
 
   build:
     needs: check
@@ -96,3 +116,28 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" dist/* \
             --repo "$GITHUB_REPOSITORY" --title "logxy $VERSION" --generate-notes
+
+  publish-plugin:
+    if: github.event_name == 'push' && needs.check.outputs.publish-plugin == 'true'
+    needs: [check, release]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 25
+      - uses: gradle/actions/setup-gradle@v6
+      - env:
+          VERSION: ${{ needs.check.outputs.version }}
+          PUBLISH_TOKEN: ${{ secrets.PUBLISH_TOKEN }}
+          CERTIFICATE_CHAIN: ${{ secrets.CERTIFICATE_CHAIN }}
+          PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
+          PRIVATE_KEY_PASSWORD: ${{ secrets.PRIVATE_KEY_PASSWORD }}
+        run: |
+          # Marketplace takes a new plugin's first version only by hand, so the token is added after that upload.
+          if [[ -z $PUBLISH_TOKEN ]]; then
+            echo "::notice::No PUBLISH_TOKEN secret: $VERSION is not published to JetBrains Marketplace"
+            exit 0
+          fi
+          ./gradlew -Pversion="$VERSION" :logxy-intellij-plugin:publishPlugin

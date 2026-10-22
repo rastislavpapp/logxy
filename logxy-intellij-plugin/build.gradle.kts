@@ -1,3 +1,4 @@
+import org.jetbrains.changelog.Changelog
 import org.jetbrains.intellij.platform.gradle.IntelliJPlatformType
 import org.jetbrains.intellij.platform.gradle.models.ProductRelease.Channel
 import org.jetbrains.intellij.platform.gradle.tasks.VerifyPluginTask.FailureLevel
@@ -6,6 +7,7 @@ import org.jetbrains.intellij.platform.gradle.tasks.VerifyPluginTask.FailureLeve
 plugins {
     id("logxy.kotlin")
     id("org.jetbrains.intellij.platform")
+    alias(libs.plugins.changelog)
 }
 
 kotlin {
@@ -56,8 +58,22 @@ configurations.runtimeClasspath {
     exclude(group = "org.slf4j")
 }
 
+// The plugin's own: the app keeps GitHub's generated release notes. Plain lists, without Added / Fixed groups.
+changelog {
+    groups.empty()
+}
+
 intellijPlatform {
     pluginConfiguration {
+        // The released version's section, or Unreleased in a snapshot build.
+        changeNotes = provider {
+            with(changelog) {
+                renderItem(
+                    (getOrNull(version.get()) ?: getUnreleased()).withHeader(false).withEmptySections(false),
+                    Changelog.OutputType.HTML,
+                )
+            }
+        }
         ideaVersion {
             sinceBuild = "261"
             untilBuild = provider { null }
@@ -65,6 +81,16 @@ intellijPlatform {
     }
     buildSearchableOptions = false
     instrumentCode = false
+    // From the release workflow's secrets; marketplace-secrets.sh walks through making them. publishPlugin signs
+    // the zip first.
+    publishing {
+        token = providers.environmentVariable("PUBLISH_TOKEN")
+    }
+    signing {
+        certificateChain = providers.environmentVariable("CERTIFICATE_CHAIN")
+        privateKey = providers.environmentVariable("PRIVATE_KEY")
+        password = providers.environmentVariable("PRIVATE_KEY_PASSWORD")
+    }
     // `untilBuild` is open, so every newer IDE counts as supported: verifyPlugin checks the binary against the oldest
     // and the latest release, or with -PverifyEap against the latest EAP alone.
     pluginVerification {
