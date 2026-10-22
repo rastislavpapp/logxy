@@ -29,7 +29,14 @@ tools/benchmark-baseline.local.properties
 !/logxy-intellij-plugin/demo/*/*.iml
 /logxy-intellij-plugin/demo/*/.idea/workspace.xml
 /logxy-intellij-plugin/demo/*/.idea/vcs.xml
+/logxy-intellij-plugin/demo/out/
 /logxy-intellij-plugin/demo/*/out/
+/logxy-intellij-plugin/demo/*/.idea/.name
+/logxy-intellij-plugin/demo/*/.idea/compiler.xml
+/logxy-intellij-plugin/demo/*/.idea/libraries/
+/logxy-intellij-plugin/demo/*/.idea/modules/
+# The Gradle import writes the Spring demo's modules; the other demos keep theirs.
+/logxy-intellij-plugin/demo/spring/.idea/modules.xml
 /logxy-intellij-plugin/demo/spring/build/
 /logxy-intellij-plugin/demo/spring/.gradle/
 __pycache__/
