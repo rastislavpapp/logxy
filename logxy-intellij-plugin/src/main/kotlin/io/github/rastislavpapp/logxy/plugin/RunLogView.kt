@@ -8,6 +8,7 @@ import com.intellij.openapi.project.DumbAwareAction
 import com.intellij.openapi.util.Key
 import io.github.rastislavpapp.logxy.core.config.SavedFilter
 import io.github.rastislavpapp.logxy.core.parse.Parser
+import io.github.rastislavpapp.logxy.core.session.Redetection
 import io.github.rastislavpapp.logxy.core.session.SessionStatus
 import io.github.rastislavpapp.logxy.ui.LogPart
 import io.github.rastislavpapp.logxy.ui.LogTab
@@ -99,6 +100,7 @@ class RunLogView(
             SwingUtilities.invokeLater {
                 statusChanged()
                 makeTabIfReady()
+                tab?.writerEnded()
                 remember()
             }
         }
@@ -172,8 +174,11 @@ class RunLogView(
             filter = kept?.filter,
             parsers = kept?.parsers.orEmpty(),
             togglesParts = true,
+            // A run's output starts with the build tool's or framework's lines before its log records.
+            redetection = Redetection(),
             onStatusChanged = ::statusChanged,
         )
+        if (spool.exitCode != null) made.writerEnded()
         made.hiddenColumns = memory.hiddenColumns
         made.columnWidths = memory.columnWidths
         made.shownParts = rememberedParts()

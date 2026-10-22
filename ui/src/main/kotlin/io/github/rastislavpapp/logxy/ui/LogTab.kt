@@ -22,6 +22,7 @@ import io.github.rastislavpapp.logxy.core.session.LogSession
 import io.github.rastislavpapp.logxy.core.session.MAX_COPY_BYTES
 import io.github.rastislavpapp.logxy.core.session.NOT_YET_FOUND
 import io.github.rastislavpapp.logxy.core.session.PreparedCopy
+import io.github.rastislavpapp.logxy.core.session.Redetection
 import io.github.rastislavpapp.logxy.core.session.RowRanges
 import io.github.rastislavpapp.logxy.core.session.SessionListener
 import io.github.rastislavpapp.logxy.core.session.SessionStatus
@@ -108,11 +109,13 @@ class LogTab(
     /** The parser chosen for each of [paths], null (or missing) to detect it. */
     parsers: List<Parser?> = emptyList(),
     private val togglesParts: Boolean = false,
+    /** Detects the parser of a single file again while it reads as raw text, as [LogSession] does. */
+    redetection: Redetection? = null,
     private val onStatusChanged: () -> Unit,
 ) : JPanel(BorderLayout()) {
 
     private val scope = CoroutineScope(SupervisorJob() + host.uiDispatcher)
-    private val session = LogSession(paths, scope, host.settings, Listener(), origin, parsers)
+    private val session = LogSession(paths, scope, host.settings, Listener(), origin, parsers, redetection)
 
     /** The files shown; for a merge, without those that turned out to have no timestamps. */
     val paths: List<Path> get() = session.paths
@@ -1229,6 +1232,9 @@ class LogTab(
 
     /** See [LogSession.grew]; callable from any thread. */
     fun fileGrew() = session.grew()
+
+    /** See [LogSession.writerEnded]; callable from any thread. */
+    fun writerEnded() = session.writerEnded()
 
     fun focusFilter() {
         shownParts += LogPart.FILTER
