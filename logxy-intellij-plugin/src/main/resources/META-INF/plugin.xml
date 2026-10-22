@@ -40,15 +40,7 @@ Parsers, saved filters and log levels are set in <i>Settings › Tools › logxy
 memory-efficient on large logs, with merging of several files into one.</p>
     ]]></description>
 
-    <change-notes><![CDATA[
-<h3>0.1.0</h3>
-<p>First release.</p>
-<ul>
-  <li>A logxy view of each run's output, switched with Console | logxy in the run tab's toolbar.</li>
-  <li>Parsed columns, the visual filter editor, the time histogram, templates and live follow.</li>
-  <li>Settings › Tools › logxy for parsers, saved filters and log levels, importable from the logxy app.</li>
-</ul>
-    ]]></change-notes>
+    <!-- <change-notes> come from CHANGELOG.md at build time. -->
 
     <depends>com.intellij.modules.platform</depends>
 
