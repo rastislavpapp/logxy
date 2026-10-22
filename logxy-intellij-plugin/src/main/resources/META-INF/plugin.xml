@@ -1,7 +1,7 @@
 <idea-plugin>
     <id>io.github.rastislavpapp.logxy</id>
     <name>logxy</name>
-    <vendor>Rastislav Papp</vendor>
+    <vendor url="https://github.com/rastislavpapp/logxy">Rastislav Papp</vendor>
     <!-- The Plugins page's overview; a shorter, run-focused pick of the README's Features list; what both name, keep in step.
          Marketplace's rules for the name, overview and icon: docs/agents/plugin-listing.md. -->
     <description><![CDATA[
@@ -33,7 +33,7 @@ timeline where they cluster.</p>
       click away, for stack-trace links and typing into the program.</li>
 </ul>
 
-<p>Works in any JetBrains IDE from 2026.1, for any run configuration that starts a process.
+<p>Works in IntelliJ IDEA and other IntelliJ-based IDEs from 2026.1, for any run configuration that starts a process.
 Parsers, saved filters and log levels are set in <i>Settings › Tools › logxy</i>.</p>
 
 <p>logxy is also a <a href="https://github.com/rastislavpapp/logxy">desktop app</a>, fast and
@@ -68,7 +68,8 @@ memory-efficient on large logs, with merging of several files into one.</p>
                     text="logxy" description="Show the run's output in parsed columns"/>
             <action id="logxy.ChooseParser" class="io.github.rastislavpapp.logxy.plugin.ChooseParser"
                     text="Parser" description="Parser: how lines are split into columns"/>
-            <action id="logxy.Status" class="io.github.rastislavpapp.logxy.plugin.RunStatus" text="Status"/>
+            <action id="logxy.Status" class="io.github.rastislavpapp.logxy.plugin.RunStatus" text="Status"
+                    description="The view's record count and the run's exit code"/>
             <add-to-group group-id="RunTab.TopToolbar" anchor="last"/>
         </group>
     </actions>

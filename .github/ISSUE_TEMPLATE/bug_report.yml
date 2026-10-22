@@ -2,6 +2,15 @@ name: Bug report
 description: Something does not work as expected
 labels: [needs-triage]
 body:
+  - type: dropdown
+    id: product
+    attributes:
+      label: Where
+      options:
+        - App
+        - IntelliJ plugin
+    validations:
+      required: true
   - type: textarea
     id: what
     attributes:
@@ -13,19 +22,26 @@ body:
     id: sample
     attributes:
       label: Log sample
-      description: A few lines of the file that trigger the problem, with anything private removed. Optional.
+      description: A few lines of the file or the run's output that trigger the problem, with anything private removed. Optional.
       render: text
   - type: input
     id: version
     attributes:
       label: logxy version
-      description: Help › About
+      description: "App: Help › About. Plugin: Settings › Plugins › Installed › logxy."
     validations:
       required: true
   - type: input
-    id: env
+    id: runtime
     attributes:
-      label: OS and Java version
-      placeholder: Fedora 44, Temurin 25.0.4
+      label: Java version (app) or IDE and its version (plugin)
+      placeholder: Temurin 25.0.4 / IntelliJ IDEA 2026.2.3
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS
+      placeholder: Fedora 44
     validations:
       required: true
