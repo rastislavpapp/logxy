@@ -29,7 +29,7 @@ The plugin turns the Run console of IntelliJ IDEA and other IntelliJ-based IDEs 
 
 ![A Spring Boot run in the plugin's logxy view, filtered to warnings and errors outside one logger](docs/images/plugin/run-view.png)
 
-To install it, in an IDE from 2026.1 on:
+To install it, in an IDE from 2025.2 on:
 
 1. Download `logxy-intellij-plugin-<version>.zip` from the [Releases page](https://github.com/rastislavpapp/logxy/releases).
 2. In *Settings › Plugins*, click the gear icon, then *Install Plugin from Disk…*, and pick the zip.
