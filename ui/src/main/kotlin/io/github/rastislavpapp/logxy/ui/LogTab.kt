@@ -7,6 +7,7 @@ import io.github.rastislavpapp.logxy.core.log.ColumnType
 import io.github.rastislavpapp.logxy.core.log.Field
 import io.github.rastislavpapp.logxy.core.log.Level
 import io.github.rastislavpapp.logxy.core.log.Role
+import io.github.rastislavpapp.logxy.core.log.Schema
 import io.github.rastislavpapp.logxy.core.parse.Parser
 import io.github.rastislavpapp.logxy.core.query.Highlighter
 import io.github.rastislavpapp.logxy.core.query.Query
@@ -263,6 +264,9 @@ class LogTab(
 
     /** [columnWidths] while there is no table, e.g. while the file is read again. */
     private var rememberedWidths = emptyMap<String, Int>()
+
+    /** Whether the rows last shown were Raw text, whose filter is on its lines. */
+    private var shownRaw = false
     private var progressTimer: Timer? = null
     private var filterTimer: Timer? = null
     private var searchTimer: Timer? = null
@@ -903,6 +907,12 @@ class LogTab(
         this.histogramBar = histogramBar
         this.chartPanel = chartPanel
         table.found = foundMarks
+        // Read with a parser after Raw text, e.g. once a run's records follow its preamble: the filter's conditions on
+        // the lines are on the messages now.
+        val raw = !isMerged && session.parser == Parser.Raw
+        val message = shown.schema.fields.firstOrNull { it.role == Role.MESSAGE }
+        if (shownRaw && !raw && message != null) filterBar.renameField(Schema.RAW.fields.single().name, message.name)
+        shownRaw = raw
         filterBar.setSchema(shown.schema)
         templates.canFilter = shown.schema.hasTemplates()
         setFilterVisible(true)

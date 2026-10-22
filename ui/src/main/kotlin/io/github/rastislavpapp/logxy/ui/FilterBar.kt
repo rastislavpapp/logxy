@@ -9,6 +9,7 @@ import io.github.rastislavpapp.logxy.core.query.QueryException
 import io.github.rastislavpapp.logxy.core.query.QueryOp
 import io.github.rastislavpapp.logxy.core.query.QueryParser
 import io.github.rastislavpapp.logxy.core.query.QueryPrinter
+import io.github.rastislavpapp.logxy.core.query.withField
 import net.miginfocom.swing.MigLayout
 import java.awt.CardLayout
 import java.awt.Component
@@ -144,6 +145,15 @@ class FilterBar(private val onApply: () -> Unit, names: ColumnNames, private val
             textArea?.text = QueryPrinter.print(editor.query(includeEmpty = true))
         }
         if (suspended) updateInputsEnabled()
+    }
+
+    /** Moves the conditions on the field [from] to [to], e.g. when the records are read anew; does not apply them. */
+    fun renameField(from: String, to: String) {
+        val query = runCatching { query() }.getOrNull() ?: return
+        val renamed = query.withField(from, to)
+        if (renamed == query) return
+        editor.setQuery(renamed)
+        if (textMode.isSelected) textArea?.text = QueryPrinter.print(renamed)
     }
 
     /** Offers the fields by their names again, e.g. after a rename; the conditions stay. */

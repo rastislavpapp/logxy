@@ -12,6 +12,7 @@ import io.github.rastislavpapp.logxy.core.filter.TextCondition
 import io.github.rastislavpapp.logxy.core.filter.TextOp
 import io.github.rastislavpapp.logxy.core.log.Level
 import io.github.rastislavpapp.logxy.core.log.LevelMapping
+import io.github.rastislavpapp.logxy.core.log.Role
 import io.github.rastislavpapp.logxy.core.parse.Parser
 import io.github.rastislavpapp.logxy.core.query.Query
 import io.github.rastislavpapp.logxy.core.query.QueryException
@@ -46,6 +47,8 @@ import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
+import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.seconds
 
 class LogSessionTest {
 
@@ -1294,15 +1297,24 @@ class LogSessionTest {
     @Test
     fun `a file of preamble reads as raw text until records follow, then as their parser with the preamble kept`() =
         runBlocking {
+            val expected = Parser.detect(Files.writeString(dir.resolve("records.log"), lines(10)))
             val file = Files.writeString(dir.resolve("run.log"), preamble(30))
             val recorder = Recorder()
-            val session = openRedetecting(file, recorder, Redetection(windowMillis = 30_000, gapMillis = 100))
+            val session = openRedetecting(file, recorder, Redetection(gap = 100.milliseconds))
             assertEquals(Parser.Raw, withContext(ui) { session.parser })
             append(file, lines(10))
-            val shown = withTimeout(10_000) { recorder.loads.receive() }
+            session.grew()
+            val shown = withTimeout(1_500) { recorder.loads.receive() }
             withContext(ui) {
-                assertTrue(session.parser != Parser.Raw)
+                assertEquals(expected, session.parser)
                 assertEquals(40, shown.size)
+                val message = shown.schema.indexOf(Role.MESSAGE)
+                for (record in 0..<30) {
+                    assertEquals(null, shown.level(record))
+                    assertEquals(null, shown.timestamp(record))
+                    assertEquals("> Task :run", shown.fieldText(record, message))
+                }
+                assertNotNull(shown.level(30))
                 session.dispose()
             }
         }
@@ -1311,9 +1323,10 @@ class LogSessionTest {
     fun `records appended after the window closed do not switch the parser`() = runBlocking {
         val file = Files.writeString(dir.resolve("late.log"), preamble(30))
         val recorder = Recorder()
-        val session = openRedetecting(file, recorder, Redetection(windowMillis = 200, gapMillis = 100))
+        val session = openRedetecting(file, recorder, Redetection(window = 200.milliseconds, gap = 100.milliseconds))
         delay(500)
         append(file, lines(10))
+        session.grew()
         assertEquals(null, withTimeoutOrNull(1500) { recorder.loads.receive() })
         assertEquals(Parser.Raw, withContext(ui) { session.parser })
         withContext(ui) { session.dispose() }
@@ -1323,8 +1336,9 @@ class LogSessionTest {
     fun `a parser the user picked is never detected again, Raw text included`() = runBlocking {
         val file = Files.writeString(dir.resolve("picked.log"), preamble(30))
         val recorder = Recorder()
-        val session = openRedetecting(file, recorder, Redetection(gapMillis = 100), chosen = Parser.Raw)
+        val session = openRedetecting(file, recorder, Redetection(gap = 100.milliseconds), chosen = Parser.Raw)
         append(file, lines(10))
+        session.grew()
         assertEquals(null, withTimeoutOrNull(1500) { recorder.loads.receive() })
         withContext(ui) { session.dispose() }
     }
@@ -1333,8 +1347,9 @@ class LogSessionTest {
     fun `a session whose first detection found a parser is never detected again`() = runBlocking {
         val file = Files.writeString(dir.resolve("parsed.log"), lines(30))
         val recorder = Recorder()
-        val session = openRedetecting(file, recorder, Redetection(gapMillis = 100))
+        val session = openRedetecting(file, recorder, Redetection(gap = 100.milliseconds))
         append(file, preamble(10))
+        session.grew()
         assertEquals(null, withTimeoutOrNull(1500) { recorder.loads.receive() })
         withContext(ui) { session.dispose() }
     }
@@ -1343,8 +1358,9 @@ class LogSessionTest {
     fun `detection runs once more over the full output when the writer ends, whatever the gap`() = runBlocking {
         val file = Files.writeString(dir.resolve("ended.log"), preamble(30))
         val recorder = Recorder()
-        val session = openRedetecting(file, recorder, Redetection(windowMillis = 30_000, gapMillis = 60_000))
+        val session = openRedetecting(file, recorder, Redetection(gap = 60.seconds))
         append(file, lines(10))
+        session.grew()
         assertEquals(null, withTimeoutOrNull(1500) { recorder.loads.receive() })
         session.writerEnded()
         withTimeout(10_000) { recorder.loads.receive() }
@@ -1360,6 +1376,29 @@ class LogSessionTest {
         val b = Files.writeString(dir.resolve("b.log"), lines(10))
         assertFailsWith<IllegalArgumentException> {
             LogSession(listOf(a, b), scope, NoSettings, Recorder(), redetection = Redetection())
+        }
+    }
+
+    @Test
+    fun `without redetection a detected parser must still read one of the first lines, as on the desktop`() =
+        runBlocking {
+            val file = Files.writeString(dir.resolve("desktop.log"), preamble(12) + lines(30))
+            val recorder = Recorder()
+            val session = withContext(ui) { LogSession(file, scope, NoSettings, recorder).also { it.start() } }
+            val title = withTimeout(10_000) { recorder.problem.await() }
+            assertTrue(title.startsWith("desktop.log does not match"), title)
+            withContext(ui) { session.dispose() }
+        }
+
+    @Test
+    fun `with redetection the same file opens with its preamble as records`() = runBlocking {
+        val file = Files.writeString(dir.resolve("run.log"), preamble(12) + lines(30))
+        val recorder = Recorder()
+        val session = openRedetecting(file, recorder, Redetection())
+        withContext(ui) {
+            assertTrue(session.parser != Parser.Raw)
+            assertEquals(42, session.shown!!.size)
+            session.dispose()
         }
     }
 }

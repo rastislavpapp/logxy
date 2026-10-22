@@ -267,4 +267,11 @@ class QueryTest {
             assertEquals(nanos, TimeLiteral.parse(TimeLiteral.format(nanos, zone), zone))
         }
     }
+
+    @Test
+    fun `withField moves the rules on a field in any case, also in nested groups`() {
+        val query = QueryParser.parse("Line == \"*Order*\" AND (line =~ \"slow\" OR Logger == \"db\")")
+        val moved = query.withField("Line", "Message")
+        assertEquals("Message == \"*Order*\" AND (Message =~ \"slow\" OR Logger == \"db\")", QueryPrinter.print(moved))
+    }
 }
