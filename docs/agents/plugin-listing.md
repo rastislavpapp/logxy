@@ -1,6 +1,6 @@
 # The plugin's listing
 
-What JetBrains requires of the plugin's name, overview, icon and screenshots, from its listing best practices and Marketplace approval guidelines. Read before changing `<name>`, `<description>` or `<change-notes>` in `plugin/src/main/resources/META-INF/plugin.xml`, or the icon.
+What JetBrains requires of the plugin's name, overview, icon and screenshots, from its listing best practices and Marketplace approval guidelines. Read before changing `<name>`, `<description>` or `<change-notes>` in `logxy-intellij-plugin/src/main/resources/META-INF/plugin.xml`, or the icon.
 
 ## Name
 
