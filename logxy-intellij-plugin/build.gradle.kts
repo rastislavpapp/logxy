@@ -120,6 +120,44 @@ intellijPlatform {
     }
 }
 
+// A copy of the Python demo for runPycharm to open, so PyCharm's saves stay out of the repository. Each run starts
+// from the demo's files again; PyCharm's workspace.xml is kept.
+val pycharmDemo = tasks.register<Copy>("pycharmDemo") {
+    from("demo/python") { exclude("jdk.table.xml", ".idea/workspace.xml") }
+    into(layout.buildDirectory.dir("pycharm-demo"))
+}
+
+// runIde's counterpart in PyCharm, for what runs differently there, such as its debugpy debugger. The oldest supported
+// PyCharm unless -PpycharmVersion names another.
+intellijPlatformTesting {
+    runIde {
+        register("runPycharm") {
+            type = IntelliJPlatformType.PyCharm
+            version = providers.gradleProperty("pycharmVersion").orElse(libs.versions.pycharm)
+            task {
+                dependsOn(pycharmDemo)
+                val demo = layout.buildDirectory.dir("pycharm-demo")
+                argumentProviders.add(CommandLineArgumentProvider { listOf(demo.get().asFile.absolutePath) })
+                // The demo's interpreter, "Python 3" at /usr/bin/python3, joins the sandbox's own: without it the demo's
+                // run configurations cannot run.
+                val sdks = sandboxConfigDirectory.file("options/jdk.table.xml")
+                val demoSdks = layout.projectDirectory.file("demo/python/jdk.table.xml")
+                doFirst {
+                    val table = sdks.get().asFile
+                    val demoTable = demoSdks.asFile.readText()
+                    if (!table.exists()) {
+                        table.parentFile.mkdirs()
+                        table.writeText(demoTable)
+                    } else if ("<name value=\"Python 3\" />" !in table.readText()) {
+                        val sdk = demoTable.substring(demoTable.indexOf("<jdk "), demoTable.lastIndexOf("</jdk>") + 6)
+                        table.writeText(table.readText().replace("</component>", "  $sdk\n  </component>"))
+                    }
+                }
+            }
+        }
+    }
+}
+
 interface Services {
     @get:Inject val archives: ArchiveOperations
 }
