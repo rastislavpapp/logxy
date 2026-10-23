@@ -43,11 +43,14 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import org.slf4j.LoggerFactory
 import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.Collections
 import java.util.concurrent.atomic.AtomicReference
+
+private val log = LoggerFactory.getLogger(LogSession::class.java)
 
 /** A session's state for a status bar; [records] is null while there is nothing to show (indexing, errors). */
 data class SessionStatus(
@@ -298,6 +301,9 @@ class LogSession internal constructor(
     private var indexMillis = 0L
     private var problem: String? = null
 
+    /** The problem reading the files that was logged last, so the polls that meet it again do not log it again. */
+    private var loggedReadProblem: String? = null
+
     /** Whether a file looks like it is being written to. */
     val isLive get() = sources.any { it.activity == FileActivity.LIVE }
 
@@ -350,11 +356,15 @@ class LogSession internal constructor(
         if (parsers == chosenParsers) return
         sources.forEachIndexed { i, source -> source.chosen = parsers[i] }
         listener.parserChanged()
-        reload()
+        reload("parser picked: " + parsers.joinToString { it?.let { "“${it.name}”" } ?: "detect" })
     }
 
     /** Starts over with the files now at [paths], e.g. after rotation, truncation or a parser change. */
-    fun reload() {
+    fun reload() = reload("Reload")
+
+    /** [reload], logged with [reason]. */
+    private fun reload(reason: String) {
+        log.info("Reloading {}: {}", files(), reason)
         job?.cancel()
         closeLogs()
         launchLoad()
@@ -508,8 +518,9 @@ class LogSession internal constructor(
             // launches the next load may lose it, as IntelliJ ties what is dispatched to the EDT to the calling
             // coroutine.
             while (load()) {
-                if (!watch()) break
                 // The files must be read again, e.g. truncated, or redetection found their parser.
+                val reason = watch() ?: break
+                log.info("Reloading {}: {}", files(), reason)
                 closeLogs()
             }
         }
@@ -518,6 +529,11 @@ class LogSession internal constructor(
     /** Indexes the files and merges them if there are several; returns false on error. */
     private suspend fun load(): Boolean {
         val sizes = withContext(Dispatchers.IO) { sources.map { runCatching { Files.size(it.path) }.getOrDefault(0L) } }
+        val loading = sources.mapIndexed { i, source ->
+            val parser = source.chosen?.let { "parser “${it.name}”" } ?: "detecting the parser"
+            "${source.path} (${formatByteSize(sizes[i])}, $parser)"
+        }
+        log.info("Loading {}", loading.joinToString())
         val progresses = sources.map { IndexProgress() }
         val total = maxOf(1L, sizes.sum())
         listener.indexing { (progresses.sumOf { it.bytesDone }.toDouble() / total).coerceIn(0.0, 1.0) }
@@ -579,11 +595,13 @@ class LogSession internal constructor(
                     // Keep at least the files themselves, so the tab still names them and can be reloaded.
                     nothingToMerge = unmergeable.size == sources.size
                     if (nothingToMerge) sources.forEach { it.log = null } else sources = sources - unmergeable.toSet()
+                    log.info("Left out of the merge, as they have no timestamps: {}", unmergeable.map { it.path })
                     listener.notMergeable(unmergeable.map { it.path })
                     listener.parserChanged()
                 }
             }
             if (nothingToMerge) {
+                log.info("Nothing to merge: none of {} has timestamps", files())
                 listener.problem(
                     "None of these files has timestamps to merge by.",
                     "They are opened in their own tabs.",
@@ -604,7 +622,14 @@ class LogSession internal constructor(
                     source.activity = FileActivity.classify(known.lastModified, known.size, Files.size(source.path))
                 }
             }
+            val parsers = sources.joinToString { source ->
+                val how = if (source.chosen == null) "detected" else "picked"
+                "${source.path}: “${source.parser.name}” ($how)"
+            }
+            val unit = if (loaded.records.isRaw) "lines" else "records"
+            log.info("Loaded {}, {} {} in {} ms", parsers, loaded.records.recordCount, unit, indexMillis)
             problem = null
+            loggedReadProblem = null
             filterShown = false
             listener.loaded(shown)
             if (isLive) follow = true
@@ -615,6 +640,7 @@ class LogSession internal constructor(
             throw e
         } catch (e: ParserMismatchException) {
             opened.forEach { it.close() }
+            log.warn("{} does not match the parser “{}”", current().path, current().parser.name, e)
             listener.problem(
                 "${current().path.fileName} does not match the parser “${current().parser.name}”.",
                 e.message.orEmpty(),
@@ -628,6 +654,7 @@ class LogSession internal constructor(
             return false
         } catch (e: Exception) {
             opened.forEach { it.close() }
+            log.warn("Cannot open {}", current().path, e)
             listener.problem("Cannot open ${current().path.fileName}.", e.message ?: e.javaClass.simpleName, null)
             setStatus(SessionStatus(message = "Error"))
             return false
@@ -636,6 +663,7 @@ class LogSession internal constructor(
             opened.forEach { it.close() }
             opened.clear()
             sources.forEach { it.log = null }
+            log.warn("Not enough memory to open {}", files(), e)
             val what = if (isMerged) "these ${sources.size} files" else "${current().path.fileName}"
             listener.problem(
                 "Not enough memory to open $what.",
@@ -652,11 +680,11 @@ class LogSession internal constructor(
         }
     }
 
-    /** Follows the files; returns true when they must be read again, false when there is nothing left to follow. */
-    private suspend fun watch(): Boolean {
+    /** Follows the files; returns why they must be read again, or null when there is nothing left to follow. */
+    private suspend fun watch(): String? {
         while (true) {
             withTimeoutOrNull(if (isLive) LIVE_POLL_MILLIS else STATIC_POLL_MILLIS) { pushes.receive() }
-            val loaded = loaded ?: return false
+            val loaded = loaded ?: return null
             try {
                 val oldRecordCount = loaded.records.recordCount
                 val changed = ArrayList<Int>()
@@ -664,7 +692,7 @@ class LogSession internal constructor(
                 var grown = false
                 var promoted = false
                 for ((part, source) in sources.withIndex()) {
-                    val log = source.log ?: return false
+                    val log = source.log ?: return null
                     // A failing file must not keep what the others appended from being merged and shown.
                     try {
                         val current = withContext(Dispatchers.IO) { FileSnapshot.take(source.path) }
@@ -673,7 +701,8 @@ class LogSession internal constructor(
                                 problems += if (isMerged) "${source.path.fileName} not found" else "file not found"
                                 continue
                             }
-                            FileChange.SHRUNK, FileChange.REPLACED -> return true
+                            FileChange.SHRUNK -> return "${source.path} shrank"
+                            FileChange.REPLACED -> return "${source.path} was replaced"
                             FileChange.GROWN -> {
                                 val appended = withContext(Dispatchers.IO) { log.readAppended(current!!.size) }
                                 loaded.append(part, appended).let { if (it >= 0) changed += it }
@@ -696,11 +725,11 @@ class LogSession internal constructor(
                         problems += if (isMerged) "${source.path.fileName}: $message" else message
                     }
                 }
-                problem = problems.joinToString(", ").ifEmpty { null }
+                readProblem(problems.joinToString(", ").ifEmpty { null })
                 if (grown) {
                     redetectionClock?.grew()
                     when (loaded.settle()) {
-                        Appended.MERGE_AGAIN -> return true
+                        Appended.MERGE_AGAIN -> return "a last record was parsed differently, so the merge is redone"
                         Appended.NEW_FIELDS -> listener.fieldsShown()
                         Appended.GREW -> {}
                     }
@@ -719,7 +748,7 @@ class LogSession internal constructor(
             } catch (e: IOException) {
                 // Closing the tab closes the files under a running read.
                 currentCoroutineContext().ensureActive()
-                problem = e.message ?: e.javaClass.simpleName
+                readProblem(e.message ?: e.javaClass.simpleName)
             }
             if (redetectionDue()) {
                 val current = settings.current
@@ -727,11 +756,20 @@ class LogSession internal constructor(
                 val found = withContext(Dispatchers.IO) {
                     runCatching { Parser.detect(path, current.parsers, current.builtInParsers) }
                 }
+                found.exceptionOrNull()?.let { log.warn("Cannot detect the parser of {} again", path, it) }
                 val detected = found.getOrNull()
-                if (detected != null && detected != Parser.Raw) return true
+                if (detected != null) log.debug("Detected the parser of {} again: “{}”", path, detected.name)
+                if (detected != null && detected != Parser.Raw) return "redetection found the parser “${detected.name}”"
             }
             updateStatus()
         }
+    }
+
+    /** Shows [problem] reading the files, null for none; logs it when it starts or changes, not on every poll. */
+    private fun readProblem(problem: String?) {
+        this.problem = problem
+        if (problem != null && problem != loggedReadProblem) log.warn("Cannot read {}: {}", files(), problem)
+        loggedReadProblem = problem
     }
 
     /** Whether the file, read as Raw text by detection, is to be detected again now; never after the user picked. */
@@ -750,7 +788,7 @@ class LogSession internal constructor(
         }
         if (levelsChanged) listener.levelMappingChanged()
         // A saved parser this session uses was edited: read the files with the new definition.
-        var edited = false
+        var edited: String? = null
         for (source in sources) {
             val used = source.chosen ?: source.parser.takeIf { it in savedParsers } ?: continue
             val changed = settings.parsers.firstOrNull { it.name == used.name && it != used } ?: continue
@@ -762,15 +800,15 @@ class LogSession internal constructor(
             }
             // A detected parser is detected again, as the edit may no longer fit the file best.
             if (source.chosen != null) source.chosen = changed
-            edited = true
+            edited = changed.name
         }
         // Only renamed: nothing to read again, just show the new name.
         for (source in sources) source.chosen?.let { renamed(it, settings.parsers) }?.let { source.chosen = it }
         for (source in sources) renamed(source.parser, settings.parsers)?.let { source.parser = it }
         savedParsers = settings.parsers
         listener.parserChanged()
-        if (edited) {
-            reload()
+        if (edited != null) {
+            reload("saved parser “$edited” edited")
         } else if (levelsChanged && activeFilter != null) {
             runFilter(keepView = true, activeFilter?.let { engine?.prepare(it) })
         } else if (levelsChanged) {
@@ -816,6 +854,7 @@ class LogSession internal constructor(
                 evaluation.run()
             } catch (e: Throwable) {
                 if (e is CancellationException || (e !is Exception && e !is OutOfMemoryError)) throw e
+                log.warn("Cannot filter {} by {}", files(), filter, e)
                 // Keep the previous result, but stop showing the filter as running.
                 indicator.cancel()
                 filtering = false
@@ -949,6 +988,7 @@ class LogSession internal constructor(
                 }
             } catch (e: Throwable) {
                 if (e is CancellationException || (e !is Exception && e !is OutOfMemoryError)) throw e
+                log.warn("Cannot search {} for {}", files(), spec, e)
                 // A failed catch-up keeps what was found before.
                 searchError = when (e) {
                     is OutOfMemoryError -> "Not enough memory to search"
@@ -1154,6 +1194,9 @@ class LogSession internal constructor(
     }
 
     private fun indexedSize(): Long = sources.sumOf { it.log?.indexedSize ?: 0L }
+
+    /** [paths] for a log line. */
+    private fun files(): String = paths.joinToString()
 
     private fun setStatus(status: SessionStatus) {
         this.status = status

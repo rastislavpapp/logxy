@@ -6,6 +6,7 @@ import io.github.rastislavpapp.logxy.core.index.LineIndex
 import io.github.rastislavpapp.logxy.core.log.LevelMapping
 import io.github.rastislavpapp.logxy.core.log.LogData
 import io.github.rastislavpapp.logxy.core.log.ParsedLog
+import org.slf4j.LoggerFactory
 import java.nio.channels.FileChannel
 import java.nio.file.Files
 import java.nio.file.Path
@@ -234,7 +235,10 @@ sealed interface Parser {
 
         private fun detectFresh(path: Path, preferred: List<Parser>, builtIn: List<Parser>): Parser {
             val sample = ParserPreview.sample(path, SAMPLE_LINES, skipEmpty = true)
-            if (sample.isEmpty()) return Raw
+            if (sample.isEmpty()) {
+                log.debug("{}: Raw text, as it has no lines yet", path)
+                return Raw
+            }
             val realLines = sample.count { !ParserCheck.looksLikeContinuation(it, 0, it.size) }
             val guess = ParserInference.infer(sample, csv = path.toString().endsWith(".csv", ignoreCase = true))
             // Guessed JSON keys refine the built-in JSON parser, which reads the same lines.
@@ -247,11 +251,23 @@ sealed interface Parser {
                 Scored(candidate, matches, candidate in preferred, fields, guessed = candidate === guess)
             }
             val ranking = compareBy<Scored>({ it.matches }, { it.preferred }, { it.fields }, { !it.guessed })
-            val best = scored.maxWithOrNull(ranking) ?: return Raw
-            return if (best.matches > 0 && best.matches * 20 >= realLines) best.parser else Raw
+            val best = scored.maxWithOrNull(ranking)
+            if (best == null) {
+                log.debug("{}: Raw text, as no candidate compiles", path)
+                return Raw
+            }
+            val lines = "${best.matches} of ${sample.size} sampled lines ($realLines not continuations)"
+            if (best.matches > 0 && best.matches * 20 >= realLines) {
+                log.debug("{}: “{}”, matching {}", path, best.parser.name, lines)
+                return best.parser
+            }
+            log.debug("{}: Raw text, as the best candidate “{}” matches only {}", path, best.parser.name, lines)
+            return Raw
         }
     }
 }
+
+private val log = LoggerFactory.getLogger(Parser::class.java)
 
 /** Bytes read by [mismatch]: enough for the first entries, but bounded for a file that starts with a huge dump. */
 private const val MISMATCH_CHECK_BYTES = 4L * 1024 * 1024

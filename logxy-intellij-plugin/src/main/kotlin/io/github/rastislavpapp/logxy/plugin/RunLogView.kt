@@ -4,6 +4,7 @@ import com.intellij.ide.ActivityTracker
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.actionSystem.ActionManager
 import com.intellij.openapi.actionSystem.IdeActions
+import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.project.DumbAwareAction
 import com.intellij.openapi.util.Key
 import io.github.rastislavpapp.logxy.core.config.SavedFilter
@@ -32,6 +33,8 @@ private const val DETECT_WAIT_MILLIS = 1500
 
 /** Where [RunLogView.shownParts] is kept: one choice for all runs. */
 private const val PARTS_KEY = "run.parts"
+
+private val log = logger<RunLogView>()
 
 /**
  * A run's console or a logxy view of its [spool], as the run tab's toolbar switches them; [memory] keeps the
@@ -129,6 +132,7 @@ class RunLogView(
      * parser in it.
      */
     fun clear() {
+        log.info("logxy: Clear All emptied ${spool.path}")
         val old = tab
         // Before the file is emptied, so the output that follows waits for the new view.
         tab = null
@@ -152,19 +156,22 @@ class RunLogView(
         if (tab != null || !showsLogxy) return
         if (spool.lines == 0 && cleared) return
         val ended = spool.exitCode != null
-        if (spool.lines >= DETECT_LINES || ended) return makeTab()
+        if (ended) return makeTab("the process ended")
+        if (spool.lines >= DETECT_LINES) return makeTab("enough output")
         if (spool.lines == 0) return
         if (waitTimer != null) return
-        waitTimer = Timer(DETECT_WAIT_MILLIS) { makeTab() }.apply {
+        waitTimer = Timer(DETECT_WAIT_MILLIS) { makeTab("the wait for more output ended") }.apply {
             isRepeats = false
             start()
         }
     }
 
-    private fun makeTab() {
+    /** Makes the view; [why] now, for the log. */
+    private fun makeTab(why: String) {
         if (tab != null) return
         waitTimer?.stop()
         waitTimer = null
+        log.info("logxy: view of ${spool.path} made at ${spool.lines} lines of output, as $why")
         Look.current = IdeLook
         val made = LogTab(
             listOf(spool.path),

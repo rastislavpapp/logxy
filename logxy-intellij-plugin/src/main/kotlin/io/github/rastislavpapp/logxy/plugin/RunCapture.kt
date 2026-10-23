@@ -19,8 +19,19 @@ class RunCapture(private val project: Project) : ExecutionListener {
     // Before the process starts, so the spool gets its first output too.
     override fun processStarting(executorId: String, env: ExecutionEnvironment, handler: ProcessHandler) {
         val spool = Spool.start(configurationId(env))
+        log.info("logxy: the output of ${env.runProfile.name} goes to ${spool.path}")
         handler.putUserData(SPOOL, spool)
         handler.addProcessListener(spool)
+    }
+
+    override fun processTerminated(
+        executorId: String,
+        env: ExecutionEnvironment,
+        handler: ProcessHandler,
+        exitCode: Int,
+    ) {
+        val spool = handler.getUserData(SPOOL) ?: return
+        log.info("logxy: ${env.runProfile.name} ended with exit code $exitCode, its output in ${spool.path}")
     }
 
     // The run tab exists once the process started, but is shown only after this listener returns.
