@@ -60,21 +60,21 @@ memory-efficient on large logs, with merging of several files into one.</p>
     </extensions>
 
     <actions>
-        <!-- In every run and debug tab's top toolbar (the debugger's in the new UI and in the classic one); the actions
-             hide in tabs without a logxy view, the switch in debug tabs, whose view is a sub-tab. -->
+        <!-- In every run tab's top toolbar; the actions hide in tabs without a logxy view. -->
         <group id="logxy.RunToolbar">
             <separator/>
             <action id="logxy.ShowConsole" class="io.github.rastislavpapp.logxy.plugin.ShowConsole"
                     text="Console" description="Show the run's console"/>
             <action id="logxy.ShowLogxy" class="io.github.rastislavpapp.logxy.plugin.ShowLogxy"
                     text="logxy" description="Show the run's output in parsed columns"/>
+            <add-to-group group-id="RunTab.TopToolbar" anchor="last"/>
+        </group>
+        <!-- At the right end of a run or debug tab's top row, set by ConsoleSwap: nothing moves as the parser shows. -->
+        <group id="logxy.StatusToolbar">
             <action id="logxy.ChooseParser" class="io.github.rastislavpapp.logxy.plugin.ChooseParser"
                     text="Parser" description="Parser: how lines are split into columns"/>
             <action id="logxy.Status" class="io.github.rastislavpapp.logxy.plugin.RunStatus" text="Status"
                     description="The records in the shown log and the run's exit code"/>
-            <add-to-group group-id="RunTab.TopToolbar" anchor="last"/>
-            <add-to-group group-id="XDebugger.ToolWindow.TopToolbar3" anchor="last"/>
-            <add-to-group group-id="XDebugger.ToolWindow.TopToolbar" anchor="last"/>
         </group>
     </actions>
 </idea-plugin>
