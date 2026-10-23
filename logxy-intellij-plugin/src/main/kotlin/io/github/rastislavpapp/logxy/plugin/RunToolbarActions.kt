@@ -22,9 +22,9 @@ import io.github.rastislavpapp.logxy.ui.LogTab
 import javax.swing.Icon
 import javax.swing.JComponent
 
-// The actions of the logxy view. The switch (a run tab's only), the parser and the status are in the run or debug
-// tab's top toolbar, beside Rerun and Stop: in every such tab's toolbar, acting on that tab's view; a tab without one,
-// e.g. of a run started before the plugin, hides them. The others are beside the view: in a run tab, in the place of
+// The actions of the logxy view. The switch is in every run tab's top toolbar, beside Rerun and Stop; the parser and
+// the status at the right end of a run or debug tab's top row. Each acts on its tab's view; a tab without one, e.g. of
+// a run started before the plugin, hides them. The others are beside the view: in a run tab, in the place of
 // the console's toolbar, which acts on the hidden console, whose context does not reach the view; in a debug tab, as
 // the view's sub-tab's own. Made for one view each.
 

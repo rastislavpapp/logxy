@@ -5,6 +5,7 @@ import com.intellij.execution.ui.ExecutionConsole
 import com.intellij.execution.ui.RunContentDescriptor
 import com.intellij.execution.ui.layout.PlaceInGrid
 import com.intellij.openapi.actionSystem.ActionGroup
+import com.intellij.openapi.actionSystem.ActionManager
 import com.intellij.openapi.actionSystem.ActionPlaces
 import com.intellij.openapi.actionSystem.ActionToolbar
 import com.intellij.openapi.actionSystem.AnAction
@@ -59,6 +60,7 @@ object ConsoleSwap {
         parent.add(wrapper, constraints, index)
         parent.revalidate()
         content.component = wrapper
+        addStatusToolbar(descriptor, ActionPlaces.RUNNER_TOOLBAR)
         return Outcome.INSTALLED
     }
 
@@ -72,7 +74,17 @@ object ConsoleSwap {
         content.isCloseable = false
         content.setActions(actions, ActionPlaces.DEBUGGER_TOOLBAR, view)
         ui.addContent(content, DEBUG_CONSOLE_TAB + 1, PlaceInGrid.center, false)
+        addStatusToolbar(descriptor, ActionPlaces.DEBUGGER_TOOLBAR)
         return true
+    }
+
+    /**
+     * Puts the parser and the status at the right end of the tab's top row, in the toolbar the IDE leaves empty there:
+     * the buttons and sub-tabs before them stay put as the parser shows and hides.
+     */
+    private fun addStatusToolbar(descriptor: RunContentDescriptor, place: String) {
+        val toolbar = ActionManager.getInstance().getAction("logxy.StatusToolbar") as? ActionGroup ?: return
+        descriptor.runnerLayoutUi?.options?.setTopMiddleToolbar(toolbar, place)
     }
 
     private fun consoleContent(descriptor: RunContentDescriptor): Content? =
