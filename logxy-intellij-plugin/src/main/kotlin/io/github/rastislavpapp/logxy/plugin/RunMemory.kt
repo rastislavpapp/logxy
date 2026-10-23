@@ -4,9 +4,9 @@ import com.intellij.ide.util.PropertiesComponent
 import com.intellij.openapi.project.Project
 
 /**
- * What a run configuration's view keeps from run to run, in the project's properties: whether it shows logxy or the
- * console, the hidden columns and the widths they were dragged to. Not the filter: a run starts showing all its
- * records. [id] names the configuration.
+ * What a run configuration's view keeps from run to run, in the project's properties: whether a run tab shows logxy
+ * or the console, the hidden columns and the widths they were dragged to, the columns shared by Run and Debug. Not the
+ * filter: a run starts showing all its records. [id] names the configuration.
  */
 class RunMemory(project: Project, id: String) {
 

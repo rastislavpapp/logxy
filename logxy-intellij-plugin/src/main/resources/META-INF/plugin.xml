@@ -28,9 +28,10 @@ timeline where they cluster.</p>
       <code>Request {1} done in {2} ms</code>. The Templates panel lists these message kinds with
       how often each occurs, so you can show or hide a whole kind at once, and chart a value, such
       as the duration, over time.</li>
-  <li><b>Out of the way.</b> A Console | logxy switch in the run or debug tab's toolbar, remembered
-      per run configuration along with the columns you hide and resize. The IDE's console stays one
-      click away, for stack-trace links and typing into the program.</li>
+  <li><b>Out of the way.</b> A Console | logxy switch in the run tab's toolbar, remembered per run
+      configuration along with the columns you hide and resize; in the debugger, a logxy tab beside
+      the Console tab. The IDE's console stays one click away, for stack-trace links and typing into
+      the program.</li>
 </ul>
 
 <p>Works in IntelliJ IDEA and other IntelliJ-based IDEs from 2025.3, for any run configuration that starts a process.
@@ -60,7 +61,7 @@ memory-efficient on large logs, with merging of several files into one.</p>
 
     <actions>
         <!-- In every run and debug tab's top toolbar (the debugger's in the new UI and in the classic one); the actions
-             hide in tabs without a logxy view. -->
+             hide in tabs without a logxy view, the switch in debug tabs, whose view is a sub-tab. -->
         <group id="logxy.RunToolbar">
             <separator/>
             <action id="logxy.ShowConsole" class="io.github.rastislavpapp.logxy.plugin.ShowConsole"

@@ -16,9 +16,8 @@ import io.github.rastislavpapp.logxy.ui.LogTab
 import io.github.rastislavpapp.logxy.ui.Look
 import io.github.rastislavpapp.logxy.ui.count
 import java.awt.BorderLayout
-import java.awt.CardLayout
+import java.awt.event.HierarchyEvent
 import java.util.concurrent.atomic.AtomicBoolean
-import javax.swing.JComponent
 import javax.swing.JLabel
 import javax.swing.JPanel
 import javax.swing.SwingConstants
@@ -37,30 +36,24 @@ private const val PARTS_KEY = "run.parts"
 private val log = logger<RunLogView>()
 
 /**
- * A run's console or a logxy view of its [spool], as the run tab's toolbar switches them; [memory] keeps the
- * choice and the columns for the next run, which starts unfiltered. The view is made once logxy shows and there is
- * enough output to detect its parser. While it shows, the view's actions take the place of the console's [toolbar].
- * The IDE's Find, Find Next and Find Previous search its records.
+ * A logxy view of a run's [spool], in a run tab beside the console ([ConsoleSwitch]) or as a debug tab's sub-tab;
+ * [memory] keeps the columns for the next run, which starts unfiltered. The view is made once it shows on screen and
+ * there is enough output to detect its parser. The IDE's Find, Find Next and Find Previous search its records.
  */
 class RunLogView(
-    console: JComponent,
-    private val toolbar: ConsoleToolbar,
     private val spool: Spool,
     private val memory: RunMemory,
     private val host: IdeHost,
-) : JPanel(CardLayout()), Disposable {
-
-    private val cards = layout as CardLayout
-    private val logPanel = JPanel(BorderLayout()).apply {
-        add(JLabel("Waiting for output…", SwingConstants.CENTER))
-    }
+) : JPanel(BorderLayout()), Disposable {
 
     /** The view once made; set on the UI thread, read on the process's threads, which push new output to it. */
     @Volatile var tab: LogTab? = null
         private set
     private val checkScheduled = AtomicBoolean()
     private var waitTimer: Timer? = null
-    private val actions = viewActions(this)
+
+    /** Follow, the columns, Clear All and the parts: beside the view, in the console toolbar's place or its own. */
+    val actions = viewActions(this)
 
     /** Whether Clear All emptied the output: no view is made of it while it stays empty, also once the run ends. */
     private var cleared = false
@@ -69,9 +62,6 @@ class RunLogView(
     private var kept: Kept? = null
 
     private class Kept(val parsers: List<Parser?>, val filter: SavedFilter)
-
-    var showsLogxy = memory.showsLogxy
-        private set
 
     /** The parts shown besides the rows, the same for all runs: none at first, so a run shows its rows alone. */
     var shownParts: Set<LogPart>
@@ -82,8 +72,14 @@ class RunLogView(
         }
 
     init {
-        add(console, CONSOLE)
-        add(logPanel, LOGXY)
+        add(JLabel("Waiting for output…", SwingConstants.CENTER))
+        // Switched to, or its sub-tab selected; the toolbar shows the records then.
+        addHierarchyListener { e ->
+            if (e.changeFlags and HierarchyEvent.SHOWING_CHANGED.toLong() != 0L) {
+                makeTabIfReady()
+                statusChanged()
+            }
+        }
         bind(IdeActions.ACTION_FIND) { it.showFind() }
         bind(IdeActions.ACTION_FIND_NEXT) { it.findNext(forward = true) }
         bind(IdeActions.ACTION_FIND_PREVIOUS) { it.findNext(forward = false) }
@@ -107,23 +103,12 @@ class RunLogView(
                 remember()
             }
         }
-        showView(showsLogxy)
     }
 
     /** Runs [action] on the view by the shortcuts of the IDE action [id], while the focus is in the view. */
     private fun bind(id: String, action: (LogTab) -> Unit) {
         val shortcuts = ActionManager.getInstance().getAction(id)?.shortcutSet ?: return
-        DumbAwareAction.create { tab?.let(action) }.registerCustomShortcutSet(shortcuts, logPanel, this)
-    }
-
-    /** Shows logxy, or the console. */
-    fun showView(logxy: Boolean) {
-        showsLogxy = logxy
-        memory.showsLogxy = logxy
-        cards.show(this, if (logxy) LOGXY else CONSOLE)
-        toolbar.show(if (logxy) actions else null, this)
-        makeTabIfReady()
-        statusChanged()
+        DumbAwareAction.create { tab?.let(action) }.registerCustomShortcutSet(shortcuts, this, this)
     }
 
     /**
@@ -143,17 +128,17 @@ class RunLogView(
             kept = Kept(old.chosenParsers, old.filter)
             old.dispose()
         }
-        logPanel.removeAll()
-        logPanel.add(JLabel("No output since Clear All", SwingConstants.CENTER))
-        logPanel.revalidate()
-        logPanel.repaint()
+        removeAll()
+        add(JLabel("No output since Clear All", SwingConstants.CENTER))
+        revalidate()
+        repaint()
         makeTabIfReady()
         statusChanged()
     }
 
-    /** Makes the view if logxy shows and the output is enough to detect its parser, or will be after a wait. */
+    /** Makes the view if it shows and the output is enough to detect its parser, or will be after a wait. */
     private fun makeTabIfReady() {
-        if (tab != null || !showsLogxy) return
+        if (tab != null || !isShowing) return
         if (spool.lines == 0 && cleared) return
         val ended = spool.exitCode != null
         if (ended) return makeTab("the process ended")
@@ -190,19 +175,19 @@ class RunLogView(
         made.columnWidths = memory.columnWidths
         made.shownParts = rememberedParts()
         made.onPartsChanged = { rememberParts(made.shownParts) }
-        logPanel.removeAll()
-        logPanel.add(made)
-        logPanel.revalidate()
+        removeAll()
+        add(made)
+        revalidate()
         tab = made
         statusChanged()
     }
 
-    /** The records shown while logxy shows, and the exit code once the process ended. */
+    /** The records shown while the view shows, and the exit code once the process ended. */
     val statusText: String
         get() {
             val parts = ArrayList<String>()
             val (_, records, shown) = tab?.status ?: SessionStatus()
-            if (showsLogxy && records != null) {
+            if (isShowing && records != null) {
                 val all = count(records, "record")
                 parts += if (shown == null) all else "${"%,d".format(shown)} of $all"
             }
@@ -238,10 +223,7 @@ class RunLogView(
     }
 
     companion object {
-        private const val CONSOLE = "console"
-        private const val LOGXY = "logxy"
-
-        /** The view of a run, on its process handler, where the run tab's top toolbar finds it. */
+        /** The view of a run, on its process handler, where the run or debug tab's top toolbar finds it. */
         val KEY = Key.create<RunLogView>("logxy.view")
     }
 }

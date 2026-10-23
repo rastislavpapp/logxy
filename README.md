@@ -25,7 +25,7 @@
 
 ## IntelliJ plugin
 
-The plugin turns the Run and Debug consoles of IntelliJ IDEA and other IntelliJ-based IDEs into a log viewer. A run's output shows as parsed columns that you can filter, search and follow live, with the time histogram and templates beside them. The format is detected from the first lines, and a Console | logxy switch in the run or debug tab's toolbar keeps the IDE's own console one click away.
+The plugin turns the Run and Debug consoles of IntelliJ IDEA and other IntelliJ-based IDEs into a log viewer. A run's output shows as parsed columns that you can filter, search and follow live, with the time histogram and templates beside them. The format is detected from the first lines, and the IDE's own console stays one click away: a Console | logxy switch in the run tab's toolbar, a logxy tab beside the debugger's Console tab.
 
 ![A Spring Boot run in the plugin's logxy view, filtered to warnings and errors outside one logger](docs/images/plugin/run-view.png)
 
@@ -33,7 +33,7 @@ To install it, in an IDE from 2025.3 on:
 
 1. Download `logxy-intellij-plugin-<version>.zip` from the [Releases page](https://github.com/rastislavpapp/logxy/releases).
 2. In *Settings › Plugins*, click the gear icon, then *Install Plugin from Disk…*, and pick the zip.
-3. Run or debug something: the tab's toolbar has the Console | logxy switch.
+3. Run something: the run tab's toolbar has the Console | logxy switch. A debug tab has a logxy tab beside its Console tab.
 
 ## Download
 
