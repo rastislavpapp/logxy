@@ -9,7 +9,7 @@
 3. **Start** with `gui.sh start <paths>`, and keep one sandbox running across checks. Each start begins with default settings.
 4. **Drive it as a loop:** take a `shot`, read the image, choose one action (`click`, `rclick`, `key`, `type`) from what it shows, repeat. Wait by taking another shot rather than sleeping. Chain actions in one command only when the screen between them is already known.
    Every image read costs by its size, so take a full shot only to learn the layout (after start, after opening a dialog or menu), then **crop** to the region the next question needs: `shot NAME X Y W H`, e.g. the status bar, one dialog, the first rows of the table.
-5. **Check the log** with `gui.sh logs | grep -A8 Uncaught` after the scenario. An exception on the UI thread is logged but often leaves the screen merely stale (old rows, an old count), so a screenshot alone can look plausible.
+5. **Check the log** with `gui.sh logs | grep -E -A8 'Uncaught|Failed in the tab'` after the scenario; the second is what a tab's own jobs threw. `grep 'Load'` shows each load with its parser and record count, `grep Reloading` each reload with why. An exception on the UI thread is logged but often leaves the screen merely stale (old rows, an old count), so a screenshot alone can look plausible.
 6. **Stop** with `gui.sh stop` when done.
 
 ## Reference

@@ -12,6 +12,8 @@ dependencies {
     // The app's fonts, for the splash screen.
     implementation(libs.flatlaf.fonts.inter)
     implementation(libs.flatlaf.fonts.jetbrains.mono)
+    // core logs, but the tools print their own output: without a provider, SLF4J warns in every JVM.
+    runtimeOnly(libs.slf4j.nop)
     implementation(libs.jmh.core)
     kapt(libs.jmh.generator.annprocess)
 }

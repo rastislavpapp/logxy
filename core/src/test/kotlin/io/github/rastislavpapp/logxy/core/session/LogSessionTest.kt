@@ -1,5 +1,6 @@
 package io.github.rastislavpapp.logxy.core.session
 
+import io.github.rastislavpapp.logxy.core.LogCapture
 import io.github.rastislavpapp.logxy.core.config.Settings
 import io.github.rastislavpapp.logxy.core.filter.ChunkListener
 import io.github.rastislavpapp.logxy.core.filter.Filter
@@ -14,6 +15,7 @@ import io.github.rastislavpapp.logxy.core.log.Level
 import io.github.rastislavpapp.logxy.core.log.LevelMapping
 import io.github.rastislavpapp.logxy.core.log.Role
 import io.github.rastislavpapp.logxy.core.parse.Parser
+import io.github.rastislavpapp.logxy.core.parse.ParserMismatchException
 import io.github.rastislavpapp.logxy.core.query.Query
 import io.github.rastislavpapp.logxy.core.query.QueryException
 import io.github.rastislavpapp.logxy.core.query.QueryOp
@@ -49,6 +51,7 @@ import kotlin.test.assertSame
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
+import org.slf4j.event.Level as LogLevel
 
 class LogSessionTest {
 
@@ -895,6 +898,8 @@ class LogSessionTest {
             assertFalse(shown.isSearching)
             assertEquals(0, shown.foundCount)
         }
+        val warning = LogCapture.logged(LogLevel.WARN, "Cannot search $file").single()
+        assertEquals("Disk on fire", warning.thrown?.message)
         append(file, lines(10))
         withTimeout(10_000) { while (withContext(ui) { shown.size } < 110) delay(50) }
         delay(600)
@@ -1400,5 +1405,61 @@ class LogSessionTest {
             assertEquals(42, session.shown!!.size)
             session.dispose()
         }
+    }
+
+    @Test
+    fun `a load is logged with its files, their parser and the records read`() = runBlocking {
+        val file = Files.writeString(dir.resolve("logged.log"), lines(100))
+        val (session, _) = open(file, Recorder())
+        val loaded = LogCapture.logged(LogLevel.INFO, "Loaded $file").single().message
+        assertTrue("“${Parser.detect(file).name}” (detected), 100 records" in loaded, loaded)
+        withContext(ui) { session.dispose() }
+    }
+
+    @Test
+    fun `a parser that does not fit is logged with why`() = runBlocking {
+        val file = Files.writeString(dir.resolve("unfit.log"), "plain text\n".repeat(20))
+        val recorder = Recorder()
+        withContext(ui) { LogSession(file, scope, NoSettings, recorder).useParser(Parser.BUILT_IN.first()) }
+        withTimeout(10_000) { recorder.problem.await() }
+        val warning = LogCapture.logged(LogLevel.WARN, "$file does not match").single()
+        assertTrue(warning.thrown is ParserMismatchException, "${warning.thrown}")
+    }
+
+    @Test
+    fun `a reload is logged with why`() = runBlocking {
+        val file = Files.writeString(dir.resolve("shrinking.log"), lines(100))
+        val recorder = Recorder()
+        val (session, _) = open(file, recorder)
+        Files.writeString(file, lines(3))
+        withTimeout(10_000) { recorder.loads.receive() }
+        assertEquals(1, LogCapture.logged(LogLevel.INFO, "Reloading $file: $file shrank").size)
+        withContext(ui) { session.dispose() }
+    }
+
+    @Test
+    fun `a file that cannot be read is logged once, not on every poll`() = runBlocking {
+        val file = Files.writeString(dir.resolve("gone.log"), lines(10))
+        val (session, _) = open(file, Recorder())
+        Files.delete(file)
+        repeat(3) {
+            session.grew()
+            delay(200)
+        }
+        awaitUi { session.status.message == "file not found" }
+        assertEquals(1, LogCapture.logged(LogLevel.WARN, "Cannot read $file: file not found").size)
+        withContext(ui) { session.dispose() }
+    }
+
+    @Test
+    fun `a redetection that fails is logged`() = runBlocking {
+        val file = Files.writeString(dir.resolve("vanished.log"), preamble(30))
+        val session = openRedetecting(file, Recorder(), Redetection(gap = 100.milliseconds))
+        Files.delete(file)
+        session.writerEnded()
+        withTimeout(10_000) {
+            while (LogCapture.logged(LogLevel.WARN, "Cannot detect the parser of $file again").isEmpty()) delay(20)
+        }
+        withContext(ui) { session.dispose() }
     }
 }

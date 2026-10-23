@@ -19,6 +19,8 @@
         </RollingFile>
     </Appenders>
     <Loggers>
+        <!-- Uncomment for more detail, e.g. why a file opened as Raw text, or each parser detection of a run. -->
+        <!-- <Logger name="io.github.rastislavpapp.logxy" level="debug"/> -->
         <Root level="info">
             <AppenderRef ref="console"/>
             <AppenderRef ref="file"/>

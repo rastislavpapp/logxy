@@ -1,6 +1,8 @@
 package io.github.rastislavpapp.logxy.core.parse
 
+import io.github.rastislavpapp.logxy.core.LogCapture
 import org.junit.jupiter.api.io.TempDir
+import org.slf4j.event.Level
 import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.test.Test
@@ -161,6 +163,14 @@ class ParserTest {
     fun `falls back to raw text`() {
         val file = Files.writeString(dir.resolve("c.log"), "hello\nworld\n")
         assertEquals(Parser.Raw, Parser.detect(file))
+    }
+
+    @Test
+    fun `tells in the log why a file reads as raw text`() {
+        val file = Files.writeString(dir.resolve("why-raw.log"), "hello\nworld\n")
+        Parser.detect(file)
+        val why = LogCapture.logged(Level.DEBUG, "$file: Raw text").single().message
+        assertTrue("matches only 0 of 2 sampled lines" in why, why)
     }
 
     @Test

@@ -7,6 +7,7 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import org.slf4j.LoggerFactory
 import java.io.IOException
 import java.nio.charset.Charset
 import java.nio.file.Files
@@ -16,6 +17,8 @@ import java.nio.file.attribute.BasicFileAttributes
 import java.util.concurrent.ConcurrentHashMap
 import java.util.zip.ZipException
 import java.util.zip.ZipFile
+
+private val log = LoggerFactory.getLogger(ZipSpool::class.java)
 
 /**
  * Extracts zip files into a directory, so their entries open like any other file: indexing needs
@@ -71,6 +74,10 @@ class ZipSpool(val root: Path) {
             try {
                 val left = ArrayList<LeftOut>()
                 val files = unzip(absolute, dir, progress, depth = 0, dir, left)
+                if (left.isNotEmpty()) {
+                    val reasons = left.joinToString { "${it.entry} (${it.reason})" }
+                    log.info("Left out of {}: {}", absolute, reasons)
+                }
                 for (file in files) origins[file] = Origin(absolute, dir.relativize(file).joinToString("/"))
                 extracted[key] = files
                 leftOut[absolute] = left

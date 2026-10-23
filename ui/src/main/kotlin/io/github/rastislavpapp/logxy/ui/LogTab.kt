@@ -31,6 +31,7 @@ import io.github.rastislavpapp.logxy.core.session.ShownLog
 import io.github.rastislavpapp.logxy.core.session.copyLimit
 import io.github.rastislavpapp.logxy.core.template.Templates
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
@@ -115,7 +116,11 @@ class LogTab(
     private val onStatusChanged: () -> Unit,
 ) : JPanel(BorderLayout()) {
 
-    private val scope = CoroutineScope(SupervisorJob() + host.uiDispatcher)
+    // Without a handler, what a job throws would reach the host's uncaught-exception handling without the files.
+    private val failed = CoroutineExceptionHandler { _, e ->
+        log.error("Failed in the tab of {}", paths.joinToString(), e)
+    }
+    private val scope = CoroutineScope(SupervisorJob() + host.uiDispatcher + failed)
     private val session = LogSession(paths, scope, host.settings, Listener(), origin, parsers, redetection)
 
     /** The files shown; for a merge, without those that turned out to have no timestamps. */
