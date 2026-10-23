@@ -29,11 +29,16 @@ class RunCapture(private val project: Project) : ExecutionListener {
 
     // Before the process starts, so the spool gets its first output too.
     override fun processStarting(executorId: String, env: ExecutionEnvironment, handler: ProcessHandler) {
-        if (env.runProfile is RemoteRunProfile) return
+        capture(env, handler)
+    }
+
+    private fun capture(env: ExecutionEnvironment, handler: ProcessHandler): Spool? {
+        if (env.runProfile is RemoteRunProfile) return null
         val spool = Spool.start(configurationId(env))
         log.info("logxy: the output of ${env.runProfile.name} goes to ${spool.path}")
         handler.putUserData(SPOOL, spool)
         handler.addProcessListener(spool)
+        return spool
     }
 
     override fun processTerminated(
@@ -48,8 +53,12 @@ class RunCapture(private val project: Project) : ExecutionListener {
 
     // The run tab exists once the process started, but is shown only after this listener returns. A debug tab can
     // come later: in 2026.2 the debugger builds it in the background, and it shows once built.
+    // The IDE leaves out processStarting for a handler that is already started: PyCharm's debugpy debugger starts it
+    // while it builds the tab. Its program starts after that, so the spool still gets the first output.
     override fun processStarted(executorId: String, env: ExecutionEnvironment, handler: ProcessHandler) {
-        val spool = handler.getUserData(SPOOL) ?: return
+        val spool = handler.getUserData(SPOOL)
+            ?: capture(env, handler)?.also { log.info("logxy: ${env.runProfile.name} was started early, caught now") }
+            ?: return
         ApplicationManager.getApplication().invokeLater({ installWhenShown(env, handler, spool) }, project.disposed)
     }
 
