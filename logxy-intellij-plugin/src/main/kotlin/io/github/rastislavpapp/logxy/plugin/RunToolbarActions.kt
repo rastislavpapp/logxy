@@ -22,10 +22,10 @@ import io.github.rastislavpapp.logxy.ui.LogTab
 import javax.swing.Icon
 import javax.swing.JComponent
 
-// The actions of the logxy view. The switch, the parser and the status are in the run tab's top toolbar, beside
-// Rerun and Stop: in every run tab's toolbar, acting on that tab's view; a tab without one, e.g. of a run started
-// before the plugin, hides them. The others take the place of the console's toolbar beside the view: made for one
-// view each, as that toolbar acts on the hidden console, whose context does not reach the view.
+// The actions of the logxy view. The switch, the parser and the status are in the run or debug tab's top toolbar,
+// beside Rerun and Stop: in every such tab's toolbar, acting on that tab's view; a tab without one, e.g. of a run
+// started before the plugin, hides them. The others take the place of the console's toolbar beside the view: made for
+// one view each, as that toolbar acts on the hidden console, whose context does not reach the view.
 
 /** The logxy view of the run tab whose toolbar the action is in; null if it has none. */
 private val AnActionEvent.view: RunLogView?
@@ -51,8 +51,10 @@ sealed class ViewSwitch(private val logxy: Boolean) : DumbAwareToggleAction() {
 
     override fun isSelected(e: AnActionEvent) = e.view?.showsLogxy == logxy
 
+    // In a debug tab, also onto the Console sub-tab, so the click shows what it changed.
     override fun setSelected(e: AnActionEvent, state: Boolean) {
         if (state) e.view?.showView(logxy)
+        e.getData(LangDataKeys.RUN_CONTENT_DESCRIPTOR)?.let(ConsoleSwap::select)
     }
 
     override fun getActionUpdateThread() = ActionUpdateThread.EDT

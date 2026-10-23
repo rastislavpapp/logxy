@@ -1,5 +1,6 @@
 package io.github.rastislavpapp.logxy.plugin
 
+import com.intellij.execution.console.LanguageConsoleView
 import com.intellij.execution.ui.ExecutionConsole
 import com.intellij.execution.ui.RunContentDescriptor
 import com.intellij.openapi.actionSystem.ActionGroup
@@ -14,33 +15,56 @@ import java.awt.BorderLayout
 import javax.swing.JComponent
 
 /**
- * The one place that knows how a run tab is built: the console is the content [ExecutionConsole.CONSOLE_CONTENT_ID]
- * of the tab's layout, shown in a grid cell's wrapper panel. The cell does not follow a change of the content's
- * component, so the wrapper takes the console's place in that panel too. The content's actions are the console's
- * toolbar beside it.
+ * The one place that knows how a run or debug tab is built: the console is the content
+ * [ExecutionConsole.CONSOLE_CONTENT_ID] of the tab's layout, shown in a grid cell's wrapper panel; in a debug tab, one
+ * sub-tab beside others. The cell does not follow a change of the content's component, so the wrapper takes the
+ * console's place in that panel too; a cell not laid out yet, as a debug tab's unselected sub-tab may be, lays out the
+ * content's component, the wrapper. The content's actions are the console's toolbar beside it.
  */
 object ConsoleSwap {
 
+    enum class Outcome {
+        INSTALLED,
+
+        /** The tab has no console content. */
+        NO_CONSOLE,
+
+        /** The console takes typed input at a prompt, as a debugger's REPL does, which the wrapper would hide. */
+        PROMPT,
+    }
+
     /**
      * Wraps the console of [descriptor] in what [wrap] makes of it, which must hold the console; [wrap] also gets
-     * the console's toolbar. False if the tab has no console content, or it is not shown yet.
+     * the console's toolbar.
      */
     fun install(
         descriptor: RunContentDescriptor,
         wrap: (console: JComponent, toolbar: ConsoleToolbar) -> JComponent,
-    ): Boolean {
-        val content = descriptor.runnerLayoutUi?.findContent(ExecutionConsole.CONSOLE_CONTENT_ID) ?: return false
-        val console = content.component ?: return false
-        val parent = console.parent ?: return false
-        val index = parent.components.indexOf(console)
-        val constraints = (parent.layout as? BorderLayout)?.getConstraints(console)
+    ): Outcome {
+        val content = consoleContent(descriptor) ?: return Outcome.NO_CONSOLE
+        val console = content.component ?: return Outcome.NO_CONSOLE
+        if (UIUtil.uiTraverser(console).any { it is LanguageConsoleView }) return Outcome.PROMPT
+        val parent = console.parent
+        val index = parent?.components?.indexOf(console)
+        val constraints = (parent?.layout as? BorderLayout)?.getConstraints(console)
         // Taking the console in removes it from the cell.
         val wrapper = wrap(console, ConsoleToolbar(content, descriptor.component))
-        parent.add(wrapper, constraints, index)
-        parent.revalidate()
+        if (parent != null && index != null) {
+            parent.add(wrapper, constraints, index)
+            parent.revalidate()
+        }
         content.component = wrapper
-        return true
+        return Outcome.INSTALLED
     }
+
+    /** Selects the console's sub-tab in [descriptor]'s tab, without taking the focus. */
+    fun select(descriptor: RunContentDescriptor) {
+        val content = consoleContent(descriptor) ?: return
+        descriptor.runnerLayoutUi?.selectAndFocus(content, false, false)
+    }
+
+    private fun consoleContent(descriptor: RunContentDescriptor): Content? =
+        descriptor.runnerLayoutUi?.findContent(ExecutionConsole.CONSOLE_CONTENT_ID)
 }
 
 /**

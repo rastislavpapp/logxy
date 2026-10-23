@@ -4,6 +4,9 @@ What's new in the logxy IntelliJ plugin, shown as its change notes in the IDE an
 
 ## Unreleased
 
+- The Console | logxy switch in the Debug tool window too, sharing the run configuration's choice and columns with Run.
+- A Debug started beside a Run of the same configuration, or two Runs in parallel, no longer break each other's view.
+
 ## 0.1.1 - 2026-10-22
 
 - Runs in IntelliJ-based IDEs from 2025.3, no longer only from 2026.1.

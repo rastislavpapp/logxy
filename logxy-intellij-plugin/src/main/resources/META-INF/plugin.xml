@@ -5,9 +5,9 @@
     <!-- The Plugins page's overview; a shorter, run-focused pick of the README's Features list; what both name, keep in step.
          Marketplace's rules for the name, overview and icon: docs/agents/plugin-listing.md. -->
     <description><![CDATA[
-<p><b>Turn the Run console into a log viewer.</b> logxy shows a run's output as a table of parsed
+<p><b>Turn the Run and Debug consoles into a log viewer.</b> logxy shows a run's output as a table of parsed
 columns (time, level, thread, logger, message) that you can filter, search and follow live, right
-in the Run tool window.</p>
+in the Run and Debug tool windows.</p>
 
 <p>A busy application prints thousands of lines, and the console offers a text search. With logxy
 you can filter down to the warnings and errors of one logger in the last minute, and see on a
@@ -28,8 +28,8 @@ timeline where they cluster.</p>
       <code>Request {1} done in {2} ms</code>. The Templates panel lists these message kinds with
       how often each occurs, so you can show or hide a whole kind at once, and chart a value, such
       as the duration, over time.</li>
-  <li><b>Out of the way.</b> A Console | logxy switch in the run tab's toolbar, remembered per run
-      configuration along with the columns you hide and resize. The IDE's console stays one
+  <li><b>Out of the way.</b> A Console | logxy switch in the run or debug tab's toolbar, remembered
+      per run configuration along with the columns you hide and resize. The IDE's console stays one
       click away, for stack-trace links and typing into the program.</li>
 </ul>
 
@@ -59,7 +59,8 @@ memory-efficient on large logs, with merging of several files into one.</p>
     </extensions>
 
     <actions>
-        <!-- In every run tab's top toolbar; the actions hide in tabs without a logxy view. -->
+        <!-- In every run and debug tab's top toolbar (the debugger's in the new UI and in the classic one); the actions
+             hide in tabs without a logxy view. -->
         <group id="logxy.RunToolbar">
             <separator/>
             <action id="logxy.ShowConsole" class="io.github.rastislavpapp.logxy.plugin.ShowConsole"
@@ -71,6 +72,8 @@ memory-efficient on large logs, with merging of several files into one.</p>
             <action id="logxy.Status" class="io.github.rastislavpapp.logxy.plugin.RunStatus" text="Status"
                     description="The records in the shown log and the run's exit code"/>
             <add-to-group group-id="RunTab.TopToolbar" anchor="last"/>
+            <add-to-group group-id="XDebugger.ToolWindow.TopToolbar3" anchor="last"/>
+            <add-to-group group-id="XDebugger.ToolWindow.TopToolbar" anchor="last"/>
         </group>
     </actions>
 </idea-plugin>
