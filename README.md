@@ -57,6 +57,8 @@ Issues and pull requests are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING
 
 logxy is free and developed in spare time. If it saves you time, you can support its development on [Ko-fi](https://ko-fi.com/rastislavpapp) or through [GitHub Sponsors](https://github.com/sponsors/rastislavpapp). Bug reports and stars help too.
 
+A bug report is easier to follow with logxy's log. The app writes it to `logs/logxy.log` in its settings folder (`%APPDATA%\logxy` on Windows, `~/.config/logxy` elsewhere); for more detail, such as why a file opened as Raw text, add `<Logger name="io.github.rastislavpapp.logxy" level="debug"/>` under `<Loggers>` in `log4j2.xml` there. The IntelliJ plugin logs to the IDE's `idea.log` (Help › Show Log in Explorer, Finder or Files); turn on more detail with Help › Diagnostic Tools › Debug Log Settings and the line `io.github.rastislavpapp.logxy`.
+
 ## AI disclosure
 
 This project is developed with the help of AI coding tools, primarily [Claude Code](https://claude.com/claude-code). The files for AI agents (`AGENTS.md` and `docs/agents/`) are kept in the repository.

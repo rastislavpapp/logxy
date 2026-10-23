@@ -356,7 +356,8 @@ class LogSession internal constructor(
         if (parsers == chosenParsers) return
         sources.forEachIndexed { i, source -> source.chosen = parsers[i] }
         listener.parserChanged()
-        reload("parser picked: " + parsers.joinToString { it?.let { "“${it.name}”" } ?: "detect" })
+        val picked = parsers.map { parser -> if (parser == null) "detect" else "“${parser.name}”" }
+        reload("parser picked: " + picked.joinToString())
     }
 
     /** Starts over with the files now at [paths], e.g. after rotation, truncation or a parser change. */
@@ -364,7 +365,7 @@ class LogSession internal constructor(
 
     /** [reload], logged with [reason]. */
     private fun reload(reason: String) {
-        log.info("Reloading {}: {}", files(), reason)
+        log.info("Reloading {}: {}", pathsText(), reason)
         job?.cancel()
         closeLogs()
         launchLoad()
@@ -520,7 +521,7 @@ class LogSession internal constructor(
             while (load()) {
                 // The files must be read again, e.g. truncated, or redetection found their parser.
                 val reason = watch() ?: break
-                log.info("Reloading {}: {}", files(), reason)
+                log.info("Reloading {}: {}", pathsText(), reason)
                 closeLogs()
             }
         }
@@ -530,7 +531,8 @@ class LogSession internal constructor(
     private suspend fun load(): Boolean {
         val sizes = withContext(Dispatchers.IO) { sources.map { runCatching { Files.size(it.path) }.getOrDefault(0L) } }
         val loading = sources.mapIndexed { i, source ->
-            val parser = source.chosen?.let { "parser “${it.name}”" } ?: "detecting the parser"
+            val chosen = source.chosen
+            val parser = if (chosen == null) "detecting the parser" else "parser “${chosen.name}”"
             "${source.path} (${formatByteSize(sizes[i])}, $parser)"
         }
         log.info("Loading {}", loading.joinToString())
@@ -601,7 +603,7 @@ class LogSession internal constructor(
                 }
             }
             if (nothingToMerge) {
-                log.info("Nothing to merge: none of {} has timestamps", files())
+                log.info("Nothing to merge: none of {} has timestamps", pathsText())
                 listener.problem(
                     "None of these files has timestamps to merge by.",
                     "They are opened in their own tabs.",
@@ -654,7 +656,7 @@ class LogSession internal constructor(
             return false
         } catch (e: Exception) {
             opened.forEach { it.close() }
-            log.warn("Cannot open {}", current().path, e)
+            log.warn("Cannot load {}", current().path, e)
             listener.problem("Cannot open ${current().path.fileName}.", e.message ?: e.javaClass.simpleName, null)
             setStatus(SessionStatus(message = "Error"))
             return false
@@ -663,7 +665,7 @@ class LogSession internal constructor(
             opened.forEach { it.close() }
             opened.clear()
             sources.forEach { it.log = null }
-            log.warn("Not enough memory to open {}", files(), e)
+            log.warn("Not enough memory to load {}", pathsText(), e)
             val what = if (isMerged) "these ${sources.size} files" else "${current().path.fileName}"
             listener.problem(
                 "Not enough memory to open $what.",
@@ -725,7 +727,7 @@ class LogSession internal constructor(
                         problems += if (isMerged) "${source.path.fileName}: $message" else message
                     }
                 }
-                readProblem(problems.joinToString(", ").ifEmpty { null })
+                setReadProblem(problems.joinToString(", ").ifEmpty { null })
                 if (grown) {
                     redetectionClock?.grew()
                     when (loaded.settle()) {
@@ -748,7 +750,7 @@ class LogSession internal constructor(
             } catch (e: IOException) {
                 // Closing the tab closes the files under a running read.
                 currentCoroutineContext().ensureActive()
-                readProblem(e.message ?: e.javaClass.simpleName)
+                setReadProblem(e.message ?: e.javaClass.simpleName)
             }
             if (redetectionDue()) {
                 val current = settings.current
@@ -766,9 +768,9 @@ class LogSession internal constructor(
     }
 
     /** Shows [problem] reading the files, null for none; logs it when it starts or changes, not on every poll. */
-    private fun readProblem(problem: String?) {
+    private fun setReadProblem(problem: String?) {
         this.problem = problem
-        if (problem != null && problem != loggedReadProblem) log.warn("Cannot read {}: {}", files(), problem)
+        if (problem != null && problem != loggedReadProblem) log.warn("Cannot read {}: {}", pathsText(), problem)
         loggedReadProblem = problem
     }
 
@@ -788,7 +790,7 @@ class LogSession internal constructor(
         }
         if (levelsChanged) listener.levelMappingChanged()
         // A saved parser this session uses was edited: read the files with the new definition.
-        var edited: String? = null
+        var editedParser: String? = null
         for (source in sources) {
             val used = source.chosen ?: source.parser.takeIf { it in savedParsers } ?: continue
             val changed = settings.parsers.firstOrNull { it.name == used.name && it != used } ?: continue
@@ -800,15 +802,15 @@ class LogSession internal constructor(
             }
             // A detected parser is detected again, as the edit may no longer fit the file best.
             if (source.chosen != null) source.chosen = changed
-            edited = changed.name
+            editedParser = changed.name
         }
         // Only renamed: nothing to read again, just show the new name.
         for (source in sources) source.chosen?.let { renamed(it, settings.parsers) }?.let { source.chosen = it }
         for (source in sources) renamed(source.parser, settings.parsers)?.let { source.parser = it }
         savedParsers = settings.parsers
         listener.parserChanged()
-        if (edited != null) {
-            reload("saved parser “$edited” edited")
+        if (editedParser != null) {
+            reload("saved parser “$editedParser” edited")
         } else if (levelsChanged && activeFilter != null) {
             runFilter(keepView = true, activeFilter?.let { engine?.prepare(it) })
         } else if (levelsChanged) {
@@ -854,7 +856,7 @@ class LogSession internal constructor(
                 evaluation.run()
             } catch (e: Throwable) {
                 if (e is CancellationException || (e !is Exception && e !is OutOfMemoryError)) throw e
-                log.warn("Cannot filter {} by {}", files(), filter, e)
+                log.warn("Cannot filter {} by {}", pathsText(), filter, e)
                 // Keep the previous result, but stop showing the filter as running.
                 indicator.cancel()
                 filtering = false
@@ -988,7 +990,7 @@ class LogSession internal constructor(
                 }
             } catch (e: Throwable) {
                 if (e is CancellationException || (e !is Exception && e !is OutOfMemoryError)) throw e
-                log.warn("Cannot search {} for {}", files(), spec, e)
+                log.warn("Cannot search {} for {}", pathsText(), spec, e)
                 // A failed catch-up keeps what was found before.
                 searchError = when (e) {
                     is OutOfMemoryError -> "Not enough memory to search"
@@ -1195,8 +1197,7 @@ class LogSession internal constructor(
 
     private fun indexedSize(): Long = sources.sumOf { it.log?.indexedSize ?: 0L }
 
-    /** [paths] for a log line. */
-    private fun files(): String = paths.joinToString()
+    private fun pathsText(): String = paths.joinToString()
 
     private fun setStatus(status: SessionStatus) {
         this.status = status

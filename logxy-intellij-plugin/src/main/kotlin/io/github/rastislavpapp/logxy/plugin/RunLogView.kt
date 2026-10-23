@@ -166,7 +166,7 @@ class RunLogView(
         }
     }
 
-    /** Makes the view; [why] now, for the log. */
+    /** Makes the view; [why] it is made now goes to the IDE log. */
     private fun makeTab(why: String) {
         if (tab != null) return
         waitTimer?.stop()
