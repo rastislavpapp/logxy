@@ -22,18 +22,22 @@ import io.github.rastislavpapp.logxy.ui.LogTab
 import javax.swing.Icon
 import javax.swing.JComponent
 
-// The actions of the logxy view. The switch, the parser and the status are in the run or debug tab's top toolbar,
-// beside Rerun and Stop: in every such tab's toolbar, acting on that tab's view; a tab without one, e.g. of a run
-// started before the plugin, hides them. The others take the place of the console's toolbar beside the view: made for
-// one view each, as that toolbar acts on the hidden console, whose context does not reach the view.
+// The actions of the logxy view. The switch (a run tab's only), the parser and the status are in the run or debug
+// tab's top toolbar, beside Rerun and Stop: in every such tab's toolbar, acting on that tab's view; a tab without one,
+// e.g. of a run started before the plugin, hides them. The others are beside the view: in a run tab, in the place of
+// the console's toolbar, which acts on the hidden console, whose context does not reach the view; in a debug tab, as
+// the view's sub-tab's own. Made for one view each.
 
-/** The logxy view of the run tab whose toolbar the action is in; null if it has none. */
+private val AnActionEvent.handler
+    get() = getData(LangDataKeys.RUN_CONTENT_DESCRIPTOR)?.processHandler
+
+/** The logxy view of the run or debug tab whose toolbar the action is in; null if it has none. */
 private val AnActionEvent.view: RunLogView?
-    get() = getData(LangDataKeys.RUN_CONTENT_DESCRIPTOR)?.processHandler?.getUserData(RunLogView.KEY)
+    get() = handler?.getUserData(RunLogView.KEY)
 
-/** The run's view while it shows logxy, and the records are there. */
+/** The run's view while it shows, and the records are there. */
 private val AnActionEvent.tab: LogTab?
-    get() = view?.takeIf { it.showsLogxy }?.tab
+    get() = view?.takeIf { it.isShowing }?.tab
 
 /** Shows text in the toolbar, not only an icon. */
 private fun Presentation.showText() = putClientProperty(ActionUtil.SHOW_TEXT_IN_TOOLBAR, true)
@@ -44,17 +48,18 @@ sealed class ViewSwitch(private val logxy: Boolean) : DumbAwareToggleAction() {
         templatePresentation.showText()
     }
 
+    private val AnActionEvent.switch: ConsoleSwitch?
+        get() = handler?.getUserData(ConsoleSwitch.KEY)
+
     override fun update(e: AnActionEvent) {
         super.update(e)
-        e.presentation.isEnabledAndVisible = e.view != null
+        e.presentation.isEnabledAndVisible = e.switch != null
     }
 
-    override fun isSelected(e: AnActionEvent) = e.view?.showsLogxy == logxy
+    override fun isSelected(e: AnActionEvent) = e.switch?.showsLogxy == logxy
 
-    // In a debug tab, also onto the Console sub-tab, so the click shows what it changed.
     override fun setSelected(e: AnActionEvent, state: Boolean) {
-        if (state) e.view?.showView(logxy)
-        e.getData(LangDataKeys.RUN_CONTENT_DESCRIPTOR)?.let(ConsoleSwap::select)
+        if (state) e.switch?.showView(logxy)
     }
 
     override fun getActionUpdateThread() = ActionUpdateThread.EDT
@@ -105,7 +110,7 @@ class ChooseParser : MenuButton() {
 
     override fun update(e: AnActionEvent) {
         super.update(e)
-        e.presentation.isVisible = e.view?.showsLogxy == true
+        e.presentation.isVisible = e.view?.isShowing == true
         e.tab?.let { e.presentation.text = it.parserText }
     }
 

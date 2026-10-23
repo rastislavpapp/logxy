@@ -3,7 +3,9 @@ package io.github.rastislavpapp.logxy.plugin
 import com.intellij.execution.console.LanguageConsoleView
 import com.intellij.execution.ui.ExecutionConsole
 import com.intellij.execution.ui.RunContentDescriptor
+import com.intellij.execution.ui.layout.PlaceInGrid
 import com.intellij.openapi.actionSystem.ActionGroup
+import com.intellij.openapi.actionSystem.ActionPlaces
 import com.intellij.openapi.actionSystem.ActionToolbar
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
@@ -16,12 +18,17 @@ import javax.swing.JComponent
 
 /**
  * The one place that knows how a run or debug tab is built: the console is the content
- * [ExecutionConsole.CONSOLE_CONTENT_ID] of the tab's layout, shown in a grid cell's wrapper panel; in a debug tab, one
- * sub-tab beside others. The cell does not follow a change of the content's component, so the wrapper takes the
- * console's place in that panel too; a cell not laid out yet, as a debug tab's unselected sub-tab may be, lays out the
- * content's component, the wrapper. The content's actions are the console's toolbar beside it.
+ * [ExecutionConsole.CONSOLE_CONTENT_ID] of the tab's layout, shown in a grid cell's wrapper panel. The cell does not
+ * follow a change of the content's component, so the wrapper takes the console's place in that panel too. The
+ * content's actions are the console's toolbar beside it. A debug tab shows its contents as sub-tabs, the console in
+ * the second.
  */
 object ConsoleSwap {
+
+    private const val LOGXY_CONTENT_ID = "logxy"
+
+    /** The debugger's sub-tab of the console; the layout's tab indexes order the sub-tabs. */
+    private const val DEBUG_CONSOLE_TAB = 1
 
     enum class Outcome {
         INSTALLED,
@@ -29,7 +36,7 @@ object ConsoleSwap {
         /** The tab has no console content. */
         NO_CONSOLE,
 
-        /** The console takes typed input at a prompt, as a debugger's REPL does, which the wrapper would hide. */
+        /** The console takes typed input at a prompt, as a REPL does, which the wrapper would hide. */
         PROMPT,
     }
 
@@ -44,23 +51,28 @@ object ConsoleSwap {
         val content = consoleContent(descriptor) ?: return Outcome.NO_CONSOLE
         val console = content.component ?: return Outcome.NO_CONSOLE
         if (UIUtil.uiTraverser(console).any { it is LanguageConsoleView }) return Outcome.PROMPT
-        val parent = console.parent
-        val index = parent?.components?.indexOf(console)
-        val constraints = (parent?.layout as? BorderLayout)?.getConstraints(console)
+        val parent = console.parent ?: return Outcome.NO_CONSOLE
+        val index = parent.components.indexOf(console)
+        val constraints = (parent.layout as? BorderLayout)?.getConstraints(console)
         // Taking the console in removes it from the cell.
         val wrapper = wrap(console, ConsoleToolbar(content, descriptor.component))
-        if (parent != null && index != null) {
-            parent.add(wrapper, constraints, index)
-            parent.revalidate()
-        }
+        parent.add(wrapper, constraints, index)
+        parent.revalidate()
         content.component = wrapper
         return Outcome.INSTALLED
     }
 
-    /** Selects the console's sub-tab in [descriptor]'s tab, without taking the focus. */
-    fun select(descriptor: RunContentDescriptor) {
-        val content = consoleContent(descriptor) ?: return
-        descriptor.runnerLayoutUi?.selectAndFocus(content, false, false)
+    /**
+     * Adds [view] to [descriptor]'s debug tab as a sub-tab after the console's, with [actions] beside it. False if the
+     * tab has no layout. Where the user drags the sub-tab, the IDE keeps it for the next session.
+     */
+    fun addSubTab(descriptor: RunContentDescriptor, view: JComponent, actions: ActionGroup): Boolean {
+        val ui = descriptor.runnerLayoutUi ?: return false
+        val content = ui.createContent(LOGXY_CONTENT_ID, view, "logxy", null, view)
+        content.isCloseable = false
+        content.setActions(actions, ActionPlaces.DEBUGGER_TOOLBAR, view)
+        ui.addContent(content, DEBUG_CONSOLE_TAB + 1, PlaceInGrid.center, false)
+        return true
     }
 
     private fun consoleContent(descriptor: RunContentDescriptor): Content? =

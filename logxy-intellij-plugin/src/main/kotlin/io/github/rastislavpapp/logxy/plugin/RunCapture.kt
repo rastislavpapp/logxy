@@ -3,6 +3,7 @@ package io.github.rastislavpapp.logxy.plugin
 import com.intellij.execution.ExecutionListener
 import com.intellij.execution.Executor
 import com.intellij.execution.configurations.RemoteRunProfile
+import com.intellij.execution.executors.DefaultDebugExecutor
 import com.intellij.execution.process.ProcessEvent
 import com.intellij.execution.process.ProcessHandler
 import com.intellij.execution.process.ProcessListener
@@ -20,8 +21,9 @@ private val SPOOL = Key.create<Spool>("logxy.spool")
 private val log = logger<RunCapture>()
 
 /**
- * Copies the output of every Run and Debug into a [Spool] and puts a [RunLogView] around its tab's console. Not of a
- * Debug that attaches to a process running elsewhere (Remote JVM Debug): it has no output of its own.
+ * Copies the output of every Run and Debug into a [Spool] and shows a [RunLogView] of it: in a run tab, switched with
+ * the console; in a debug tab, as a sub-tab after the console's. Not of a Debug that attaches to a process running
+ * elsewhere (Remote JVM Debug): it has no output of its own.
  */
 class RunCapture(private val project: Project) : ExecutionListener {
 
@@ -86,12 +88,20 @@ class RunCapture(private val project: Project) : ExecutionListener {
     ) {
         val memory = RunMemory(project, configurationId(env))
         // Disposed with the tab, e.g. when a rerun replaces it; the tab's toolbar finds it on the handler.
-        val outcome = ConsoleSwap.install(descriptor) { console, toolbar ->
-            RunLogView(console, toolbar, spool, memory, IdeHost(project)).also {
-                Disposer.register(descriptor, it)
-                handler.putUserData(RunLogView.KEY, it)
+        val view = RunLogView(spool, memory, IdeHost(project))
+        Disposer.register(descriptor, view)
+        if (env.executor.id == DefaultDebugExecutor.EXECUTOR_ID) {
+            if (ConsoleSwap.addSubTab(descriptor, view, view.actions)) {
+                handler.putUserData(RunLogView.KEY, view)
+            } else {
+                log.warn("logxy: found no layout in the debug tab of ${env.runProfile.name}")
             }
+            return
         }
+        val outcome = ConsoleSwap.install(descriptor) { console, toolbar ->
+            ConsoleSwitch(console, toolbar, view, memory).also { handler.putUserData(ConsoleSwitch.KEY, it) }
+        }
+        if (outcome == ConsoleSwap.Outcome.INSTALLED) handler.putUserData(RunLogView.KEY, view)
         when (outcome) {
             ConsoleSwap.Outcome.INSTALLED -> {}
             ConsoleSwap.Outcome.NO_CONSOLE -> log.warn("logxy: found no console in the tab of ${env.runProfile.name}")
