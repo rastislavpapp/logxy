@@ -31,9 +31,6 @@ import javax.swing.table.TableCellRenderer
 
 private const val CELL_PADDING = 12
 
-/** What Swing ends a label's text with when it does not fit. */
-private const val CLIP = "..."
-
 /**
  * The last column (usually the message) keeps this many characters; when columns do not fit, the others shrink
  * first.
@@ -42,9 +39,6 @@ private const val MIN_LAST_COLUMN_CHARS = 40
 
 /** What an expanded record ends with when it is longer than [MAX_DETAIL_BYTES]. */
 private const val CUT_MARK = "… cut at 1 MB"
-
-/** Ends the first line of an expanded row; collapses it when clicked. */
-private const val COLLAPSE_MARKER = " ▾"
 
 /** Keeps the pixel rows of the table's window within an int, however long the expanded records. */
 private const val MAX_ROW_HEIGHT = 1 shl 22
@@ -64,8 +58,9 @@ fun levelColor(level: Level?, default: Color): Color = when (level) {
 }
 
 /**
- * Table of log records; the last column always fills the viewport and long values are cut. A record of several lines
- * shows its first, with a marker that expands its row to all of them in the last column.
+ * Table of log records; the last column always fills the viewport and long values are cut. A record of several lines,
+ * or a first line too long for its cell, shows what fits, with an icon at the start of the last column that expands
+ * its row to all of it.
  */
 class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
 
@@ -94,8 +89,13 @@ class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
     /** Measures the cells' insets. */
     private val plainRenderer = DefaultTableCellRenderer()
 
-    /** Whether the last click on a row was on its marker, so the double click it starts toggles nothing more. */
-    private var clickedMarker = false
+    private val expandIcon = ExpandIcon()
+
+    /**
+     * Whether the last click on a row expanded or collapsed it, on its expand icon or hint, so the double click it
+     * starts toggles nothing more.
+     */
+    private var clickedToggle = false
 
     /**
      * The widths in pixels the user dragged columns to, by field name, also of hidden columns; set ones count as
@@ -141,9 +141,9 @@ class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
                 val row = rowAtPoint(e.point)
                 if (row < 0) return
                 if (e.clickCount == 1) {
-                    clickedMarker = isOnMarker(row, e.point)
-                    if (clickedMarker) toggleExpanded(row)
-                } else if (e.clickCount == 2 && !clickedMarker) {
+                    clickedToggle = isOnToggle(row, e.point)
+                    if (clickedToggle) toggleExpanded(row)
+                } else if (e.clickCount == 2 && !clickedToggle) {
                     toggleExpanded(row)
                 }
             }
@@ -252,8 +252,15 @@ class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
             super.getCellRenderer(row, column)
         }
 
-    /** Whether [row] of the window shows a record of several lines, which it can show all of. */
-    fun isExpandable(row: Int): Boolean = expandingColumn() >= 0 && logModel.moreLines(row) > 0
+    /** Whether [row] of the window has more to show expanded: later lines, or a first line too long for its cell. */
+    fun isExpandable(row: Int): Boolean {
+        val column = expandingColumn()
+        return column >= 0 && (logModel.moreLines(row) > 0 || overflows(row, column))
+    }
+
+    /** Whether the first line of [row]'s text in [column] is wider than the column shows. */
+    private fun overflows(row: Int, column: Int): Boolean =
+        CellCut(this, textWidth(row, column)).isCut(getValueAt(row, column) as String)
 
     /** Whether [row] of the window shows all lines of its record. */
     fun isExpanded(row: Int): Boolean = logModel.recordAt(row) in expanded
@@ -277,33 +284,51 @@ class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
     }
 
     /**
-     * Expands [row] of the window if what the find bar found shows only past its record's first line; then, or if
-     * it was expanded already, the y within the row of the first line with a find there. -1 if there is none past the
-     * first line.
+     * Expands [row] of the window when the find bar's hits in it are hidden while it is collapsed: in a later line of
+     * its record, or past the "..." of a first line too long for its cell. Returns the y, within the row, of the
+     * wrapped line with the first hit, to scroll to; -1 when no scrolling is needed, e.g. the hit is on the first line.
      */
     fun showFound(row: Int): Int {
         val column = expandingColumn()
         if (column < 0 || found.isEmpty || !isExpandable(row)) return -1
-        if (!isExpanded(row)) {
-            val shownInRow = (0..<columnCount).any { cell ->
-                val field = logModel.fieldAt(cell) ?: return@any false
-                found.ranges(field.name, getValueAt(row, cell) as String).isNotEmpty()
-            }
-            if (shownInRow) return -1
-        }
+        val collapsed = !isExpanded(row)
+        if (collapsed && isFoundShown(row, column)) return -1
         val field = logModel.fieldAt(column)!!.name
         val ranges = expandedText(row, column).found(found, field)
-        val wrapped = wrapped(row, column)
-        val line = if (ranges.isEmpty()) 0 else wrapped.lineOf(ranges[0])
-        if (line == 0) return -1
-        setExpanded(row, true)
+        if (ranges.isEmpty()) return -1
+        val line = wrapped(row, column).lineOf(ranges[0])
+        if (collapsed) {
+            setExpanded(row, true)
+        } else if (line == 0) {
+            return -1
+        }
         return firstLineTop() + line * lineHeight()
+    }
+
+    /**
+     * Whether a find bar hit in the collapsed [row] is visible. A hit in any cell counts, except that in [column] a hit
+     * past the "..." of a cut value is hidden.
+     */
+    private fun isFoundShown(row: Int, column: Int): Boolean = (0..<columnCount).any { cell ->
+        val field = logModel.fieldAt(cell) ?: return@any false
+        val ranges = found.ranges(field.name, getValueAt(row, cell) as String)
+        // Ranges are sorted: the first decides whether any is before the cut.
+        ranges.isNotEmpty() && (cell != column || ranges[0] < shownLength(row, cell))
+    }
+
+    /** How many characters of the value in the collapsed cell at [row], [column] are visible, before any "...". */
+    private fun shownLength(row: Int, column: Int): Int {
+        val renderer = prepareRenderer(getCellRenderer(row, column), row, column) as JLabel
+        renderer.setBounds(0, 0, columnModel.getColumn(column).width, rowHeight)
+        return layOut(renderer, renderer.text, Rectangle())
     }
 
     /** The last column, where expanded rows show their records; -1 if it shows no field, e.g. the line numbers. */
     private fun expandingColumn(): Int {
         val column = columnCount - 1
-        return if (column >= 0 && logModel.fieldAt(column) != null) column else -1
+        // While the model's columns change, e.g. one is hidden, the table still has the old ones: none fits yet.
+        if (column < 0 || column >= logModel.columnCount) return -1
+        return if (logModel.fieldAt(column) != null) column else -1
     }
 
     /** Lays out the rows again soon: [expanded] or what they show changed. */
@@ -354,28 +379,39 @@ class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
         val record = logModel.recordAt(row)
         return expandedTexts.getOrPut(record) {
             val laterLines = logModel.shown.laterLines(record, MAX_DETAIL_BYTES, CUT_MARK)
-            ExpandedText.of(getValueAt(row, column) as String, laterLines)
+            ExpandedText.of(logModel.detailValueAt(row, column), laterLines)
         }
     }
 
-    /** The expanded text at [row] wrapped to the width of [column], its first line leaving room for the marker. */
+    /** The expanded text at [row] wrapped to the width of [column]. */
     private fun wrapped(row: Int, column: Int): WrappedText {
-        plainRenderer.getTableCellRendererComponent(this, "", false, false, row, column)
-        val insets = plainRenderer.insets
-        val charWidth = getFontMetrics(font).charWidth('0')
-        val chars = (columnModel.getColumn(column).width - insets.left - insets.right) / charWidth
-        return expandedText(row, column).wrapped(chars, chars - COLLAPSE_MARKER.length)
+        val chars = columnChars(row, column)
+        return expandedText(row, column).wrapped(chars, chars)
     }
 
-    /** Whether [point] is on the marker that expands or collapses [row]. */
-    private fun isOnMarker(row: Int, point: Point): Boolean {
+    /** How many characters of the monospaced font fit in [column] at [row]; see [textWidth]. */
+    private fun columnChars(row: Int, column: Int): Int = textWidth(row, column) / getFontMetrics(font).charWidth('0')
+
+    /**
+     * The width in pixels left for text in [column] at [row]: the column's width minus the cell's insets and, in the
+     * column that expands, minus the room for the expand icon.
+     */
+    private fun textWidth(row: Int, column: Int): Int {
+        plainRenderer.getTableCellRendererComponent(this, "", false, false, row, column)
+        val insets = plainRenderer.insets
+        val indent = if (column == expandingColumn()) expandIcon.indent() else 0
+        return columnModel.getColumn(column).width - insets.left - insets.right - indent
+    }
+
+    /** Whether a click at [point] expands or collapses [row]: on its expand icon, or on its "… +N lines" hint. */
+    private fun isOnToggle(row: Int, point: Point): Boolean {
         val column = columnAtPoint(point)
         if (column != expandingColumn()) return false
         val prepared = prepareRenderer(getCellRenderer(row, column), row, column)
         val renderer = prepared as? CellRenderer ?: return false
         val cell = getCellRect(row, column, false)
         renderer.setBounds(0, 0, cell.width, cell.height)
-        return renderer.markerBounds()?.contains(point.x - cell.x, point.y - cell.y) == true
+        return renderer.togglesAt(point.x - cell.x, point.y - cell.y)
     }
 
     // → and ← would move between cells, which the table does not select: they expand and collapse the lead row.
@@ -407,6 +443,7 @@ class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
         // A plain Font, not a FontUIResource, so a theme switch does not replace it.
         font = Font(base.name, base.style, base.size)
         rowHeight = getFontMetrics(font).height + 4
+        expandIcon.reload()
         // Widths are measured in the new font; only the dragged ones stay.
         widths.keys.retainAll(resized)
         setUpColumns()
@@ -517,11 +554,11 @@ class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
             label.width - insets.left - insets.right,
             label.height - insets.top - insets.bottom,
         )
-        val shown = SwingUtilities.layoutCompoundLabel(
+        val displayed = SwingUtilities.layoutCompoundLabel(
             label, label.getFontMetrics(label.font), text, null, label.verticalAlignment, label.horizontalAlignment,
             label.verticalTextPosition, label.horizontalTextPosition, view, Rectangle(), textBounds, 0,
         )
-        return if (shown == text) text.length else (shown.length - CLIP.length).coerceAtLeast(0)
+        return CellCut.shownLength(text, displayed)
     }
 
     /** Fills [ranges] of [text], drawn from [x] and [y], that fall in `[from, to)`: the marks of one line. */
@@ -550,11 +587,26 @@ class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
     private open inner class CellRenderer : DefaultTableCellRenderer() {
         protected var isSelected = false
 
+        /** Whether this cell shows the [ExpandIcon]: it is in the column that expands, and its row can expand. */
+        private var showsExpandIcon = false
+        private var rowExpanded = false
+
+        /** The x the [ExpandIcon] is drawn at: the cell's left inset. */
+        private var expandIconX = 0
+
         override fun getTableCellRendererComponent(
             table: JTable, value: Any?, isSelected: Boolean, hasFocus: Boolean, row: Int, column: Int,
         ): Component {
             super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column)
             this.isSelected = isSelected
+            showsExpandIcon = false
+            if (column == expandingColumn()) {
+                // Read before the room for the icon is added to the insets below.
+                expandIconX = insets.left
+                rowExpanded = isExpanded(row)
+                showsExpandIcon = rowExpanded || isExpandable(row)
+                border = CompoundBorder(border, EmptyBorder(0, expandIcon.indent(), 0, 0))
+            }
             val tall = getRowHeight(row) > rowHeight
             verticalAlignment = if (tall) TOP else CENTER
             if (tall) {
@@ -565,22 +617,28 @@ class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
             return this
         }
 
-        /** Where the marker that expands or collapses the row is, in the cell; null if it has none. */
-        open fun markerBounds(): Rectangle? = null
+        /** Whether a click at [x], [y] in the cell expands or collapses its row: in [ExpandIcon.hitArea]. */
+        open fun togglesAt(x: Int, y: Int): Boolean =
+            showsExpandIcon && expandIcon.hitArea(expandIconX, rowHeight).contains(x, y)
 
-        /** Draws [marker] dimmed, unless the row is selected, in the font [g] has. */
-        protected fun drawMarker(g: Graphics, marker: String, x: Int, baseline: Int) {
+        override fun paintComponent(g: Graphics) {
+            super.paintComponent(g)
+            if (showsExpandIcon) expandIcon.paint(this, g, expandIconX, rowHeight, rowExpanded, isSelected, foreground)
+        }
+
+        /** Draws [hint] dimmed, unless the row is selected, in the font [g] has. */
+        protected fun drawHint(g: Graphics, hint: String, x: Int, baseline: Int) {
             g.color = if (isSelected) foreground else UIManager.getColor("Label.disabledForeground")
-            BasicGraphicsUtils.drawString(this, g as Graphics2D, marker, x.toFloat(), baseline.toFloat())
+            BasicGraphicsUtils.drawString(this, g as Graphics2D, hint, x.toFloat(), baseline.toFloat())
         }
     }
 
-    /** Paints the matches behind the text of left-aligned cells; ends a record's first line with its marker. */
+    /** Paints the matches behind the text of left-aligned cells; ends a record's first line with how many follow. */
     private open inner class HighlightRenderer : CellRenderer() {
         private var ranges = IntArray(0)
         private var foundRanges = IntArray(0)
 
-        /** After the text of a record with more lines: the marker, and how many there are. */
+        /** After the text of a record with more lines: how many there are. */
         private var more = ""
 
         override fun getTableCellRendererComponent(
@@ -597,21 +655,23 @@ class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
             val moreLines = if (column == expandingColumn()) logModel.moreLines(row) else 0
             more = when (moreLines) {
                 0 -> ""
-                1 -> " ▸ … +1 line"
-                else -> " ▸ … +$moreLines lines"
+                1 -> " … +1 line"
+                else -> " … +$moreLines lines"
             }
-            // The text is cut before the marker rather than under it.
+            // The text is cut before the hint rather than under it.
             if (more.isNotEmpty()) border = CompoundBorder(border, EmptyBorder(0, 0, 0, moreWidth()))
             return this
         }
 
         private fun moreWidth() = getFontMetrics(font).stringWidth(more)
 
-        override fun markerBounds(): Rectangle? {
-            if (more.isEmpty()) return null
+        // A click on the "… +N lines" hint toggles too: it is a bigger target than the icon.
+        override fun togglesAt(x: Int, y: Int): Boolean {
+            if (super.togglesAt(x, y)) return true
+            if (more.isEmpty()) return false
             val textBounds = Rectangle()
             layOut(this, text, textBounds)
-            return Rectangle(textBounds.x + textBounds.width, textBounds.y, moreWidth(), textBounds.height)
+            return Rectangle(textBounds.x + textBounds.width, 0, moreWidth(), rowHeight).contains(x, y)
         }
 
         override fun paintComponent(g: Graphics) {
@@ -638,7 +698,7 @@ class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
             if (more.isNotEmpty()) {
                 g.font = font
                 val baseline = textBounds.y + getFontMetrics(font).ascent
-                drawMarker(g, more, textBounds.x + textBounds.width, baseline)
+                drawHint(g, more, textBounds.x + textBounds.width, baseline)
             }
         }
     }
@@ -672,13 +732,6 @@ class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
             return this
         }
 
-        override fun markerBounds(): Rectangle? {
-            val wrapped = wrapped ?: return null
-            val metrics = getFontMetrics(font)
-            val x = insets.left + metrics.stringWidth(wrapped.text.substring(0, wrapped.end(0)))
-            return Rectangle(x, insets.top, metrics.stringWidth(COLLAPSE_MARKER), metrics.height)
-        }
-
         override fun paintComponent(g: Graphics) {
             super.paintComponent(g)
             val wrapped = wrapped ?: return
@@ -701,7 +754,6 @@ class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
                 val shown = text.substring(from, to)
                 val baseline = y + metrics.ascent
                 BasicGraphicsUtils.drawString(this, g as Graphics2D, shown, left.toFloat(), baseline.toFloat())
-                if (line == 0) drawMarker(g, COLLAPSE_MARKER, left + metrics.stringWidth(shown), baseline)
             }
         }
     }

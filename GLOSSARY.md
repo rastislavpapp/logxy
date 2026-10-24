@@ -20,6 +20,10 @@ _Avoid_: line (only in raw text, where a record is one line), entry, event
 A record's position among those shown; differs from its record number while a filter is active.
 _Avoid_: index, line
 
+**Expand**:
+Show a row's whole record in its message cell, wrapped: its later lines, or a first line too long for the cell. _Collapse_ goes back to the first line only.
+_Avoid_: fold, unfold, unpack
+
 **Parser**:
 A saved description of how to split a file's lines into records and fields. Each is of one parser kind (pattern, regex, JSON, …); built-in parsers ship with the app and are tried on every file opened.
 _Avoid_: format, layout
