@@ -1,0 +1,52 @@
+2026-10-01 10:00:00.001 [main] INFO  com.example.app.Application - Starting application v2.4.1 on host app-01
+2026-10-01 10:00:00.012 [main] INFO  com.example.app.config.DatabaseConfig - Connection pool ready: 20 connections
+2026-10-01 10:00:00.034 [scheduler-1] DEBUG com.example.order.job.InvoiceMapper - Cache miss for key order:428881
+2026-10-01 10:00:00.051 [http-nio-8080-exec-1] INFO  com.example.order.api.OrderController - Payload: {"orderId":398519,"customer":{"id":81231,"name":"Jana Novakova","email":"jana.novakova@example.com","tier":"gold"},"items":[{"sku":"SKU-437194","qty":6,"price":495.07},{"sku":"SKU-423648","qty":7,"price":138.25},{"sku":"SKU-111797","qty":7,"price":880.47},{"sku":"SKU-90259","qty":6,"price":614.37},{"sku":"SKU-261160","qty":2,"price":77.67},{"sku":"SKU-397093","qty":4,"price":244.25},{"sku":"SKU-392081","qty":1,"price":434.08},{"sku":"SKU-181417","qty":3,"price":161.01},{"sku":"SKU-614545","qty":1,"price":262.25}],"shipping":{"method":"express","address":"Hlavna 12, 040 01 Kosice"},"marker":"NEEDLE-PAST-CUT"}
+2026-10-01 10:00:00.063 [http-nio-8080-exec-2] INFO  com.example.auth.api.SessionHandler - User 818074 logged in from 10.86.225.131
+2026-10-01 10:00:00.078 [kafka-consumer-3] WARN  com.example.inventory.config.StockValidator - Retrying operation sync-134136 (attempt 2/5)
+2026-10-01 10:00:00.090 [scheduler-2] ERROR com.example.billing.service.PaymentService - Payment declined for order 269452: insufficient funds
+java.lang.IllegalStateException: Card 4111-XXXX was declined by the issuer
+	at com.example.billing.service.PaymentService.charge(PaymentService.java:212)
+	at com.example.billing.service.PaymentService.settle(PaymentService.java:148)
+	at com.example.order.job.SettlementJob.run(SettlementJob.java:57)
+2026-10-01 10:00:00.105 [pool-2-thread-1] INFO  com.example.report.service.QueryHandler - Processed 8213 records in 635 ms
+2026-10-01 10:00:00.118 [http-nio-8080-exec-3] INFO  com.example.customer.api.AddressController - Zákazník 976479 změnil doručovací adresu
+2026-10-01 10:00:00.130 [http-nio-8080-exec-4] INFO  com.example.i18n.api.MessageController - 顧客976479が配送先住所を変更しました。注文番号398519の配送は明日の午前中に予定されています。倉庫は東京第二物流センター、担当者は山田太郎です。追跡番号はJP-2026-0001-4471で、配送業者は通常便から速達便に変更されました。顧客には確認メールが送信され、請求額に変更はありません。
+2026-10-01 10:00:00.142 [scheduler-3] DEBUG com.example.order.job.ParcelMapper - Scheduled job report-5 finished
+2026-10-01 10:00:00.155 [kafka-consumer-2] ERROR com.example.notification.service.TokenService - Failed to process message 8d2d32d4-8b04-87f6-c432-26af43a590c2: timeout after 4589 ms
+java.sql.SQLTransientConnectionException: HikariPool-1 - Connection is not available, request timed out after 30000ms.
+	at com.zaxxer.hikari.pool.HikariPool.createTimeoutException(HikariPool.java:696)
+	at com.zaxxer.hikari.pool.HikariPool.getConnection(HikariPool.java:181)
+	at com.zaxxer.hikari.pool.HikariPool.getConnection(HikariPool.java:146)
+	at com.zaxxer.hikari.HikariDataSource.getConnection(HikariDataSource.java:100)
+	at com.example.notification.config.TokenService.handle(TokenService.java:487)
+	at com.example.order.config.SessionController.handle(SessionController.java:431)
+	at com.example.search.client.EmailController.handle(EmailController.java:313)
+	at com.example.report.config.OrderService.handle(OrderService.java:489)
+	at com.example.billing.repository.UserService.handle(UserService.java:335)
+	at com.example.notification.job.EmailScheduler.handle(EmailScheduler.java:253)
+	at com.example.notification.api.TokenHandler.handle(TokenHandler.java:816)
+	at com.example.shipping.repository.UserController.handle(UserController.java:862)
+	at com.example.report.repository.CacheScheduler.handle(CacheScheduler.java:865)
+	at com.example.inventory.api.EmailController.handle(EmailController.java:393)
+	at com.example.shipping.config.SessionController.handle(SessionController.java:839)
+	at com.example.auth.client.OrderMapper.handle(OrderMapper.java:342)
+	at com.example.notification.service.OrderController.handle(OrderController.java:726)
+	at com.example.report.repository.OrderScheduler.handle(OrderScheduler.java:378)
+	at com.example.report.client.TokenRepository.handle(TokenRepository.java:538)
+	at com.example.report.service.ParcelClient.handle(ParcelClient.java:137)
+Caused by: java.net.SocketTimeoutException: Read timed out while waiting for the database at db-primary.internal:5432
+	at java.base/sun.nio.ch.NioSocketImpl.timedRead(NioSocketImpl.java:288)
+	at java.base/sun.nio.ch.NioSocketImpl.implRead(NioSocketImpl.java:314)
+	at java.base/java.net.Socket$SocketInputStream.read(Socket.java:1099)
+	at org.postgresql.core.VisibleBufferedInputStream.readMore(VisibleBufferedInputStream.java:161)
+	at org.postgresql.core.PGStream.receiveChar(PGStream.java:467)
+	... 26 more
+2026-10-01 10:00:00.170 [pool-2-thread-2] INFO  com.example.report.service.QueryHandler - Request GET /api/v1/orders/295144 completed with status 200 in 1409 ms
+2026-10-01 10:00:00.183 [http-nio-8080-exec-5] WARN  com.example.search.api.SearchController - Slow query detected: 2326 ms for findByCustomerId(175953) with filter {"status":["NEW","PAID","SHIPPED","RETURNED"],"createdFrom":"2026-01-01T00:00:00Z","createdTo":"2026-10-01T00:00:00Z","warehouses":["BTS-1","KSC-2","PRG-1","VIE-3"],"sort":[{"field":"createdAt","dir":"desc"},{"field":"total","dir":"asc"}],"page":{"size":500,"number":12}}
+java.lang.RuntimeException: Query plan used a sequential scan on orders (12 431 822 rows)
+	at com.example.search.repository.OrderRepository.findByCustomerId(OrderRepository.java:91)
+	at com.example.search.api.SearchController.search(SearchController.java:64)
+2026-10-01 10:00:00.197 [scheduler-4] INFO  com.example.cache.job.EvictionJob - Evicted	412	entries	from	cache	order-summaries
+2026-10-01 10:00:00.210 [kafka-consumer-1] DEBUG com.example.inventory.api.StockClient - Connection pool stats: active=19, idle=29, waiting=0
+2026-10-01 10:00:00.224 [main] INFO  com.example.app.Application - Started in 4.2 s
