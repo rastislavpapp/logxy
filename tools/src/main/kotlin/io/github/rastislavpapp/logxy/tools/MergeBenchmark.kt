@@ -50,7 +50,7 @@ abstract class MergedFiles {
 /** Merging and counting on the merged log. Open so JMH can generate its subclass. */
 @State(Scope.Benchmark)
 open class MergeBenchmark : MergedFiles() {
-    /** As for a filter's result: positions to look up. */
+    /** Every other record, standing in for a filter's result, whose positions are looked up one by one. */
     private val everyOther by lazy { IntArray(merged.recordCount / 2) { it * 2 } }
 
     @Benchmark

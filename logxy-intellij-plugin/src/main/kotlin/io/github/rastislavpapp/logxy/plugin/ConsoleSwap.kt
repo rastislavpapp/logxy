@@ -18,9 +18,9 @@ import java.awt.BorderLayout
 import javax.swing.JComponent
 
 /**
- * The one place that knows how a run or debug tab is built: the console is the content
- * [ExecutionConsole.CONSOLE_CONTENT_ID] of the tab's layout, shown in a grid cell's wrapper panel. The cell does not
- * follow a change of the content's component, so the wrapper takes the console's place in that panel too. The
+ * The one place that knows how a run or debug tab is built. The console is the content
+ * [ExecutionConsole.CONSOLE_CONTENT_ID] of the tab's layout, shown in the wrapper panel of a grid cell. The cell does
+ * not follow a change of the content's component, so the wrapper also takes the console's place in that panel. The
  * content's actions are the console's toolbar beside it. A debug tab shows its contents as sub-tabs, the console in
  * the second.
  */
@@ -28,7 +28,7 @@ object ConsoleSwap {
 
     private const val LOGXY_CONTENT_ID = "logxy"
 
-    /** The debugger's sub-tab of the console; the layout's tab indexes order the sub-tabs. */
+    /** The index of the console's sub-tab in a debug tab; the layout's tab indexes give the sub-tabs' order. */
     private const val DEBUG_CONSOLE_TAB = 1
 
     enum class Outcome {
@@ -92,10 +92,10 @@ object ConsoleSwap {
 }
 
 /**
- * The toolbar beside the console, found in the run tab's [root]. Its group's children are swapped in place rather
- * than the content's actions set anew: a run tab whose content's actions change shows the content's tab above it.
- * The IDE performs no action whose toolbar's target is hidden, as the console is while the view shows, so the
- * actions shown in its place get a target of their own.
+ * The toolbar beside the console, found in the run tab's [root]. The children of its action group are swapped in
+ * place, rather than the content's actions set anew: a run tab whose content's actions change starts showing the
+ * content's tab above it. The IDE performs no action whose toolbar's target is hidden, as the console is while the
+ * view shows, so the actions shown in the console's place get a target of their own.
  */
 class ConsoleToolbar internal constructor(content: Content, private val root: JComponent) {
 

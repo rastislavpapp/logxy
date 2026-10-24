@@ -48,7 +48,7 @@ internal class RoleFields(keys: RoleKeys) {
         private val timestamps = JsonTimestampParser(zone)
         private var scratch = ByteArray(256)
 
-        /** Starts a record; then [key] each of its keys, then [write] the chosen values. */
+        /** Starts a record. Then call [key] for each of its keys, and [write] to write the chosen values. */
         fun begin() {
             chosen.fill(-1)
         }

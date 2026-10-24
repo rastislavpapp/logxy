@@ -16,6 +16,9 @@ abstract class SettingsPage(val title: String, val icon: Icon) : JPanel() {
     /** [settings] with this page's values. */
     abstract fun applyTo(settings: Settings): Settings
 
-    /** Whether the page changed any of [settings]; asked often while it shows, so an edit in progress goes on. */
+    /**
+     * Whether the page changed any of [settings]. Asked often while the page shows, so it must not end an edit in
+     * progress.
+     */
     open fun isModified(settings: Settings): Boolean = applyTo(settings) != settings
 }

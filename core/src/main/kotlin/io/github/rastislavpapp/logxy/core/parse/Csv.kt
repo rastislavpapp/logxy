@@ -73,8 +73,8 @@ internal object Csv {
     }
 
     /**
-     * The cell `bytes[from, to)` as UTF-8 to show: a quoted one without its quotes and with `""` read as `"`, others
-     * as written. A quoted cell cut before its closing quote is shown up to the cut.
+     * Decodes the cell `bytes[from, to)` to the UTF-8 text the table shows: a quoted cell without its quotes and
+     * with `""` read as `"`, others as written. A quoted cell cut before its closing quote is shown up to the cut.
      */
     fun decode(bytes: ByteArray, from: Int, to: Int): ByteArray {
         if (from >= to || bytes[from] != QUOTE) return bytes.copyOfRange(from, to)

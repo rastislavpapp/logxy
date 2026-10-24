@@ -122,8 +122,8 @@ class LevelsConfigurable : PageConfigurable("logxy.levels", "Log Levels") {
 }
 
 /**
- * Copies the standalone app's parsers, saved filters and level mappings over the plugin's, once: the two keep apart,
- * as both may run at once. How to open files does not apply to the plugin, so it stays.
+ * Copies the standalone app's parsers, saved filters and level mappings over the plugin's, once; afterwards the two
+ * stay apart, as both may run at once. How to open files does not apply to the plugin, so it stays as it is.
  */
 private fun importAppSettings(parent: Component) {
     val path = Settings.defaultPath()

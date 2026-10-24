@@ -319,9 +319,10 @@ internal class RequiredText private constructor(val bytes: ByteArray, val ignore
         }
 
         /**
-         * Whether [c] is matched only by itself (and, when [ignoreCase], its other ASCII case) and so found by
-         * a byte search. Case-insensitive Unicode matching also takes `İ` and `ı` for `i`, the Kelvin sign for
-         * `k` and `ſ` for `s`; malformed UTF-8 decodes to U+FFFD; surrogates may pair up across escapes.
+         * Whether [c] is matched only by itself, and, when [ignoreCase], by its other ASCII case, so that a byte
+         * search finds every match. Not so for some characters: case-insensitive Unicode matching also takes
+         * `İ` and `ı` for `i`, the Kelvin sign for `k` and `ſ` for `s`. U+FFFD also matches malformed UTF-8,
+         * which decodes to it. And a surrogate may pair up with one written in another escape.
          */
         private fun isLiteral(c: Char, ignoreCase: Boolean): Boolean = when {
             c == '�' || c.isSurrogate() -> false

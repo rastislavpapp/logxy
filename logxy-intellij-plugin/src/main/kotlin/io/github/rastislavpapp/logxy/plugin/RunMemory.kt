@@ -24,7 +24,10 @@ class RunMemory(project: Project, id: String) {
         get() = properties.getList(hiddenKey).orEmpty().toSet()
         set(value) = properties.setList(hiddenKey, value.toList())
 
-    /** Pixels by column name, kept as `width:name`: the width cannot hold the colon a name may. */
+    /**
+     * The widths in pixels the user dragged columns to, by column name. Stored as `width:name`, the width first, as a
+     * name may hold a colon and the width cannot.
+     */
     var columnWidths: Map<String, Int>
         get() = properties.getList(widthsKey).orEmpty().mapNotNull { entry ->
             val width = entry.substringBefore(':').toIntOrNull() ?: return@mapNotNull null

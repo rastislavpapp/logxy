@@ -10,9 +10,12 @@ object TemplateRules {
         Query.Rule(Query.TEMPLATE_FIELD, op, Templates.numbered(template))
 
     /**
-     * The rule to join to [current] to show only records of [template] whose [variable] (from 0) is [value]: the
-     * variable rule alone if [current] has the template's rule as the one `Template ==` at its top, else both in a
-     * group, as a variable rule needs one to belong to.
+     * The rule to join to [current] to show only the records of [template] whose variable value at template
+     * variable [variable], counted from 0, is [value].
+     *
+     * If [current]'s only `Template ==` rule at its top is the one for [template], that is the variable rule
+     * alone. Else it is the variable rule in a group with a `Template ==` rule, as a variable rule needs one to
+     * belong to.
      */
     fun showOnly(current: Query.Group, template: String, variable: Int, value: String): Query {
         val rule = variable(variable, value)
@@ -21,7 +24,10 @@ object TemplateRules {
         return if (own) rule else Query.Group(all = true, items = listOf(template(template, QueryOp.EQUALS), rule))
     }
 
-    /** The rule that hides records of [template] whose [variable] (from 0) is [value], keeping all others. */
+    /**
+     * The rule that hides the records of [template] whose variable value at template variable [variable], counted
+     * from 0, is [value], keeping all others.
+     */
     fun hide(template: String, variable: Int, value: String): Query {
         val items = listOf(template(template, QueryOp.EQUALS), variable(variable, value))
         return Query.Group(all = true, items = items, negated = true)

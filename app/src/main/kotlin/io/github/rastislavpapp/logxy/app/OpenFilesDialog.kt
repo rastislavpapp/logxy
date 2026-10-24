@@ -29,9 +29,10 @@ class OpenAnswer(
 )
 
 /**
- * Asks how to open [files] ([names] as the merge's source column would show them, [descriptions] in
- * tooltips): merged, with the [current] tab's files if there is one, or in tabs, and with which parser
- * each. Files [inSubfolders] of an opened folder can be left out. [answer] is null if cancelled.
+ * Asks how to open [files]: merged, with the [current] tab's files if there is one, or in tabs, and with
+ * which parser each. The files are shown by their [names], as the merge's source column would show them,
+ * with their [descriptions] in tooltips. The files in [inSubfolders], found in a subfolder of an opened
+ * folder, can be left out. [answer] is null if cancelled.
  */
 class OpenFilesDialog(
     owner: Window,
@@ -101,9 +102,10 @@ class OpenFilesDialog(
     }
 
     /**
-     * Follows the files to open (subfolders, exclusions, parsers): the heading, the choices that fit how many there
-     * are, opening only files that fit their parsers, and remembering the answer only while every parser is detected
-     * (chosen parsers are not remembered, though the user might expect it).
+     * Brings the dialog up to date with the files to open, after a change of subfolders, exclusions or parsers: the
+     * heading, the choices that fit how many files there are, and Open, which opens only files that fit their
+     * parsers. The answer can be remembered only while every parser is detected, as chosen parsers are not
+     * remembered, though the user might expect them to be.
      */
     private fun update() {
         val files = parsers.included

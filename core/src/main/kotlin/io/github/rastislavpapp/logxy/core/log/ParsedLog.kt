@@ -49,9 +49,9 @@ private class AppendedRecords(
  * record continue the previous one (stack traces); such lines before the first record become records
  * of their own, with only a message.
  *
- * [schema] differs from the parser's: a DICT field whose values turn out mostly distinct (e.g. a
- * misdetected layout) is a SPAN, and each key found in an MDC map while indexing gets a field of its
- * own, read from the map; keys that first appear in appended records do not.
+ * [schema] differs from the parser's in two ways. A DICT field whose values turn out mostly distinct
+ * (e.g. with a misdetected layout) is a SPAN. And each key found in an MDC map while indexing gets a
+ * field of its own, read from the map; keys that first appear in appended records get none.
  */
 class ParsedLog private constructor(
     override val path: Path,
@@ -165,7 +165,7 @@ class ParsedLog private constructor(
             needed = maxOf(needed, relative + shown)
         }
         val bytes = if (needed > 0) read(start, minOf(needed, recordLength)) else EMPTY
-        // The record's own line end starts no line.
+        // The line end that ends the record does not start another line.
         val countEnd = if (counted == recordLength) Bytes.trimLineEnd(bytes, 0, counted) else counted
         val moreLines = Bytes.countLineFeeds(bytes, 0, countEnd)
 
@@ -220,7 +220,8 @@ class ParsedLog private constructor(
         while (from < end && bytes[from] != Bytes.LF) from++
         if (from == end) return ""
         from++
-        // The line end can lie just past maxBytes, read for the trimming.
+        // The read went two bytes past maxBytes, so that a line end just past it could be trimmed; the text
+        // itself is still cut at maxBytes.
         return Bytes.utf8Text(bytes, from, end, (maxBytes - from).coerceAtLeast(0), cutMark)
     }
 
@@ -263,7 +264,10 @@ class ParsedLog private constructor(
         tail = appended.tail
     }
 
-    /** Shows the optional fields hidden as absent that [source] has values of, e.g. a JSON log's first exception. */
+    /**
+     * Shows the optional fields that were hidden because no record had a value of them, but that [source] has
+     * values of, e.g. once a JSON log's first exception is appended.
+     */
     private fun showPresent(source: Columns) {
         val fields = schema.fields
         // A map split into its keys stays hidden: it is shown through them.
@@ -392,10 +396,17 @@ class ParsedLog private constructor(
             }
         }
 
-        /** Thrown by a range whose [Columns.overflowed]; ends the other ranges too. */
+        /**
+         * Thrown by a range once [Columns.overflowed] names a [field]; it ends the parsing of the other ranges
+         * too.
+         */
         private class DictionaryOverflow(val field: Int) : Exception(null, null, false, false)
 
-        /** The ranges between [bounds], and the schema they were parsed with. */
+        /**
+         * Parses the ranges between [bounds], and returns the schema they were parsed with along with each
+         * range's columns and result. Whenever a DICT field overflows, starts over with that field stored as a
+         * SPAN.
+         */
         private suspend fun parseAll(
             channels: ReadChannels,
             bounds: LongArray,
@@ -440,7 +451,7 @@ class ParsedLog private constructor(
             }.awaitAll()
         }
 
-        /** Per field, the keys found in it if it is a map that can be split, sorted. */
+        /** For each field that is a map that can be split, the keys found in it, sorted; null for other fields. */
         private fun mapKeys(storage: Schema, segments: List<Columns>): Array<List<String>?> =
             Array(storage.fields.size) { field ->
                 if (!storage.fields[field].isMap) return@Array null
@@ -473,7 +484,7 @@ class ParsedLog private constructor(
             return Schema(fields)
         }
 
-        /** [schema] with optional fields that no record has hidden. */
+        /** [schema] with each optional field hidden that no record has a value of. */
         private fun withoutAbsent(schema: Schema, segments: List<Columns>): Schema {
             val absent = schema.fields.indices.filter { field ->
                 schema.fields[field].optional && segments.none { field < it.present.size && it.present[field] }
@@ -525,7 +536,8 @@ class ParsedLog private constructor(
             var inPreamble = preamble && from == 0L
             var tail = Tail(from, lastLineComplete = true, lastLineStartedRecord = false)
             var lines = 0
-            // Header lines are skipped wherever the file is read from its start, also again when one is unfinished.
+            // Header lines are skipped whenever the file is read from its start, also when a read starts there
+            // again because a header line was unfinished.
             var header = if (from == 0L) parser.headerLines else 0
             while (reader.next()) {
                 if (++lines and 1023 == 0) check()

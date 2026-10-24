@@ -13,9 +13,10 @@ class Highlighter private constructor(private val terms: List<Term>) {
     val isEmpty get() = terms.isEmpty()
 
     /**
-     * Sorted, non-overlapping `[start, end)` pairs, flattened, of matches in [text]; of rules on [field], or of
-     * all rules when [field] is null. Wildcard rules mark each literal part between the `*`s. Gives up after
-     * [budgetNanos] with the matches found so far, as a user's regex can backtrack for minutes.
+     * The parts of [text] that the rules on [field] match, or that all rules match when [field] is null. They come
+     * as sorted, non-overlapping `[start, end)` pairs flattened into one array, e.g. `[0, 4, 10, 12]` for two
+     * matches. Wildcard rules mark each literal part between the `*`s. Gives up after [budgetNanos] with the
+     * matches found so far, as a user's regex can backtrack for minutes.
      */
     fun ranges(field: String?, text: String, budgetNanos: Long = CELL_BUDGET_NANOS): IntArray {
         if (terms.isEmpty() || text.isEmpty()) return EMPTY
@@ -101,7 +102,10 @@ class Highlighter private constructor(private val terms: List<Term>) {
             return Highlighter(listOf(Term(null, pattern)))
         }
 
-        /** Negated rules, groups and ops, comparisons and empty values mark nothing; neither do invalid regexes. */
+        /**
+         * Marks what the text rules of [query] match. Negated rules and groups, negated ops, comparisons, empty
+         * values and invalid regexes mark nothing.
+         */
         fun of(query: Query): Highlighter {
             val terms = ArrayList<Term>()
             collect(query, terms)
@@ -135,8 +139,9 @@ class Highlighter private constructor(private val terms: List<Term>) {
                             if (segment.all { it == Glob.ANY_ONE }) return@mapIndexedNotNull null
                             val body = segment.split(Glob.ANY_ONE)
                                 .joinToString(".") { if (it.isEmpty()) "" else Pattern.quote(it) }
-                            // Without a `*` there, the value meets the field's edge; in the detail pane's whole record
-                            // that is at least a word's, so `thread == main` does not mark "domain".
+                            // Without a `*` at that end, the value must meet the field's edge. In the detail pane's
+                            // whole record it must at least meet a word's edge, so `thread == main` does not mark
+                            // "domain".
                             val atStart = i == 0 && !glob.leadingStar && isWordChar(segment.first())
                             val atEnd = i == glob.segments.lastIndex && !glob.trailingStar && isWordChar(segment.last())
                             (if (atStart) NOT_AFTER_WORD else "") + body + (if (atEnd) NOT_BEFORE_WORD else "")

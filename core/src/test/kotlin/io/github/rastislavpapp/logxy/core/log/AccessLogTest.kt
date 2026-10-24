@@ -78,8 +78,8 @@ class AccessLogTest {
         val text = sample.lines().first()
         val line = text.toByteArray()
         val matcher = CompiledAccessLog().newMatcher()
-        // Only cuts within or right after the size (a common line) and the whole line are records; others must be
-        // rejected, not fail.
+        // Of all the cuts of the line, only those within or right after the size field, where a line of the common
+        // format ends, and the whole line are records. The others must be rejected, not throw.
         val accepted = (0..line.size).filter { matcher.match(line, 0, it) }
         val size = text.indexOf(" 512 ") + 1
         assertEquals(listOf(size + 1, size + 2, size + 3, size + 4, line.size), accepted)

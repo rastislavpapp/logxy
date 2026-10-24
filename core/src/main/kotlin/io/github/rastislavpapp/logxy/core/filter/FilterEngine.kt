@@ -30,14 +30,16 @@ import java.util.Collections
 import java.util.concurrent.atomic.AtomicLong
 
 /**
- * The records from [from] on that a filter lets through, in order, out of the first [recordCount]
- * records, which ended at [indexedSize] bytes of the file.
+ * The result of running a filter: [rows] holds the numbers of the records from [from] on that it lets
+ * through, in increasing order. The run covered the first [recordCount] records, which end at byte
+ * [indexedSize] of the file.
  */
 class FilterResult(val rows: IntArray, val from: Int, val recordCount: Int, val indexedSize: Long)
 
 /**
- * Limits a run to records known to be among [records] (sorted, the first [size] count) below [upTo]; from [upTo]
- * on, all records are tested. For a filter stricter than one whose result is [records].
+ * Lets a run skip records that cannot match, for a filter stricter than an earlier one whose result is
+ * [records]. Below record [upTo], only the records in the first [size] entries of [records], which are
+ * sorted, are tested; from [upTo] on, all records are.
  */
 class Narrowing(val records: IntArray, val size: Int, val upTo: Int)
 
@@ -50,15 +52,16 @@ interface RecordFilter {
     fun prepare(filter: Filter, from: Int = 0, within: Narrowing? = null): PreparedFilter
 
     /**
-     * The first record whose result may differ from a result computed when there were [coveredRecords]
-     * records: records that were still growing then (the last one of a log) and everything after.
+     * The first record whose filter result may have changed since a result was computed over the first
+     * [coveredRecords] records. A record that was still growing then, such as the last record of a log, may
+     * now match differently, and the records after it are new.
      */
     fun changedFrom(coveredRecords: Int): Int
 
     /**
-     * Counts [rowCount] rows (`rows[i]`, or all records from the first if [rows] is null) by the template of
-     * their message; see [io.github.rastislavpapp.logxy.core.template.Templates]. Call on the thread that owns
-     * the records; cancelling the calling coroutine stops it.
+     * Counts the first [rowCount] rows by the message template of their message; see
+     * [io.github.rastislavpapp.logxy.core.template.Templates]. Row i is record `rows[i]`, or record i if [rows]
+     * is null. Call on the thread that owns the records; cancelling the calling coroutine stops it.
      */
     suspend fun countTemplates(rows: IntArray?, rowCount: Int): TemplateCounts
 
@@ -66,8 +69,9 @@ interface RecordFilter {
     val templateProgress: Double
 
     /**
-     * The values at each of [variables] of the rows (as [countTemplates] takes them) whose message has [template],
-     * in one pass. Call on the thread that owns the records; cancelling the calling coroutine stops it.
+     * The variable values at each of [variables] in the rows whose message has the message template [template],
+     * collected in one pass. [rows] and [rowCount] are as in [countTemplates]. Call on the thread that owns the
+     * records; cancelling the calling coroutine stops it.
      */
     suspend fun variableSeries(
         rows: IntArray?,
@@ -77,17 +81,18 @@ interface RecordFilter {
     ): List<VariableSeries>
 
     /**
-     * How often each value occurs at [variable] (from 0) of the rows (as [countTemplates] takes them) whose message
-     * has [template]. Call on the thread that owns the records; cancelling the calling coroutine stops it.
+     * How often each variable value occurs at template variable [variable], counted from 0, in the rows whose
+     * message has the message template [template]. [rows] and [rowCount] are as in [countTemplates]. Call on
+     * the thread that owns the records; cancelling the calling coroutine stops it.
      */
     suspend fun variableValues(rows: IntArray?, rowCount: Int, template: String, variable: Int): VariableValues
 }
 
-/** Hears of the matches of a finished chunk of records; see [PreparedFilter.run]. */
+/** Receives the matching records of each chunk of records once the chunk is decided; see [PreparedFilter.run]. */
 fun interface ChunkListener {
     /**
-     * The records of `[first, end)` are decided: [records] (sorted) are the ones in them that match. Called on any
-     * thread, for several chunks at once.
+     * The records `[first, end)` are decided, and [records], sorted, are those among them that match. Called on
+     * any thread, possibly for several chunks at once.
      */
     fun chunkDone(first: Int, end: Int, records: IntArray)
 }
@@ -95,9 +100,12 @@ fun interface ChunkListener {
 /** A filter ready to run; [run] may be called on any thread. */
 interface PreparedFilter {
     /**
-     * Computes the matching records; cancelling the calling coroutine stops it. With [onChunk], the matches are
-     * also reported chunk by chunk, in no particular order, as the last condition evaluated finishes them; if that
-     * is not a single condition, or the evaluation merges parts, nothing is reported before the result.
+     * Computes the matching records; cancelling the calling coroutine stops it.
+     *
+     * With [onChunk], the matches are also reported chunk by chunk, in no particular order, as soon as the
+     * condition evaluated last has decided them. When the filter does not end in a single condition, e.g. it is a
+     * [Filter.Or], which merges the results of its parts, or a [Filter.Not], which inverts its part's, nothing is
+     * reported before the result.
      */
     suspend fun run(onChunk: ChunkListener? = null): FilterResult
 
@@ -106,14 +114,17 @@ interface PreparedFilter {
 }
 
 /**
- * Evaluates [Filter]s over one log into bitsets, one bit per record. Dictionary fields test each
- * distinct value once; text in the file is only read for records the cheaper conditions left open.
- * Leaf results are cached per condition, so changing one condition or appending records only
- * computes what is new.
+ * Evaluates [Filter]s over one log into bitsets, one bit per record. A condition on a dictionary field
+ * tests each distinct value once. Text in the file is only read for records the cheaper conditions did
+ * not already rule out. The result of each condition is cached, so changing one condition or appending
+ * records only computes what is new.
  */
 class FilterEngine(private val log: LogData, private val maxCacheBytes: Long = DEFAULT_CACHE_BYTES) : RecordFilter {
 
-    /** Bits of one condition for the [coverage] rows it was computed for; other bits are unknown. */
+    /**
+     * The cached result of one condition. [bits] has a bit set for each matching record, but is valid only for
+     * the records whose bit is set in [coverage], those it was computed for.
+     */
     private class Entry(val bits: LongArray, val coverage: LongArray) {
         val bytes get() = (bits.size + coverage.size) * 8L
     }
@@ -215,7 +226,10 @@ class FilterEngine(private val log: LogData, private val maxCacheBytes: Long = D
             is Leaf -> listOf(node)
         }
 
-        /** The records evaluated: from [from] to the end of the snapshot, below [within]'s limit only its records. */
+        /**
+         * The records this run evaluates, one bit per record: those from [from] to the end of the snapshot,
+         * except that below [Narrowing.upTo] only those among [within]'s records.
+         */
         private val all = LongArray(words).also { bits ->
             val open = within?.upTo?.coerceIn(from, snapshot.count) ?: from
             for (w in open / 64..<words) bits[w] = -1L
@@ -236,8 +250,9 @@ class FilterEngine(private val log: LogData, private val maxCacheBytes: Long = D
         }
 
         /**
-         * The records of [candidates] (all if null) that match [node]. [onChunk] is for the last node evaluated, if
-         * it is a condition: what it decides is final.
+         * The records among [candidates] that match [node]; null [candidates] stands for [all]. [onChunk] is
+         * passed on only to the node evaluated last, and used only if that node is a condition, as only then is
+         * what it decides final.
          */
         private suspend fun evaluate(
             node: Node,
@@ -288,8 +303,9 @@ class FilterEngine(private val log: LogData, private val maxCacheBytes: Long = D
                 if (need[w] != 0L) anyNeeded = true
                 if (need[w] and (if (w == lastWord) lastBit.inv() else -1L) != 0L) cacheable = true
             }
-            // The leaf decides its chunks' records: those it computes, with the cached ones, and those it only reads
-            // from the cache (or that no candidates are left in), right away.
+            // What this leaf decides is final, so its chunks are reported. A chunk it computes is reported once
+            // computed, merged with the cached results. A chunk it only reads from the cache, or one with no
+            // candidates left, is reported right away.
             val starts = if (anyNeeded) chunkStarts(need) else emptyList()
             fun decided(first: Int, computed: LongArray?) {
                 if (onChunk == null) return
@@ -320,7 +336,10 @@ class FilterEngine(private val log: LogData, private val maxCacheBytes: Long = D
             (first..<minOf(words, first + chunkWords)).any { need[it] != 0L }
         }
 
-        /** Tells [listener] the records of the chunk at word [first], which have the bits [bits] gives per word. */
+        /**
+         * Tells [listener] the matching records of the chunk starting at word [first]; [bits] gives the bits of
+         * the matching records in each word of the chunk.
+         */
         private inline fun reportChunk(listener: ChunkListener, first: Int, bits: (word: Int) -> Long) {
             val end = minOf(words, first + chunkWords)
             val records = IntArray((first..<end).sumOf { java.lang.Long.bitCount(bits(it)) })
@@ -336,8 +355,9 @@ class FilterEngine(private val log: LogData, private val maxCacheBytes: Long = D
         }
 
         /**
-         * The bits of [leaf] for the [need]ed records in the chunks at [chunks], and how many that took. [report] is
-         * called with a chunk's first word and the bits, once it is computed.
+         * Tests [leaf] on the records whose bit is set in [need], in the chunks starting at the words in [chunks].
+         * Returns the bits of the matching records and the number of chunks computed. [report] gets each chunk's
+         * first word and the bits once that chunk is computed.
          */
         private suspend fun compute(
             leaf: Leaf,
@@ -382,13 +402,16 @@ class FilterEngine(private val log: LogData, private val maxCacheBytes: Long = D
     }
 
     private companion object {
-        /** Records per parallel task at most: 4096 words of 64. Smaller tasks cost more each. */
+        /**
+         * The most words of 64 records a parallel task tests. Smaller tasks spread the work better, but cost
+         * more overhead per record.
+         */
         const val CHUNK_WORDS = 4096
 
-        /** Records per parallel task at least. */
+        /** The fewest words of 64 records a parallel task tests. */
         const val MIN_CHUNK_WORDS = 512
 
-        /** About 25 conditions on 40M records. */
+        /** Enough for the cached results of about 25 conditions on 40M records. */
         const val DEFAULT_CACHE_BYTES = 256L * 1024 * 1024
     }
 }
@@ -468,8 +491,8 @@ private class Leaf(
         }
 
         /**
-         * Tests the word at the condition's variable; the template index rules out records of other templates
-         * first, so only messages of the condition's template are read.
+         * Tests the variable value at the condition's template variable. The template index rules out the records
+         * of other message templates first, so only messages of the condition's template are read.
          */
         private fun variableLeaf(
             condition: VariableCondition,
@@ -616,7 +639,10 @@ private class Leaf(
             }
         }
 
-        /** Tests the JSON value `bytes[from, to)` as shown; strings without escapes straight on their bytes. */
+        /**
+         * Tests the JSON value `bytes[from, to)` as the table shows it, decoded. A string without escapes is
+         * tested on its bytes in place, as decoding would not change it.
+         */
         private fun testJson(test: ValueTest, bytes: ByteArray, from: Int, to: Int): Boolean {
             if (Json.isString(bytes, from, to) && Json.isPlain(bytes, from + 1, to - 1)) {
                 return test.test(bytes, from + 1, to - 1)
@@ -625,7 +651,10 @@ private class Leaf(
             return test.test(decoded, 0, decoded.size)
         }
 
-        /** Tests the CSV cell `bytes[from, to)` as shown; one without quotes in it straight on its bytes. */
+        /**
+         * Tests the CSV cell `bytes[from, to)` as the table shows it, decoded. A quoted cell without quotes
+         * inside is tested on its bytes in place, as decoding would not change it.
+         */
         private fun testCsv(test: ValueTest, bytes: ByteArray, from: Int, to: Int): Boolean {
             if (Csv.isQuoted(bytes, from, to) && Csv.isPlain(bytes, from + 1, to - 1)) {
                 return test.test(bytes, from + 1, to - 1)
@@ -687,13 +716,19 @@ private fun interface ValueTest {
     fun test(bytes: ByteArray, from: Int, to: Int): Boolean
 }
 
-/** Space for finding the word at a template variable, one per thread; [json] messages need room to unescape. */
+/**
+ * Scratch buffers for finding the variable value at a template variable, one set per thread. With [json],
+ * it also has room to unescape a JSON message.
+ */
 private class VariableScratch(json: Boolean) {
     private val out = ByteArray(Templates.OUT_SIZE)
     private val places = IntArray(Templates.PLACES_SIZE)
     val unescaped = if (json) ByteArray(MessageReader.READ_LIMIT) else null
 
-    /** Whether the word at [variable] of the message `bytes[from, to)` passes [test]; false if it has none. */
+    /**
+     * Whether the variable value at template variable [variable] of the message `bytes[from, to)` passes [test];
+     * false if the message has no such variable.
+     */
     fun passes(bytes: ByteArray, from: Int, to: Int, variable: Int, test: ValueTest): Boolean {
         val range = Templates.variableRange(bytes, from, to, variable, out, places)
         return range >= 0 && test.test(bytes, (range ushr 32).toInt(), range.toInt())

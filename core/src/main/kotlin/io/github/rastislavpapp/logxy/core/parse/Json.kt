@@ -138,7 +138,8 @@ internal object Json {
     }
 
     /**
-     * The value `bytes[from, to)` as UTF-8 to show: a string's content unescaped, other values as written.
+     * Decodes the value `bytes[from, to)` to the UTF-8 text the table shows: a string's content unescaped, other
+     * values as written.
      * A string cut before its closing quote is shown up to the cut.
      */
     fun decode(bytes: ByteArray, from: Int, to: Int): ByteArray {
@@ -253,7 +254,10 @@ internal object Json {
         return if (writePretty(bytes, start, end, out, 0)) out.toString(Charsets.UTF_8) else null
     }
 
-    /** Returns false if the value is malformed inside. */
+    /**
+     * Writes the value `bytes[from, to)` into [out], indented as [depth] levels deep; returns false if the value
+     * is malformed inside.
+     */
     private fun writePretty(bytes: ByteArray, from: Int, to: Int, out: ByteArrayOutputStream, depth: Int): Boolean {
         val first = bytes[from]
         if (isString(bytes, from, to)) {

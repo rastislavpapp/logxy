@@ -5,7 +5,10 @@ import io.github.rastislavpapp.logxy.core.log.MapKey
 /** How to read a field that holds a whole map, so that each of its keys can be shown as a field. */
 internal interface MapSyntax {
 
-    /** More distinct keys than this, e.g. ids used as keys, and the map stays one field. */
+    /**
+     * The most distinct keys a map may have to be split into fields. With more, e.g. when ids are used as keys,
+     * the map stays one field.
+     */
     val maxKeys: Int
 
     /** Whether values are JSON values, see [Json]. */
@@ -14,7 +17,10 @@ internal interface MapSyntax {
     /** The range of the entries in `bytes[from, to)`, packed as by [MdcMap.pack]; -1 if it is not a map. */
     fun entries(bytes: ByteArray, from: Int, to: Int): Long
 
-    /** The value range of [key] among the [entries] in `bytes[from, to)`, packed; -1 if absent. */
+    /**
+     * The range of [key]'s value in the entries `bytes[from, to)`, as [entries] found them, packed as by
+     * [MdcMap.pack]; -1 if the key is absent.
+     */
     fun value(bytes: ByteArray, from: Int, to: Int, key: MapKey): Long
 
     /** Whether [key] gets a field of its own. */

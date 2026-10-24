@@ -18,8 +18,9 @@ internal object Logfmt {
     fun isSpace(b: Byte) = b == SPACE || b == TAB
 
     /**
-     * Calls [pair] with the key and value range of each pair in `bytes[from, to)`, a quoted value with its
-     * quotes; returns false, maybe after some calls, if a key is empty or a quote is not closed.
+     * Calls [pair] with the key range and the value range of each pair in `bytes[from, to)`; a quoted value's
+     * range includes its quotes. Returns false if a key is empty or a quote is not closed; [pair] may have been
+     * called for the pairs before it then.
      */
     inline fun forEachPair(bytes: ByteArray, from: Int, to: Int, pair: (Int, Int, Int, Int) -> Unit): Boolean {
         var i = from

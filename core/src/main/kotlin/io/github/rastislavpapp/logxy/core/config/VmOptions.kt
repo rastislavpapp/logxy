@@ -7,15 +7,19 @@ import java.nio.file.Path
 
 /**
  * The options the packaged launcher starts the JVM with, such as the memory limit and whether the newline search
- * uses vectors. The launcher hands the JVM
- * [installed] (`logxy.vmoptions` in the app directory) with `-XX:VMOptionsFile`; the user's options live in
- * [user], which, unlike the app directory, survives an upgrade, and [install] copies them over. The JVM does not
- * start if the installed file is missing or holds anything but options, not even a comment, so it is only ever
- * replaced whole.
+ * uses vectors.
+ *
+ * The launcher passes the JVM [installed], `logxy.vmoptions` in the app directory, with `-XX:VMOptionsFile`.
+ * The user's options live in [user] instead, as the app directory does not survive an upgrade, and [install]
+ * copies them to [installed]. The JVM does not start if the installed file is missing or holds anything but
+ * options, not even a comment, so it is only ever replaced whole.
  */
 class VmOptions(val installed: Path, val user: Path) {
 
-    /** What [install] did: nothing, as the files already matched; copied the user's options; or failed to. */
+    /**
+     * What [install] did: [UNCHANGED] when both files already held the same options, [CHANGED] when it copied
+     * the user's options to [installed], [FAILED] when it could not write [installed].
+     */
     enum class Install { UNCHANGED, CHANGED, FAILED }
 
     /** The options as shipped, from [DEFAULT_FILE] next to [installed]; empty if it is missing. */
@@ -62,7 +66,7 @@ class VmOptions(val installed: Path, val user: Path) {
         /** The file the launcher reads, and the user's copy of it in the settings directory. */
         const val FILE = "logxy.vmoptions"
 
-        /** Shipped next to [FILE]: the options to start from. */
+        /** The file of the options as shipped, next to the installed [FILE]. */
         const val DEFAULT_FILE = "logxy.default.vmoptions"
 
         private const val XMX = "-Xmx"
@@ -72,8 +76,9 @@ class VmOptions(val installed: Path, val user: Path) {
             options.lastOrNull { it.startsWith(XMX) }?.removePrefix(XMX)
 
         /**
-         * [options] with `-Xmx`[limit], unchecked: a value the JVM rejects stops it from starting. For null, the
-         * heap limit from [defaults] instead.
+         * [options] with their heap limit replaced by `-Xmx`[limit], e.g. `-Xmx8g` for `8g`, or by the heap
+         * limit in [defaults] when [limit] is null. [limit] is not checked: a value the JVM rejects stops it
+         * from starting.
          */
         fun withMemoryLimit(options: List<String>, limit: String?, defaults: List<String>): List<String> {
             val heap = if (limit == null) defaults.filter(::limitsHeap) else listOf("$XMX$limit")
@@ -88,7 +93,7 @@ class VmOptions(val installed: Path, val user: Path) {
         /** Whether [options] let [NewlineScanner] search with vectors, which it does by default where supported. */
         fun vectorSearch(options: List<String>): Boolean = options.lastOrNull { it.startsWith(NEWLINES) } != SWAR_ONLY
 
-        /** [options] with the vector newline search turned [on], or off: SWAR only. */
+        /** [options] with the vector newline search turned on, or, if not [on], off, so that it uses SWAR only. */
         fun withVectorSearch(options: List<String>, on: Boolean): List<String> =
             options.filterNot { it.startsWith(NEWLINES) } + if (on) emptyList() else listOf(SWAR_ONLY)
 

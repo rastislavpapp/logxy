@@ -34,8 +34,8 @@ class QueryCompiler(private val schema: Schema, private val zone: ZoneId = ZoneI
     fun compile(query: Query): Filter = compileOrNull(query, Binding(null, 0)) ?: Filter.And(emptyList())
 
     /**
-     * The `Template ==` rules joined with AND in the group around a variable rule: the template it belongs to if
-     * there is one [count], else null.
+     * The `Template ==` rules joined with AND in the group around a variable rule. [count] is how many there are,
+     * and [template] the template the variable rule belongs to if there is exactly one, else null.
      */
     private class Binding(val template: String?, val count: Int)
 
@@ -133,7 +133,10 @@ class QueryCompiler(private val schema: Schema, private val zone: ZoneId = ZoneI
     private fun message() = schema.fields.firstOrNull { it.role == Role.MESSAGE }
         ?: throw QueryException("${Query.TEMPLATE_FIELD} needs a message, which this log does not have")
 
-    /** `{n}` [rule]: variable [number] (from 1) of the template of [binding], compared as other fields are. */
+    /**
+     * Compiles a `{n}` [rule]: it compares template variable [number], counted from 1, of the template [binding]
+     * names, as rules compare other fields.
+     */
     private fun variable(rule: Query.Rule, number: Int, binding: Binding): Filter {
         val template = binding.template ?: throw QueryException(
             if (binding.count > 1) {
@@ -168,7 +171,7 @@ class QueryCompiler(private val schema: Schema, private val zone: ZoneId = ZoneI
         return LevelCondition(field, levels.toSet())
     }
 
-    /** [shown] names the field in errors. */
+    /** Compiles [rule], which compares [field] with a number; [shown] is the field's name in error messages. */
     private fun numberComparison(field: String, rule: Query.Rule, shown: String = field): NumberCondition {
         val number = Bytes.parseNumber(rule.value)
         if (number.isNaN()) {

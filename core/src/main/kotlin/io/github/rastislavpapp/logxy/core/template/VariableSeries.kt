@@ -12,9 +12,10 @@ import kotlinx.coroutines.withContext
 import kotlin.math.abs
 
 /**
- * The values of one variable of one template over time: per counted row of the template that has a time, the row,
- * its time in epoch nanoseconds and the variable's value (see [Templates.variableNumber]), NaN where the variable
- * holds no number. In row order. Variables read in one pass share their rows and times.
+ * The values of one template variable of one message template over time. For each counted row of the template
+ * that has a time, it holds the row, its time in epoch nanoseconds and the number its variable value starts with
+ * (see [Templates.variableNumber]), or NaN where it holds no number. In row order. The series of variables read in
+ * one pass share their rows and times.
  */
 class VariableSeries internal constructor(
     private val rows: IntArray,
@@ -25,7 +26,7 @@ class VariableSeries internal constructor(
     /** Values that are numbers. */
     val numbers: Int
 
-    /** Of the numbers; NaN if there are none. */
+    /** The smallest, largest and average of the numbers; NaN if there are none. */
     val min: Double
     val max: Double
     val average: Double
@@ -117,10 +118,11 @@ class VariableSeries internal constructor(
 
     internal companion object {
         /**
-         * Reads [rowCount] rows (`rows[i]`, or `i` if [rows] is null) whose template is [template]: each a record
-         * of the log that [origin] tells (the first if null), whose snapshot and index are at that position in
-         * [snapshots] and [indexes]. Indexes are updated first. Reads all [variables] in one pass, and returns their
-         * values in that order.
+         * Reads the template variables [variables] of those of the first [rowCount] rows whose template is
+         * [template], all in one pass, and returns their series in the order of [variables]. Row i is `rows[i]`,
+         * or i if [rows] is null. [origin] tells which log each row is a record of, and which record; without it,
+         * row r is record r of the first log. A log's snapshot and index are at its position in [snapshots] and
+         * [indexes]. Updates the indexes first.
          */
         suspend fun collect(
             indexes: List<TemplateIndex>,

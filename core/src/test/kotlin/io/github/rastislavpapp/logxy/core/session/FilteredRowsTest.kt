@@ -43,7 +43,7 @@ class FilteredRowsTest {
         val rows = FilteredRows(intArrayOf(2, 5, 9))
         assertEquals(5, rows.next(3, forward = true, inclusive = false))
         assertEquals(2, rows.next(3, forward = false, inclusive = true))
-        // Before the first and after the last.
+        // From a record before the first row and from one after the last, wrapping around.
         assertEquals(2, rows.next(0, forward = true, inclusive = false))
         assertEquals(9, rows.next(0, forward = false, inclusive = false))
         assertEquals(2, rows.next(12, forward = true, inclusive = false))

@@ -65,7 +65,10 @@ private const val PROGRESS_DELAY_MILLIS = 200
 
 private const val PROGRESS_HEIGHT = 3
 
-/** How long the strip's segment takes to cross while the progress is unknown, and the placeholders to pulse. */
+/**
+ * How many milliseconds the progress strip's segment takes to cross the panel while the progress is unknown, and the
+ * placeholders take to pulse once.
+ */
 private const val CYCLE_MILLIS = 1200.0
 
 private const val TABLE_CARD = "table"
@@ -73,10 +76,10 @@ private const val PLACEHOLDERS_CARD = "placeholders"
 
 private val PADDING = EmptyBorder(0, 0, 0, 12)
 
-/** Values of a variable its tooltip lists; the rest are summed up in one line. */
+/** How many values of a variable its tooltip lists; the rest are summed up in one line. */
 private const val TOOLTIP_VALUES = 5
 
-/** Values of a variable its Show Only and Hide menus list. */
+/** How many values of a variable its Show Only and Hide menus list. */
 private const val MENU_VALUES = 10
 
 private val log = LoggerFactory.getLogger(TemplatesPanel::class.java)
@@ -97,9 +100,9 @@ fun Schema.hasTemplates() =
  *
  * Templates show their variables numbered, `{1}`, `{2}`, …. Hovering one lists its most frequent values in the shown
  * rows, counted by [values] when first needed; right-clicking one offers to show only or hide one of them, through
- * [addRuleFor] and [addRules]. While [canChart], clicking a variable charts it in [charts] or stops, as does the
- * context menu; a charted variable is drawn bold in its chart's color, and one found to hold no number faint, as it
- * cannot be charted. The columns fit their contents; the template's takes the rest of the width.
+ * [addRuleFor] and [addRules]. While [canChart], clicking a variable charts it in [charts], or stops charting it, as
+ * the context menu can too. A charted variable is drawn bold in its chart's color, and one found to hold no number
+ * faint, as it cannot be charted. The columns fit their contents; the template's takes the rest of the width.
  */
 class TemplatesPanel(
     private val scope: CoroutineScope,
@@ -120,7 +123,7 @@ class TemplatesPanel(
     /** Where the mouse last moved over the table, to show a tooltip again once its values are counted. */
     private var pointer: Point? = null
 
-    /** The values of variables counted since the shown rows changed. */
+    /** The variable values counted since the shown rows changed, by template and variable. */
     private val counted = HashMap<Pair<String, Int>, VariableValues?>()
     private var counting: Job? = null
     private var countingFor: Pair<String, Int>? = null
@@ -154,7 +157,7 @@ class TemplatesPanel(
     private var job: Job? = null
     private val throttle = Timer(REFRESH_MILLIS) { refresh() }.apply { isRepeats = false }
 
-    /** Counted rows changed while hidden, so they are counted once shown. */
+    /** Whether the rows to count changed while the panel was hidden, so they are counted once it shows. */
     private var stale = true
 
     /** Whether the records can be filtered by template; see [hasTemplates]. */
@@ -238,9 +241,10 @@ class TemplatesPanel(
     }
 
     /**
-     * Counts the values of [variable] (a template and its variable) unless they are counted already, then calls
-     * [then], also when a count of it already runs (a right-click while the hover's count runs); a count for another
-     * variable stops, and what waited on it is not called.
+     * Counts the values of [variable], a template and the number of one of its variables, unless they are counted
+     * already, and then calls [then]. If a count of the same variable already runs, e.g. on a right-click while the
+     * hover's count runs, [then] waits for it. A running count of another variable stops, and what waited on it is
+     * never called.
      */
     private fun countValues(variable: Pair<String, Int>, then: () -> Unit) {
         if (variable in counted) return then()
@@ -269,8 +273,8 @@ class TemplatesPanel(
     }
 
     /**
-     * The most frequent values of [variable] of [template] with their counts, what their numbers come to, and what
-     * clicking does; counted when first asked for, saying so meanwhile.
+     * The tooltip of [variable] of [template]: its most frequent values with their counts, what their numbers come
+     * to, and what clicking does. The values are counted when first asked for; the tooltip says so meanwhile.
      */
     private fun variableToolTip(template: String, variable: Int): String {
         val key = template to variable
@@ -394,7 +398,7 @@ class TemplatesPanel(
         setCounts(null)
     }
 
-    /** Forgets the values of variables counted, as the shown rows changed. */
+    /** Forgets the variable values counted, as the shown rows changed. */
     private fun forgetValues() {
         counting?.cancel()
         counted.clear()
@@ -510,8 +514,8 @@ class TemplatesPanel(
             .filter { it.isNotEmpty() }
 
     /**
-     * The menu of the selected templates; on [variable] (a template and its variable, whose values are counted), it
-     * first offers to show only or hide one of its most frequent values.
+     * Shows the menu of the selected templates. Opened on [variable], a template and the number of one of its
+     * variables, whose values are counted, it first offers to show only or hide one of its most frequent values.
      */
     private fun showMenu(x: Int, y: Int, variable: Pair<String, Int>?) {
         val templates = selectedTemplates()
@@ -639,7 +643,7 @@ class TemplatesPanel(
 
         fun levelAt(column: Int): Level? = levels.getOrNull(column - 1)
 
-        /** Null for the records over the template limit. */
+        /** The template of [row]; null for the row of the records over the template limit. */
         fun template(row: Int): String? = counts?.templates?.get(row)
 
         override fun getRowCount() = counts?.size ?: 0

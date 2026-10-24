@@ -23,14 +23,17 @@ import java.util.zip.GZIPInputStream
  */
 class CompressedSpool(val root: Path) {
 
-    /** Where a decompressed file came from; written as just the [source] path, which opens decompressed again. */
+    /**
+     * Where a decompressed file came from. Its `toString` is just the [source] path, as opening that path
+     * decompresses the file again.
+     */
     data class Origin(val source: Path, val format: Format) : ArchiveOrigin {
         override val container: Path get() = source
         override val entry: String get() = ""
         override fun toString() = source.toString()
     }
 
-    /** A compression format a single file can be in, and the file name [extension] that tells it. */
+    /** A compression format a single file can be in, and the [extension] the names of such files end with. */
     enum class Format(val extension: String) {
         GZIP(".gz"),
         ZSTD(".zst"),
@@ -44,9 +47,9 @@ class CompressedSpool(val root: Path) {
     fun originOf(path: Path): Origin? = origins[path.toAbsolutePath().normalize()]
 
     /**
-     * The decompressed content of [source], decompressing it first if needed and telling [progress] the
-     * fraction done (on the decompressing thread). Cancelling the calling coroutine stops it and removes
-     * what was written.
+     * The file holding the decompressed content of [source], decompressing it first if needed. Tells
+     * [progress] the fraction done, from 0 to 1, on the decompressing thread. Cancelling the calling coroutine
+     * stops the decompression and removes what it wrote.
      */
     suspend fun decompress(source: Path, format: Format, progress: (Double) -> Unit = {}): Path = lock.withLock {
         withContext(Dispatchers.IO) {
@@ -58,7 +61,8 @@ class CompressedSpool(val root: Path) {
             val target = base.resolve(absolute.fileName.toString().removeSuffix(format.extension))
             try {
                 write(absolute, target, format, attributes.size(), progress)
-                // The source's time, else a file written just now would count as live and be followed.
+                // Gives the output the source's modification time: a file written just now would count as
+                // live and be followed.
                 Files.setLastModifiedTime(target, attributes.lastModifiedTime())
                 origins[target] = Origin(absolute, format)
                 decompressed[key] = target
@@ -93,7 +97,7 @@ class CompressedSpool(val root: Path) {
     }
 
     companion object {
-        /** Bytes of a file's start [formatOf] needs. */
+        /** How many bytes from the start of a file [formatOf] needs to tell its format. */
         const val HEADER_BYTES = 4
 
         private const val BUFFER_SIZE = 1024 * 1024

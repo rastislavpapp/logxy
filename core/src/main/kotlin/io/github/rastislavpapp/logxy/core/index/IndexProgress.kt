@@ -21,7 +21,10 @@ class IndexProgress {
         done.addAndGet(bytes)
     }
 
-    /** Starts counting from zero again, when a parse starts over (a dictionary column turned out mostly distinct). */
+    /**
+     * Starts counting from zero again, for when a parse starts over, e.g. because a dictionary column turned out
+     * to hold mostly distinct values.
+     */
     internal fun reset() {
         done.set(0)
     }

@@ -16,12 +16,12 @@ import java.io.IOException
 
 /** What a [PreparedCopy] got. */
 sealed interface CopyResult {
-    /** The text, one line per row (a record of several lines takes several). */
+    /** The text, one line per row; a record of several lines takes as many. */
     data class Copied(val text: String) : CopyResult
 
     /**
-     * Nothing was copied: the [rows] take [bytes] in the files, more than the copy's limit; a column copy stops
-     * where it went over, so its [bytes] are the characters copied by then.
+     * Nothing was copied, as the [rows] take [bytes] in the files, more than the copy's limit. A column copy stops
+     * where it went over the limit, so for it [bytes] counts the characters copied by then.
      */
     data class TooLarge(val rows: Int, val bytes: Long) : CopyResult
 
@@ -209,7 +209,8 @@ class ShownLog internal constructor(private val loaded: LoadedLog) {
     }
 
     /**
-     * Copies [rows] (below [size]) as their records are written in the files, each starting on a line of its own.
+     * Copies [rows], all below [size], as their records are written in the files, each starting on a line of its
+     * own.
      * Rows taking more than [limit] bytes there are refused before any is read.
      */
     fun copyRows(rows: RowRanges, limit: Long): PreparedCopy {
@@ -223,7 +224,7 @@ class ShownLog internal constructor(private val loaded: LoadedLog) {
     }
 
     /**
-     * Copies [field] of [rows] (below [size]), or of every row if null, one value per line. Stops once the text
+     * Copies [field] of [rows], all below [size], or of every row if null, one value per line. Stops once the text
      * takes more than [limit] characters.
      */
     fun copyColumn(field: Int, limit: Long, rows: RowRanges? = null): PreparedCopy {
@@ -298,8 +299,8 @@ class ShownLog internal constructor(private val loaded: LoadedLog) {
     }
 
     /**
-     * Copies the records of the rows in [ranges]: the rows themselves, or for a filter's result, [records] from
-     * row [firstRow] on.
+     * Copies the records of the rows in [ranges]. While all records are shown, a row is its record; for a filter's
+     * result, [records] holds the records of the rows from [firstRow] on.
      */
     private inner class RowsCopy(
         private val ranges: RowRanges,
@@ -368,13 +369,19 @@ class ShownLog internal constructor(private val loaded: LoadedLog) {
         }
     }
 
-    /** The rows shown, null for all records, and how many; for passes over them on other threads. */
+    /**
+     * The records of the shown rows, or null while all records are shown; with [rowCount], for passes over them
+     * on other threads.
+     */
     internal val rowArray: IntArray? get() = rows?.array()
 
     /** The record count while all are shown, or the filter result's size; unlike [size], also once [ended]. */
     internal val rowCount: Int get() = rows?.size ?: records.recordCount
 
-    /** Shows [rows] (sorted records), or all records if null; returns the record each row showed before. */
+    /**
+     * Shows [rows], sorted record numbers, or all records if null. Returns a function that gives, for a row, the
+     * record it showed before.
+     */
     internal fun showRows(rows: IntArray?): (row: Int) -> Int {
         val old = this.rows
         this.rows = rows?.let(::FilteredRows)
@@ -387,7 +394,7 @@ class ShownLog internal constructor(private val loaded: LoadedLog) {
      */
     internal fun replaceRowsFrom(from: Int, rows: IntArray): Int = this.rows!!.replaceFrom(from, rows)
 
-    /** Shows the records a search over all rows found (sorted); it is done. */
+    /** Shows [records], sorted, as what a search over all rows found; the search is done. */
     internal fun showFound(records: IntArray) {
         found = FilteredRows(records)
         foundSoFar = null
@@ -424,7 +431,7 @@ class ShownLog internal constructor(private val loaded: LoadedLog) {
     /** The found records as a limit for a stricter search, trusted below record [upTo]. */
     internal fun narrowing(upTo: Int) = Narrowing(found.array(), found.size, upTo)
 
-    /** Replaces the found records from record [from] on with [records] (sorted, all `>= from`). */
+    /** Replaces the found records from record [from] on with [records], which are sorted and all `>= from`. */
     internal fun replaceFoundFrom(from: Int, records: IntArray) {
         found.replaceFrom(from, records)
     }
@@ -441,7 +448,7 @@ class ShownLog internal constructor(private val loaded: LoadedLog) {
     }
 
     internal companion object {
-        /** Rows without a time looked past for one. */
+        /** How many rows without a time are looked past for one with a time. */
         const val UNTIMED_ROWS = 1000
 
         private const val CANCEL_CHECK_ROWS = 4096
@@ -459,7 +466,10 @@ private object EndedCopy : PreparedCopy {
     override val progress = 1.0
 }
 
-/** How many of [bytes] (UTF-8) end before a character that does not fit in them. */
+/**
+ * How many of the UTF-8 [bytes] hold whole characters: all of them, or fewer if the last character is cut off at
+ * the end of the array.
+ */
 private fun wholeCharacters(bytes: ByteArray): Int {
     // The last character's first byte: the last byte that is not a continuation byte (10xxxxxx).
     var first = bytes.size - 1

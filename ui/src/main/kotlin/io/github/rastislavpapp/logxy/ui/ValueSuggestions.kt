@@ -18,7 +18,7 @@ import javax.swing.UIManager
 import javax.swing.event.DocumentEvent
 import javax.swing.event.DocumentListener
 
-/** Values listed at most, so the list stays short. */
+/** The most values the list shows, so it stays short. */
 private const val MAX_SUGGESTIONS = 10
 
 /**

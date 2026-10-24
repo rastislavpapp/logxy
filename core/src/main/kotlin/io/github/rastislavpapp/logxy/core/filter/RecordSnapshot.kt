@@ -35,7 +35,7 @@ internal abstract class RecordSnapshot(
      */
     open fun formatTimestamp(field: Int, nanos: Long): String = nanos.toString()
 
-    /** Walks records, cheapest in increasing order; one per thread. */
+    /** A new cursor over the records, for one thread; moving it through them in increasing order is cheapest. */
     abstract fun cursor(): RecordCursor
 
     /** [length] bytes of the file from [position]; fewer if the file ends before. */
@@ -58,8 +58,8 @@ internal abstract class RecordSnapshot(
  */
 internal interface RecordCursor {
     /**
-     * Makes [record], below the snapshot's count, the current one; the next record or a later one in the same
-     * segment is cheapest.
+     * Makes [record] the current one; it must be below the snapshot's count. Moving to the next record, or to a
+     * later one in the same segment, is cheapest.
      */
     fun moveTo(record: Int)
 
@@ -84,7 +84,10 @@ internal interface RecordCursor {
     /** Where SPAN [field]'s value starts, relative to [start]. */
     fun spanStart(field: Int): Int
 
-    /** [Columns.ABSENT_LENGTH], [Columns.TO_RECORD_END], or a length. */
+    /**
+     * The length in bytes of SPAN [field]'s value; [Columns.ABSENT_LENGTH] if the record has none, or
+     * [Columns.TO_RECORD_END] if the value runs to the end of the record.
+     */
     fun spanLength(field: Int): Int
 }
 

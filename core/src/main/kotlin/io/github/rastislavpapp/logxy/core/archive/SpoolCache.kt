@@ -4,7 +4,10 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.security.MessageDigest
 
-/** What [ZipSpool] and [CompressedSpool] share: a folder per process, and one per version of a source in it. */
+/**
+ * The folders [ZipSpool] and [CompressedSpool] write to: one folder per running process, holding one folder
+ * per version of each zip or compressed file.
+ */
 object SpoolCache {
 
     /** Short hash for a cache key (e.g. path + size + mtime). */
@@ -18,8 +21,8 @@ object SpoolCache {
     }
 
     /**
-     * The folder in [cache] for this process's spool, deleted when the JVM exits; deletes the folders of
-     * processes no longer running, e.g. after a crash.
+     * The folder in [cache] for this process's spool, deleted when the JVM exits. First deletes the spool
+     * folders of processes no longer running, e.g. after a crash.
      */
     fun createProcessSpool(cache: Path, directoryPrefix: String): Path {
         runCatching {

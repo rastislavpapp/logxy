@@ -33,7 +33,9 @@ class FileSnapshot(
 ) {
 
     /**
-     * Change from this snapshot, taken when [indexedSize] bytes were indexed, to [current].
+     * How the file changed from this snapshot to [current], a later snapshot of the same path, or null if the
+     * file is gone. [indexedSize] is how many bytes of the file were indexed.
+     *
      * Windows may give a file created under a just-renamed name the old creation time ("tunneling"),
      * so the identity alone does not catch rotation there; the first bytes almost always differ.
      */

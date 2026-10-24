@@ -102,7 +102,7 @@ private class Day(val start: Long) {
 
     private fun bump(x: Double, center: Double, width: Double) = exp(-((x - center) / width).let { it * it })
 
-    /** Where the service was down, the time logging starts again. */
+    /** If the service was down at [time], the time logging starts again; else null. */
     fun gapEnd(time: Long): Long? = if (time in restart) restart.last + 1 else null
 
     fun errorShare(time: Long): Double = when (time) {

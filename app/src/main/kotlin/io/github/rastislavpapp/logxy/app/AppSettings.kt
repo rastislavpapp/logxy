@@ -6,7 +6,7 @@ import org.slf4j.LoggerFactory
 import java.awt.Component
 import javax.swing.JOptionPane
 
-/** The settings in use, loaded at startup; listeners hear about saved changes. Used on the EDT only. */
+/** The settings in use, loaded at startup; listeners are told of saved changes. Used on the EDT only. */
 object AppSettings : WritableSettings {
 
     private val log = LoggerFactory.getLogger(AppSettings::class.java)

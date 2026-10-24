@@ -115,10 +115,11 @@ object Templates {
     private val NUMBERED = Regex("""\{\d+}""")
 
     /**
-     * The value at [variable] (counted as [variableCount] does) of the template of the text `bytes[from, to)`: the
-     * number its word starts with, as in `12` of `12ms`; NaN if the variable is missing, a literal `{}`, or its word
-     * does not start with a number or has more digits after it (`10.0.3.17`, `0x1F`, `3fa9c1d2e5`). [out] and
-     * [places] are scratch space, at least [OUT_SIZE] and [PLACES_SIZE] long.
+     * The number that the variable value at template variable [variable] of the text `bytes[from, to)` starts
+     * with, e.g. 12 for `12ms`. [variable] counts from 0, from the left, as [variableCount] counts. NaN if there is
+     * no such variable, it is a literal `{}`, or its value does not start with a number or has more digits after
+     * it (`10.0.3.17`, `0x1F`, `3fa9c1d2e5`). [out] and [places] are scratch space, at least [OUT_SIZE] and
+     * [PLACES_SIZE] long.
      */
     fun variableNumber(bytes: ByteArray, from: Int, to: Int, variable: Int, out: ByteArray, places: IntArray): Double {
         var number = Double.NaN
@@ -129,7 +130,10 @@ object Templates {
         return number
     }
 
-    /** [variableNumber] of each of [variables], masking once, written into [into] from [at]. */
+    /**
+     * [variableNumber] for each of [variables], masking the text only once. The numbers are written into [into]
+     * from index [at] on, in the order of [variables].
+     */
     fun variableNumbers(
         bytes: ByteArray,
         from: Int,
@@ -157,8 +161,8 @@ object Templates {
     }
 
     /**
-     * The variable (counted as [variableCount] does) whose word in [text] holds the character at [offset]; -1 if
-     * none.
+     * The template variable, counted from 0 as [variableCount] counts, whose variable value in [text] holds the
+     * character at [offset]; -1 if none.
      */
     fun variableAt(text: String, offset: Int): Int {
         if (offset !in text.indices) return -1
@@ -173,8 +177,8 @@ object Templates {
     }
 
     /**
-     * The word of [text] at [variable], as the template leaves it out; null if there is no such variable or it is
-     * literal.
+     * The variable value of [text] at template variable [variable], counted from 0, which the template replaces
+     * with `{}`; null if there is no such variable or it is a literal `{}`.
      */
     fun variableWord(text: String, variable: Int): String? {
         val bytes = text.toByteArray(Charsets.UTF_8)
@@ -187,9 +191,9 @@ object Templates {
     }
 
     /**
-     * Where the word at [variable] of the template of the text `bytes[from, to)` starts and ends in [bytes], packed
-     * as `start shl 32 or end`; -1 if there is no such variable or it is a literal `{}`. [out] and [places] are
-     * scratch space as for [variableNumber].
+     * Where the variable value at template variable [variable] of the text `bytes[from, to)` starts and ends in
+     * [bytes], packed as `start shl 32 or end`; -1 if there is no such variable or it is a literal `{}`. [out] and
+     * [places] are scratch space as for [variableNumber].
      */
     fun variableRange(bytes: ByteArray, from: Int, to: Int, variable: Int, out: ByteArray, places: IntArray): Long {
         var range = -1L
@@ -202,7 +206,7 @@ object Templates {
 
     /**
      * Masks the text `bytes[from, to)`, then calls [visit] with each variable of its template in turn and where the
-     * variable's word starts and ends in [bytes] (both -1 for a literal `{}`), until it returns true.
+     * variable value starts and ends in [bytes] (both -1 for a literal `{}`), until [visit] returns true.
      */
     private inline fun forEachVariable(
         bytes: ByteArray,

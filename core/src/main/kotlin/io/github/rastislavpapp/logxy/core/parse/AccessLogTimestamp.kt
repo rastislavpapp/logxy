@@ -32,8 +32,8 @@ internal class AccessLogTimestamp {
     }
 
     /**
-     * Epoch seconds of the minute `dd/MMM/yyyy:HH:mm` at [from] in the offset that ends the timestamp; MIN_VALUE
-     * if invalid.
+     * The epoch second of the minute `dd/MMM/yyyy:HH:mm` at [from], read in the UTC offset that ends the
+     * timestamp, e.g. `+0200`; Long.MIN_VALUE if either is invalid.
      */
     private fun minuteSeconds(bytes: ByteArray, from: Int): Long {
         if (bytes[from + 2] != SLASH || bytes[from + 6] != SLASH) return Long.MIN_VALUE

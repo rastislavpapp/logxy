@@ -81,7 +81,10 @@ internal object VectorNewlineSearch : NewlineSearch {
         return -1
     }
 
-    /** The whole of [buffer], heap or direct, whatever its position and limit: segment offsets are buffer indexes. */
+    /**
+     * The whole of [buffer], heap or direct, ignoring its position and limit, so that offsets in the segment are
+     * indexes in the buffer.
+     */
     private fun wholeSegment(buffer: ByteBuffer): MemorySegment {
         if (!buffer.hasArray()) return MemorySegment.ofBuffer(buffer.duplicate().clear())
         val array = MemorySegment.ofArray(buffer.array())

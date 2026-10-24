@@ -17,9 +17,9 @@ class VariableValues internal constructor(
     private val counts: IntArray,
     /** Rows of the template counted, with a value or without (a literal `{}`). */
     val records: Int,
-    /** Rows whose value came after the limit of different values, so is not among [values]. */
+    /** Rows whose value was first seen once the limit of different values was reached, so it is not in [values]. */
     val other: Int,
-    /** Values that start with a number, and the [min], [max] and [average] of those numbers; NaN if none do. */
+    /** How many values start with a number; [min], [max] and [average] are of those numbers, NaN if none do. */
     val numbers: Int,
     val min: Double,
     val max: Double,
@@ -33,10 +33,11 @@ class VariableValues internal constructor(
         const val MAX_VALUES = 100_000
 
         /**
-         * Counts the values at [variable] (from 0) of [rowCount] rows (`rows[i]`, or `i` if [rows] is null) whose
-         * template is [template]: each a record of the log that [origin] tells (the first if null), whose snapshot
-         * and index are at that position in [snapshots] and [indexes]. Indexes are updated first. Values first seen
-         * after [maxValues] different ones count as [other].
+         * Counts the variable values at template variable [variable], counted from 0, of those of the first
+         * [rowCount] rows whose template is [template]. Row i is `rows[i]`, or i if [rows] is null. [origin] tells
+         * which log each row is a record of, and which record; without it, row r is record r of the first log. A
+         * log's snapshot and index are at its position in [snapshots] and [indexes]. Updates the indexes first.
+         * Values first seen after [maxValues] different ones count as [other].
          */
         suspend fun count(
             indexes: List<TemplateIndex>,

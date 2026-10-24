@@ -22,11 +22,12 @@ import io.github.rastislavpapp.logxy.ui.LogTab
 import javax.swing.Icon
 import javax.swing.JComponent
 
-// The actions of the logxy view. The switch is in every run tab's top toolbar, beside Rerun and Stop; the parser and
-// the status at the right end of a run or debug tab's top row. Each acts on its tab's view; a tab without one, e.g. of
-// a run started before the plugin, hides them. The others are beside the view: in a run tab, in the place of
-// the console's toolbar, which acts on the hidden console, whose context does not reach the view; in a debug tab, as
-// the view's sub-tab's own. Made for one view each.
+// The actions of the logxy view. The Console | logxy switch is in every run tab's top toolbar, beside Rerun and Stop;
+// the parser and the status are at the right end of a run or debug tab's top row. Each of those acts on its tab's
+// view, and a tab without one, e.g. of a run started before the plugin was loaded, hides them. The other actions sit
+// beside the view. In a run tab they take the place of the console's toolbar, which acts on the hidden console, and
+// the console's context does not reach the view. In a debug tab they are the toolbar of the view's own sub-tab.
+// Each view gets a set of these actions of its own.
 
 private val AnActionEvent.handler
     get() = getData(LangDataKeys.RUN_CONTENT_DESCRIPTOR)?.processHandler
@@ -70,8 +71,8 @@ class ShowConsole : ViewSwitch(logxy = false)
 class ShowLogxy : ViewSwitch(logxy = true)
 
 /**
- * A button with a drop-down arrow that opens one of the view's own menus under itself: a group to the toolbar, so it
- * gets the arrow, which runs [showMenu] instead of listing children.
+ * A button with a drop-down arrow that opens one of the view's own menus under itself. To the toolbar it is an action
+ * group, so that it gets the arrow, but clicking it runs [showMenu] instead of listing children.
  */
 abstract class MenuButton : ActionGroup(), DumbAware {
     init {
@@ -211,8 +212,8 @@ private class ClearRun(private val view: RunLogView) :
 }
 
 /**
- * Shows or hides [part] of the view; the choice holds for all runs. Disabled while [unavailable] tells why, which
- * then stands for the description.
+ * Shows or hides [part] of the view; the choice holds for all runs. Disabled while [unavailable] gives a reason,
+ * which then replaces the description.
  */
 private class PartToggle(
     private val view: RunLogView,
@@ -240,7 +241,7 @@ private class PartToggle(
     override fun getActionUpdateThread() = ActionUpdateThread.EDT
 }
 
-/** Icons the IDE has none like. */
+/** Icons for which the IDE has none of its own. */
 object LogxyIcons {
     /** Bars of counts over time. */
     val histogram: Icon = IconLoader.getIcon("/icons/histogram.svg", LogxyIcons::class.java)

@@ -263,10 +263,10 @@ class MainFrame : JFrame("logxy") {
     }
 
     /**
-     * Opens [paths], folders as the log files in them, zip files as the files in them, and compressed
-     * files (.gz, .zst) as their decompressed content: a single file into a tab if none is open;
-     * otherwise the user chooses between merging them, with the current tab or into a new one,
-     * and tabs of their own.
+     * Opens [paths]: folders as the log files in them, zip files as the files in them, and compressed
+     * files (.gz, .zst) as their decompressed content. A single file opens in a tab if no tab is open;
+     * otherwise the user chooses between merging them, with the current tab's files or in a new tab,
+     * and opening them in tabs of their own.
      */
     fun openFiles(paths: List<Path>) {
         val previous = opening
@@ -424,8 +424,8 @@ class MainFrame : JFrame("logxy") {
     }
 
     /**
-     * Opens a tab for each of [restored]'s sessions with its parsers and filter, its paths read with [path], then
-     * selects one.
+     * Opens a tab for each of [restored]'s sessions with its parsers and filter, then selects the tab [restored]
+     * names. [path] turns each path as written in the arguments into the file to open.
      */
     private fun openRestored(restored: Reopen, path: (String) -> Path) {
         val sessions = restored.sessions.map { session ->

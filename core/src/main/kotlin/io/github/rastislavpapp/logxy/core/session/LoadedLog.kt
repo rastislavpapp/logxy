@@ -47,8 +47,9 @@ internal interface LoadedLog {
     fun templateOf(record: Int): String
 
     /**
-     * Reads [field] of the [count] records in [records] (null: the first [count]) by their index there.
-     * Created on the owner thread; the reader runs on any thread.
+     * A reader of [field] in [count] records: given an index i, it returns the field's text in record
+     * `records[i]`, or in record i if [records] is null. Created on the owner thread; the reader itself may run
+     * on any thread.
      */
     fun fieldReader(field: Int, records: IntArray?, count: Int): (Int) -> String
 
@@ -58,7 +59,7 @@ internal interface LoadedLog {
     /** Applies [data] appended to [part]; returns the record that may have more text now, -1 if none. */
     fun append(part: Int, data: AppendedData): Int
 
-    /** Shows what the parts got by [append] since the last time. */
+    /** Takes in what the parts got by [append] since the last call, so that [records] has it. */
     suspend fun settle(): Appended
 }
 

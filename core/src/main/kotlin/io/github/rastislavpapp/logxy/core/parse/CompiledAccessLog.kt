@@ -114,7 +114,7 @@ class CompiledAccessLog(private val zone: ZoneId = ZoneId.systemDefault()) : Com
             ends[field] = to
         }
 
-        /** The method that starts the request, if it is one: uppercase letters and a space. */
+        /** Notes the method that starts the request, if it starts with one: uppercase letters followed by a space. */
         private fun method() {
             val from = starts[REQUEST]
             val to = ends[REQUEST]

@@ -25,7 +25,10 @@ import kotlin.math.floor
 import kotlin.math.log10
 import kotlin.math.pow
 
-/** Histogram slices per slice of the charts: a percentile of the few records in one would be mostly noise. */
+/**
+ * How many histogram slices make one slice of the charts: a percentile of the few records in a single histogram slice
+ * would be mostly noise.
+ */
 private const val CHART_GROUP = 4
 
 /** The plot is this many times as tall as the histogram, at least. */
@@ -43,18 +46,18 @@ private const val DOT_SIZE = 6f
 private const val MAX_BELOW_ZERO = 0.5
 
 /**
- * The variables charted in [charts], over the times of [timeline] at this plot's width (the histogram bar's slicing,
- * so the two line up when both show, also while the bar is hidden), in one plot: per chart a line of its
+ * The variables charted in [charts], in one plot over the times of [timeline] at this plot's width. Those are the
+ * histogram bar's times, so the two line up when both show, also while the bar is hidden. Each chart is a line of its
  * [VariableChart.metric] per slice of [CHART_GROUP] histogram slices. Each line has its own scale, as their units
- * differ, and all have 0 on one shared line; the left edge labels each scale's ends in its chart's color. A legend
- * over the plot's top switches a chart's metric (its label) or closes it (×); a × at its right end closes all,
- * as does the context menu, which also closes them one by one.
+ * differ, and all have 0 on one shared line; the left edge labels the ends of each scale in its chart's color. A
+ * legend over the top of the plot switches a chart's metric (click its label) or closes it (its ×). A × at the
+ * legend's right end closes all charts, as does the context menu, which also closes them one by one.
  *
  * At the [pointer]'s time, set while the mouse is over this plot or the histogram, a line crosses the plot with each
- * chart's value there beside it; [onPointer] hears where the mouse points here. Clicking calls [onJumpToRecord] with
- * the record whose value is closest to the nearest line's point there, or [onJump] with the time if no line has one.
- * Dragging selects whole slices of the histogram, as dragging there does: [onDragged] hears the times while
- * dragging, [onRange] once dropped.
+ * chart's value there beside it; [onPointer] is told where the mouse points on this plot. Clicking calls
+ * [onJumpToRecord] with the record whose value is closest to the nearest line's point there, or [onJump] with the
+ * time if no line has one. Dragging selects whole slices of the histogram, as dragging there does: [onDragged] is
+ * told the times while dragging, [onRange] once dropped.
  */
 class VariableChartPanel(
     private val charts: VariableCharts,
@@ -65,7 +68,7 @@ class VariableChartPanel(
     var onJump: (time: Long) -> Unit = {}
     var onJumpToRecord: (record: Int) -> Unit = {}
 
-    /** From [from] to [to], exclusive. */
+    /** Called with the times dragged over, from `from` to `to`, exclusive. */
     var onRange: (from: Long, to: Long) -> Unit = { _, _ -> }
 
     /** The times being dragged over, or null once dropped. */
@@ -123,7 +126,10 @@ class VariableChartPanel(
     /** The lines as last painted, for the pointer and clicks. */
     private val lines = mutableListOf<Line>()
 
-    /** A label, which switches [chart]'s metric, or a close mark: of [chart], or of all charts if that is null. */
+    /**
+     * Where a legend entry was painted: a label, which switches [chart]'s metric, or, if [closes], a close mark,
+     * which closes [chart], or all charts if [chart] is null.
+     */
     private class LegendEntry(val bounds: Rectangle, val chart: VariableChart?, val closes: Boolean)
 
     /** [chart]'s [values] of [slices] as painted: [zeroY] where 0 is, [scale] pixels per unit. */
@@ -308,9 +314,9 @@ class VariableChartPanel(
     }
 
     /**
-     * Over the top of the plot, right of the [scaleLabels] pixels the scales' top labels take at the left edge: per
-     * chart its color, metric and label, and a ×; on the background, so lines do not hide it. Labels are cut shorter
-     * until the row fits beside the × at its right end, which closes all.
+     * Paints the legend over the top of the plot, right of the [scaleLabels] pixels the scales' top labels take at the
+     * left edge: for each chart its color, metric and label, and a ×. It goes on the background, so lines do not hide
+     * it. Labels are cut shorter until the row fits beside the × at its right end, which closes all charts.
      */
     private fun paintLegend(g2: Graphics2D, scaleLabels: Int) {
         legend.clear()
@@ -378,9 +384,9 @@ class VariableChartPanel(
     }
 
     /**
-     * Each chart's line on its own scale, with 0 on one line for all: as far up as the chart reaching furthest below
-     * 0 needs, at most [MAX_BELOW_ZERO] of the way while some line is above. Its ends are labeled at the left; returns
-     * how wide the labels at the top are, in pixels from the left edge.
+     * Paints each chart's line on its own scale, with 0 at one height for all: as high up the plot as the chart
+     * reaching furthest below 0 needs, but at most [MAX_BELOW_ZERO] of the way while some line is above 0. Labels the
+     * ends of each scale at the left edge, and returns how wide the labels at the top are, in pixels from that edge.
      */
     private fun paintLines(g2: Graphics2D, timeline: Timeline): Int {
         val (from, sliceWidth, count) = slicing(timeline)

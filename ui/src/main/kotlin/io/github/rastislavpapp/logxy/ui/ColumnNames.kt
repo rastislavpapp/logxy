@@ -3,7 +3,7 @@ package io.github.rastislavpapp.logxy.ui
 import io.github.rastislavpapp.logxy.core.log.Field
 
 /**
- * The names the columns show: a rename for this view only, else the alias saved with the parser, else the field's
+ * The names the columns show: a rename for this table only, else the alias saved with the parser, else the field's
  * own name. Filters keep using the fields' own names. Used on the EDT only.
  */
 class ColumnNames {
@@ -18,12 +18,12 @@ class ColumnNames {
 
     fun of(field: String): String = renamed[field] ?: saved[field] ?: field
 
-    /** Shows [field] as [name] in this view only. */
+    /** Shows [field] as [name] in this table only. */
     fun rename(field: String, name: String) {
         renamed[field] = name
     }
 
-    /** Shows [field] as [name] in [saved], ready to be saved with the parser; drops its rename for this view. */
+    /** Shows [field] as [name] in [saved], ready to be saved with the parser; drops its rename for this table. */
     fun renameSaved(field: String, name: String) {
         renamed -= field
         saved = if (name == field) saved - field else saved + (field to name)

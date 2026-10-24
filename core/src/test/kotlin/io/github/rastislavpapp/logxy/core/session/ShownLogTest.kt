@@ -75,7 +75,7 @@ class ShownLogTest {
         assertTrue(shown.isFiltered)
         assertEquals(listOf(1, 3), shown.records())
         assertEquals(1, shown.rowOf(3))
-        // A record the filter hides: the row of the next one shown.
+        // For a record the filter hides, rowOf gives the row of the next record shown.
         assertEquals(1, shown.rowOf(2))
         assertEquals(-1, shown.rowOf(4))
 

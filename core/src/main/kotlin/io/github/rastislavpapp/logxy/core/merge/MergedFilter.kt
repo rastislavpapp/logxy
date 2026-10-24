@@ -67,7 +67,10 @@ class MergedFilter(private val log: MergedLog) : RecordFilter {
         }
     }
 
-    /** [within], whose merged positions are sorted, as one narrowing per part, on the part's own records. */
+    /**
+     * Splits [within], whose records are sorted merged positions, into one narrowing per part, over that part's
+     * own record numbers.
+     */
     private fun partNarrowings(within: Narrowing): List<Narrowing> {
         val sizes = IntArray(log.parts.size)
         for (i in 0..<within.size) {
@@ -165,7 +168,8 @@ class MergedFilter(private val log: MergedLog) : RecordFilter {
                 sourceCondition(filter, log.names[part])
             } else {
                 val partField = if (field < 0) -1 else log.partField(part, field)
-                // A field the part lacks is absent in all its records; the engine treats unknown names so.
+                // A field the part lacks is absent in all its records. The engine treats a field name its log
+                // lacks that way, so the condition gets a name no log has.
                 renamed(filter, if (partField < 0) MISSING_FIELD else log.parts[part].schema.fields[partField].name)
             }
         }

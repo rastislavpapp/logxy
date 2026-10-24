@@ -11,7 +11,10 @@ import java.util.Properties
 /** A named filter: the minimum level (null for all) and the query text. */
 data class SavedFilter(val name: String, val minimumLevel: Level?, val query: String)
 
-/** How to open files: into the current tab's merge, merged with it in a new tab, merged on their own, or a tab each. */
+/**
+ * How to open files: added to the current tab's session, merged with that session's files in a new tab,
+ * merged with each other in a new tab, or in a tab each.
+ */
 enum class OpenMode(val key: String) {
     MERGE_INTO_CURRENT("merge-into-current"),
     MERGE_WITH_CURRENT_IN_NEW("merge-with-current"),
@@ -20,9 +23,13 @@ enum class OpenMode(val key: String) {
 }
 
 /**
- * The user's saved parsers, level names, filters, how to open files without asking ([openMode], null to ask)
- * and whether opened folders include their subfolders, and the names of the built-in parsers the user deleted.
- * The memory limit is not here but in [VmOptions], as the launcher reads it.
+ * What the user set up and saved:
+ * - their own parsers, level names and saved filters;
+ * - [openMode], how to open files without asking, or null to ask each time;
+ * - whether opened folders include their subfolders;
+ * - [deletedBuiltIns], the names of the built-in parsers they deleted.
+ *
+ * The memory limit is not here but in [VmOptions], as the launcher reads it from there.
  */
 data class Settings(
     val parsers: List<Parser> = emptyList(),
@@ -53,8 +60,8 @@ data class Settings(
         fun defaultPath(): Path = directory().resolve("logxy.properties")
 
         /**
-         * For files that can be made again: `%LOCALAPPDATA%\logxy\cache` on Windows, `$XDG_CACHE_HOME/logxy` or
-         * `~/.cache/logxy` elsewhere.
+         * The folder for files that can be made again, such as extracted zips: `%LOCALAPPDATA%\logxy\cache` on
+         * Windows, `$XDG_CACHE_HOME/logxy` or `~/.cache/logxy` elsewhere.
          */
         fun cacheDirectory(): Path {
             val localAppData = System.getenv("LOCALAPPDATA")
@@ -115,7 +122,6 @@ data class Settings(
                 val level = Level.entries.firstOrNull { it.name == levelName }
                 SavedFilter(name, level, properties.getProperty("filter.$n.query").orEmpty())
             }
-            // Without the marker, level entries only add to the built-in names (as first released).
             val openModeKey = properties.getProperty("open.mode")
             val openMode = OpenMode.entries.firstOrNull { it.key == openModeKey }
             val includeSubfolders = properties.getProperty("open.subfolders") != "false"
@@ -123,6 +129,8 @@ data class Settings(
                 .mapNotNull { n -> properties.getProperty("deleted-built-in.$n.name")?.trim() }
                 .filter { it.isNotEmpty() }
                 .toSet()
+            // Without the `level-names=custom` marker, the level entries only add to the built-in names, as
+            // they did in the first release.
             val levelMapping = LevelMapping(if (custom) levels else Level.BUILT_IN_NAMES + levels)
             return Settings(parsers, levelMapping, filters, openMode, includeSubfolders, deletedBuiltIns)
         }

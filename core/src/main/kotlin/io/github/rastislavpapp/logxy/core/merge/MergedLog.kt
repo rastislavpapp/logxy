@@ -19,7 +19,7 @@ import java.nio.file.Path
  * Several logs as one, their records interleaved by timestamp. Each log keeps its own order: the merge
  * takes the earliest next record of any log, so a log's slightly out-of-order lines stay as written.
  * A record without timestamp counts as the time of the record before it. Records appended later are
- * merged among themselves and added at the end, so shown records never move.
+ * merged among themselves and added at the end, so records already shown never move.
  *
  * Every part must have a timestamp field. Not thread-safe, like [LogData]; filters read it through
  * [MergedFilter].
@@ -112,8 +112,9 @@ class MergedLog private constructor(
     override fun sourceText(record: Int): String = parts[part(record)].sourceText(record(record))
 
     /**
-     * Reads [field] of the [count] merged records in [records] (null: the first [count]) by their index there,
-     * on any thread. Call on the owner thread, which resolves where each record is.
+     * A reader of [field] in [count] merged records: given an index i, it returns the field's text in record
+     * `records[i]`, or in record i if [records] is null. Call this on the thread that owns the log, which
+     * resolves where each record is; the reader itself may run on any thread.
      */
     internal fun fieldReader(field: Int, records: IntArray?, count: Int): (Int) -> String {
         val recordParts = ByteArray(count) { partOf[records?.get(it) ?: it] }
@@ -139,7 +140,7 @@ class MergedLog private constructor(
      */
     suspend fun appendNew(): Boolean {
         if (parts.indices.any { parts[it].recordCount < mergedCount(it) }) return false
-        // A part shows a field now that its appended records are the first to have; fields keep their places.
+        // A part may now show a field that only its appended records have; the merged fields keep their places.
         if (parts.indices.any { parts[it].schema !== partSchemas[it] }) {
             partSchemas = parts.map { it.schema }
             merged = MergedSchema(partSchemas)
@@ -200,7 +201,7 @@ class MergedLog private constructor(
     }
 
     companion object {
-        /** Parts are stored as unsigned bytes. */
+        /** The most parts a merge can hold, as each record's part is stored in an unsigned byte. */
         const val MAX_PARTS = 255
 
         /**
@@ -236,11 +237,14 @@ class MergedLog private constructor(
             }
         }
 
-        /** A file's path: [zip] (empty if none) and the path in it, or the file's path. */
+        /**
+         * A file's path, split into names. For a file extracted from a zip, [zip] is the zip's path and [path]
+         * the file's path inside it; otherwise [zip] is empty and [path] is the file's path.
+         */
         private class Name(val zip: List<String>, val path: List<String>) {
             val depth get() = zip.size + path.size
 
-            /** The last [depth] parts, the zip's name always among them. */
+            /** The last [depth] names joined with `/`; the zip's own name is always among them. */
             fun shown(depth: Int): String {
                 if (zip.isEmpty()) return path.takeLast(depth).joinToString("/")
                 val inZip = path.takeLast(depth)

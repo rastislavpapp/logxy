@@ -99,9 +99,9 @@ class CompiledJson(
 }
 
 /**
- * Parses JSON timestamps: ISO-8601 text (`2026-10-01T08:00:00.123Z`, a space for the `T`, any number
- * of fraction digits, an offset or none, then [zone] applies), or epoch numbers. Caches the minute,
- * which consecutive records usually share.
+ * Parses JSON timestamps: ISO-8601 text such as `2026-10-01T08:00:00.123Z`, or epoch numbers. The text
+ * may have a space for the `T` and any number of fraction digits; without an offset, it is read in
+ * [zone]. Caches the minute, which consecutive records usually share.
  */
 internal class JsonTimestampParser(private val zone: ZoneId) {
     var nanos = 0L
@@ -180,7 +180,10 @@ internal class JsonTimestampParser(private val zone: ZoneId) {
         return cachedZonedMinute
     }
 
-    /** `Z`, `+HH`, `+HHMM` or `+HH:MM` making up all of `bytes[from, to)`; [NO_OFFSET] if it is none. */
+    /**
+     * The offset in seconds that all of `bytes[from, to)` writes as `Z`, `+HH`, `+HHMM` or `+HH:MM`;
+     * [NO_OFFSET] if it is none of those.
+     */
     private fun offsetSeconds(bytes: ByteArray, from: Int, to: Int): Long {
         val sign = bytes[from].toInt().toChar()
         if ((sign == 'Z' || sign == 'z') && to == from + 1) return 0

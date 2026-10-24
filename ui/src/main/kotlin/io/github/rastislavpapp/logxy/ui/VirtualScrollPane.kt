@@ -28,7 +28,10 @@ private const val EDGE_ROWS = 50_000
 private val UPWARD_KEYS = setOf(KeyEvent.VK_UP, KeyEvent.VK_KP_UP, KeyEvent.VK_PAGE_UP, KeyEvent.VK_HOME)
 private val DOWNWARD_KEYS = setOf(KeyEvent.VK_DOWN, KeyEvent.VK_KP_DOWN, KeyEvent.VK_PAGE_DOWN)
 
-/** A scroll pane's border round a table: not null, which a table replaces with the look's own, an outline. */
+/**
+ * An empty border for a scroll pane around a table. Not null: a table replaces a null border with the look's own, an
+ * outline.
+ */
 internal val NO_OUTLINE: Border = BorderFactory.createEmptyBorder()
 
 /** A table model that shows [WINDOW_ROWS] rows of a larger list, starting at [windowStart]. */
@@ -173,7 +176,7 @@ class VirtualScrollPane(private val table: JTable, private val window: RowWindow
         if (local in 0..<table.rowCount) table.selectionModel.setSelectionInterval(local, local)
     }
 
-    /** Scrolls the part [y] to [y] + [height] of [row] of the whole list into view, if it is not; e.g. a line of it. */
+    /** Scrolls the part of [row] of the whole list from [y] to [y] + [height], e.g. one line, into view if needed. */
     fun showInRow(row: Int, y: Int, height: Int) {
         scrollPane.validate()
         val local = row - window.windowStart
@@ -249,7 +252,8 @@ class VirtualScrollPane(private val table: JTable, private val window: RowWindow
         viewport.viewPosition = Point(0, y.coerceIn(0, maxY))
     }
 
-    // By pixels, a row's height per row turned, so the wheel also scrolls through a row taller than the view.
+    // Scrolls by pixels: each row's worth of wheel turn moves the view by rowHeight, so the wheel also scrolls
+    // through a row taller than the view.
     private fun onWheel(e: MouseWheelEvent) {
         val perNotch = if (e.scrollType == MouseWheelEvent.WHEEL_UNIT_SCROLL) e.scrollAmount else visibleRows
         val rows = e.preciseWheelRotation * perNotch + wheelRemainder

@@ -9,7 +9,7 @@ import io.github.rastislavpapp.logxy.core.log.Encoding
 import io.github.rastislavpapp.logxy.core.parse.Json
 import java.nio.channels.FileChannel
 
-/** Reads the templates of records' [field] (a message) from [snapshot]; one per thread. */
+/** Reads the message templates and variable values of the message [field] of records in [snapshot]; one per thread. */
 internal class MessageReader(private val snapshot: RecordSnapshot, private val field: Int, channel: FileChannel) {
     private val cursor = snapshot.cursor()
     private val type = snapshot.schema.fields.getOrNull(field)?.type
@@ -20,8 +20,8 @@ internal class MessageReader(private val snapshot: RecordSnapshot, private val f
     private val unescaped = if (json) ByteArray(READ_LIMIT) else null
 
     /**
-     * The numbers of each dictionary text at [numbersVariables], side by side, once read; many records share a
-     * text.
+     * For a DICT message, the numbers at the template variables [numbersVariables] of each dictionary text, side by
+     * side: those of text i start at `i * numbersVariables.size`. Each text is read once, as many records share it.
      */
     private var dictionaryNumbers = DoubleArray(0)
     private val numbersRead = if (type == ColumnType.DICT) BooleanArray(dictionary!!.size) else null
@@ -45,8 +45,9 @@ internal class MessageReader(private val snapshot: RecordSnapshot, private val f
     }
 
     /**
-     * Writes the values at [variables] of [record]'s message (see [Templates.variableNumbers]) into [into] from
-     * [at]; NaN where it has none. [out] and [places] are scratch space as that needs.
+     * Writes the numbers at the template variables [variables] of [record]'s message into [into], from index [at]
+     * on, as [Templates.variableNumbers] reads them; NaN where the message has none. [out] and [places] are
+     * scratch space for that call.
      */
     fun variableNumbers(
         record: Int,
@@ -85,18 +86,21 @@ internal class MessageReader(private val snapshot: RecordSnapshot, private val f
         }
     }
 
-    /** The word of each dictionary text at [wordsVariable], once read; [NO_WORD] where it has none. */
+    /**
+     * For a DICT message, the variable value of each dictionary text at template variable [wordsVariable], once
+     * read; [NO_WORD] where the text has none.
+     */
     private val dictionaryWords = if (type == ColumnType.DICT) arrayOfNulls<ByteArray>(dictionary!!.size) else null
     private var wordsVariable = -1
 
-    /** Hears of a word in `bytes[from, to)`; see [variableWord]. */
+    /** Receives a variable value, `bytes[from, to)`; see [variableWord]. */
     fun interface WordVisitor {
         fun visit(bytes: ByteArray, from: Int, to: Int)
     }
 
     /**
-     * Calls [visit] with the word at [variable] of [record]'s message, unless it has none there. [out] and [places]
-     * are scratch space as [Templates.variableRange] needs.
+     * Calls [visit] with the variable value at template variable [variable] of [record]'s message, unless it has
+     * none there. [out] and [places] are scratch space for [Templates.variableRange].
      */
     fun variableWord(record: Int, variable: Int, out: ByteArray, places: IntArray, visit: WordVisitor) {
         cursor.moveTo(record)
@@ -134,7 +138,7 @@ internal class MessageReader(private val snapshot: RecordSnapshot, private val f
         const val READ_LIMIT = Templates.MAX_BYTES * 6 + 2
         const val QUOTE = '"'.code.toByte()
 
-        /** Stands for a dictionary text without a word at the variable; compared by identity. */
+        /** Stands for a dictionary text without a value at the variable; compared by identity. */
         private val NO_WORD = ByteArray(0)
 
         /**

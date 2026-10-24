@@ -87,7 +87,10 @@ private const val FLOATING_RIGHT_GAP = 24
 
 private val EDGE = BottomEdge()
 
-/** Under the histogram when the time axis is not: as much room as above the chart, so it does not touch the line. */
+/**
+ * The edge under the histogram while the time axis is not under it: as much room as above the chart, so the chart
+ * does not touch the line.
+ */
 private val PADDED_EDGE = BottomEdge(HISTOGRAM_PADDING)
 
 /** The views around a [LogTab]'s rows, which the user can show and hide one by one where the host offers it. */
@@ -95,11 +98,12 @@ enum class LogPart { FILTER, HISTOGRAM, CHARTS, TEMPLATES }
 
 /**
  * One open file, or several merged: shows the records of its [LogSession], with the filter bar and, if the host has
- * one, the detail pane. [openFiles] opens dropped files; [openEach] opens files in tabs of their own. [filter]
- * is applied once the records are there. [origin] tells which files were extracted from zips or decompressed.
- * The [host] keeps the settings and gives what only the app or the plugin has. With [togglesParts], the
- * [shownParts] are shown or hidden as set; else the detail and the templates are tabs below the rows, which a divider
- * arrow hides.
+ * one, the detail pane.
+ *
+ * [openFiles] opens dropped files; [openEach] opens files in tabs of their own. [filter] is applied once the
+ * records are there. [origin] tells which files were extracted from zips or decompressed. The [host] keeps the
+ * settings and gives what only the app or the plugin has. With [togglesParts], the [shownParts] are shown or hidden
+ * as set; without it, the detail and the templates are tabs below the rows, which a divider arrow hides.
  */
 class LogTab(
     paths: List<Path>,
@@ -126,7 +130,7 @@ class LogTab(
     /** The files shown; for a merge, without those that turned out to have no timestamps. */
     val paths: List<Path> get() = session.paths
 
-    /** The (first) file. */
+    /** The file, or the first file of a merge. */
     val path: Path get() = session.paths.first()
 
     val isMerged get() = session.isMerged
@@ -137,7 +141,7 @@ class LogTab(
     /** Short names of [paths], as the merge's source column shows them. */
     val sourceNames: List<String> get() = session.sourceNames
 
-    /** Kept when the file is read again, as are the renames for this tab only. */
+    /** The names the columns show. They are kept when the file is read again, also those renamed for this tab only. */
     private val columnNames = ColumnNames()
 
     /**
@@ -299,7 +303,7 @@ class LogTab(
     /** The histogram above [rowsHolder]; null until the records are there. */
     private var rowsPanel: JComponent? = null
 
-    /** Where the charts' divider was dragged to; -1 until it is, for their own height. */
+    /** The charts' height, where the user dragged their divider to; -1 until then, so they take their own height. */
     private var chartHeight = -1
 
     private var search: TextSearch? = null
@@ -370,8 +374,8 @@ class LogTab(
     }
 
     /**
-     * Auto, raw text, the user's parsers (editable), the built-in ones; plus the parser in use if it is none of
-     * those.
+     * Shows the parser menu: Auto, raw text, the user's parsers (editable), the built-in ones, and the parser in use
+     * if it is none of those.
      */
     private fun showParsers(anchor: JComponent = parserButton) {
         if (isMerged) return showMergedParsers(anchor)
@@ -438,7 +442,7 @@ class LogTab(
         session.useParsers(chosen ?: return)
     }
 
-    /** Checks for the columns to show; the menu stays open while they are toggled. */
+    /** Shows a menu of checks for the columns to show; it stays open while they are toggled. */
     private fun showColumns(anchor: JComponent = columnsButton) {
         val model = model ?: return
         val popup = JPopupMenu()
@@ -710,15 +714,16 @@ class LogTab(
     private fun canChart() = histogramBar != null && model?.shown?.schema?.hasTemplates() == true
 
     /**
-     * The menu item that charts, or stops charting, [variable] of [template], whose value in the clicked record is
-     * [word]; null if variables cannot be charted, or the templates of the shown rows are not counted yet.
+     * The menu item that charts, or stops charting, template variable [variable] of [template]; [variableValue] is
+     * its value in the clicked record. Null if variables cannot be charted, or the templates of the shown rows are
+     * not counted yet.
      */
-    private fun chartItem(template: String, variable: Int, word: String): JMenuItem? {
+    private fun chartItem(template: String, variable: Int, variableValue: String): JMenuItem? {
         if (!canChart() || !templates.hasCounts) return null
-        val shown = word.cut(MAX_MENU_CHARS)
+        val shown = variableValue.cut(MAX_MENU_CHARS)
         val charted = variableCharts.chart(template, variable) != null
         return JMenuItem(if (charted) "Stop Charting “$shown”" else "Chart “$shown” Over Time").apply {
-            // Found to hold no number in any shown record.
+            // Disabled once the variable was found to hold no number in any shown record.
             isEnabled = variableCharts.canChart(template, variable)
             addActionListener { toggleChart(this@LogTab, variableCharts, template, variable) }
         }
@@ -1147,7 +1152,7 @@ class LogTab(
         val selected = if (lead in table.selection) model.recordAtIndexOrNull(lead) else null
         val current = selected ?: model.recordAtIndex(scrollPane.firstVisibleRow)
         val record = model.shown.nextFound(current, forward, inclusive || selected == null)
-        // A searched record between here and the match may still hold one: go once the search is sure.
+        // A record between here and the match that is not searched yet may still hold one: go once the search is sure.
         if (record == NOT_YET_FOUND) {
             pendingFind = forward to inclusive
             return
@@ -1402,7 +1407,7 @@ class LogTab(
         override fun histogramChanged() {
             showMarkedTimes()
             histogramBar?.repaint()
-            // Their times are the histogram's.
+            // The charts and the time axis use the histogram's times.
             chartPanel?.repaint()
             timeAxis?.repaint()
         }

@@ -59,7 +59,10 @@ class RowRanges {
         }
     }
 
-    /** Makes room for [count] new rows at [at]: rows from [at] on move down by [count]; the new rows are not added. */
+    /**
+     * Makes room for [count] new rows at [at]. The rows from [at] on move down by [count], and the new rows are not
+     * added to the set.
+     */
     fun insert(at: Int, count: Int) {
         if (count <= 0) return
         val split = firstEndingAtOrAfter(at + 1)

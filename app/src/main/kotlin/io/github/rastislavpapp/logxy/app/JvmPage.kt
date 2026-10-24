@@ -18,7 +18,7 @@ import javax.swing.JTextField
 /**
  * The JVM's options: the most memory logxy may use, and whether it searches for newlines with vectors. They are kept
  * in the launcher's [VmOptions] rather than the [Settings], and apply only to a newly started JVM. Without the
- * packaged launcher there is nothing to keep them in, so the page only tells.
+ * packaged launcher there is nothing to keep them in, so the page only tells what they are.
  */
 class JvmPage : SettingsPage("JVM", Icons.memory) {
 
@@ -30,7 +30,10 @@ class JvmPage : SettingsPage("JVM", Icons.memory) {
 
     private val support = NewlineScanner.vectorSupport
 
-    /** Whether the next start may use vectors: what the file says, or without it what this JVM does. */
+    /**
+     * Whether the next start may search with vectors, as the launcher's options say. Without the packaged launcher,
+     * whether this JVM was allowed to.
+     */
     private val initialVectors = vmOptions?.let { VmOptions.vectorSearch(it.current()) }
         ?: (System.getProperty(NewlineScanner.PROPERTY) != NewlineScanner.SWAR)
     private val vectors = JCheckBox("Search for newlines with SIMD instructions (Java's Vector API)").apply {

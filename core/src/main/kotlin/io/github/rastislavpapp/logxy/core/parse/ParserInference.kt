@@ -13,10 +13,13 @@ internal object ParserInference {
     /** Share of lines a guess has to agree with. */
     private const val AGREEMENT = 0.9
 
-    /** Tokens of a line looked at for its columns; the message comes before this many. */
+    /** The most tokens of a line looked at for its columns; the message starts before this many. */
     private const val MAX_TOKENS = 32
 
-    /** Separators `|` after the timestamp that make a line delimited: before and after the level, at least. */
+    /**
+     * The fewest `|` separators after the timestamp that make a line delimited, such as one before the level and
+     * one after it.
+     */
     private const val MIN_SEPARATORS = 2
 
     /** The name of every pattern guessed from a file: what is in it shows in the layout, not in the name. */
@@ -161,8 +164,9 @@ internal object ParserInference {
     }
 
     /**
-     * Tokens of a line split at its first [separators] `|`: each cell between them is one word, possibly empty,
-     * between spaces, so cells of any content keep the same shape. The message follows the last separator.
+     * Splits [line] from [from] on into tokens at its first [separators] `|` characters. Each cell between two of
+     * them becomes one word token, possibly empty, with space tokens around it, so cells of any content give
+     * every line the same shape. The message follows the last separator.
      */
     private fun tokenizeCells(line: ByteArray, from: Int, separators: Int): List<Token> {
         val tokens = ArrayList<Token>()
@@ -216,7 +220,8 @@ internal object ParserInference {
         if (stamp == null && (levelColumn == null || columns.take(levelColumn).any { it.isValue })) return null
 
         val header = headerLength(columns, levelColumn)
-        // A guess that does not read the lines is cut short, the message taking more, down to timestamp and message.
+        // A layout that does not read the lines is tried again with fewer columns, the message taking in the
+        // rest, down to just the timestamp and the message.
         for (end in header downTo 0) {
             if (stamp == null && (levelColumn == null || end <= levelColumn)) break
             val pattern = layout(stamp, columns, levelColumn, end) ?: continue
@@ -246,7 +251,8 @@ internal object ParserInference {
             }
             Score(stamp, count, length)
         }
-        // The longest layout of those that match most: one without the fraction also matches, up to it.
+        // Of the layouts that match the most lines, the longest wins: one without the fraction matches as well,
+        // but stops before the fraction.
         val best = scores.maxWithOrNull(compareBy({ it.count }, { it.length })) ?: return null
         if (best.count == 0 || best.count * 20 < lines.size) return null
         val first = lines.first { best.stamp.end(it) >= 0 }
@@ -280,7 +286,10 @@ internal object ParserInference {
             .firstOrNull { zoned -> matching.count { zoned.end(it) >= 0 } >= matching.size * AGREEMENT }
     }
 
-    /** Tokens that end the header so the message follows: separators such as ` - `, ` : ` or ` | `. */
+    /**
+     * How many of [columns] the header has before the message: up to a separator after the level, such as
+     * ` - `, ` : ` or ` | `, or else through the run of columns after the level that look like fields.
+     */
     private fun headerLength(columns: List<Column>, levelColumn: Int?): Int {
         val after = (levelColumn ?: -1) + 1
         val separators = (after..<columns.size)
@@ -397,7 +406,10 @@ internal object ParserInference {
 
     private class Token(val kind: Kind, val from: Int, val to: Int, val signature: String)
 
-    /** The same token of each line that has the shared shape; its values are inside brackets, untrimmed. */
+    /**
+     * One column: the token at the same place in each line that has the shared shape. Its [values] are the
+     * tokens' texts, without a bracket token's brackets, and not trimmed.
+     */
     private class Column(val signature: String, val tokens: List<Token>, val lines: List<ByteArray>) {
         val kind = tokens.first().kind
         val isValue get() = kind == Kind.WORD || kind == Kind.BRACKET
@@ -425,8 +437,8 @@ internal object ParserInference {
         }
 
         /**
-         * The least width of the padding before a word and the word, if some are padded (as by `%5p`):
-         * the field must start past the padding, or the space that follows the field ends it at once.
+         * The smallest width of a word together with the padding before it, if some words are padded, as by
+         * `%5p`; else 0. The field must start past the padding, or the space that follows it would end it at once.
          */
         fun width(): Int {
             if (kind != Kind.WORD) return 0

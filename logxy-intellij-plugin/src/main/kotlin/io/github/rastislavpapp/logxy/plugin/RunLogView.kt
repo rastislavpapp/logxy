@@ -27,7 +27,7 @@ import javax.swing.Timer
 /** Lines of output to wait for before the view is made, so the parser is detected from more than a line or two. */
 private const val DETECT_LINES = 20
 
-/** Or this long after the first output, for a program that prints little. */
+/** How long after the first output the view is made anyway, for a program that prints fewer lines. */
 private const val DETECT_WAIT_MILLIS = 1500
 
 /** Where [RunLogView.shownParts] is kept: one choice for all runs. */
