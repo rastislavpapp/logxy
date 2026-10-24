@@ -12,7 +12,7 @@ internal class WrappedText(val text: String, val width: Int, val firstWidth: Int
         lineStarts { starts[i++] = it }
     }
 
-    /** Calls [visit] with the start of each line shown; how many there are. */
+    /** Calls [visit] with the start of each line shown, and returns how many lines there are. */
     private inline fun lineStarts(visit: (Int) -> Unit): Int {
         var count = 0
         var start = 0

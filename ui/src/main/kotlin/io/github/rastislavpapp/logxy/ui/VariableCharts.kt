@@ -32,7 +32,10 @@ private val CHART_COLORS = listOf(
     Color(0x8C6E45),
 )
 
-/** Charts [variable] of [template] in [charts], or stops; tells the user, over [parent], when no more fit. */
+/**
+ * Charts template variable [variable] of [template] in [charts], or stops charting it if it is charted. Tells the
+ * user, in a dialog over [parent], when no more charts fit.
+ */
 fun toggleChart(parent: Component, charts: VariableCharts, template: String, variable: Int) {
     if (charts.toggle(template, variable)) return
     JOptionPane.showMessageDialog(
@@ -61,7 +64,10 @@ enum class VariableMetric(val title: String, val short: String, val of: (Variabl
     SUM("Sum", "sum", { it.sum }),
     ;
 
-    /** The value of a record that stands for [slice] of [slices]: the largest for a sum, which no record is near. */
+    /**
+     * The value a record must be near to stand for [slice] of [slices]: the slice's value of this metric, or for a
+     * sum, which no single record comes near, the slice's largest value.
+     */
     fun target(slices: VariableSlices, slice: Int): Double = if (this == SUM) slices.max[slice] else of(slices)[slice]
 }
 
@@ -82,8 +88,8 @@ class VariableChart internal constructor(val template: String, val variable: Int
     internal var values: VariableSeries? = null
 
     /**
-     * The last [VariableSeries.slices] computed, and for which values; drawn by their own times until newer ones
-     * come.
+     * The last [VariableSeries.slices] computed, and in [slicedValues] the values they were computed from. They are
+     * drawn at their own times until newer ones come.
      */
     var slices: VariableSlices? = null
         internal set
@@ -102,8 +108,9 @@ class VariableChart internal constructor(val template: String, val variable: Int
 /**
  * The variables charted in one tab, in the order they were added, each with its own color. Values are read through
  * [read], one pass per template for all its charted variables, for the shown rows, and kept until [refresh] reads them
- * again; [onChanged] hears of charts added or removed and of new values or slices. A variable read for the first time
- * is shown only if it holds a number, which [onShown] hears of; else [onNoNumbers] does. Use on the UI thread.
+ * again. [onChanged] is called when charts are added or removed and when new values or slices come. A variable read
+ * for the first time is shown only if it holds a number, and then [onShown] is called; otherwise [onNoNumbers] is.
+ * Use on the UI thread.
  */
 class VariableCharts(
     private val scope: CoroutineScope,
@@ -113,16 +120,16 @@ class VariableCharts(
     private var job: Job? = null
     private val throttle = Timer(REFRESH_MILLIS) { readValues(charts.toList()) }.apply { isRepeats = false }
 
-    /** Of the variables read since the shown rows changed, charted or not. */
+    /** What the values came to, of each variable read since the shown rows changed, charted or not. */
     private val summaries = HashMap<Pair<String, Int>, VariableSummary>()
 
     var onChanged: () -> Unit = {}
     var onNoNumbers: (VariableChart) -> Unit = {}
 
-    /** Hears of a chart first shown, once its values are read and found to hold numbers. */
+    /** Called when a chart is first shown, once its values are read and found to hold numbers. */
     var onShown: (VariableChart) -> Unit = {}
 
-    /** Hears when the last chart is closed, by [remove] or [removeAll]. */
+    /** Called when the last chart is closed, by [remove] or [removeAll]. */
     var onAllRemoved: () -> Unit = {}
 
     /** The charts shown, without those still read for the first time. */
@@ -200,8 +207,9 @@ class VariableCharts(
     }
 
     /**
-     * [chart]'s values in [count] slices of [width] nanoseconds from [from]. Computed off the UI thread: until they
-     * are, the last ones computed (perhaps of other slices), or null; [onChanged] hears when they are.
+     * [chart]'s values summed up in [count] slices of [width] nanoseconds from [from]. They are computed off the UI
+     * thread; until they are, this returns the last slices computed, perhaps of other times, or null, and
+     * [onChanged] is called once they are.
      */
     fun slices(chart: VariableChart, from: Long, width: Long, count: Int): VariableSlices? {
         val values = chart.values ?: return null

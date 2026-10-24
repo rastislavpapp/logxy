@@ -10,7 +10,7 @@ sealed interface Filter {
     /** At least one of [parts] matches; with no parts, no record does. */
     data class Or(val parts: List<Filter>) : Filter
 
-    /** The records [part] does not match, also those that lack its field. */
+    /** Matches the records [part] does not match, including those that lack its field. */
     data class Not(val part: Filter) : Filter
 }
 
@@ -20,12 +20,15 @@ sealed interface Condition : Filter {
 }
 
 /**
- * [EQUALS] and [NOT_EQUALS] take wildcard patterns (see [Glob]), [MATCHES] and [NOT_MATCHES] regexes
- * (found anywhere).
+ * How a [TextCondition] compares: [EQUALS] and [NOT_EQUALS] with a wildcard pattern (see [Glob]) that must
+ * match the whole text, [MATCHES] and [NOT_MATCHES] with a regex that may match anywhere in it.
  */
 enum class TextOp { EQUALS, NOT_EQUALS, MATCHES, NOT_MATCHES }
 
-/** Compares the field's text, as shown in the table. Absent values match only the negated ops. */
+/**
+ * Compares the field's text, as shown in the table, with [value]. A record without a value of the field
+ * matches only [TextOp.NOT_EQUALS] and [TextOp.NOT_MATCHES].
+ */
 data class TextCondition(
     override val field: String,
     val op: TextOp,
@@ -33,7 +36,10 @@ data class TextCondition(
     val ignoreCase: Boolean = false,
 ) : Condition
 
-/** Compares a record's whole text as written in the file, e.g. for searching; [field] is not one of the log's. */
+/**
+ * Compares a record's whole text, as written in the file, with [value], e.g. for searching. Its [field] is
+ * [RECORD_TEXT], a pseudo field no log has.
+ */
 data class RecordTextCondition(val op: TextOp, val value: String, val ignoreCase: Boolean = false) : Condition {
     override val field get() = RECORD_TEXT
 
@@ -46,7 +52,10 @@ data class RecordTextCondition(val op: TextOp, val value: String, val ignoreCase
     }
 }
 
-/** The record has a value of [field] ([present]), or has none (not [present]). A log without the field has none. */
+/**
+ * Matches the records that have a value of [field] if [present], or those that have none if not. In a log
+ * without the field, no record has a value.
+ */
 data class PresenceCondition(override val field: String, val present: Boolean = true) : Condition
 
 /** The record's canonical level is one of [levels]. */
@@ -69,8 +78,11 @@ data class LevelCondition(override val field: String, val levels: Set<Level>) : 
 data class TemplateCondition(override val field: String, val templates: Set<String>) : Condition
 
 /**
- * The template of the message [field] is [template] (with `{}`, as stored), and the word at its [variable] (from 0)
- * passes [test], a [TextCondition] or [NumberCondition] applied to that word.
+ * Matches the records whose message [field] has the message template [template] and whose variable value at
+ * template variable [variable] passes [test].
+ *
+ * [template] is written with `{}` for each variable, as stored. [variable] counts from 0, so 0 is `{1}`.
+ * [test] is a [TextCondition] or a [NumberCondition], applied to the variable value.
  */
 data class VariableCondition(
     override val field: String,

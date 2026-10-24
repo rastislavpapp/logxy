@@ -8,7 +8,7 @@ import javax.swing.JPanel
 /**
  * A run tab's console or its logxy [view], as the Console | logxy switch in the tab's toolbar picks them; [memory]
  * keeps the choice for the next run. While the view shows, its actions take the place of the console's [toolbar].
- * A debug tab has none: its view is a sub-tab of its own.
+ * A debug tab has no switch: its view is a sub-tab of its own.
  */
 class ConsoleSwitch(
     console: JComponent,

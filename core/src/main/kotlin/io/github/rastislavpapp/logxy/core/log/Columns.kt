@@ -19,7 +19,7 @@ internal class Columns(val schema: Schema) {
     /** Dictionary ids for DICT fields; start offsets relative to the record for SPAN fields. */
     val ints = arrayOfNulls<IntChunkList>(schema.fields.size)
 
-    /** Lengths of SPAN fields; none for those that always run to the record end, see [spanLength]. */
+    /** Lengths of SPAN fields; null for a field whose values always run to the record end, see [spanLength]. */
     private val lengths = arrayOfNulls<IntChunkList>(schema.fields.size)
     val dictionaries = arrayOfNulls<ByteDictionary>(schema.fields.size)
 
@@ -79,8 +79,8 @@ internal class Columns(val schema: Schema) {
     }
 
     /**
-     * Sets LEVEL [field] of the current record to the text `source[from, to)`; texts past the [MAX_LEVEL_ID]th
-     * share its id, as ids are stored in a byte.
+     * Sets LEVEL [field] of the current record to the text `source[from, to)`. Ids are stored in a byte, so every
+     * text from id [MAX_LEVEL_ID] on gets id [MAX_LEVEL_ID].
      */
     fun setLevel(field: Int, source: ByteArray, from: Int, to: Int) {
         val id = minOf(dictionaries[field]!!.idOf(source, from, to), MAX_LEVEL_ID)
@@ -88,7 +88,11 @@ internal class Columns(val schema: Schema) {
         present[field] = true
     }
 
-    /** A value of a field the parser declares DICT, stored as a span if the log made it one, see [ParsedLog]. */
+    /**
+     * Sets a field the parser declares DICT to `source[from, to)`. If the log has turned the field into a SPAN,
+     * see [ParsedLog], stores where the value is instead, relative to [lineFrom], where the record starts in
+     * [source].
+     */
     fun setText(field: Int, source: ByteArray, lineFrom: Int, from: Int, to: Int) {
         if (schema.fields[field].type == ColumnType.SPAN) {
             setSpan(field, from - lineFrom, to - from)
@@ -110,7 +114,7 @@ internal class Columns(val schema: Schema) {
 
     /**
      * Sets LEVEL [field] of the current record to an id already in [dictionaries], e.g. when copying a segment
-     * remapped.
+     * with its ids remapped to shared ones.
      */
     fun setLevelId(field: Int, id: Int) {
         bytes[field]!![size - 1] = minOf(id, MAX_LEVEL_ID).toByte()
@@ -119,7 +123,7 @@ internal class Columns(val schema: Schema) {
 
     /**
      * Sets DICT [field] of the current record to an id already in [dictionaries], e.g. when copying a segment
-     * remapped.
+     * with its ids remapped to shared ones.
      */
     fun setDictId(field: Int, id: Int) {
         ints[field]!![size - 1] = id
@@ -147,7 +151,10 @@ internal class Columns(val schema: Schema) {
         if (keys.size > schema.fields[field].map!!.maxKeys) mapKeys[field] = null
     }
 
-    /** [length] may be [TO_RECORD_END]. */
+    /**
+     * Sets SPAN [field] of the current record to the value [relativeStart] bytes after the record's start, which
+     * is [length] bytes long, or [TO_RECORD_END] if it runs to the end of the record.
+     */
     fun setSpan(field: Int, relativeStart: Int, length: Int) {
         ints[field]!![size - 1] = relativeStart
         present[field] = true
@@ -184,7 +191,10 @@ internal class Columns(val schema: Schema) {
             ColumnType.SPAN -> null
         }
 
-    /** Length of a SPAN field: [ABSENT_LENGTH], [TO_RECORD_END], or a length. */
+    /**
+     * The length in bytes of SPAN [field]'s value in [record]; [ABSENT_LENGTH] if the record has none, or
+     * [TO_RECORD_END] if the value runs to the end of the record.
+     */
     fun spanLength(field: Int, record: Int): Int = lengths[field]?.get(record) ?: TO_RECORD_END
 
     /** Drops the last record, e.g. one whose first line was unfinished, to parse it again once more bytes arrive. */
@@ -204,7 +214,9 @@ internal class Columns(val schema: Schema) {
         const val ABSENT_LENGTH = -1
         const val TO_RECORD_END = -2
 
-        // About where a dictionary entry (key bytes, list and table slots) outweighs the 4 bytes a span costs extra.
+        // A DICT field overflows once its dictionary holds at least MIN_OVERFLOW_VALUES values, and one distinct
+        // value per MAX_DISTINCT_SHARE records or more. About there, a dictionary entry (key bytes, list and
+        // table slots) outweighs the 4 bytes per record a span costs extra.
         private const val MIN_OVERFLOW_VALUES = 10_000
         private const val MAX_DISTINCT_SHARE = 16
 

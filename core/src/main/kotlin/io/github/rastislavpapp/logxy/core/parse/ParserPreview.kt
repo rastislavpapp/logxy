@@ -38,8 +38,8 @@ object ParserPreview {
         }
 
     /**
-     * Each of [lines] as [parser] reads it on its own: the field values of a line that starts a record, or
-     * whether a line that does not looks like a continuation. Continuation lines are not joined to a record.
+     * Each of [lines] as [parser] reads it on its own: for a line that starts a record, its field values; for
+     * one that does not, whether it looks like a continuation. Continuation lines are not joined to a record.
      */
     fun preview(parser: CompiledParser, lines: List<ByteArray>): List<PreviewLine> {
         val matcher = parser.newMatcher()

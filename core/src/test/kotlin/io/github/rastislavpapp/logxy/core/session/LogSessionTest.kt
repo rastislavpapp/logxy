@@ -547,7 +547,10 @@ class LogSessionTest {
         }
     }
 
-    /** Records each search prepared and from which record on; filters without the search wait for [gate]. */
+    /**
+     * Wraps [engine] to record the first record each search is prepared from. Runs of a search wait for
+     * [searchGate], runs of other filters, those without [search] in them, for [gate].
+     */
     private class Recording(private val engine: RecordFilter, private val search: Filter) : RecordFilter by engine {
         val searchedFrom = ArrayList<Int>()
 
@@ -982,8 +985,8 @@ class LogSessionTest {
     @Test
     fun `a file said to have grown is read at once, not at the next poll`() = runBlocking {
         val file = Files.writeString(dir.resolve("pushed.log"), lines(10))
-        // Old, so the session sees a finished file and polls it at the slow pace, which starts with the load: a poll
-        // is still far off when the push comes right after it.
+        // An hour old, so the session sees a finished file and polls it at the slow pace, counted from the load:
+        // the next poll is still far off when the push comes right after it.
         Files.setLastModifiedTime(file, FileTime.from(Instant.now().minus(Duration.ofHours(1))))
         val (session, shown) = open(file, Recorder())
         append(file, lines(5))

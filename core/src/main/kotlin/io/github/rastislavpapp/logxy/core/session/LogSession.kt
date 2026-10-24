@@ -66,7 +66,7 @@ data class SessionStatus(
     val message: String? = null,
 )
 
-/** What a [LogSession] tells its view; always called on the session's scope, i.e. the UI thread. */
+/** What a [LogSession] tells its UI; always called on the session's scope, i.e. the UI thread. */
 interface SessionListener {
     /** Indexing (re)started; [fraction] tells how far it got, from 0 to 1, and may be called on any thread. */
     fun indexing(fraction: () -> Double)
@@ -74,13 +74,13 @@ interface SessionListener {
     /** The files could not be shown. */
     fun problem(title: String, detail: String, hint: String?)
 
-    /** [shown] is ready to be shown, all records for now; the view applies its filter next. */
+    /** [shown] is ready to be shown, all records for now; the UI applies its filter next. */
     fun loaded(shown: ShownLog)
 
     /** The shown log of the last [loaded] ended, before its files are closed: drop it and what was read from it. */
     fun shownEnded()
 
-    /** [paths] have no timestamps, so they were left out of the merge; the view may open them on their own. */
+    /** [paths] have no timestamps, so they were left out of the merge; the UI may open them on their own. */
     fun notMergeable(paths: List<Path>)
 
     /** The parsers in use, or how they were chosen, changed. */
@@ -129,10 +129,11 @@ interface SessionListener {
 /**
  * One or more open files without their UI: indexes them in the background, merges several by time
  * (see [MergedLog]), follows changes to them, and filters them. Not thread-safe: use it, and run
- * [scope], on one thread (the UI thread); [listener] is called there. [origin] tells which files were
- * extracted from zips or decompressed, for naming them. [chosen] holds the parser the
- * user picked for each of the paths, null (or missing) to detect it. [redetection] turns on detecting
- * the parser of a single file again while it reads as Raw text; a merge refuses it.
+ * [scope], on one thread (the UI thread); [listener] is called there.
+ *
+ * [origin] tells which files were extracted from zips or decompressed, for naming them. [chosen] holds
+ * the parser the user picked for each of the paths, null (or missing) to detect it. [redetection] turns
+ * on detecting the parser of a single file again while it reads as Raw text; a merge refuses it.
  */
 class LogSession internal constructor(
     paths: List<Path>,
@@ -193,7 +194,7 @@ class LogSession internal constructor(
     var sourceNames: List<String> = MergedLog.sourceNames(paths, origin)
         private set
 
-    /** Several files merged into one view. */
+    /** Whether several files are merged into one session. */
     val isMerged get() = sources.size > 1
 
     /** The parser the user picked for a single file (the first one of a merge), or null to detect it. */
@@ -205,7 +206,7 @@ class LogSession internal constructor(
     /** The parser in use (or last used) for each of [paths]. */
     val parsers: List<Parser> get() = sources.map { it.parser }
 
-    /** The parser of the first (for a single file: the) file. */
+    /** The parser of the first file, which for a single file is its only one. */
     val parser: Parser get() = sources.first().parser
 
     /** Whether the parsers were determined, by the user or by detection. */
@@ -224,14 +225,15 @@ class LogSession internal constructor(
 
     private var engine: RecordFilter? = null
 
-    // The values of variables over all records, and the records they were counted in: the loaded log and its count.
+    // The variable values of each template variable over all records, and what they were counted over: the
+    // loaded log and its record count.
     private val allValues = HashMap<Pair<String, Int>, VariableValues>()
     private var allValuesOf: Pair<LoadedLog, Int>? = null
 
     private var activeFilter: Filter? = null
     private var filterJob: Job? = null
 
-    /** Whether the rows shown are [activeFilter]'s result (all records without one). */
+    /** Whether the rows shown are [activeFilter]'s result, or all records while there is no active filter. */
     private var filterShown = false
 
     // How much of the records the shown filter result covers: records, and bytes (the last record may grow without
@@ -251,7 +253,8 @@ class LogSession internal constructor(
     private var searchJob: Job? = null
     private var searching: PreparedFilter? = null
 
-    // What [searchCondition] is for, and the search whose records the found ones are, once its run is done.
+    // The search [searchCondition] was made from, and, once its run is done, the search that found the found
+    // records.
     private var searchSpec: TextSearch? = null
     private var foundSpec: TextSearch? = null
 
@@ -291,7 +294,8 @@ class LogSession internal constructor(
     var histogram: TimeHistogram? = null
         private set
 
-    // The shown rows before [settledRows], which no longer change, counted apart from the rest, which may.
+    // The times of the shown rows before [settledRows], which no longer change, counted apart from those of the
+    // later rows, which still may.
     private var settled: TimeHistogram? = null
     private var settledRows = 0
     private var countJob: Job? = null
@@ -455,8 +459,9 @@ class LogSession internal constructor(
     }
 
     /**
-     * The values at each of [variables] of the shown rows whose message has [template], over time, read in one pass;
-     * null if there is nothing loaded or the records have no message or no time. Cancelling the caller stops it.
+     * The variable values at each of [variables] in the shown rows whose message has the message template
+     * [template], over time, read in one pass. Null if there is nothing loaded or the records have no message or
+     * no time. Cancelling the caller stops it.
      */
     suspend fun variableSeries(template: String, variables: IntArray): List<VariableSeries>? {
         while (true) countJob?.takeIf { it.isActive }?.join() ?: break
@@ -467,8 +472,9 @@ class LogSession internal constructor(
     }
 
     /**
-     * How often each value occurs at [variable] (from 0) of the shown rows whose message has [template]; null if
-     * there is nothing loaded or the records have no message. Cancelling the caller stops it.
+     * How often each variable value occurs at template variable [variable], counted from 0, in the shown rows
+     * whose message has the message template [template]. Null if there is nothing loaded or the records have no
+     * message. Cancelling the caller stops it.
      */
     suspend fun variableValues(template: String, variable: Int): VariableValues? {
         while (true) countJob?.takeIf { it.isActive }?.join() ?: break
@@ -916,11 +922,13 @@ class LogSession internal constructor(
     }
 
     /**
-     * Finds the shown rows that [searchCondition] matches, ANDed with [shownFilter]: [anew] all of them, cancelling
-     * a running search, or only those added or changed since the found records. Like [catchUpFilter], a catch-up
-     * never cancels a running search: whichever finishes calls this again, so nothing appended is missed. With
-     * [narrow], the found records are those of a previous search that [searchCondition] only narrows: it looks
-     * among them, and they stay shown until it is done.
+     * Finds the shown rows that [searchCondition] matches, by searching with it ANDed with [shownFilter]. With
+     * [anew], searches all of them, cancelling a running search; otherwise only the rows added or changed since
+     * the found records were computed. Like [catchUpFilter], such a catch-up never cancels a running search:
+     * whichever finishes calls this again, so nothing appended is missed.
+     *
+     * With [narrow], the found records are those of a previous search that [searchCondition] only narrows: the
+     * search looks among them, and they stay shown until it is done.
      */
     private fun searchShown(anew: Boolean, narrow: Boolean = false) {
         if (anew) {
@@ -1005,7 +1013,7 @@ class LogSession internal constructor(
                     shown.clearFound()
                     foundHistogram = null
                 }
-                // A search typed on meanwhile has nothing to narrow, so it starts from scratch.
+                // A search typed meanwhile has nothing to narrow, so it starts from scratch.
                 val queued = queuedSearch
                 if (queued != null) {
                     queuedSearch = null
@@ -1028,7 +1036,8 @@ class LogSession internal constructor(
             searchJob = null
             searchNarrows = false
             if (anew) foundSpec = spec
-            // A search typed on meanwhile narrows this one's records, which stay unannounced as they are replaced.
+            // A search typed meanwhile narrows this one's found records. They are not announced, as the narrowing
+            // search replaces them.
             val queued = queuedSearch
             if (queued != null && foundSpec == searchSpec) {
                 queuedSearch = null
@@ -1062,8 +1071,8 @@ class LogSession internal constructor(
     }
 
     /**
-     * Counts the times of the found records for [foundHistogram], all of [rows] (sorted) or those given to
-     * [TimeCount.countRecords]; null if the records have no timestamps.
+     * A count of the found records' times for [foundHistogram]: when run, of all of [rows], which are sorted, or
+     * else of the records passed to [TimeCount.countRecords]. Null if the records have no timestamps.
      */
     private fun foundTimeCount(shown: ShownLog, rows: IntArray? = null): TimeCount? {
         val loaded = loaded ?: return null
@@ -1074,9 +1083,9 @@ class LogSession internal constructor(
     }
 
     /**
-     * Counts the times for [foundHistogram] once the search found [found] (sorted) among the records from [from] on,
-     * on other threads; returns what puts them in. Null if nothing is to be put in: the records have no times, or
-     * the chunks of a search anew counted them already.
+     * Counts, on other threads, the times for [foundHistogram] once the search found [found], sorted, among the
+     * records from [from] on. Returns a function that puts them into [foundHistogram]. Null if there is nothing to
+     * put in: the records have no times, or the chunks of a search anew counted them already.
      */
     private suspend fun countFoundTimes(shown: ShownLog, from: Int, found: IntArray, anew: Boolean): (() -> Unit)? {
         if (anew && foundChunked) return null

@@ -42,8 +42,9 @@ class Field internal constructor(
     internal val isMap get() = map != null
 
     /**
-     * This field stored as another [type] (a DICT field turned SPAN), or [hidden] changed: shown once a record has an
-     * optional field, hidden while none has it or when a map is split into its keys.
+     * A copy of this field with another [type], as when a DICT field turns SPAN, or with [hidden] changed. An
+     * optional field is shown once a record has it and hidden while none has it, and a map field is hidden when
+     * it is split into its keys.
      */
     internal fun copy(type: ColumnType = this.type, hidden: Boolean = this.hidden) =
         Field(name, type, role, toRecordEnd, hidden, map, mapKey, encoding, optional)
@@ -63,7 +64,7 @@ internal enum class Encoding {
     CSV,
     ;
 
-    /** The value `bytes[from, to)` as UTF-8 to show. */
+    /** Decodes the value `bytes[from, to)` to the UTF-8 text the table shows. */
     fun decode(bytes: ByteArray, from: Int, to: Int): ByteArray = when (this) {
         PLAIN -> bytes.copyOfRange(from, to)
         JSON -> Json.decode(bytes, from, to)

@@ -32,8 +32,8 @@ class PopupItem(
 
 /**
  * A flat "text ⌄" button that opens a [showPopupList], like IntelliJ's run configuration widget. Without
- * [maxWidth] it never shrinks (no "All lev…"); [sizedFor] are all its texts, so its width stays put when the
- * text changes.
+ * [maxWidth] it never shrinks, so "All levels" is never cut to "All lev…". [sizedFor] lists all the texts it
+ * may show, so that its width stays put when the text changes.
  */
 fun dropDownButton(
     tooltip: String,

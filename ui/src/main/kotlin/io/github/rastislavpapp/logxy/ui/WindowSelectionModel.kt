@@ -36,7 +36,7 @@ class WindowSelectionModel(private val window: RowWindow) : ListSelectionModel {
     /** Like [extendTo], but other rows stay selected; see [Selection.extendKeepingOthers]. */
     fun extendKeepingOthers(index: Int) = change { selection.extendKeepingOthers(row(index)) }
 
-    /** Runs [block] ignoring all edits and adjusting, so the selection stays as it is and no listener hears. */
+    /** Runs [block] ignoring all edits and adjusting, so the selection stays as it is and no listener is told. */
     fun keeping(block: () -> Unit) {
         kept = true
         try {

@@ -24,8 +24,8 @@ import java.nio.channels.FileChannel
 import java.nio.file.Path
 
 /**
- * How a file is read when indexed or parsed; tests shrink the ranges to exercise them, a merge uses fewer read
- * channels per file.
+ * How a file is read when indexed or parsed. Tests shrink the ranges to exercise the split into ranges, and a
+ * merge opens fewer read channels per file.
  */
 data class IndexOptions(
     /** The most ranges a file is split into, scanned in parallel. */
@@ -34,7 +34,10 @@ data class IndexOptions(
     val minRangeSize: Long = 64L * 1024 * 1024,
     /** Bytes read per call into each range's buffer when indexing raw lines; parsing sizes its own. */
     val bufferSize: Int = 1024 * 1024,
-    /** Channels per file where positional reads are serial (Windows); fewer when many files are open together. */
+    /**
+     * How many read channels to open per file where positional reads run one at a time, as on Windows; fewer
+     * when many files are open together.
+     */
     val readChannels: Int = parallelism,
     /**
      * Whether the file may start with a preamble: lines before its first record, each a record of its own with only
@@ -61,9 +64,9 @@ class AppendedLines internal constructor(
 ) : AppendedData
 
 /**
- * Start offsets of all lines in a file: the raw-text view of a log, one record per line. Lines end
- * with `\n` or `\r\n`; a trailing line without terminator counts as a line, a terminator at the
- * very end does not start an empty one.
+ * The start offsets of all lines in a file, for a log read as raw text, one record per line. Lines end
+ * with `\n` or `\r\n`. A last line without a terminator counts as a line, but a terminator at the very
+ * end does not start an empty one.
  *
  * Holds the file open for reading line text until [close]d.
  */

@@ -260,7 +260,7 @@ class TemplateIndexTest {
             assertEquals(200.0, status.min)
             assertEquals(500.0, status.max)
             assertEquals(352.0, status.average)
-            // Only the rows given; equal counts in the order first seen.
+            // Only the rows given are counted; values with equal counts come in the order first seen.
             val some = runBlocking { engine.variableValues(intArrayOf(1, 2, 3, 4), 4, done, 1) }
             assertEquals(listOf("200" to 1, "404" to 1, "500" to 1), some.entries())
             val none = runBlocking { engine.variableValues(null, log.recordCount, "nothing like it", 0) }

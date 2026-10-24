@@ -40,7 +40,10 @@ private const val MIN_LAST_COLUMN_CHARS = 40
 /** What an expanded record ends with when it is longer than [MAX_DETAIL_BYTES]. */
 private const val CUT_MARK = "… cut at 1 MB"
 
-/** Keeps the pixel rows of the table's window within an int, however long the expanded records. */
+/**
+ * The tallest an expanded row may be, in pixels, so that the y of every row of the table's window fits in an int
+ * however long the expanded records are.
+ */
 private const val MAX_ROW_HEIGHT = 1 shl 22
 
 /** Background of text matched by the filter, translucent to suit light and dark looks. */
@@ -98,8 +101,8 @@ class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
     private var clickedToggle = false
 
     /**
-     * The widths in pixels the user dragged columns to, by field name, also of hidden columns; set ones count as
-     * dragged.
+     * The widths in pixels the user dragged columns to, by field name, also of hidden columns. Widths set here count
+     * as dragged too.
      */
     var resizedWidths: Map<String, Int>
         get() {
@@ -543,8 +546,8 @@ class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
     }
 
     /**
-     * Lays out [text] in [label] as the label paints it, putting where it goes into [textBounds]; the number of its
-     * characters shown, before a cut value's "...".
+     * Lays out [text] in [label] as the label paints it, and puts where the text goes into [textBounds]. Returns how
+     * many of its characters are shown, before the "..." of a cut value.
      */
     private fun layOut(label: JLabel, text: String, textBounds: Rectangle): Int {
         val insets = label.insets
@@ -561,7 +564,10 @@ class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
         return CellCut.shownLength(text, displayed)
     }
 
-    /** Fills [ranges] of [text], drawn from [x] and [y], that fall in `[from, to)`: the marks of one line. */
+    /**
+     * Fills with [color] the parts of [ranges] that fall in `[from, to)`, the marks on one line of [text]; the line
+     * is drawn from [x], [y].
+     */
     private fun mark(g: Graphics, text: String, from: Int, to: Int, ranges: IntArray, x: Int, y: Int, color: Color) {
         if (ranges.isEmpty()) return
         val metrics = g.fontMetrics
@@ -583,7 +589,10 @@ class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
         }
     }
 
-    /** A cell's text at the top of a row taller than rowHeight, where it would be in a row of rowHeight. */
+    /**
+     * Renders a cell. In a row taller than rowHeight, it puts the text at the top, where it would be in a row
+     * rowHeight high.
+     */
     private open inner class CellRenderer : DefaultTableCellRenderer() {
         protected var isSelected = false
 

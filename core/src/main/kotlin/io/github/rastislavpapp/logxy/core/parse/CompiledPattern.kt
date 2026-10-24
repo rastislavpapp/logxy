@@ -24,7 +24,10 @@ class CompiledPattern(val pattern: String, private val zone: ZoneId = ZoneId.sys
         val field: Int,
         val kind: Kind,
         val minWidth: Int,
-        /** `key=` of `%X{key}`, for taking the value out of a whole MDC map written there (log4j2's braces only). */
+        /**
+         * For `%X{key}`, the bytes `key=`. They take the key's value out of a whole MDC map when the log writes
+         * the map there, as log4j2 does in braces.
+         */
         val mdcKey: ByteArray? = null,
     ) : Token
 
@@ -113,7 +116,10 @@ class CompiledPattern(val pattern: String, private val zone: ZoneId = ZoneId.sys
         return true
     }
 
-    /** [source] is the converter as written, for naming one that is not known. */
+    /**
+     * Adds the field of the converter [word] with its [options]. [source] is the converter as written, which
+     * names the column of a converter that is not known.
+     */
     private fun addField(word: String, options: List<String>, minWidth: Int, source: String) {
         val previous = tokens.lastOrNull()
         require(previous !is FieldToken || previous.kind == Kind.TIMESTAMP) {

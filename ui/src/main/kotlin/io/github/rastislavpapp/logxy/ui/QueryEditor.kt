@@ -107,8 +107,8 @@ class QueryEditor(private val onApply: () -> Unit, private val columnNames: Colu
     var templates = false
 
     /**
-     * Gives the values of a template's variable (from 0) in the log, to pick from in a `{n}` rule: calls back
-     * on the UI thread, perhaps later, with null if there are none.
+     * Gets the variable values of a template variable, counted from 0, in the log, to pick from in a `{n}` rule.
+     * Calls `onValues` back on the UI thread, perhaps later, with null if there are none.
      */
     var variableValues: (template: String, variable: Int, onValues: (VariableValues?) -> Unit) -> Unit =
         { _, _, onValues -> onValues(null) }
@@ -275,8 +275,8 @@ class QueryEditor(private val onApply: () -> Unit, private val columnNames: Colu
 
         fun isEmpty() = items.componentCount == 0
 
-        // The top level keeps one condition, so its only one has no ×; hidden still takes its space, keeping rows
-        // aligned.
+        // The top level keeps at least one condition, so a lone condition there has no ×. A hidden × still takes its
+        // space, so the rows stay aligned.
         fun updateRemovable() {
             val single = isRoot && items.componentCount == 1
             items.components.forEach { (it as? RuleView)?.remove?.isVisible = !single }
@@ -319,8 +319,10 @@ class QueryEditor(private val onApply: () -> Unit, private val columnNames: Colu
         }
 
         /**
-         * The template (as stored, with `{}`) that `{n}` rules here belong to, as the query compiler finds it: of the
-         * one "Template is" row of this group if it matches all, else of the group around it; null if none.
+         * The template, as stored with `{}`, that the `{n}` rules in this group belong to, found as the query
+         * compiler finds it. If this group matches all of its items and has "Template is" rows, that is the template
+         * of its one such row, or null if it has several. Otherwise it is the template of the group around it, or
+         * null at the top.
          */
         fun template(): String? {
             val selected = match.selectedItem as Match
@@ -434,7 +436,10 @@ class QueryEditor(private val onApply: () -> Unit, private val columnNames: Colu
             listeners.forEach(field::addActionListener)
         }
 
-        /** The values of this row's variable, most frequent first, if it is a `{n}` row whose group has a template. */
+        /**
+         * Loads the variable values of this row's template variable, most frequent first, if it is a `{n}` row whose
+         * group has a template; otherwise [onValues] gets null.
+         */
         private fun loadValues(onValues: (List<Pair<String, Int>>?) -> Unit) {
             val number = variableNumber()
             val template = group.template()

@@ -12,7 +12,10 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardOpenOption
 
-/** A saved description of how to read a log: raw lines, a pattern layout, a regex, or JSON lines. */
+/**
+ * A saved description of how to split a file's lines into records and fields. Each is of one [Kind], such as
+ * a pattern layout, a regex or JSON lines.
+ */
 sealed interface Parser {
     val name: String
 
@@ -45,7 +48,10 @@ sealed interface Parser {
      * test files and the benchmark.
      */
     abstract class Kind(val type: String) {
-        /** The parser named [name] whose other [properties] are given; null if they are incomplete. */
+        /**
+         * Reads back the parser named [name]; [properties] looks up each of its other settings by key. Null if
+         * they are incomplete.
+         */
         abstract fun read(name: String, properties: (String) -> String?): Parser?
     }
 
@@ -220,11 +226,11 @@ sealed interface Parser {
         }
 
         /**
-         * The candidate that matches most of the file's first lines: the user's own parsers ([preferred]),
-         * the [builtIn] ones the user kept, and one guessed from the lines. On a tie one of [preferred], then
-         * the one with more fields, being more specific, then a built-in one over the guess. [Raw] if none
-         * matches at least 5% of the lines that do not look like continuations (a single record may be
-         * followed by a huge stack trace or dump).
+         * The candidate parser that matches most of the file's first lines. The candidates are the user's own
+         * parsers ([preferred]), the [builtIn] ones the user kept, and one guessed from the lines. On a tie, one
+         * of [preferred] wins, then the one with more fields, being more specific, then a built-in one over the
+         * guess. [Raw] if none matches at least 5% of the lines that do not look like continuations; the bar is
+         * that low as a single record may be followed by a huge stack trace or dump.
          */
         fun detect(path: Path, preferred: List<Parser> = emptyList(), builtIn: List<Parser> = BUILT_IN): Parser {
             val modified = Files.getLastModifiedTime(path).toMillis()

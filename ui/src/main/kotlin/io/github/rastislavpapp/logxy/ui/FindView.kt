@@ -20,9 +20,10 @@ interface FindView {
     fun open(text: String? = null)
 
     /**
-     * Shows how many records match: [total]. While searching, which [progress] (from 0 to 1) says, or null [total]
-     * does, [total] is how many were found so far, null if not known. [current] is the position among them of the
-     * selected record, from 1, or 0 if it is none (or, while searching, not final yet).
+     * Shows how many records match: [total]. The search still runs while [progress], from 0 to 1, is not null, or
+     * while [total] is null; [total] is then how many were found so far, or null if that is not known yet.
+     * [current] is the position of the selected record among the matches, counted from 1. It is 0 if no record is
+     * selected or the selected one is no match, and while the search runs, if its position is not final yet.
      */
     fun showCount(current: Int, total: Int?, progress: Double? = null)
 

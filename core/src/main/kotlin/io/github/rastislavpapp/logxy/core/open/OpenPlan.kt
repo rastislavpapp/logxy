@@ -24,7 +24,10 @@ sealed interface Decision {
     /** As the settings say, without asking. */
     data class Open(val mode: OpenMode, val files: List<Path>) : Decision
 
-    /** The user decides; files [inSubfolders] of an opened folder can be left out. */
+    /**
+     * The user decides how to open [files]. Those in [inSubfolders], found in a subfolder of an opened folder,
+     * can be left out.
+     */
     data class Ask(val files: List<Path>, val inSubfolders: Set<Path>) : Decision
 }
 
@@ -32,9 +35,9 @@ sealed interface Decision {
 object OpenPlan {
 
     /**
-     * The files of [paths]: folders as the log files in them. Of the paths to one file, through links,
-     * keeps only the first, as a merge of a file with itself would show each record twice. Tells [onFound]
-     * how many files it found so far in the folder it walks; stops soon once cancelled.
+     * The files to open for [paths], each folder replaced by the log files in it. Of the paths to one file,
+     * through links, keeps only the first, as a merge of a file with itself would show each record twice.
+     * Tells [onFound] how many files it found so far in the folder it walks; stops soon once cancelled.
      */
     suspend fun find(paths: List<Path>, onFound: (folder: Path, count: Int) -> Unit = { _, _ -> }): Found {
         val empty = ArrayList<Path>()
@@ -53,8 +56,9 @@ object OpenPlan {
     }
 
     /**
-     * How to open [files] next to the [current] session's files (null if none is open): with the remembered
-     * [openMode] (null to ask) and [includeSubfolders] if they fit, else by asking.
+     * How to open [files] next to [current], the current session's files, or null if no session is open. Uses
+     * the remembered [openMode] and [includeSubfolders] when that mode fits the files; asks when it does not, or
+     * when [openMode] is null.
      */
     fun decide(
         files: List<FoundFile>,
@@ -78,8 +82,8 @@ object OpenPlan {
     }
 
     /**
-     * What [count] files can do: merge with a current session of [currentCount] files, merge on their own, or
-     * open one session each.
+     * The modes [count] files can be opened in: merged with a current session of [currentCount] files, merged
+     * with each other, or in a session each.
      */
     fun modesFor(count: Int, currentCount: Int?): List<OpenMode> = buildList {
         if (count == 0) return@buildList

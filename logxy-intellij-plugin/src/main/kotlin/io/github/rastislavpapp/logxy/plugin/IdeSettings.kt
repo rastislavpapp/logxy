@@ -12,9 +12,9 @@ import java.awt.Component
 import java.util.Properties
 
 /**
- * The plugin's settings, in the IDE's own storage (`logxy.xml` of its options), as the properties the app keeps in
- * its file: apart from the app's, as both may run at once. Used on the UI thread, except that the IDE may load the
- * state on any thread.
+ * The plugin's settings, as the same properties the app keeps in its file, but in the IDE's own storage
+ * (`logxy.xml` of its options), apart from the app's, as both may run at once. Used on the UI thread, except that
+ * the IDE may load the state on any thread.
  */
 @Service(Service.Level.APP)
 @State(name = "logxy", storages = [Storage("logxy.xml")])

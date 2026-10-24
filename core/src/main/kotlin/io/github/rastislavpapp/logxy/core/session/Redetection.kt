@@ -44,7 +44,7 @@ internal class RedetectionClock(
         ended = true
     }
 
-    /** Whether to detect now; a true counts as the detection. */
+    /** Whether to detect now. Returning true counts as the detection having been done. */
     fun due(): Boolean {
         val started = started ?: return false
         if (started.elapsedNow() > redetection.window) return false

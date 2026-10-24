@@ -30,8 +30,10 @@ import javax.swing.border.AbstractBorder
 /**
  * The filter of one tab: the minimum level, the filter itself (visual or as text), Apply, the mode toggle,
  * saved filters and Clear. The text form (Advanced) is offered only if the [host] has an editor for it.
- * Enter in any input applies. [onApply] is called to (re)apply; [minimumLevel] and [query] give the state. The visual
- * filter offers the fields by their [names]; the text one by their own.
+ *
+ * [onApply] is called whenever the filter is to be applied anew; [minimumLevel] and [query] then tell what to apply.
+ * Enter in any input applies. The visual filter offers the fields by the names their columns show ([names]), the
+ * text form by their own names.
  */
 class FilterBar(private val onApply: () -> Unit, names: ColumnNames, private val host: LogViewHost) :
     JPanel(MigLayout("insets 6 8 6 8, fillx, gapy 3, hidemode 3", "[grow, fill]0[]")) {
@@ -130,7 +132,10 @@ class FilterBar(private val onApply: () -> Unit, names: ColumnNames, private val
     /** Gives the values of a template's variable to pick from; see [QueryEditor.variableValues]. */
     var variableValues by editor::variableValues
 
-    /** Fields of the log being filtered: offered in the editors; the level choice needs a level field. */
+    /**
+     * Sets the fields of the log being filtered, which the editors offer; the level choice shows only if one is a
+     * level field.
+     */
     fun setSchema(schema: Schema) {
         val hasLevel = schema.indexOf(Role.LEVEL) >= 0
         levelButton.isVisible = hasLevel

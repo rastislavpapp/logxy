@@ -1,7 +1,7 @@
 package io.github.rastislavpapp.logxy.core.log
 
 /**
- * Records as a view shows them: rows of fields described by [schema], from one log or several merged.
+ * Records as the table shows them: rows of fields described by [schema], from one log or several merged.
  * Read on the thread that owns them.
  */
 interface Records {
@@ -24,8 +24,9 @@ interface Records {
     fun rowValues(record: Int, maxBytes: Int): Array<String> = row(record, maxBytes, 0).values
 
     /**
-     * Like [rowValues], with how many lines [record] has after its first, counted in its first [countBytes] bytes:
-     * the read that gets the values reaches that far, so a cut record shows a count of the part read.
+     * Like [rowValues], plus how many lines [record] has after its first. They are counted only in the record's
+     * first [countBytes] bytes, as far as the read that gets the values reaches, so for a longer record the
+     * count covers only that part.
      */
     fun row(record: Int, maxBytes: Int, countBytes: Int): RowText
 
@@ -36,8 +37,8 @@ interface Records {
     fun recordText(record: Int, maxBytes: Int): String
 
     /**
-     * The lines of [record] after its first, as written; empty if it has none. Of the record's first [maxBytes]
-     * bytes, ending with [cutMark] if it is longer.
+     * The lines of [record] after its first, as written, or empty if it has none. Only the record's first
+     * [maxBytes] bytes are read; for a longer record, the text ends with [cutMark].
      */
     fun laterLines(record: Int, maxBytes: Int, cutMark: String): String
 

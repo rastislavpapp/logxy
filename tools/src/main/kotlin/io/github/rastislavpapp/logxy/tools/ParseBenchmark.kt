@@ -24,7 +24,7 @@ import java.io.File
 import java.nio.file.Files
 import java.nio.file.Path
 
-/** Logs a parse benchmark made, closed before the next run so they don't add up. */
+/** The logs a parse benchmark made, closed before the next run so that they do not add up in memory. */
 @State(Scope.Benchmark)
 abstract class ParsedLogs {
     protected val held = ArrayList<LogData>()

@@ -8,7 +8,7 @@ import java.nio.file.Path
 interface AppendedData
 
 /**
- * An indexed log file as [Records]; the common view of raw and parsed logs.
+ * An indexed log file as [Records]; what raw and parsed logs have in common.
  *
  * Not thread-safe: [append] and all readers must run on one thread; only [readAppended] may run
  * on another, but not during [append]. Filters read a snapshot on other threads, see
@@ -27,8 +27,8 @@ abstract class LogData : Records, Closeable {
     abstract fun readAppended(size: Long): AppendedData
 
     /**
-     * Adds what [readAppended] read, which must start where this log's indexed bytes end (or its unfinished
-     * last line starts); records grow, are added, and the last may be replaced.
+     * Adds what [readAppended] read. That data must start where this log's indexed bytes end, or where its
+     * unfinished last line starts. The last record may grow or be replaced, and new records may be added.
      */
     abstract fun append(data: AppendedData)
 

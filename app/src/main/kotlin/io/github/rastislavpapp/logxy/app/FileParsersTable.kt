@@ -38,11 +38,12 @@ import javax.swing.table.DefaultTableCellRenderer
 import javax.swing.table.TableCellRenderer
 
 /**
- * Files ([names] shown, [descriptions] in tooltips) and the parser for each, null for Auto-detect: chosen
- * per file, or for all at once through a combo in the parser column's header. Each file is checked right
- * away against the start of its file, Auto-detect ones with the parser detection picks: a check mark if it
- * fits, a warning if not. If [excludable], a checkbox per file leaves it out. [onChange] follows any change.
- * Call [dispose] when done.
+ * A table of [files], shown by their [names] with their [descriptions] in tooltips, and the parser for each,
+ * null for Auto-detect. A parser is chosen per file, or for all files at once through a combo in the parser
+ * column's header. Each file is checked right away against the start of the file, with its chosen parser or,
+ * on Auto-detect, with the parser detection picks. A check mark shows that the parser fits, a warning that it
+ * does not. If [excludable], a checkbox per file leaves it out. [onChange] is called on any change. Call
+ * [dispose] when done.
  */
 class FileParsersTable(
     private val files: List<Path>,
@@ -86,7 +87,7 @@ class FileParsersTable(
         add(warning)
     }
 
-    /** The files listed, e.g. without those in subfolders; [chosenParsers] are theirs. */
+    /** The files listed, e.g. all but those in subfolders; [included] and [chosenParsers] are of these. */
     var shown: List<Path> = files
         set(value) {
             field = value
@@ -99,7 +100,7 @@ class FileParsersTable(
     /** The parser chosen for each of [included], null where it is detected. */
     val chosenParsers: List<Parser?> get() = included.map { chosen[it] }
 
-    /** Every file included was checked and fits its parser, so they can be opened. */
+    /** Whether every file included was checked and fits its parser, so the files can be opened. */
     val allFit: Boolean get() = included.isNotEmpty() && included.all { it in fitting }
 
     /** Why the files cannot be opened yet; null if [allFit]. */

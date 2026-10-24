@@ -11,7 +11,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 
-/** Where a view's row comes from: which log of [TemplateCounts.count]'s, and which record there. */
+/** Where a row comes from: which of the logs [TemplateCounts.count] counts, and which record there. */
 internal interface RowOrigin {
     /** The index, among the counted logs, of the log [row] comes from. */
     fun part(row: Int): Int
@@ -52,9 +52,9 @@ class TemplateCounts internal constructor(
         val EMPTY = TemplateCounts(emptyList(), IntArray(0), 0)
 
         /**
-         * Counts [rowCount] rows: `rows[i]`, or `i` if [rows] is null. Each row is a record of the log that
-         * [origin] tells (the first if null), whose snapshot and index are at that position in [snapshots] and
-         * [indexes]. Indexes are updated first.
+         * Counts the first [rowCount] rows; row i is `rows[i]`, or i if [rows] is null. [origin] tells which log
+         * each row is a record of, and which record; without it, row r is record r of the first log. A log's
+         * snapshot and index are at its position in [snapshots] and [indexes]. Updates the indexes first.
          */
         suspend fun count(
             indexes: List<TemplateIndex>,
@@ -77,7 +77,7 @@ class TemplateCounts internal constructor(
             val perTask = coroutineScope {
                 (0..<tasks).map { task ->
                     async {
-                        // Per part: counts by template id (the last slot for OTHER), SLOTS each.
+                        // Per part, SLOTS counts for each template id, then SLOTS for the records of OTHER.
                         val counts = arrayOfNulls<IntArray>(indexes.size)
                         val cursors = snapshots.map { it.cursor() }
                         val from = (rowCount.toLong() * task / tasks).toInt()

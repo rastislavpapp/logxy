@@ -115,7 +115,8 @@ fun printRow(name: String, times: Timings) {
 
 /**
  * Times of one row in seconds, the measured runs of each JVM. A JVM can settle into a slower state for its whole
- * run, so its runs agree with each other but not with another JVM's: the statistics take each JVM's own first.
+ * run, so its runs agree with each other but not with another JVM's; the statistics therefore first take each JVM's
+ * own best or median, then the median of those.
  */
 class Timings(val jvms: List<DoubleArray>) {
     /** The median of each JVM's best run: what the check compares. */

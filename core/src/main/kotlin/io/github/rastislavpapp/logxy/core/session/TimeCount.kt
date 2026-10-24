@@ -15,8 +15,8 @@ import kotlinx.coroutines.withContext
 private const val TASK_ROWS = 1 shl 20
 
 /**
- * Counts the times of [rows] (sorted records) of [log], or of all records if null, as a session does; for measuring it.
- * Call on the thread that owns [log].
+ * Counts the times of [rows], sorted record numbers of [log], or of all records if null, as a session does; for
+ * measuring that count. Call on the thread that owns [log].
  */
 suspend fun countTimes(log: LogData, rows: IntArray? = null): TimeHistogram = countAll(SingleLoad(log), rows)
 
@@ -33,10 +33,10 @@ private suspend fun countAll(loaded: LoadedLog, rows: IntArray?): TimeHistogram 
 }
 
 /**
- * Counts the times of the shown rows from [from] until [to] (`rows[i]`, or the records themselves if
- * [rows] is null) into [TimeHistogram]s expected to cover [expectedFrom] to [expectedTo]: one of the
- * rows before [split], one of the rest. Created on the thread that owns [loaded]; [run] reads
- * snapshots of its parts on other threads, in parallel.
+ * Counts the times of the shown rows from [from] until [to] into two [TimeHistogram]s: one of the rows
+ * before [split], one of the rest. Row i is record `rows[i]`, or record i if [rows] is null. The
+ * histograms start out with bins for [expectedFrom] to [expectedTo]. Created on the thread that owns
+ * [loaded]; [run] reads snapshots of its parts on other threads, in parallel.
  */
 internal class TimeCount(
     private val loaded: LoadedLog,
@@ -69,7 +69,8 @@ internal class TimeCount(
         .sorted()
         .toIntArray()
 
-    // All rows are each part's records in a range: read straight through, with no positions to look up.
+    // While all records are shown, a task's rows are a range of each part's records, read straight through
+    // with no positions to look up.
     private val partBounds = if (rows == null) {
         Array(parts.size) { part -> IntArray(bounds.size) { loaded.firstRecordFrom(part, bounds[it]) } }
     } else {
@@ -77,9 +78,9 @@ internal class TimeCount(
     }
 
     /**
-     * Counts the rows before [split] and the rest. [onCounted] gets, as the tasks finish, the rows counted
-     * so far from the first on, reaching all expected times, to show them filling up; on any thread.
-     * Cancelling the calling coroutine stops it.
+     * Counts the rows before [split] and the rest. As tasks finish, [onCounted] gets a histogram of the rows
+     * counted so far from the first on, with bins reaching all expected times, to show it filling up; it is
+     * called on any thread. Cancelling the calling coroutine stops the count.
      */
     suspend fun run(
         onCounted: ((TimeHistogram) -> Unit)? = null,

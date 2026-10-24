@@ -147,8 +147,8 @@ class LogTableModel(val shown: ShownLog, private val names: ColumnNames) : Abstr
     fun level(row: Int): Level? = shown.level(recordAt(row))
 
     /**
-     * How many lines the record shown in [row] has after its first, of its first [MAX_DETAIL_BYTES]; from the read of
-     * the row's values.
+     * How many lines the record shown in [row] has after its first, counted in its first [MAX_DETAIL_BYTES] bytes by
+     * the same read that gets the row's values.
      */
     fun moreLines(row: Int): Int {
         val record = recordAt(row)
@@ -157,8 +157,8 @@ class LogTableModel(val shown: ShownLog, private val names: ColumnNames) : Abstr
     }
 
     /**
-     * The text of [column] in [row], as [getValueAt] has it, for measuring many rows: not counting the record's lines,
-     * which reads far into a long record, nor keeping it.
+     * The text of [column] in [row], as [getValueAt] has it, for measuring many rows. Unlike [getValueAt], it does not
+     * count the record's lines, which would read far into a long record, and does not cache the text.
      */
     fun sampleText(row: Int, column: Int): String {
         val record = recordAt(row)

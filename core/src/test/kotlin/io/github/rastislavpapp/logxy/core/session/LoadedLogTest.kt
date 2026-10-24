@@ -44,7 +44,10 @@ abstract class LoadedLogContract {
         }
     }
 
-    /** Appends [text] to the files of [parts] and applies it; the records that may have changed, and the outcome. */
+    /**
+     * Appends [text] to the files of [parts] and applies it. Returns the record that may have changed for each
+     * part, and what settling the load did.
+     */
     private fun LoadedLog.grow(text: String, parts: List<Int>): Pair<List<Int>, Appended> {
         val changed = parts.map { part ->
             val log = this.parts[part]
@@ -101,7 +104,8 @@ abstract class LoadedLogContract {
     fun `a last record parsed differently merges again`() =
         load("2026-10-01 10:00:01.000 A1\n2026-10-01 10:00:03.000 A2", parser = oneWord) { loaded ->
             val before = loaded.parts[0].recordCount
-            // Without its line end, the last line was a record; with more words it is part of the one before.
+            // Without its line end, the last line was a record of its own. With more words it no longer matches,
+            // so it continues the record before.
             val outcome = loaded.grow(" and more\n").second
             assertEquals(before - 1, loaded.parts[0].recordCount)
             if (canMergeAgain) {
@@ -122,7 +126,7 @@ abstract class LoadedLogContract {
             val log = loaded.parts[part]
             assertEquals(log.fieldText(partRecord, log.field("Message")), records.fieldText(record, message))
             seen[part] += partRecord
-            // The record itself is its part's first one shown from there on.
+            // The first record of the part shown at this record or later is this record itself.
             assertEquals(partRecord, loaded.firstRecordFrom(part, record))
         }
         for ((part, records) in seen.withIndex()) assertEquals(List(loaded.parts[part].recordCount) { it }, records)

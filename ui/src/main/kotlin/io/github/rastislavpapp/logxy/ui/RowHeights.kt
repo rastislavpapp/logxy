@@ -1,8 +1,8 @@
 package io.github.rastislavpapp.logxy.ui
 
 /**
- * Where a table's rows lie when all are [base] pixels high but a few: [tallRows] (any order) are [tallHeights]
- * high. Lookups take a binary search over the tall rows, so many plain rows cost nothing.
+ * Where a table's rows lie when all are [base] pixels high except a few: row `tallRows[i]` is `tallHeights[i]`
+ * high, with the rows in any order. Lookups take a binary search over the tall rows, so many plain rows cost nothing.
  */
 internal class RowHeights(private val base: Int, tallRows: IntArray, tallHeights: IntArray) {
 
@@ -33,10 +33,10 @@ internal class RowHeights(private val base: Int, tallRows: IntArray, tallHeights
         return if (i >= 0) heights[i] else base
     }
 
-    /** The y of [row]'s top; of the end of the rows for the row past the last. */
+    /** The y of [row]'s top; for the row past the last, the y where the rows end. */
     fun top(row: Int): Int = row * base + extraBefore[tallBefore(row)]
 
-    /** The row of [rowCount] at [y]; -1 if none is there. */
+    /** The row at [y] among the first [rowCount] rows; -1 if none is there. */
     fun rowAt(y: Int, rowCount: Int): Int {
         if (y < 0 || rowCount <= 0 || y >= top(rowCount)) return -1
         var low = 0

@@ -27,13 +27,19 @@ private val log = LoggerFactory.getLogger(ZipSpool::class.java)
  */
 class ZipSpool(val root: Path) {
 
-    /** Where an extracted file came from: [entry] is its path inside [zip], `/`-separated; nested zips are folders. */
+    /**
+     * Where an extracted file came from. [entry] is its path inside [zip], `/`-separated, with a zip inside
+     * the zip as a folder, e.g. `old.zip/app.log`.
+     */
     data class Origin(val zip: Path, override val entry: String) : ArchiveOrigin {
         override val container: Path get() = zip
         override fun toString() = "$zip$SEPARATOR$entry"
     }
 
-    /** A file of a zip that extracting left out, as it cannot be a log; [entry] as in [Origin.entry]. */
+    /**
+     * A file in a zip that extracting left out because it cannot be a log, and the [reason] why. [entry] is
+     * its path in the zip, as in [Origin.entry].
+     */
     data class LeftOut(val entry: String, val reason: String)
 
     private val lock = Mutex()
@@ -57,8 +63,8 @@ class ZipSpool(val root: Path) {
     fun extractedFile(origin: Origin): Path? = origins.entries.firstOrNull { it.value == origin }?.key
 
     /**
-     * Extracts the files of [zip], in the zip's order, telling [progress] the fraction done (on the
-     * extracting thread). Cancelling the calling coroutine stops it and removes what was extracted.
+     * Extracts the files of [zip], in the zip's order. Tells [progress] the fraction done, from 0 to 1, on the
+     * extracting thread. Cancelling the calling coroutine stops the extraction and removes what it extracted.
      */
     suspend fun extract(zip: Path, progress: (Double) -> Unit = {}): List<Path> = lock.withLock {
         withContext(Dispatchers.IO) {
@@ -66,8 +72,8 @@ class ZipSpool(val root: Path) {
             val attributes = Files.readAttributes(absolute, BasicFileAttributes::class.java)
             val key = "$absolute|${attributes.size()}|${attributes.lastModifiedTime().toMillis()}"
             extracted[key]?.let { return@withContext it }
-            // A folder per zip version, holding a folder named like the zip, so merged views name files
-            // "app.zip/app.log".
+            // A folder per zip version, holding a folder named like the zip, so that a merged session names
+            // the files e.g. "app.zip/app.log".
             val base = root.resolve(SpoolCache.hash(key))
             val dir = base.resolve(absolute.fileName.toString())
             SpoolCache.deleteRecursively(base)
@@ -89,7 +95,11 @@ class ZipSpool(val root: Path) {
         }
     }
 
-    /** Extracts [zip] into [dir]; adds the files left out to [left], named from [top], the outermost zip's folder. */
+    /**
+     * Extracts [zip] into [dir], and each zip inside it into a folder named like that zip, up to [MAX_DEPTH]
+     * levels deep; [depth] is the level of [zip], 0 for the outermost. Adds each file it leaves out to [left],
+     * with its path relative to [top], the folder of the outermost zip.
+     */
     private suspend fun unzip(
         zip: Path, dir: Path, progress: (Double) -> Unit, depth: Int, top: Path, left: MutableList<LeftOut>,
     ): List<Path> {
@@ -119,7 +129,8 @@ class ZipSpool(val root: Path) {
                         }
                     }
                 }
-                // The time from the zip, else a file written just now would count as live and be followed.
+                // Gives the file its modification time from the zip: a file written just now would count as
+                // live and be followed.
                 entry.lastModifiedTime?.let { Files.setLastModifiedTime(target, it) }
                 done += compressed
                 progress(done.toDouble() / total)
@@ -157,7 +168,7 @@ class ZipSpool(val root: Path) {
         /** Between a zip and an entry in [Origin.toString], as in `logs.zip!/app/app.log`. */
         const val SEPARATOR = "!/"
 
-        /** Bytes of a file's start [isZip] needs. */
+        /** How many bytes from the start of a file [isZip] needs to tell whether it is a zip. */
         const val HEADER_BYTES = 4
 
         private const val BUFFER_SIZE = 1024 * 1024
@@ -179,7 +190,10 @@ class ZipSpool(val root: Path) {
             return (third == 3 && fourth == 4) || (third == 5 && fourth == 6)
         }
 
-        /** The origin [text] names, as [Origin.toString] writes it, if its zip exists. */
+        /**
+         * Reads an origin from [text] as [Origin.toString] writes it, e.g. `logs.zip!/app/app.log`. Null if
+         * [text] holds no origin or its zip does not exist.
+         */
         fun parseOrigin(text: String): Origin? {
             val at = text.indexOf(SEPARATOR)
             if (at <= 0) return null
@@ -201,7 +215,10 @@ class ZipSpool(val root: Path) {
             ZipFile(zip.toFile(), Charset.forName("IBM437"))
         }
 
-        /** Not macOS resource forks or hidden files such as `.DS_Store`. */
+        /**
+         * Whether the entry [name] is worth extracting: not a macOS resource fork under `__MACOSX`, nor a hidden
+         * file such as `.DS_Store`.
+         */
         private fun isWanted(name: String): Boolean {
             val parts = name.split('/').filter { it.isNotEmpty() }
             return parts.isNotEmpty() && parts.first() != "__MACOSX" && !parts.last().startsWith(".")

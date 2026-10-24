@@ -1,8 +1,9 @@
 package io.github.rastislavpapp.logxy.core.session
 
 /**
- * The record of [records] (sorted, the first [size] count) after [current], or before it unless [forward],
- * wrapping around; with [inclusive], [current] itself counts if it is one of them. -1 if there are none.
+ * The record among the first [size] entries of [records], which are sorted, that comes after [current], or
+ * before it unless [forward], wrapping around at the ends. With [inclusive], [current] itself counts if it is
+ * among them. -1 if there are none.
  */
 internal fun nextRecord(records: IntArray, size: Int, current: Int, forward: Boolean, inclusive: Boolean): Int {
     if (size == 0) return -1
@@ -34,8 +35,9 @@ internal class FilteredRows(rows: IntArray) {
     operator fun get(index: Int): Int = rows[index]
 
     /**
-     * The rows below [size], for reading on another thread. Only the part [replaceFrom] replaces may change
-     * under the reader, so a result for the rows read then is complete up to there.
+     * The array holding the rows, of which the entries below [size] count, for reading on another thread. Only
+     * the entries [replaceFrom] replaces may change under the reader, so a result computed from it is right up
+     * to the first replaced entry.
      */
     internal fun array(): IntArray = rows
 

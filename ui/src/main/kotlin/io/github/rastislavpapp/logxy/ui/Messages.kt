@@ -11,5 +11,5 @@ fun String.cut(maxChars: Int): String = if (length > maxChars) take(maxChars - 1
 /** [n] and its [unit], e.g. `1 error`, `1,234 errors`; [plural] for a unit that does not just take an s. */
 fun count(n: Int, unit: String, plural: String = "${unit}s"): String = "%,d %s".format(n, if (n == 1) unit else plural)
 
-/** [text] to put in Swing's HTML, e.g. of a tooltip, as written. */
+/** [text] escaped for Swing's HTML, e.g. in a tooltip, so that it shows as written. */
 fun escapeHtml(text: String): String = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")

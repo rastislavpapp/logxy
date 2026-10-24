@@ -12,8 +12,8 @@ import javax.swing.event.DocumentEvent
 import javax.swing.event.DocumentListener
 
 /**
- * Asks under [header], at [x], for the name [field] shows among [fields]; [onRename] gets it, or the field's own
- * name for an empty one. A name another column has or shows is refused.
+ * Shows a popup under [header], at [x], that asks for the name [field]'s column is to show. [onRename] gets the
+ * name entered, or the field's own name if it is left empty. A name that another of [fields] has or shows is refused.
  */
 fun showColumnRename(
     header: JComponent,

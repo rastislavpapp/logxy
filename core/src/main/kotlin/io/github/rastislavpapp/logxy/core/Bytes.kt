@@ -30,8 +30,8 @@ internal object Bytes {
     }
 
     /**
-     * As [indexOf], folding ASCII case: [needle] must be ASCII lower case already, and matches its letters in
-     * either case.
+     * Like [indexOf], but ignoring ASCII case. [needle] must already be in ASCII lower case; its letters then
+     * match in either case.
      */
     fun indexOfIgnoreAsciiCase(bytes: ByteArray, needle: ByteArray, from: Int, to: Int): Int {
         if (needle.isEmpty()) return from
@@ -44,7 +44,10 @@ internal object Bytes {
         return -1
     }
 
-    /** Whether `bytes` at [at] holds the ASCII lower-case [needle] in any ASCII case; the caller checks bounds. */
+    /**
+     * Whether the bytes starting at [at] match [needle], ignoring ASCII case. [needle] must be in ASCII lower
+     * case. The caller makes sure [needle] fits before the end of [bytes].
+     */
     fun regionMatchesIgnoreAsciiCase(bytes: ByteArray, at: Int, needle: ByteArray): Boolean {
         for (i in needle.indices) if (lowerAscii(bytes[at + i]) != needle[i]) return false
         return true
@@ -81,7 +84,10 @@ internal object Bytes {
         return true
     }
 
-    /** `bytes[from, to)` as UTF-8 text; beyond [maxBytes] cut at a character boundary and ending with [cutMark]. */
+    /**
+     * Decodes `bytes[from, to)` as UTF-8. A range longer than [maxBytes] is cut at the last character boundary
+     * within [maxBytes], and [cutMark] is appended to show the cut.
+     */
     fun utf8Text(bytes: ByteArray, from: Int, to: Int, maxBytes: Int, cutMark: String = "…"): String {
         if (to - from <= maxBytes) return String(bytes, from, to - from, Charsets.UTF_8)
         var end = from + maxBytes
@@ -120,8 +126,8 @@ internal object Bytes {
     fun parseNumber(text: String): Double = text.toByteArray().let { parseNumber(it, 0, it.size) }
 
     /**
-     * Whether `bytes[from, to)` is digits with an optional fraction and exponent; toDouble would also take
-     * e.g. `NaN` or `1f`.
+     * Whether `bytes[from, to)` is digits with an optional fraction and exponent. Checked before
+     * `String.toDouble`, which would also accept e.g. `NaN` or `1f`.
      */
     private fun isDecimal(bytes: ByteArray, from: Int, to: Int): Boolean {
         var i = from

@@ -96,7 +96,10 @@ class Selection {
         }
     }
 
-    /** Rows were inserted at [at]: rows from there on move down by [count]; the new rows are not selected. */
+    /**
+     * Call after [count] rows were inserted at [at]. The rows from [at] on move down by [count], and the new rows are
+     * not selected.
+     */
     fun insert(at: Int, count: Int) {
         rows.insert(at, count)
         if (anchor >= at) anchor += count

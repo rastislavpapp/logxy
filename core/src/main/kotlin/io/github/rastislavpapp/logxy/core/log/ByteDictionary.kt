@@ -43,7 +43,10 @@ class ByteDictionary {
     /** The bytes of [id]; the dictionary's own array, not to be changed. */
     fun key(id: Int): ByteArray = keys[id]
 
-    /** The id in [target] of each of this dictionary's keys, by id here; adds the keys [target] lacks. */
+    /**
+     * Maps the ids of this dictionary to those of [target]: element i is the id in [target] of this dictionary's
+     * key i. Adds the keys [target] lacks.
+     */
     fun idsIn(target: ByteDictionary): IntArray = IntArray(size) { id -> keys[id].let { target.idOf(it, 0, it.size) } }
 
     /** The bytes of [id] decoded as UTF-8, decoded once and kept. */

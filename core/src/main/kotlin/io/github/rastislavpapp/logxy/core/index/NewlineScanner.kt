@@ -13,7 +13,7 @@ object NewlineScanner {
 
     const val SWAR = "swar"
 
-    /** Whether this JVM could search with vectors, also when [PROPERTY] turns them off. */
+    /** Whether this JVM could search with vectors, even when [PROPERTY] turns them off. */
     val vectorSupport: VectorSupport =
         vectorSupport(ModuleLayer.boot().findModule("jdk.incubator.vector").isPresent) { VectorNewlineSearch.bitSize }
 
@@ -48,7 +48,10 @@ sealed interface VectorSupport {
     /** Started without `--add-modules jdk.incubator.vector`. */
     data object NoModule : VectorSupport
 
-    /** The CPU's preferred vectors have [bits], fewer than [MIN_VECTOR_BITS]: without AVX2, slower than SWAR. */
+    /**
+     * The CPU's preferred vectors have only [bits] bits, fewer than [MIN_VECTOR_BITS]: the CPU lacks AVX2, so
+     * vectors would be slower than SWAR.
+     */
     data class TooNarrow(val bits: Int) : VectorSupport
 }
 
@@ -73,6 +76,9 @@ internal fun vectorSupport(moduleLoaded: Boolean, preferredBits: () -> Int): Vec
     return if (bits >= MIN_VECTOR_BITS) VectorSupport.Supported(bits) else VectorSupport.TooNarrow(bits)
 }
 
-/** Whether to search with vectors: where [support]ed, unless [override] is [NewlineScanner.SWAR]. */
+/**
+ * Whether to search with vectors: when [support] says the JVM can, unless [override], the value of
+ * [NewlineScanner.PROPERTY], is [NewlineScanner.SWAR].
+ */
 internal fun usesVectors(override: String?, support: VectorSupport): Boolean =
     override != NewlineScanner.SWAR && support is VectorSupport.Supported

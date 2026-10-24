@@ -32,7 +32,7 @@ class VariableSeriesTest {
         )
         val slices = values.slices(0, 10, 4)
         val nan = Double.NaN
-        // Records, without a number, min, p50, p99, max, sum, average.
+        // Each row of a slice: records, records without a number, then min, p50, p99, max, sum and average.
         assertEquals(listOf(4.0, 1.0, 1.0, 3.0, 5.0, 5.0, 9.0, 3.0), slices.row(0))
         assertEquals(listOf(2.0, 1.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0), slices.row(1))
         assertEquals(listOf(1.0, 0.0, 7.0, 7.0, 7.0, 7.0, 7.0, 7.0), slices.row(2))

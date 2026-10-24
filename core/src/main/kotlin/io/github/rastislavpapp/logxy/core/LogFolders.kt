@@ -27,7 +27,8 @@ object LogFolders {
     suspend fun files(folder: Path, recursive: Boolean = true, onFound: (count: Int) -> Unit = {}): List<Path> {
         val job = currentCoroutineContext().job
         val found = ArrayList<Path>()
-        // Following links, as logs are often links, e.g. Kubernetes' /var/log/containers; loops end in visitFileFailed.
+        // Follows links, as logs often are links, e.g. in Kubernetes' /var/log/containers.
+        // A link that loops back is reported to visitFileFailed, which skips it.
         val options = setOf(FileVisitOption.FOLLOW_LINKS)
         Files.walkFileTree(folder, options, if (recursive) Int.MAX_VALUE else 1, object : SimpleFileVisitor<Path>() {
             override fun preVisitDirectory(dir: Path, attrs: BasicFileAttributes): FileVisitResult {
@@ -56,7 +57,7 @@ object LogFolders {
     private fun isHidden(path: Path) =
         path.fileName.toString().startsWith(".") || runCatching { Files.isHidden(path) }.getOrDefault(false)
 
-    /** A zip or compressed file, or text. */
+    /** Whether [file] is a zip, a compressed file or text. */
     private fun isOpenable(file: Path): Boolean {
         val start = start(file) ?: return false
         return ZipSpool.isZip(start) || CompressedSpool.formatOf(start) != null || isText(start)

@@ -19,10 +19,10 @@ import javax.swing.UIManager
 import kotlin.math.abs
 import kotlin.math.sqrt
 
-/** Of the chart, without the time labels under it. */
+/** The chart's height in unscaled pixels, without the time labels under it. */
 internal const val HISTOGRAM_HEIGHT = 40
 
-/** Above the chart; as much is left under it when the time axis is not right below. */
+/** The space above the chart in unscaled pixels; as much is left under it when the time axis is not right below. */
 internal const val HISTOGRAM_PADDING = 4
 private const val MATCH_STRIP_HEIGHT = 3
 
@@ -42,8 +42,8 @@ internal const val DRAG_THRESHOLD = 3
  * context menu calls [onShowAllTimes] when [hasTimeRange].
  *
  * At the [pointer]'s time, set while the mouse is over this bar or another on its [timeline], a line crosses
- * the chart with the counts of the slice there beside it; [onPointer] hears where the mouse points here. Likewise
- * [draggedTimes] shows a drag over such a bar, and [onDragged] hears of one here.
+ * the chart with the counts of the slice there beside it; [onPointer] is told where the mouse points on this bar.
+ * Likewise [draggedTimes] shows a drag over such a bar, and [onDragged] is told of a drag on this one.
  *
  * A [TimeAxis] labels the times, under this bar or under the charts below it.
  */
@@ -52,10 +52,13 @@ class TimeHistogramBar(
     private val found: () -> TimeHistogram? = { null },
 ) : JComponent() {
 
-    /** From [from] to [to], exclusive: the slice clicked, with the most severe [TimeHistogram] category in it. */
+    /**
+     * Called with the slice clicked, from `from` to `to`, exclusive, and the most severe [TimeHistogram] category
+     * in it.
+     */
     var onJump: (from: Long, to: Long, category: Int) -> Unit = { _, _, _ -> }
 
-    /** From [from] to [to], exclusive. */
+    /** Called with the times dragged over, from `from` to `to`, exclusive. */
     var onRange: (from: Long, to: Long) -> Unit = { _, _ -> }
 
     /** The times being dragged over, or null once dropped. */

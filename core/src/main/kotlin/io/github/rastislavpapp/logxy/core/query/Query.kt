@@ -33,7 +33,7 @@ sealed interface Query {
     }
 }
 
-/** This query with its rules on the field [from], in any case, on [to] instead. */
+/** This query with each rule on the field [from], whatever the case of its name, moved to the field [to]. */
 fun Query.Group.withField(from: String, to: String): Query.Group = copy(
     items = items.map { item ->
         when (item) {
@@ -64,7 +64,10 @@ enum class QueryOp(val symbol: String) {
 
     val comparison get() = this == AT_LEAST || this == ABOVE || this == AT_MOST || this == BELOW
 
-    /** With an empty value, keeps records that have a non-empty one; other ops make an empty value a placeholder. */
+    /**
+     * Whether a rule with this op and an empty value keeps the records that have a non-empty value. With other
+     * ops, an empty value makes the rule a placeholder, which is ignored.
+     */
     val excludesEmpty get() = this == NOT_EQUALS || this == NOT_EQUALS_CASE
 }
 

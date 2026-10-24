@@ -12,7 +12,7 @@ import java.nio.file.Path
  */
 data class SessionFiles(val paths: List<Path>, val parsers: List<Parser?>, val filter: SavedFilter? = null)
 
-/** A change to the tabs, applied in order; [index]es are of the tabs as they are when it applies. */
+/** A change to the tabs. Changes apply in order, and an index refers to the tabs as they are when it applies. */
 sealed interface TabAction {
     /** Selects the existing tab at [index], e.g. one that already shows the files being opened. */
     data class Select(val index: Int) : TabAction
@@ -85,7 +85,8 @@ object TabPlan {
     private class OpenTabs(tabs: List<SessionFiles>) {
         private val paths = tabs.mapTo(ArrayList()) { it.paths }
 
-        // Resolved only for tabs with as many files, as fileKey reads the file system.
+        // A tab's keys are resolved only when it has as many files as are looked for, as fileKey reads the
+        // file system.
         private val keys = ArrayList<Set<Path>?>(paths.map { null })
 
         fun indexOf(files: List<Path>): Int? {

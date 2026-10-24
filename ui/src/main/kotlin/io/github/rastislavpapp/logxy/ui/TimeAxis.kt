@@ -18,7 +18,7 @@ private const val TICK_HEIGHT = 3
 /** Space a time label needs around it, in pixels. */
 private const val LABEL_GAP = 24
 
-/** In nanoseconds. */
+/** Spans of time, in nanoseconds. */
 internal const val MILLI = 1_000_000L
 internal const val SECOND = 1_000 * MILLI
 internal const val MINUTE = 60 * SECOND
@@ -33,8 +33,8 @@ private val TICK_STEPS = longArrayOf(
 )
 
 /**
- * Ticks at round times of [timeline] at this strip's width, labeled as far apart as the labels need: one strip under
- * the histogram and the charts above it, which share its width and so its times.
+ * A strip of ticks at round times of [timeline] at the strip's width, with labels as far apart as they need. One strip,
+ * placed under the histogram and the charts, serves both, as they have its width and so its times.
  */
 class TimeAxis(private val timeline: (width: Int) -> Timeline?) : JComponent() {
 

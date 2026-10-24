@@ -15,7 +15,10 @@ import java.util.Locale
 
 /** Parses timestamps from raw bytes into epoch nanoseconds. Stateful (caches); one per thread. */
 internal interface TimestampParser {
-    /** Parses a timestamp starting at `bytes[from]`; returns the index after it, or -1. Result in [nanos]. */
+    /**
+     * Parses a timestamp that starts at `bytes[from]` and ends by [limit]. Returns the index after it, and its
+     * value is then in [nanos]; -1 if there is none.
+     */
     fun parse(bytes: ByteArray, from: Int, limit: Int): Int
 
     val nanos: Long
