@@ -18,3 +18,4 @@ numbers.
 ## Prior requests
 
 - #16: "Text search over the whole read buffer"
+- #116: "Search plain text with the Vector API", as the way to give vectors long input
