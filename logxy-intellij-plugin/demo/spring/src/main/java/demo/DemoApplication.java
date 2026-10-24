@@ -27,7 +27,7 @@ public class DemoApplication {
     void work() {
         tick++;
         if (tick % 10 == 0) {
-            log.warn("Order {} is slow: {} ms", tick, 1500 + tick);
+            log.warn("Order {} is slow: {} ms .............. long line is very long and will be even longer if i do not stop typing letters", tick, 1500 + tick);
         } else if (tick % 25 == 0) {
             log.error("Payment for order {} failed", tick, new IllegalStateException("card declined"));
         } else {
