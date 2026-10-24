@@ -26,6 +26,7 @@ The script reads the IDE from its `product-info.json`: its launcher, its options
 - **Console links**: a running console scrolls on, so stop the process before clicking a link in it.
 - **Inside the container**: the IDE's system directory is `/tmp/ide/system`, so the run spool files are in `/tmp/ide/system/logxy/runs`. The demo project is a copy at `/tmp/demo`. Look with `gui.sh exec ls ...`.
 - **Screenshots** for `docs/images/plugin/` are 1200x800 of the IDE alone: start with `GUI_SIZE=1200x819`, maximize the window by double-clicking its title bar, and crop with `gui.sh shot NAME 0 19 1200 800`. Escape in the logxy view clears its filter.
+- **IntelliJ's own icons**: for UI that should look like IntelliJ's, start from its icons rather than drawing new ones. They are `expui/<path>.svg` in the `intellij-icons` artifact (`gradle/libs.versions.toml`), loaded through `Look.icon(path, size)`. List them with `unzip -l` on the jar under `~/.gradle/caches/modules-2/files-2.1/com.jetbrains.intellij.platform/icons/`. Not all are 16 px (the editor's `gutter/fold` is 9), and `size` is the size to draw at, so pass the SVG's own size to keep it as IntelliJ shows it.
 - **Harmless errors**: JCEF fails to start in the container, so the What's New page stays blank and the log has SEVERE `StartupTest` and `CefApp` entries; their "Last Action" names whatever was clicked last, logxy's actions too. PyCharm also reports that File Watchers needs a plugin it lacks.
 
 ## Checking in PyCharm
