@@ -133,6 +133,16 @@ class LogTableModel(val shown: ShownLog, private val names: ColumnNames) : Abstr
         return values(record)[field]
     }
 
+    /**
+     * The first line of [column] in [row] as [getValueAt] has it, but cut at [MAX_DETAIL_BYTES] rather than
+     * [MAX_DISPLAY_BYTES]: for an expanded row. Read anew each time, not cached.
+     */
+    fun detailValueAt(row: Int, column: Int): String {
+        val record = recordAt(row)
+        val field = fieldIndex(column) ?: return "${record + 1}"
+        return readValue(record, field, MAX_DETAIL_BYTES)
+    }
+
     /** Canonical level of the record shown in [row], if the parser has levels. */
     fun level(row: Int): Level? = shown.level(recordAt(row))
 
@@ -155,8 +165,12 @@ class LogTableModel(val shown: ShownLog, private val names: ColumnNames) : Abstr
         val field = fieldIndex(column) ?: return "${record + 1}"
         val slot = record and (CACHE_SIZE - 1)
         if (cachedRows[slot] == record) return cachedValues[slot]!![field]
-        return expandTabs(shown.rowValues(record, MAX_DISPLAY_BYTES)[field])
+        return readValue(record, field, MAX_DISPLAY_BYTES)
     }
+
+    /** The first line of [field] of [record], cut at [maxBytes], read from the file; tabs expanded. */
+    private fun readValue(record: Int, field: Int, maxBytes: Int): String =
+        expandTabs(shown.rowValues(record, maxBytes)[field])
 
     private fun values(record: Int): Array<String> {
         val slot = record and (CACHE_SIZE - 1)

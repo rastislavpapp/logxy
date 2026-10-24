@@ -31,16 +31,20 @@ import javax.swing.JToggleButton
 import javax.swing.plaf.basic.BasicButtonUI
 import javax.swing.plaf.basic.BasicSplitPaneDivider
 import javax.swing.plaf.basic.BasicSplitPaneUI
+import kotlin.math.abs
 
-private const val ICON_SIZE = 16
+private const val HALF_PIXEL = 0.5f
 
 /** The [Look] from IntelliJ's theme; the colours are theme-aware, so they follow a theme switch. */
 object IdeLook : Look {
 
-    // IconLoader picks the `_dark` variant in dark themes by itself.
+    // IconLoader picks the `_dark` variant in dark themes by itself. [size] is scaled against the SVG's own size,
+    // which is not always 16 (the expand icons are 9). The icon's width is already scaled to the screen, so that
+    // scale is divided out first.
     override fun icon(path: String, size: Int): Icon {
         val icon = IconLoader.getIcon("expui/$path.svg", IdeLook::class.java.classLoader)
-        return if (size == ICON_SIZE) icon else IconUtil.scale(icon, null, size.toFloat() / ICON_SIZE)
+        val natural = icon.iconWidth / JBUIScale.scale(1f)
+        return if (abs(size - natural) < HALF_PIXEL) icon else IconUtil.scale(icon, null, size / natural)
     }
 
     override fun scale(value: Int): Int = JBUIScale.scale(value)

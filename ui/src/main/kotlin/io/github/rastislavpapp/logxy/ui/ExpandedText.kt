@@ -3,8 +3,9 @@ package io.github.rastislavpapp.logxy.ui
 import io.github.rastislavpapp.logxy.core.query.Highlighter
 
 /**
- * The whole [text] an expanded row's cell shows: the cell's own first line, then the record's later lines, tabs
- * expanded. Keeps its last wrap and marks, as painting asks for them over and over and the text can be long.
+ * The whole [text] an expanded row's cell shows: its first line, cut at 1 MB rather than the collapsed cell's 4 KB,
+ * then the record's later lines, tabs expanded. Keeps its last wrap and marks, as painting asks for them over and
+ * over and the text can be long.
  */
 internal class ExpandedText(val text: String) {
 
