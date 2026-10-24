@@ -37,6 +37,7 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.swing.Swing
 import net.miginfocom.swing.MigLayout
+import org.slf4j.LoggerFactory
 import java.awt.BasicStroke
 import java.awt.BorderLayout
 import java.awt.CardLayout
@@ -87,6 +88,8 @@ private const val FOLLOW_COLOR = "Component.accentColor"
 private const val OPENING_TITLE = "Opening Files"
 
 class MainFrame : JFrame("logxy") {
+
+    private val log = LoggerFactory.getLogger(MainFrame::class.java)
 
     private val shortcut = toolkit.menuShortcutKeyMaskEx
     private val tabs = JTabbedPane()
@@ -372,8 +375,10 @@ class MainFrame : JFrame("logxy") {
         val index = current?.let(tabs::indexOfComponent)?.takeIf { it >= 0 }
         if (index == null && (mode == OpenMode.MERGE_INTO_CURRENT || mode == OpenMode.MERGE_WITH_CURRENT_IN_NEW)) return
         // Files can go between finding them and the user's answer.
-        val openable = files.zip(parsers).filter { (file, _) -> checkOpenable(file) }
-        perform(TabPlan.open(mode, openable.map { it.first }, openable.map { it.second }, openSessions(), index))
+        val filesWithParsers = files.zip(parsers).filter { (file, _) -> checkOpenable(file) }
+        val openableFiles = filesWithParsers.map { it.first }
+        log.info("Opening files $openableFiles with mode=$mode")
+        perform(TabPlan.open(mode, openableFiles, filesWithParsers.map { it.second }, openSessions(), index))
     }
 
     private fun askHowToOpen(files: List<Path>, inSubfolders: Set<Path>, current: LogTab?): OpenAnswer? {
