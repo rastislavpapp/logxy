@@ -9,7 +9,7 @@ Names, KDoc and comments in the diff use the terms `GLOSSARY.md` defines, never 
 ## Comments and KDoc
 
 - **Comments carry what the code cannot show**: why it is done this way, constraints, contracts, tricky algorithms.
-- **Length follows the content**: one line by default, more when the contract needs it (units, threading, nullability, edge cases, the reason for a non-obvious approach) or when one clear line cannot hold it.
+- **Length follows the content**: as long as a reader needs to understand it on the first pass, and no longer. A simple fact takes one line; a contract (units, threading, nullability, edge cases, the reason for a non-obvious approach) takes as many lines as it needs.
 - **Readable on the first pass**: a reader new to the class understands a comment or KDoc without rereading it. Write plain sentences that name each thing outright, and say what each parameter or value *is* before what is done with it, with a tiny example when its meaning is not obvious (`2 for "hello" displayed as "he..."`). Older terse, colon-chained KDoc is no precedent.
 - **KDoc** fills a gap the name and signature leave: the contract, an edge case, the reason. A declaration whose name already tells all is complete without one, in `core` too: `PlatformDetector.isWindows()`, a `builtIn: Boolean` flag. A KDoc that restates the name is noise, and a review flags it, not its absence. In `core`, the API the app builds on, check each class and non-private function for such a gap.
 
