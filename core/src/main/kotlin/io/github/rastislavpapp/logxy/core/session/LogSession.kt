@@ -257,7 +257,7 @@ class LogSession internal constructor(
 
     private var searchCondition: Filter? = null
 
-    /** The evaluation of [searchCondition] among the shown rows; what it covers is what the found records cover. */
+    /** The evaluation of [searchCondition] in the shown log; what it covers is what the found records cover. */
     private val searchRun = LoadEvaluation(scope)
     private var searching: PreparedFilter? = null
 
@@ -298,9 +298,9 @@ class LogSession internal constructor(
     private val highlightRun = LoadEvaluation(scope)
 
     /** The row highlights of the settings that were evaluated last, null while none were. */
-    private var highlightsOf: List<RowHighlight>? = null
+    private var evaluatedHighlights: List<RowHighlight>? = null
 
-    /** [highlightsOf] compiled for the records: null for one that does not fit them. */
+    /** [evaluatedHighlights] compiled for the records: null for one that does not fit them. */
     private var highlightFilters = emptyList<Filter?>()
 
     /** Whether the row highlights of a new load wait for the filter's first result, so as not to delay it. */
@@ -880,7 +880,7 @@ class LogSession internal constructor(
             countTimes(anew = true)
         }
         // A load waiting for its filter evaluates the current row highlights once it is done.
-        if (editedParser == null && (levelsChanged || settings.rowHighlights != highlightsOf)) highlightAll()
+        if (editedParser == null && (levelsChanged || settings.rowHighlights != evaluatedHighlights)) highlightAll()
     }
 
     /** The saved parser that [parser] became by a rename, i.e. with the same definition under a new name. */
@@ -960,7 +960,8 @@ class LogSession internal constructor(
         val filter = activeFilter ?: return
         val shown = shown?.takeIf { it.isFiltered } ?: return
         val engine = engine ?: return
-        filterRun.catchUp(engine, indexedSize(), { from -> engine.prepare(filter, from) }) { from, evaluation ->
+        val prepare = { from: Int -> engine.prepare(filter, from) }
+        filterRun.catchUp(engine, indexedSize(), prepare) { from, evaluation ->
             val result = evaluation.run()
             val oldSize = shown.rowCount
             val firstChanged = shown.replaceRowsFrom(from, result.rows)
@@ -994,9 +995,11 @@ class LogSession internal constructor(
         val highlights = settings.current.rowHighlights
         val compiled = compileHighlights(highlights.map { it.query }, QueryCompiler(records.schema))
         val evaluations = prepareHighlights(engine, compiled, 0)
-        highlightsOf = highlights
+        evaluatedHighlights = highlights
         // One that does not prepare, such as one with an invalid regex, is left out of the catch-ups too.
-        highlightFilters = compiled.mapIndexed { i, filter -> filter.takeIf { evaluations[i] != null } }
+        highlightFilters = compiled.mapIndexed { i, filter ->
+            if (evaluations[i] == null) null else filter
+        }
         if (evaluations.all { it == null }) {
             highlightRun.cover(0, 0L)
             val had = shown.hasRowHighlights
@@ -1004,6 +1007,9 @@ class LogSession internal constructor(
             if (had) notifyRows { rowHighlightsChanged(0) }
             return
         }
+        // The records keep indexes into the row highlights before; should this run fail, a catch-up starts over from
+        // the first record rather than read them against the new ones.
+        highlightRun.cover(0, 0L)
         highlightRun.start { showHighlights(shown, highlights, 0, evaluations) }
     }
 
@@ -1012,7 +1018,7 @@ class LogSession internal constructor(
         if (highlightsWait || highlightFilters.all { it == null }) return
         val shown = shown ?: return
         val engine = engine ?: return
-        val highlights = highlightsOf ?: return
+        val highlights = evaluatedHighlights ?: return
         val filters = highlightFilters
         val prepare = { from: Int -> prepareHighlights(engine, filters, from) }
         highlightRun.catchUp(engine, indexedSize(), prepare) { from, evaluations ->
@@ -1085,7 +1091,8 @@ class LogSession internal constructor(
         }
         // A failed search stops following the rows until the next one.
         if (!anew && searchError != null) return
-        val shownCondition = shownFilter?.let { Filter.And(listOf(it, condition)) } ?: condition
+        val filter = shownFilter
+        val shownCondition = if (filter == null) condition else Filter.And(listOf(filter, condition))
         val spec = searchSpec
         if (!anew) {
             val prepare = { from: Int -> engine.prepare(shownCondition, from) }
@@ -1393,7 +1400,7 @@ class LogSession internal constructor(
         filterRun.clear()
         searchRun.clear()
         highlightRun.clear()
-        highlightsOf = null
+        evaluatedHighlights = null
         highlightFilters = emptyList()
         searching = null
         searchError = null

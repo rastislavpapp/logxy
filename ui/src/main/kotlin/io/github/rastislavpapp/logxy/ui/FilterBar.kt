@@ -375,7 +375,14 @@ class FilterBar(private val onApply: () -> Unit, names: ColumnNames, private val
      */
     private fun highlightLike(query: String, color: PaletteColor) {
         val highlights = host.settings.current.rowHighlights
-        fun printed(text: String) = runCatching { QueryPrinter.print(QueryParser.parse(text)) }.getOrDefault(text)
+
+        // Printed again, in case the settings file holds a query as typed rather than as printed.
+        fun printed(text: String): String = try {
+            val parsed = QueryParser.parse(text)
+            QueryPrinter.print(parsed)
+        } catch (_: QueryException) {
+            text
+        }
         val same = highlights.indexOfFirst { printed(it.query) == query }
         if (same >= 0) return recolor(highlights[same], color)
         if (highlights.size >= RowHighlight.MAX) {

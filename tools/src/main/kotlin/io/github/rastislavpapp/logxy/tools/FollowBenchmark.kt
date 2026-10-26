@@ -42,6 +42,7 @@ open class FollowBenchmark {
     private lateinit var bytes: ByteArray
     private lateinit var log: ParsedLog
     private lateinit var engine: FilterEngine
+    private lateinit var highlightEngine: FilterEngine
     private var covered = 0
 
     @Setup
@@ -54,9 +55,11 @@ open class FollowBenchmark {
         val parser = parserFor(source).compileFor(source)
         log = runBlocking { ParsedLog.build(followed, parser) }
         engine = FilterEngine(log)
+        // An engine of its own, so the filter's row measures the same cache as before row highlights existed.
+        highlightEngine = FilterEngine(log)
         runBlocking {
             engine.prepare(filter).run()
-            evaluateRowHighlights(engine, log.schema, benchmarkHighlights)
+            evaluateRowHighlights(highlightEngine, log.schema, benchmarkHighlights)
         }
     }
 
@@ -79,7 +82,7 @@ open class FollowBenchmark {
     /** [benchmarkHighlights] caught up on the appended records. */
     @Benchmark
     fun highlightAppended(): Int = runBlocking {
-        evaluateRowHighlights(engine, log.schema, benchmarkHighlights, engine.changedFrom(covered))
+        evaluateRowHighlights(highlightEngine, log.schema, benchmarkHighlights, highlightEngine.changedFrom(covered))
     }
 }
 

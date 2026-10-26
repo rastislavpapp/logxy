@@ -72,8 +72,9 @@ class ShownLog internal constructor(private val loaded: LoadedLog) {
     // What a search started anew has found so far, while it runs and reports chunk by chunk; null otherwise.
     private var foundSoFar: FoundChunks? = null
 
-    private val highlights = RecordHighlights()
-    private var highlightList = emptyList<RowHighlight>()
+    // Which of [evaluatedHighlights] each record takes.
+    private val recordHighlights = RecordHighlights()
+    private var evaluatedHighlights = emptyList<RowHighlight>()
 
     var ended = false
         private set
@@ -143,14 +144,14 @@ class ShownLog internal constructor(private val loaded: LoadedLog) {
      * The row highlights that [rowHighlight] gives the index of: those of the settings when the records were last
      * evaluated. Empty once the shown log ended.
      */
-    val rowHighlights: List<RowHighlight> get() = if (ended) emptyList() else highlightList
+    val rowHighlights: List<RowHighlight> get() = if (ended) emptyList() else evaluatedHighlights
 
     /**
      * The index in [rowHighlights] of [record]'s row highlight, the first one it matches; the same in every shown log
      * of the load, whatever the filter. -1 for none, also while the record is not evaluated yet and once the shown
      * log ended.
      */
-    fun rowHighlight(record: Int): Int = if (ended) -1 else highlights.of(record)
+    fun rowHighlight(record: Int): Int = if (ended) -1 else recordHighlights.of(record)
 
     /** Epoch nanoseconds of [record]'s timestamp, or null if there is none. */
     fun timestamp(record: Int): Long? = if (ended) null else records.timestamp(record)
@@ -457,15 +458,15 @@ class ShownLog internal constructor(private val loaded: LoadedLog) {
     internal fun clearFound() = showFound(IntArray(0))
 
     /** Whether any record was evaluated for its row highlight. */
-    internal val hasRowHighlights: Boolean get() = highlights.size > 0
+    internal val hasRowHighlights: Boolean get() = recordHighlights.size > 0
 
     /**
      * Shows [part], the row highlights of the records from its first one on, as indexes into [list]; a part from
      * the first record replaces all of them.
      */
     internal fun showRowHighlights(list: List<RowHighlight>, part: HighlightsPart) {
-        highlights.replace(part)
-        highlightList = list
+        recordHighlights.replace(part)
+        evaluatedHighlights = list
     }
 
     /**

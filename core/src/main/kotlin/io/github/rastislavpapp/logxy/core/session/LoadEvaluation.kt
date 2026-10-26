@@ -26,7 +26,7 @@ internal class LoadEvaluation(private val scope: CoroutineScope) {
     var coveredBytes = 0L
         private set
 
-    /** Whether a run or a catch-up is running. */
+    /** Whether a run or a catch-up is running; false once its job called [finished]. */
     val isRunning: Boolean get() = job?.isActive == true
 
     /** Runs [block] as the evaluation, cancelling the one running. */
@@ -60,7 +60,10 @@ internal class LoadEvaluation(private val scope: CoroutineScope) {
         coveredBytes = bytes
     }
 
-    /** The running job is done, though still running the code that called this. */
+    /**
+     * Called by the running job once its result is in place, so that a [catchUp] it starts next is not refused as
+     * running; the job may still run the code after this call.
+     */
     fun finished() {
         job = null
     }
