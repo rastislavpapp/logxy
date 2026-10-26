@@ -108,16 +108,19 @@ interface Look {
 /** Short for [Look.current]. */
 internal val look: Look get() = Look.current
 
-/** The backgrounds of [Look.rowHighlight]: for a light look, then for a dark one. */
+/**
+ * The backgrounds of [Look.rowHighlight]: for a light look, then for a dark one. Pale or dark enough that the level
+ * colours keep most of the contrast they have on the table's own background.
+ */
 private val ROW_HIGHLIGHTS = mapOf(
-    PaletteColor.RED to (0xFAD4D4 to 0x5A2E2E),
-    PaletteColor.ORANGE to (0xFBE0C6 to 0x5A3F24),
-    PaletteColor.YELLOW to (0xF7EDB0 to 0x4F4920),
-    PaletteColor.GREEN to (0xD3EFD0 to 0x2E4A30),
-    PaletteColor.TEAL to (0xCDECE8 to 0x234846),
-    PaletteColor.BLUE to (0xD3E3F8 to 0x2A3D5A),
-    PaletteColor.PURPLE to (0xE6DAF5 to 0x432F57),
-    PaletteColor.GRAY to (0xE3E3E3 to 0x45474B),
+    PaletteColor.RED to (0xFCE3E3 to 0x45292A),
+    PaletteColor.ORANGE to (0xFCEBDA to 0x453423),
+    PaletteColor.YELLOW to (0xFAF3CC to 0x3E3A21),
+    PaletteColor.GREEN to (0xE2F5E0 to 0x283B2B),
+    PaletteColor.TEAL to (0xDEF3F0 to 0x213A39),
+    PaletteColor.BLUE to (0xE2EDFA to 0x263246),
+    PaletteColor.PURPLE to (0xEFE7F8 to 0x362944),
+    PaletteColor.GRAY to (0xEDEDED to 0x37393D),
 )
 
 private fun rowHighlightBackground(color: PaletteColor, dark: Boolean): Color {
