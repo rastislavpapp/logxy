@@ -53,11 +53,13 @@ internal class HighlightsPart(val from: Int, val indexes: ByteChunkList, val rec
  * a field they lack, or one whose query has only empty values.
  */
 internal fun compileHighlights(queries: List<String>, compiler: QueryCompiler): List<Filter?> = queries.map { text ->
-    try {
-        compiler.compile(QueryParser.parse(text)).takeIf { it != Filter.And(emptyList()) }
+    val filter = try {
+        val query = QueryParser.parse(text)
+        compiler.compile(query)
     } catch (_: QueryException) {
-        null
+        return@map null
     }
+    if (filter == Filter.And(emptyList())) null else filter
 }
 
 /**
@@ -89,8 +91,11 @@ internal suspend fun runHighlights(from: Int, evaluations: List<PreparedFilter?>
         repeat(end - from) { indexes.add(0) }
         // The last row highlight first, so that the first one a record matches is written over the others.
         for (i in results.indices.reversed()) {
+            val rows = results[i]?.rows ?: continue
             val index = (i + 1).toByte()
-            for (record in results[i]?.rows ?: continue) if (record < end) indexes[record - from] = index
+            for (record in rows) {
+                if (record < end) indexes[record - from] = index
+            }
         }
         indexes
     }

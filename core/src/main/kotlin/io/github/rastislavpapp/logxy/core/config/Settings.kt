@@ -32,7 +32,7 @@ enum class PaletteColor(val label: String) {
 /** A row highlight: the rows of the records [query] (its text, as typed in the filter bar) matches get [color]. */
 data class RowHighlight(val query: String, val color: PaletteColor) {
     companion object {
-        /** The most row highlights there can be, as each record keeps the index of its own in one byte. */
+        /** The most row highlights there can be: a session keeps, for each record, which one it matches in a byte. */
         const val MAX = 255
     }
 }

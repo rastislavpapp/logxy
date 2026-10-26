@@ -108,16 +108,19 @@ interface Look {
 /** Short for [Look.current]. */
 internal val look: Look get() = Look.current
 
-/** The background of [Look.rowHighlight] in a light look, or a [dark] one. */
-private fun rowHighlightBackground(color: PaletteColor, dark: Boolean): Color = Color(
-    when (color) {
-        PaletteColor.RED -> if (dark) 0x5A2E2E else 0xFAD4D4
-        PaletteColor.ORANGE -> if (dark) 0x5A3F24 else 0xFBE0C6
-        PaletteColor.YELLOW -> if (dark) 0x4F4920 else 0xF7EDB0
-        PaletteColor.GREEN -> if (dark) 0x2E4A30 else 0xD3EFD0
-        PaletteColor.TEAL -> if (dark) 0x234846 else 0xCDECE8
-        PaletteColor.BLUE -> if (dark) 0x2A3D5A else 0xD3E3F8
-        PaletteColor.PURPLE -> if (dark) 0x432F57 else 0xE6DAF5
-        PaletteColor.GRAY -> if (dark) 0x45474B else 0xE3E3E3
-    },
+/** The backgrounds of [Look.rowHighlight]: for a light look, then for a dark one. */
+private val ROW_HIGHLIGHTS = mapOf(
+    PaletteColor.RED to (0xFAD4D4 to 0x5A2E2E),
+    PaletteColor.ORANGE to (0xFBE0C6 to 0x5A3F24),
+    PaletteColor.YELLOW to (0xF7EDB0 to 0x4F4920),
+    PaletteColor.GREEN to (0xD3EFD0 to 0x2E4A30),
+    PaletteColor.TEAL to (0xCDECE8 to 0x234846),
+    PaletteColor.BLUE to (0xD3E3F8 to 0x2A3D5A),
+    PaletteColor.PURPLE to (0xE6DAF5 to 0x432F57),
+    PaletteColor.GRAY to (0xE3E3E3 to 0x45474B),
 )
+
+private fun rowHighlightBackground(color: PaletteColor, dark: Boolean): Color {
+    val (light, darkRgb) = ROW_HIGHLIGHTS.getValue(color)
+    return Color(if (dark) darkRgb else light)
+}
