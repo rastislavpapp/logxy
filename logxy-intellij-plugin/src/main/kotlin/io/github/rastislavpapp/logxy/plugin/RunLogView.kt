@@ -36,7 +36,7 @@ private const val PARTS_KEY = "run.parts"
 private val log = logger<RunLogView>()
 
 /**
- * A logxy view of a run's [spool], in a run tab beside the console ([ConsoleSwitch]) or as a debug tab's sub-tab;
+ * A logxy view of a run's [spool], a sub-tab of the run or debug tab beside the console's ([RunTabLayout]);
  * [memory] keeps the columns for the next run, which starts unfiltered. The view is made once it shows on screen and
  * there is enough output to detect its parser. The IDE's Find, Find Next and Find Previous search its records.
  */
@@ -52,7 +52,7 @@ class RunLogView(
     private val checkScheduled = AtomicBoolean()
     private var waitTimer: Timer? = null
 
-    /** Follow, the columns, Clear All and the parts: beside the view, in the console toolbar's place or its own. */
+    /** Follow, the columns, Clear All and the parts: the toolbar of the view's sub-tab. */
     val actions = viewActions(this)
 
     /** Whether Clear All emptied the output: no view is made of it while it stays empty, also once the run ends. */
