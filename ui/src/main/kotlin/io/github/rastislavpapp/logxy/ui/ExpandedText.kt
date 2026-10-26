@@ -1,6 +1,6 @@
 package io.github.rastislavpapp.logxy.ui
 
-import io.github.rastislavpapp.logxy.core.query.Highlighter
+import io.github.rastislavpapp.logxy.core.query.Marker
 
 /**
  * The whole [text] an expanded row's cell shows: its first line, cut at 1 MB rather than the collapsed cell's 4 KB,
@@ -20,22 +20,22 @@ internal class ExpandedText(val text: String) {
         return WrappedText(text, width, firstWidth).also { wrapped = it }
     }
 
-    /** What the filter's [highlighter] marks in [text], for rules on [field]; see [Highlighter.ranges]. */
-    fun matches(highlighter: Highlighter, field: String): IntArray = matches.of(highlighter, field, text)
+    /** What the filter's [marker] marks in [text], for rules on [field]; see [Marker.ranges]. */
+    fun matches(marker: Marker, field: String): IntArray = matches.of(marker, field, text)
 
-    /** What the find bar's [highlighter] marks in [text]. */
-    fun found(highlighter: Highlighter, field: String): IntArray = found.of(highlighter, field, text)
+    /** What the find bar's [marker] marks in [text]. */
+    fun found(marker: Marker, field: String): IntArray = found.of(marker, field, text)
 
-    /** The marks of the last highlighter asked for. */
+    /** The marks of the last marker asked for. */
     private class Marks {
-        private var highlighter: Highlighter? = null
+        private var marker: Marker? = null
         private var field: String? = null
         private var ranges = IntArray(0)
 
-        fun of(highlighter: Highlighter, field: String, text: String): IntArray {
-            if (highlighter !== this.highlighter || field != this.field) {
-                ranges = highlighter.ranges(field, text, Highlighter.DETAIL_BUDGET_NANOS)
-                this.highlighter = highlighter
+        fun of(marker: Marker, field: String, text: String): IntArray {
+            if (marker !== this.marker || field != this.field) {
+                ranges = marker.ranges(field, text, Marker.DETAIL_BUDGET_NANOS)
+                this.marker = marker
                 this.field = field
             }
             return ranges

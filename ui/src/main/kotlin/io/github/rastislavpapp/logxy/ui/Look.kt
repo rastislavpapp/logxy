@@ -27,7 +27,7 @@ interface Look {
 
     fun scale(value: Float): Float
 
-    /** Highlights the current choice: a selected toggle, a selection range, progress. */
+    /** Shows the current choice: a selected toggle, a selection range, progress. */
     val accent: Color
 
     /** Errors in charts and level colours. */

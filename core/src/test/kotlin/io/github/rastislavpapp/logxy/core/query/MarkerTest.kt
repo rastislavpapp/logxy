@@ -4,18 +4,18 @@ import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertTrue
 
-class HighlighterTest {
+class MarkerTest {
 
     private fun rule(op: QueryOp, value: String, field: String = "message", negated: Boolean = false) =
         Query.Rule(field, op, value, negated = negated)
 
-    private fun of(vararg items: Query) = Highlighter.of(Query.Group(all = true, items = items.toList()))
+    private fun of(vararg items: Query) = Marker.of(Query.Group(all = true, items = items.toList()))
 
     @Test
     fun marksSearchedTextInAnyField() {
-        val h = Highlighter.of(TextSearch("a*b"))
+        val h = Marker.of(TextSearch("a*b"))
         assertContentEquals(intArrayOf(1, 4, 5, 8), h.ranges("thread", "xA*bya*b ab"))
-        assertContentEquals(intArrayOf(), Highlighter.of(TextSearch("(", regex = true)).ranges(null, "("))
+        assertContentEquals(intArrayOf(), Marker.of(TextSearch("(", regex = true)).ranges(null, "("))
     }
 
     @Test
@@ -77,7 +77,7 @@ class HighlighterTest {
 
     @Test
     fun marksManyMatches() {
-        val ranges = Highlighter.of(TextSearch("e")).ranges(null, "e.".repeat(500_000), budgetNanos = 10_000_000_000)
+        val ranges = Marker.of(TextSearch("e")).ranges(null, "e.".repeat(500_000), budgetNanos = 10_000_000_000)
         assertContentEquals(IntArray(1_000_000) { it }, ranges)
     }
 

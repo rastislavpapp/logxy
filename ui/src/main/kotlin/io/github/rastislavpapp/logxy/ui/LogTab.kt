@@ -8,7 +8,7 @@ import io.github.rastislavpapp.logxy.core.log.Role
 import io.github.rastislavpapp.logxy.core.log.Schema
 import io.github.rastislavpapp.logxy.core.parse.Parser
 import io.github.rastislavpapp.logxy.core.query.CellRules
-import io.github.rastislavpapp.logxy.core.query.Highlighter
+import io.github.rastislavpapp.logxy.core.query.Marker
 import io.github.rastislavpapp.logxy.core.query.Query
 import io.github.rastislavpapp.logxy.core.query.QueryException
 import io.github.rastislavpapp.logxy.core.query.QueryOp
@@ -331,7 +331,7 @@ class LogTab(
     private var chartHeight = -1
 
     private var search: TextSearch? = null
-    private var foundMarks = Highlighter.NONE
+    private var foundMarks = Marker.NONE
 
     /** A find asked for while the search was running: forward, and whether the current record counts. */
     private var pendingFind: Pair<Boolean, Boolean>? = null
@@ -1061,7 +1061,7 @@ class LogTab(
             } else {
                 session.applyFilter(filterBar.minimumLevel, query)
             }
-            val matches = query?.let(Highlighter::of) ?: Highlighter.NONE
+            val matches = query?.let(Marker::of) ?: Marker.NONE
             table?.matches = matches
             detail?.matches = matches
             filterBar.showError(null)
@@ -1135,7 +1135,7 @@ class LogTab(
     /** Marks [search] and finds the records it matches, going to the first from the current one on. */
     private fun searchFor(search: TextSearch?) {
         this.search = search
-        foundMarks = search?.let(Highlighter::of) ?: Highlighter.NONE
+        foundMarks = search?.let(Marker::of) ?: Marker.NONE
         table?.found = foundMarks
         detail?.found = foundMarks
         if (!findBar.isOpen) table?.requestFocusInWindow()

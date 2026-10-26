@@ -3,7 +3,7 @@ package io.github.rastislavpapp.logxy.ui
 import io.github.rastislavpapp.logxy.core.log.ColumnType
 import io.github.rastislavpapp.logxy.core.log.Level
 import io.github.rastislavpapp.logxy.core.log.Role
-import io.github.rastislavpapp.logxy.core.query.Highlighter
+import io.github.rastislavpapp.logxy.core.query.Marker
 import io.github.rastislavpapp.logxy.core.session.Selection
 import java.awt.Color
 import java.awt.Component
@@ -47,7 +47,7 @@ private const val CUT_MARK = "… cut at 1 MB"
 private const val MAX_ROW_HEIGHT = 1 shl 22
 
 /** Background of text matched by the filter, translucent to suit light and dark looks. */
-val HIGHLIGHT_COLOR = Color(255, 200, 0, 110)
+val MARK_COLOR = Color(255, 200, 0, 110)
 
 /** Background of text the find bar found; unlike the filter's, also shown on selected rows. */
 val FOUND_COLOR = Color(40, 200, 90, 130)
@@ -116,14 +116,14 @@ class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
         }
 
     /** Marks what the filter matched in the cells. */
-    var matches: Highlighter = Highlighter.NONE
+    var matches: Marker = Marker.NONE
         set(value) {
             field = value
             repaint()
         }
 
     /** Marks what the find bar found in the cells, also of selected rows. */
-    var found: Highlighter = Highlighter.NONE
+    var found: Marker = Marker.NONE
         set(value) {
             field = value
             repaint()
@@ -486,7 +486,7 @@ class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
                     foreground = UIManager.getColor("Label.disabledForeground")
                 }
                 field.role == Role.LEVEL -> LevelRenderer()
-                else -> HighlightRenderer()
+                else -> MarkRenderer()
             }
             if (column == columnModel.columnCount - 1) {
                 tableColumn.minWidth = MIN_LAST_COLUMN_CHARS * charWidth
@@ -643,7 +643,7 @@ class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
     }
 
     /** Paints the matches behind the text of left-aligned cells; ends a record's first line with how many follow. */
-    private open inner class HighlightRenderer : CellRenderer() {
+    private open inner class MarkRenderer : CellRenderer() {
         private var ranges = IntArray(0)
         private var foundRanges = IntArray(0)
 
@@ -699,7 +699,7 @@ class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
                     cleared = true
                 }
                 g.font = font
-                mark(g, text, 0, visible, ranges, textBounds.x, textBounds.y - 1, HIGHLIGHT_COLOR)
+                mark(g, text, 0, visible, ranges, textBounds.x, textBounds.y - 1, MARK_COLOR)
                 mark(g, text, 0, visible, foundRanges, textBounds.x, textBounds.y - 1, FOUND_COLOR)
             }
             super.paintComponent(g)
@@ -712,7 +712,7 @@ class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
         }
     }
 
-    private inner class LevelRenderer : HighlightRenderer() {
+    private inner class LevelRenderer : MarkRenderer() {
         override fun getTableCellRendererComponent(
             table: JTable, value: Any?, isSelected: Boolean, hasFocus: Boolean, row: Int, column: Int,
         ): Component {
@@ -757,7 +757,7 @@ class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
                 val y = top + line * lineHeight
                 val from = wrapped.start(line)
                 val to = wrapped.end(line)
-                mark(g, text, from, to, ranges, left, y - 1, HIGHLIGHT_COLOR)
+                mark(g, text, from, to, ranges, left, y - 1, MARK_COLOR)
                 mark(g, text, from, to, foundRanges, left, y - 1, FOUND_COLOR)
                 g.color = foreground
                 val shown = text.substring(from, to)

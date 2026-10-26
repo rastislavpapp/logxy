@@ -1,10 +1,10 @@
 package io.github.rastislavpapp.logxy.app
 
 import com.formdev.flatlaf.FlatLaf
-import io.github.rastislavpapp.logxy.core.query.Highlighter
+import io.github.rastislavpapp.logxy.core.query.Marker
 import io.github.rastislavpapp.logxy.ui.DetailPane
 import io.github.rastislavpapp.logxy.ui.FOUND_COLOR
-import io.github.rastislavpapp.logxy.ui.HIGHLIGHT_COLOR
+import io.github.rastislavpapp.logxy.ui.MARK_COLOR
 import org.fife.ui.rsyntaxtextarea.AbstractTokenMakerFactory
 import org.fife.ui.rsyntaxtextarea.RSyntaxTextArea
 import org.fife.ui.rsyntaxtextarea.Theme
@@ -30,22 +30,22 @@ fun RSyntaxTextArea.applyEditorTheme() {
     background = UIManager.getColor("TextArea.background")
 }
 
-/** Read-only view of a whole record, its stack trace highlighted. */
+/** Read-only view of a whole record, its stack trace in syntax colors. */
 class LogDetailArea : RSyntaxTextArea(), DetailPane {
 
     private var initialized = false
-    private val painter = DefaultHighlighter.DefaultHighlightPainter(HIGHLIGHT_COLOR)
+    private val painter = DefaultHighlighter.DefaultHighlightPainter(MARK_COLOR)
     private val foundPainter = DefaultHighlighter.DefaultHighlightPainter(FOUND_COLOR)
 
     override val component: JTextComponent get() = this
 
-    override var matches: Highlighter = Highlighter.NONE
+    override var matches: Marker = Marker.NONE
         set(value) {
             field = value
             mark()
         }
 
-    override var found: Highlighter = Highlighter.NONE
+    override var found: Marker = Marker.NONE
         set(value) {
             field = value
             mark()
@@ -81,9 +81,9 @@ class LogDetailArea : RSyntaxTextArea(), DetailPane {
     private fun mark() {
         if (!initialized) return
         highlighter.removeAllHighlights()
-        val ranges = matches.ranges(null, text, Highlighter.DETAIL_BUDGET_NANOS)
+        val ranges = matches.ranges(null, text, Marker.DETAIL_BUDGET_NANOS)
         for (i in ranges.indices step 2) highlighter.addHighlight(ranges[i], ranges[i + 1], painter)
-        foundRanges = found.ranges(null, text, Highlighter.DETAIL_BUDGET_NANOS)
+        foundRanges = found.ranges(null, text, Marker.DETAIL_BUDGET_NANOS)
         for (i in foundRanges.indices step 2) highlighter.addHighlight(foundRanges[i], foundRanges[i + 1], foundPainter)
     }
 
