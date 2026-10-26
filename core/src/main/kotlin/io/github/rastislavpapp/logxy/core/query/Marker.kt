@@ -5,7 +5,7 @@ import java.util.regex.Pattern
 import java.util.regex.PatternSyntaxException
 
 /** Finds the text a query's positive text conditions matched, to mark it in the table and the detail pane. */
-class Highlighter private constructor(private val terms: List<Term>) {
+class Marker private constructor(private val terms: List<Term>) {
 
     /** A [field] of null marks text in any field. */
     private class Term(val field: String?, val pattern: Pattern)
@@ -85,27 +85,29 @@ class Highlighter private constructor(private val terms: List<Term>) {
         const val DETAIL_BUDGET_NANOS = 50_000_000L
 
         private val EMPTY = IntArray(0)
-        val NONE = Highlighter(emptyList())
+        private const val NOT_AFTER_WORD = "(?<![\\p{L}\\p{N}_])"
+        private const val NOT_BEFORE_WORD = "(?![\\p{L}\\p{N}_])"
+        val NONE = Marker(emptyList())
 
         /** Marks what [search] finds, in any field; nothing for an empty or invalid one. */
-        fun of(search: TextSearch): Highlighter {
+        fun of(search: TextSearch): Marker {
             if (search.isEmpty) return NONE
             val pattern = try {
                 search.pattern()
             } catch (e: QueryException) {
                 return NONE
             }
-            return Highlighter(listOf(Term(null, pattern)))
+            return Marker(listOf(Term(null, pattern)))
         }
 
         /**
          * Marks what the text rules of [query] match. Negated rules and groups, negated ops, comparisons, empty
          * values and invalid regexes mark nothing.
          */
-        fun of(query: Query): Highlighter {
+        fun of(query: Query): Marker {
             val terms = ArrayList<Term>()
             collect(query, terms)
-            return if (terms.isEmpty()) NONE else Highlighter(terms)
+            return if (terms.isEmpty()) NONE else Marker(terms)
         }
 
         private fun collect(query: Query, into: MutableList<Term>) {

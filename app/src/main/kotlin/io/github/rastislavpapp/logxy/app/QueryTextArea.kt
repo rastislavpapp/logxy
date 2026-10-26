@@ -31,7 +31,7 @@ import javax.swing.text.Segment
 
 private const val SYNTAX_STYLE = "text/x-logxy-query"
 
-/** Editor for the text form of a filter: highlighting, completion, and syntax errors underlined as you type. */
+/** Editor for the text form of a filter: syntax colors, completion, and syntax errors underlined as you type. */
 class QueryTextArea(private val onApply: () -> Unit) : RSyntaxTextArea(3, 60), QueryText {
 
     override val component: JTextComponent get() = this

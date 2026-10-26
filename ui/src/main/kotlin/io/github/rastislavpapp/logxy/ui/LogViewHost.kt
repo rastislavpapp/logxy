@@ -2,7 +2,7 @@ package io.github.rastislavpapp.logxy.ui
 
 import io.github.rastislavpapp.logxy.core.config.Settings
 import io.github.rastislavpapp.logxy.core.parse.Parser
-import io.github.rastislavpapp.logxy.core.query.Highlighter
+import io.github.rastislavpapp.logxy.core.query.Marker
 import io.github.rastislavpapp.logxy.core.query.TextSearch
 import io.github.rastislavpapp.logxy.core.session.SettingsStore
 import kotlinx.coroutines.CoroutineDispatcher
@@ -101,10 +101,10 @@ interface DetailPane {
     fun show(text: String)
 
     /** What the filter matched. */
-    var matches: Highlighter
+    var matches: Marker
 
     /** What the find bar found. */
-    var found: Highlighter
+    var found: Marker
 
     /** Where [found] first occurs in the shown text; 0 if it does not. */
     val firstFound: Int
