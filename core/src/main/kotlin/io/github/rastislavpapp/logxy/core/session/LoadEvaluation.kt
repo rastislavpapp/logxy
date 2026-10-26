@@ -9,7 +9,7 @@ import kotlinx.coroutines.launch
 /**
  * The evaluation of one query over the records of a load, kept up to date as records are appended: a run over all
  * of them, then catch-ups over the records from [RecordFilter.changedFrom] on, whose result replaces what the
- * result held from there. The filter and the search each keep one. Use it on the session's thread.
+ * result held from there. The filter, the search and the row highlights each keep one. Use it on the session's thread.
  *
  * The job that runs is the caller's: it calls [cover] once its result is in place and [finished] when it is done,
  * after which a [catchUp] may start the next one. A job replaced by [start] is cancelled.

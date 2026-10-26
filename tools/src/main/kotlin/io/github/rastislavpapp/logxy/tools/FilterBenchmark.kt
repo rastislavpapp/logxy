@@ -8,6 +8,7 @@ import io.github.rastislavpapp.logxy.core.formatByteSize
 import io.github.rastislavpapp.logxy.core.log.ParsedLog
 import io.github.rastislavpapp.logxy.core.session.TimeHistogram
 import io.github.rastislavpapp.logxy.core.session.countTimes
+import io.github.rastislavpapp.logxy.core.session.evaluateRowHighlights
 import io.github.rastislavpapp.logxy.core.template.TemplateCounts
 import kotlinx.coroutines.runBlocking
 import org.openjdk.jmh.annotations.Benchmark
@@ -49,6 +50,29 @@ open class FilterBenchmark {
     fun run(): FilterResult = runBlocking { FilterEngine(log).prepare(condition).run() }
 }
 
+/** [benchmarkHighlights] over all records, on a new engine each time. Open so JMH can generate its subclass. */
+@State(Scope.Benchmark)
+open class RowHighlightBenchmark {
+    @Param("")
+    @JvmField
+    var file = ""
+
+    private lateinit var log: ParsedLog
+
+    @Setup
+    fun setUp() {
+        log = parse(Path.of(file))
+    }
+
+    @TearDown
+    fun tearDown() = log.close()
+
+    @Benchmark
+    fun evaluate(): Int = runBlocking {
+        evaluateRowHighlights(FilterEngine(log), log.schema, benchmarkHighlights)
+    }
+}
+
 /** Counting templates and times, and hiding the most common template. Open so JMH can generate its subclass. */
 @State(Scope.Benchmark)
 open class TemplateBenchmark {
@@ -88,13 +112,14 @@ open class TemplateBenchmark {
     fun countTimes(): TimeHistogram = runBlocking { countTimes(log) }
 }
 
-/** The `filter` rows: [benchmarkFilters] by name, templates and count times. */
+/** The `filter` rows: [benchmarkFilters] by name, templates, count times and row highlights. */
 val filterRows = listOf(
     BenchmarkRow(FilterBenchmark::class.java, "run", "filter ", FilterBenchmark::filter.name),
     BenchmarkRow(TemplateBenchmark::class.java, "countTemplates", "templates: count all"),
     BenchmarkRow(TemplateBenchmark::class.java, "countTemplatesAgain", "templates: count all again"),
     BenchmarkRow(TemplateBenchmark::class.java, "hideMostCommonTemplate", "filter hide most common template"),
     BenchmarkRow(TemplateBenchmark::class.java, "countTimes", "count times"),
+    BenchmarkRow(RowHighlightBenchmark::class.java, "evaluate", "row highlights: evaluate 5"),
 )
 
 /** Parameters of [FilterBenchmark] and [TemplateBenchmark], whose `file` parameters share the name. */

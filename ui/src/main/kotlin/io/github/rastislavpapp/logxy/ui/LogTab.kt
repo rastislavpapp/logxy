@@ -1451,6 +1451,11 @@ class LogTab(
             histogramBar?.repaint()
         }
 
+        // The table paints only the rows in view, so they are all painted again.
+        override fun rowHighlightsChanged(fromRecord: Int) {
+            table?.repaint()
+        }
+
         override fun levelMappingChanged() {
             model?.let { it.fireTableRowsUpdated(0, maxOf(0, it.rowCount - 1)) }
             templates.refresh()
