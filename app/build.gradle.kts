@@ -135,8 +135,10 @@ fun AbstractArchiveTask.nativeArchive(extension: String) {
 if (windows) {
     tasks.register<Zip>("nativeArchive") { nativeArchive("zip") }
 } else {
-    // A tarball keeps the launcher executable.
+    // A tarball keeps the launcher executable, and jspawnhelper, which the JVM starts processes with, as the image
+    // has them; Gradle's reproducible default would make every file 644.
     tasks.register<Tar>("nativeArchive") {
+        useFileSystemPermissions()
         compression = Compression.GZIP
         nativeArchive("tar.gz")
     }
