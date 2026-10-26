@@ -22,12 +22,9 @@ import io.github.rastislavpapp.logxy.ui.LogTab
 import javax.swing.Icon
 import javax.swing.JComponent
 
-// The actions of the logxy view. The Console | logxy switch is in every run tab's top toolbar, beside Rerun and Stop;
-// the parser and the status are at the right end of a run or debug tab's top row. Each of those acts on its tab's
-// view, and a tab without one, e.g. of a run started before the plugin was loaded, hides them. The other actions sit
-// beside the view. In a run tab they take the place of the console's toolbar, which acts on the hidden console, and
-// the console's context does not reach the view. In a debug tab they are the toolbar of the view's own sub-tab.
-// Each view gets a set of these actions of its own.
+// The actions of the logxy view. The parser and the status are at the right end of a run or debug tab's top row. Each
+// of those acts on its tab's view, and a tab without one, e.g. of a run started before the plugin was loaded, hides
+// them. The other actions are the toolbar of the view's sub-tab. Each view gets a set of these actions of its own.
 
 private val AnActionEvent.handler
     get() = getData(LangDataKeys.RUN_CONTENT_DESCRIPTOR)?.processHandler
@@ -42,33 +39,6 @@ private val AnActionEvent.tab: LogTab?
 
 /** Shows text in the toolbar, not only an icon. */
 private fun Presentation.showText() = putClientProperty(ActionUtil.SHOW_TEXT_IN_TOOLBAR, true)
-
-/** One side of the Console | logxy switch: selected while it shows. */
-sealed class ViewSwitch(private val logxy: Boolean) : DumbAwareToggleAction() {
-    init {
-        templatePresentation.showText()
-    }
-
-    private val AnActionEvent.switch: ConsoleSwitch?
-        get() = handler?.getUserData(ConsoleSwitch.KEY)
-
-    override fun update(e: AnActionEvent) {
-        super.update(e)
-        e.presentation.isEnabledAndVisible = e.switch != null
-    }
-
-    override fun isSelected(e: AnActionEvent) = e.switch?.showsLogxy == logxy
-
-    override fun setSelected(e: AnActionEvent, state: Boolean) {
-        if (state) e.switch?.showView(logxy)
-    }
-
-    override fun getActionUpdateThread() = ActionUpdateThread.EDT
-}
-
-class ShowConsole : ViewSwitch(logxy = false)
-
-class ShowLogxy : ViewSwitch(logxy = true)
 
 /**
  * A button with a drop-down arrow that opens one of the view's own menus under itself. To the toolbar it is an action
@@ -243,6 +213,9 @@ private class PartToggle(
 
 /** Icons for which the IDE has none of its own. */
 object LogxyIcons {
+    /** The plugin's icon at 16 px, for the logxy sub-tab. */
+    val logxy: Icon = IconLoader.getIcon("/icons/logxy.svg", LogxyIcons::class.java)
+
     /** Bars of counts over time. */
     val histogram: Icon = IconLoader.getIcon("/icons/histogram.svg", LogxyIcons::class.java)
 

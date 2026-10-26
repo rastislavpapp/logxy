@@ -32,8 +32,8 @@ class LogxyConfigurable : SearchableConfigurable {
         Look.current = IdeLook
         return JPanel(MigLayout("insets 0, wrap 1", "[grow, fill]")).apply {
             addNote(
-                "logxy shows a run's output in parsed columns: switch a run between Console and logxy in the run " +
-                    "tab's toolbar. The parsers and log levels it uses are set on the pages below.",
+                "logxy shows a run's output in parsed columns, in a logxy tab beside the Console tab of each run " +
+                    "and debug session. The parsers and log levels it uses are set on the pages below.",
             )
             val import = LinkButton("Import Parsers, Saved Filters and Log Levels from the logxy App…") {
                 importAppSettings(this)

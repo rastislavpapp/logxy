@@ -28,10 +28,9 @@ timeline where they cluster.</p>
       <code>Request {1} done in {2} ms</code>. The Templates panel lists these message kinds with
       how often each occurs, so you can show or hide a whole kind at once, and chart a value, such
       as the duration, over time.</li>
-  <li><b>Out of the way.</b> A Console | logxy switch in the run tab's toolbar, remembered per run
-      configuration along with the columns you hide and resize; in the debugger, a logxy tab beside
-      the Console tab. The IDE's console stays one click away, for stack-trace links and typing into
-      the program.</li>
+  <li><b>Out of the way.</b> A logxy tab beside the Console tab, in Run and in Debug. Each run
+      configuration remembers whether you last looked at logxy, and the columns you hide and resize.
+      The IDE's console stays one click away, for stack-trace links and typing into the program.</li>
 </ul>
 
 <p>Works in IntelliJ IDEA and other IntelliJ-based IDEs from 2025.3, for any run configuration that starts a process.
@@ -60,16 +59,7 @@ memory-efficient on large logs, with merging of several files into one.</p>
     </extensions>
 
     <actions>
-        <!-- In every run tab's top toolbar; the actions hide in tabs without a logxy view. -->
-        <group id="logxy.RunToolbar">
-            <separator/>
-            <action id="logxy.ShowConsole" class="io.github.rastislavpapp.logxy.plugin.ShowConsole"
-                    text="Console" description="Show the run's console"/>
-            <action id="logxy.ShowLogxy" class="io.github.rastislavpapp.logxy.plugin.ShowLogxy"
-                    text="logxy" description="Show the run's output in parsed columns"/>
-            <add-to-group group-id="RunTab.TopToolbar" anchor="last"/>
-        </group>
-        <!-- At the right end of a run or debug tab's top row, set by ConsoleSwap: nothing moves as the parser shows. -->
+        <!-- At the right end of a run or debug tab's top row, set by RunTabLayout: nothing moves as the parser shows. -->
         <group id="logxy.StatusToolbar">
             <action id="logxy.ChooseParser" class="io.github.rastislavpapp.logxy.plugin.ChooseParser"
                     text="Parser" description="Parser: how lines are split into columns"/>

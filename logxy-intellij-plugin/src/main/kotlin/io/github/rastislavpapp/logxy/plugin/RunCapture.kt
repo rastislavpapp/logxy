@@ -11,6 +11,7 @@ import com.intellij.execution.runners.ExecutionEnvironment
 import com.intellij.execution.ui.RunContentDescriptor
 import com.intellij.execution.ui.RunContentManager
 import com.intellij.execution.ui.RunContentWithExecutorListener
+import com.intellij.openapi.actionSystem.ActionPlaces
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.project.Project
@@ -21,9 +22,9 @@ private val SPOOL = Key.create<Spool>("logxy.spool")
 private val log = logger<RunCapture>()
 
 /**
- * Copies the output of every Run and Debug into a [Spool] and shows a [RunLogView] of it: in a run tab, switched with
- * the console; in a debug tab, as a sub-tab after the console's. Not of a Debug that attaches to a process running
- * elsewhere (Remote JVM Debug): it has no output of its own.
+ * Copies the output of every Run and Debug into a [Spool] and shows a [RunLogView] of it as the last sub-tab of the
+ * run or debug tab. Not of a Debug that attaches to a process running elsewhere (Remote JVM Debug): it has no output
+ * of its own.
  */
 class RunCapture(private val project: Project) : ExecutionListener {
 
@@ -99,23 +100,13 @@ class RunCapture(private val project: Project) : ExecutionListener {
         // Disposed with the tab, e.g. when a rerun replaces it; the tab's toolbar finds it on the handler.
         val view = RunLogView(spool, memory, IdeHost(project))
         Disposer.register(descriptor, view)
-        if (env.executor.id == DefaultDebugExecutor.EXECUTOR_ID) {
-            if (ConsoleSwap.addSubTab(descriptor, view, view.actions)) {
-                handler.putUserData(RunLogView.KEY, view)
-            } else {
-                log.warn("logxy: found no layout in the debug tab of ${env.runProfile.name}")
-            }
-            return
-        }
-        val outcome = ConsoleSwap.install(descriptor) { console, toolbar ->
-            ConsoleSwitch(console, toolbar, view, memory).also { handler.putUserData(ConsoleSwitch.KEY, it) }
-        }
-        if (outcome == ConsoleSwap.Outcome.INSTALLED) handler.putUserData(RunLogView.KEY, view)
-        when (outcome) {
-            ConsoleSwap.Outcome.INSTALLED -> {}
-            ConsoleSwap.Outcome.NO_CONSOLE -> log.warn("logxy: found no console in the tab of ${env.runProfile.name}")
-            ConsoleSwap.Outcome.PROMPT -> log.info("logxy: the console of ${env.runProfile.name} takes input, kept")
-        }
+        val debug = env.executor.id == DefaultDebugExecutor.EXECUTOR_ID
+        val place = if (debug) ActionPlaces.DEBUGGER_TOOLBAR else ActionPlaces.RUNNER_TOOLBAR
+        val content = RunTabLayout.addSubTab(descriptor, view, view.actions, place)
+            ?: return log.warn("logxy: found no layout in the tab of ${env.runProfile.name}")
+        handler.putUserData(RunLogView.KEY, view)
+        // A debug tab opens on the debugger's own sub-tabs, which a breakpoint selects again anyway.
+        if (!debug) RunTabLayout.followSelection(descriptor, content, memory.showsLogxy) { memory.showsLogxy = it }
     }
 
     /** Stays with the configuration across runs: its type and name, or only the name of a run without settings. */
