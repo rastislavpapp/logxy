@@ -8,6 +8,10 @@ A desktop viewer for large log files: it indexes one file, or several merged by 
 One or more open files shown together in one tab, followed while they change.
 _Avoid_: tab (the UI around a session), document
 
+**Recent session**:
+A closed session as it can be opened again: its files, the parser chosen for each, and its filter.
+_Avoid_: recent file, history entry
+
 **Load**:
 One pass of a session over its files: indexed, merged if there are several, then followed until the session reloads or closes.
 _Avoid_: open, generation
