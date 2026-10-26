@@ -24,9 +24,11 @@ import io.github.rastislavpapp.logxy.core.session.LogSession
 import io.github.rastislavpapp.logxy.core.session.MAX_COPY_BYTES
 import io.github.rastislavpapp.logxy.core.session.NOT_YET_FOUND
 import io.github.rastislavpapp.logxy.core.session.PreparedCopy
+import io.github.rastislavpapp.logxy.core.session.RecordStart
 import io.github.rastislavpapp.logxy.core.session.Redetection
 import io.github.rastislavpapp.logxy.core.session.RowRanges
 import io.github.rastislavpapp.logxy.core.session.SessionListener
+import io.github.rastislavpapp.logxy.core.session.SessionPosition
 import io.github.rastislavpapp.logxy.core.session.SessionStatus
 import io.github.rastislavpapp.logxy.core.session.ShownLog
 import io.github.rastislavpapp.logxy.core.session.copyLimit
@@ -116,6 +118,8 @@ class LogTab(
     private val togglesParts: Boolean = false,
     /** Detects the parser of a single file again while it reads as raw text, as [LogSession] does. */
     redetection: Redetection? = null,
+    /** Where to go once the records are first shown, with [filter] applied: a [position] this tab had before. */
+    restore: SessionPosition<Path>? = null,
     private val onStatusChanged: () -> Unit,
 ) : JPanel(BorderLayout()) {
 
@@ -139,6 +143,28 @@ class LogTab(
 
     /** Short names of [paths], as the merge's source column shows them. */
     val sourceNames: List<String> get() = session.sourceNames
+
+    /** The position to go to once the records are first shown; null once there, or if there is none. */
+    private var restoring: SessionPosition<Path>? = restore
+
+    /**
+     * The lead record of the selection, if selected, and the record in the top visible row, by where they start in
+     * the files, to go back there when the session is opened again; until the records are first shown, the position
+     * this tab was opened to restore. Null if there is neither.
+     */
+    val position: SessionPosition<Path>?
+        get() {
+            restoring?.let { return it }
+            val model = model ?: return null
+            val table = table ?: return null
+            val scrollPane = scrollPane ?: return null
+            if (model.totalRowCount == 0) return null
+            val lead = table.selection.lead
+            val selected = if (lead in table.selection) model.recordAtIndexOrNull(lead) else null
+            val leadStart = if (selected == null) null else session.startOf(selected)
+            val topStart = session.startOf(model.recordAtIndex(scrollPane.firstVisibleRow))
+            return SessionPosition(leadStart, topStart)
+        }
 
     /** The names the columns show. They are kept when the file is read again, also those renamed for this tab only. */
     private val columnNames = ColumnNames()
@@ -1067,6 +1093,38 @@ class LogTab(
             }
         }
         if (selectedIndex != null) scrollPane.selectRow(selectedIndex, scroll = false)
+        // The first rows shown, with the filter the tab opened with applied.
+        restoring?.let(::goTo)
+    }
+
+    /**
+     * Goes back to [position]: scrolls its top record to the top, or, if the filter hides it, the nearest shown row
+     * after it, and selects its lead record if it is shown. A file that changed since gives the last record starting
+     * before the stored offset; one that is now shorter than the offset gives none.
+     */
+    private fun goTo(position: SessionPosition<Path>) {
+        restoring = null
+        val model = model ?: return
+        val scrollPane = scrollPane ?: return
+        if (model.totalRowCount == 0) return
+        // The record at a stored start; null if there is none any more.
+        fun recordOf(start: RecordStart<Path>?): Int? {
+            if (start == null) return null
+            val record = session.recordAt(start)
+            return if (record >= 0) record else null
+        }
+        val lead = recordOf(position.lead)
+        val top = recordOf(position.top)
+        val first = top ?: lead ?: return
+        session.follow = false
+        // The first shown row at the record or after it; the last row if there is none.
+        fun nearestRow(record: Int): Int {
+            val row = model.indexOfRecord(record)
+            return if (row >= 0) row else model.totalRowCount - 1
+        }
+        scrollPane.scrollToRow(nearestRow(first))
+        val leadRow = lead?.let(::nearestRow)
+        if (leadRow != null && model.recordAtIndex(leadRow) == lead) scrollPane.selectRow(leadRow, scroll = false)
     }
 
     /** Opens the find bar, to find the text selected in the detail pane if it is one line. */

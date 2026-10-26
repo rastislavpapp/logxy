@@ -43,6 +43,9 @@ internal interface LoadedLog {
     /** The first record of [part] at [record] or later; the part's record count if none. */
     fun firstRecordFrom(part: Int, record: Int): Int
 
+    /** The record of [records] that is [part]'s [record]; -1 if that one is not merged yet. */
+    fun recordOf(part: Int, record: Int): Int
+
     /** The template of [record]'s message; empty if it has none. */
     fun templateOf(record: Int): String
 
@@ -121,6 +124,8 @@ internal class SingleLoad(private val log: LogData) : LoadedLog {
 
     override fun firstRecordFrom(part: Int, record: Int) = record
 
+    override fun recordOf(part: Int, record: Int) = record
+
     override fun templateOf(record: Int) = TemplateIndex.templateOf(log.filterSnapshot(), record)
 
     override fun fieldReader(field: Int, records: IntArray?, count: Int): (Int) -> String {
@@ -162,6 +167,9 @@ internal class MergedLoad(private val log: MergedLog) : LoadedLog {
     override fun newFilter(): RecordFilter = MergedFilter(log)
 
     override fun firstRecordFrom(part: Int, record: Int) = log.firstRecordFrom(part, record)
+
+    override fun recordOf(part: Int, record: Int) =
+        if (record < log.mergedCount(part)) log.position(part, record) else -1
 
     override fun templateOf(record: Int) =
         TemplateIndex.templateOf(log.parts[log.part(record)].filterSnapshot(), log.record(record))

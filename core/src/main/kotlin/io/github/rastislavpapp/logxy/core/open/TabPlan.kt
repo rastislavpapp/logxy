@@ -4,13 +4,19 @@ import io.github.rastislavpapp.logxy.core.config.OpenMode
 import io.github.rastislavpapp.logxy.core.config.SavedFilter
 import io.github.rastislavpapp.logxy.core.fileKey
 import io.github.rastislavpapp.logxy.core.parse.Parser
+import io.github.rastislavpapp.logxy.core.session.SessionPosition
 import java.nio.file.Path
 
 /**
  * The files of a session open in a tab, or to open in one, with the parser for each ([parsers], null to detect
- * it) and its [filter].
+ * it), its [filter] and, for a session opened again, the [position] to go back to.
  */
-data class SessionFiles(val paths: List<Path>, val parsers: List<Parser?>, val filter: SavedFilter? = null)
+data class SessionFiles(
+    val paths: List<Path>,
+    val parsers: List<Parser?>,
+    val filter: SavedFilter? = null,
+    val position: SessionPosition<Path>? = null,
+)
 
 /** A change to the tabs. Changes apply in order, and an index refers to the tabs as they are when it applies. */
 sealed interface TabAction {

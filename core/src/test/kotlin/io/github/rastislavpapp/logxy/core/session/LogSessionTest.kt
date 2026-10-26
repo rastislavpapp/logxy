@@ -199,6 +199,38 @@ class LogSessionTest {
     }
 
     @Test
+    fun `a record is found again by the file and byte offset where it starts, also in a merge`() = runBlocking {
+        val first = "2026-10-01 08:00:00.000 [main] INFO  app.L - one\n"
+        val second = "2026-10-01 08:00:02.000 [main] WARN  app.L - two\n\tat a stack frame\n"
+        val third = "2026-10-01 08:00:04.000 [main] INFO  app.L - three\n"
+        val a = Files.writeString(dir.resolve("a.log"), first + second + third)
+        val b = Files.writeString(dir.resolve("b.log"), "2026-10-01 08:00:03.000 [main] ERROR app.L - b\n")
+        val secondStart = first.length.toLong()
+        val thirdStart = secondStart + second.length
+
+        val (single, _) = open(a, Recorder())
+        withContext(ui) {
+            assertEquals(RecordStart(a, secondStart), single.startOf(1))
+            assertEquals(1, single.recordAt(RecordStart(a, secondStart)))
+            // Within a record, as when the file was rewritten with other text: the record starting before it.
+            assertEquals(1, single.recordAt(RecordStart(a, secondStart + 10)))
+            assertEquals(-1, single.recordAt(RecordStart(a, Files.size(a))))
+            assertEquals(-1, single.recordAt(RecordStart(b, 0)))
+            single.dispose()
+        }
+
+        // Merged by time: a's one and two, b's record, a's three.
+        val (merged, _) = open(listOf(a, b), Recorder())
+        withContext(ui) {
+            assertEquals(RecordStart(b, 0), merged.startOf(2))
+            assertEquals(RecordStart(a, thirdStart), merged.startOf(3))
+            assertEquals(2, merged.recordAt(RecordStart(b, 0)))
+            assertEquals(3, merged.recordAt(RecordStart(a, thirdStart)))
+            merged.dispose()
+        }
+    }
+
+    @Test
     fun `a merge uses the parsers chosen for its files and detects the others`() = runBlocking {
         val a = Files.writeString(dir.resolve("a.log"), lines(10))
         val b = Files.writeString(dir.resolve("b.log"), lines(10))

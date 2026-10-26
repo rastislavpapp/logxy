@@ -512,6 +512,43 @@ class LogSession internal constructor(
         return loaded.templateOf(record).ifEmpty { null }
     }
 
+    /** Where [record] of the loaded records starts; null if nothing is loaded or there is no such record. */
+    fun startOf(record: Int): RecordStart<Path>? {
+        val loaded = loaded ?: return null
+        if (record !in 0..<loaded.records.recordCount) return null
+        var start: RecordStart<Path>? = null
+        loaded.sourceReader().spans(record, record + 1) { part, offset, _ ->
+            start = RecordStart(loaded.parts[part].path, offset)
+        }
+        return start
+    }
+
+    /**
+     * The loaded record that starts at [start] as [startOf] gave it; if the file changed since, e.g. it was
+     * truncated or rotated, the last record starting before [start]. -1 if there is none: nothing is loaded, the
+     * file is not one of the session's, or [start] lies past the end of the file.
+     */
+    fun recordAt(start: RecordStart<Path>): Int {
+        val loaded = loaded ?: return -1
+        val file = start.file.toAbsolutePath().normalize()
+        val part = loaded.parts.indexOfFirst { it.path.toAbsolutePath().normalize() == file }
+        if (part < 0) return -1
+        val snapshot = loaded.parts[part].filterSnapshot()
+        if (snapshot.count == 0 || start.offset >= snapshot.end) return -1
+        val cursor = snapshot.cursor()
+        cursor.moveTo(0)
+        if (cursor.start > start.offset) return -1
+        // The last record starting at or before the offset.
+        var low = 0
+        var high = snapshot.count - 1
+        while (low < high) {
+            val middle = (low + high + 1) ushr 1
+            cursor.moveTo(middle)
+            if (cursor.start <= start.offset) low = middle else high = middle - 1
+        }
+        return loaded.recordOf(part, low)
+    }
+
     /** Cancels running work and releases the files. */
     fun dispose() {
         settings.removeListener(settingsListener)

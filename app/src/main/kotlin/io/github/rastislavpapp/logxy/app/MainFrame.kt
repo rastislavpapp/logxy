@@ -14,6 +14,7 @@ import io.github.rastislavpapp.logxy.core.open.Found
 import io.github.rastislavpapp.logxy.core.open.FoundFile
 import io.github.rastislavpapp.logxy.core.open.OpenPlan
 import io.github.rastislavpapp.logxy.core.open.OpenSession
+import io.github.rastislavpapp.logxy.core.open.RecentSessions
 import io.github.rastislavpapp.logxy.core.open.Reopen
 import io.github.rastislavpapp.logxy.core.open.SessionArgs
 import io.github.rastislavpapp.logxy.core.open.SessionFiles
@@ -52,6 +53,8 @@ import java.awt.event.InputEvent
 import java.awt.event.KeyEvent
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
+import java.awt.event.WindowAdapter
+import java.awt.event.WindowEvent
 import java.io.File
 import java.nio.file.Files
 import java.nio.file.Path
@@ -80,6 +83,8 @@ import javax.swing.KeyStroke
 import javax.swing.SwingConstants
 import javax.swing.UIManager
 import javax.swing.WindowConstants
+import javax.swing.event.MenuEvent
+import javax.swing.event.MenuListener
 
 private const val CARD_PLACEHOLDER = "placeholder"
 private const val CARD_TABS = "tabs"
@@ -114,6 +119,20 @@ class MainFrame : JFrame("logxy") {
     private fun originOf(path: Path): ArchiveOrigin? =
         (if (spoolCreation.isInitialized()) spool.originOf(path) else null)
             ?: if (compressedSpoolCreation.isInitialized()) compressedSpool.originOf(path) else null
+
+    /** The recent sessions, newest first; filled each time it opens. Shown while they are remembered. */
+    private val openRecent = JMenu("Open Recent").apply {
+        addMenuListener(object : MenuListener {
+            override fun menuSelected(e: MenuEvent) = fillOpenRecent(this@apply)
+            override fun menuDeselected(e: MenuEvent) {}
+            override fun menuCanceled(e: MenuEvent) {}
+        })
+    }
+
+    private val reopenClosedTabItem =
+        menuItem("Reopen Closed Tab", null, KeyEvent.VK_T, shortcut or InputEvent.SHIFT_DOWN_MASK) {
+            reopenClosedTab()
+        }
 
     init {
         defaultCloseOperation = WindowConstants.EXIT_ON_CLOSE
@@ -158,8 +177,97 @@ class MainFrame : JFrame("logxy") {
         size = Dimension(1200, 800)
         setLocationRelativeTo(null)
         WindowState.install(this, WindowState.MAIN)
+        addWindowListener(object : WindowAdapter() {
+            override fun windowClosing(e: WindowEvent) = recordExit()
+        })
+        var remembered = AppSettings.current.rememberRecent
+        AppSettings.addListener {
+            // Only when turned off, not on every save while it is off.
+            if (remembered && !AppSettings.current.rememberRecent) RecentStore.forget()
+            remembered = AppSettings.current.rememberRecent
+            showRecentItems()
+        }
+        showRecentItems()
         updateStatus()
     }
+
+    /** Whether the open sessions were recorded at exit; closing may be asked for more than once. */
+    private var exitRecorded = false
+
+    private fun recordExit() {
+        if (exitRecorded) return
+        exitRecorded = true
+        RecentStore.recordExit(openSessionsToStore(), tabs.selectedIndex)
+    }
+
+    private fun tabAt(index: Int) = tabs.getComponentAt(index) as LogTab
+
+    /** Open Recent and Reopen Closed Tab are there only while the recent sessions are remembered. */
+    private fun showRecentItems() {
+        val remembered = AppSettings.current.rememberRecent
+        openRecent.isVisible = remembered
+        reopenClosedTabItem.isVisible = remembered
+        // A hidden item's shortcut would still work.
+        reopenClosedTabItem.isEnabled = remembered
+    }
+
+    /** Fills [menu] with the recent sessions, each opening it again, then Clear Recent. */
+    private fun fillOpenRecent(menu: JMenu) {
+        menu.removeAll()
+        val recent = RecentStore.sessions.recent
+        for (session in recent) {
+            menu.add(JMenuItem(recentLabel(session)).apply {
+                toolTipText = session.paths.joinToString("<br>", "<html>", "</html>") { escapeHtml(it) }
+                // Its files are all gone; it is dropped when the recent sessions are written next.
+                isEnabled = !RecentSessions.gone(session)
+                addActionListener { reopen(Reopen(listOf(session), 0)) }
+            })
+        }
+        if (recent.isEmpty()) menu.add(JMenuItem("No Recent Sessions").apply { isEnabled = false })
+        menu.addSeparator()
+        menu.add(JMenuItem("Clear Recent").apply {
+            isEnabled = recent.isNotEmpty()
+            addActionListener { RecentStore.clear() }
+        })
+    }
+
+    private fun escapeHtml(text: String) = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    /** A recent session's name in Open Recent: its first file's, and how many more a merge has. */
+    private fun recentLabel(session: OpenSession): String {
+        val first = recentFileLabel(session.paths.first())
+        return if (session.paths.size == 1) first else "$first + ${session.paths.size - 1} more"
+    }
+
+    /** A stored file's name: `server.log`, or `app.zip › server.log` for a file from a zip. */
+    private fun recentFileLabel(stored: String): String {
+        val origin = ZipSpool.parseOrigin(stored)
+        if (origin != null) return "${origin.zip.fileName} › ${origin.entry.substringAfterLast('/')}"
+        return stored.substringAfterLast('/').substringAfterLast(File.separatorChar)
+    }
+
+    /** Opens the newest recent session that is not open; pressed again, the next one, as the last one is open now. */
+    private fun reopenClosedTab() {
+        if (!AppSettings.current.rememberRecent) return
+        val open = (0..<tabs.tabCount).map { i -> tabAt(i).paths.map(::storedPath).toSet() }
+        val session = RecentStore.sessions.recent.firstOrNull { recent ->
+            !RecentSessions.gone(recent) && recent.paths.toSet() !in open
+        } ?: return
+        reopen(Reopen(listOf(session), 0))
+    }
+
+    /** [path] as a session is stored: an extracted file by its zip or compressed file, as opening it extracts anew. */
+    private fun storedPath(path: Path) = (originOf(path) ?: path).toString()
+
+    /** [tab]'s session as it can be opened again, e.g. after a restart or from Open Recent. */
+    private fun sessionOf(tab: LogTab): OpenSession {
+        val filter = tab.filter.takeUnless { it.isEmpty }
+        val position = tab.position?.mapFiles(::storedPath)
+        return OpenSession(tab.paths.map(::storedPath), tab.chosenParsers, filter, position)
+    }
+
+    /** The sessions of the open tabs as they can be opened again, in tab order. */
+    private fun openSessionsToStore() = (0..<tabs.tabCount).map { sessionOf(tabAt(it)) }
 
     private fun selectedTab() = tabs.selectedComponent as LogTab?
 
@@ -180,16 +288,21 @@ class MainFrame : JFrame("logxy") {
         add(JMenu("File").apply {
             mnemonic = KeyEvent.VK_F
             add(menuItem("Open", Icons.open, KeyEvent.VK_O, shortcut) { chooseAndOpenFiles() })
+            add(openRecent)
             add(menuItem("Reload", Icons.refresh, KeyEvent.VK_F5) { selectedTab()?.reloadFile() })
             add(menuItem("Close Tab", Icons.close, KeyEvent.VK_W, shortcut) {
                 if (tabs.selectedIndex >= 0) closeTab(tabs.selectedIndex)
             })
+            add(reopenClosedTabItem)
             addSeparator()
             add(menuItem("Preferences", Icons.settings, KeyEvent.VK_S, shortcut or InputEvent.ALT_DOWN_MASK) {
                 PreferencesDialog(this@MainFrame, previewFile = selectedTab()?.path).isVisible = true
             })
             addSeparator()
-            add(menuItem("Exit", Icons.exit, null) { dispose() })
+            // Closing rather than disposing, so the open sessions are recorded as at any exit.
+            add(menuItem("Exit", Icons.exit, null) {
+                this@MainFrame.dispatchEvent(WindowEvent(this@MainFrame, WindowEvent.WINDOW_CLOSING))
+            })
         })
         add(JMenu("Edit").apply {
             mnemonic = KeyEvent.VK_E
@@ -389,48 +502,79 @@ class MainFrame : JFrame("logxy") {
         return dialog.answer
     }
 
-    /** Arguments for [openArgs] that reopen the open tabs with their parsers and filters, e.g. after a restart. */
-    fun tabArgs(): List<String> = SessionArgs.write(
-        (0..<tabs.tabCount).map { i ->
-            val tab = tabs.getComponentAt(i) as LogTab
-            // Extracted files by their zip or compressed file, as the next app extracts them anew.
-            OpenSession(tab.paths.map { (originOf(it) ?: it).toString() }, tab.chosenParsers, tab.filter)
-        },
-        tabs.selectedIndex,
-    )
+    /**
+     * Arguments for [openArgs] that reopen the open tabs with their parsers, filters and positions, e.g. after a
+     * restart.
+     */
+    fun tabArgs(): List<String> = SessionArgs.write(openSessionsToStore(), tabs.selectedIndex)
 
     /**
-     * Opens files given on the command line, or the tabs from [tabArgs]: each file group in a tab, merged if
-     * several.
+     * Opens the tabs from [tabArgs]; or else files given on the command line, each file group in a tab, merged if
+     * several, after the sessions open at the last exit if the settings say to reopen them.
      */
     fun openArgs(args: List<String>) {
-        val reopen = SessionArgs.read(args) ?: return openFiles(args.map { Path.of(it) })
-        val args = reopen.sessions.flatMap { it.paths }
-        val zips = args.mapNotNull(ZipSpool::parseOrigin).map { it.zip }
-        // Decompressed files are saved as their .gz or .zst, and decompressed again.
-        val compressed = args
-            .filter { ZipSpool.parseOrigin(it) == null }
-            .map { Path.of(it).toAbsolutePath().normalize() }
-            .filter { CompressedSpool.formatOf(it) != null }
-        val archives = (zips + compressed).distinct()
-        if (archives.isEmpty()) return openRestored(reopen) { Path.of(it) }
-        extractThen(archives) { files ->
-            openRestored(reopen) { arg ->
-                ZipSpool.parseOrigin(arg)?.let(spool::extractedFile)?.let { return@openRestored it }
-                val path = Path.of(arg)
-                files[path.toAbsolutePath().normalize()]?.singleOrNull() ?: path
-            }
+        SessionArgs.read(args)?.let { return reopen(it) }
+        // Settings only have reopenOnStart while they remember recent sessions.
+        val atExit = if (AppSettings.current.reopenOnStart) RecentStore.sessions.atExit else null
+        if (atExit != null) reopen(atExit)
+        if (args.isNotEmpty()) openFiles(args.map { Path.of(it) })
+    }
+
+    /**
+     * Opens [reopen]'s sessions, after any files being opened before are, each in a tab with its parsers, filter and
+     * position. Files from zips and compressed files are extracted again first.
+     */
+    private fun reopen(reopen: Reopen) {
+        val previous = opening
+        opening = scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            previous?.join()
+            val stored = reopen.sessions.flatMap { it.paths }
+            val zips = stored.mapNotNull(ZipSpool::parseOrigin).map { it.zip }
+            // Decompressed files are stored as their .gz or .zst, and decompressed again.
+            val compressed = stored
+                .filter { ZipSpool.parseOrigin(it) == null }
+                .map { Path.of(it).toAbsolutePath().normalize() }
+                .filter { CompressedSpool.formatOf(it) != null }
+            // A zip that is gone leaves out its files, as any other file that is gone.
+            val archives = (zips + compressed).distinct().filter { Files.exists(it) }
+            if (archives.isEmpty()) return@launch openRestored(reopen) { Path.of(it) }
+            extractThen(archives) { files ->
+                openRestored(reopen) { text ->
+                    ZipSpool.parseOrigin(text)?.let(spool::extractedFile)?.let { return@openRestored it }
+                    val path = Path.of(text)
+                    files[path.toAbsolutePath().normalize()]?.singleOrNull() ?: path
+                }
+            }.join()
         }
     }
 
     /**
-     * Opens a tab for each of [restored]'s sessions with its parsers and filter, then selects the tab [restored]
-     * names. [path] turns each path as written in the arguments into the file to open.
+     * Opens a tab for each of [restored]'s sessions with its parsers, filter and position, then selects the tab
+     * [restored] names. [path] turns each path as stored into the file to open. Files that cannot be opened are
+     * left out, and listed for the user.
      */
     private fun openRestored(restored: Reopen, path: (String) -> Path) {
+        val leftOut = ArrayList<List<String>>()
         val sessions = restored.sessions.map { session ->
-            val openable = session.paths.map(path).zip(session.parsers).filter { (file, _) -> checkOpenable(file) }
-            SessionFiles(openable.map { it.first }, openable.map { it.second }, session.filter)
+            val files = LinkedHashMap<String, Path>()
+            val parsers = ArrayList<Parser?>()
+            session.paths.forEachIndexed { i, stored ->
+                val file = path(stored)
+                val problem = OpenPlan.problem(file)
+                if (problem != null) {
+                    leftOut += listOf(stored, problem)
+                } else {
+                    files[stored] = file
+                    parsers += session.parsers.getOrNull(i)
+                }
+            }
+            SessionFiles(files.values.toList(), parsers, session.filter, session.position?.mapFiles(files::get))
+        }
+        if (leftOut.isNotEmpty()) {
+            TableNoticeDialog(
+                this, "Files Left Out", UIManager.getIcon("OptionPane.warningIcon"), "These files are not opened:",
+                listOf("File", "Reason"), leftOut, "files-left-out",
+            ).isVisible = true
         }
         perform(TabPlan.reopen(sessions, openSessions(), restored.selected))
     }
@@ -500,14 +644,17 @@ class MainFrame : JFrame("logxy") {
             is TabAction.InsertAfter -> insertTab(action.index + 1, action.session)
             is TabAction.Replace -> {
                 insertTab(action.index, action.session)
-                closeTab(action.index + 1)
+                // Merged into the new tab, not closed.
+                closeTab(action.index + 1, recorded = false)
             }
         }
     }
 
     private fun insertTab(index: Int, session: SessionFiles) {
-        val paths = session.paths
-        val tab = LogTab(paths, AppHost, ::openFiles, ::openEach, session.filter, ::originOf, session.parsers) {
+        val tab = LogTab(
+            session.paths, AppHost, ::openFiles, ::openEach, session.filter, ::originOf, session.parsers,
+            restore = session.position,
+        ) {
             updateStatus()
         }
         tabs.insertTab(tab.title, if (tab.isMerged) Icons.merged else Icons.logFile, tab, tab.description, index)
@@ -525,8 +672,10 @@ class MainFrame : JFrame("logxy") {
     private fun tellCannotOpen(path: Path, problem: String) =
         JOptionPane.showMessageDialog(this, "$problem:\n$path", "Cannot Open File", JOptionPane.ERROR_MESSAGE)
 
-    private fun closeTab(index: Int) {
-        val tab = tabs.getComponentAt(index) as LogTab
+    /** Closes the tab at [index]; if [recorded], its session becomes the newest recent session. */
+    private fun closeTab(index: Int, recorded: Boolean = true) {
+        val tab = tabAt(index)
+        if (recorded) RecentStore.recordClosed(sessionOf(tab))
         tabs.removeTabAt(index)
         tab.dispose()
         if (tabs.tabCount == 0) cards.show(center, CARD_PLACEHOLDER)
