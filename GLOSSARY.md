@@ -59,3 +59,19 @@ _Avoid_: view, shown rows, filtered rows
 **Selection**:
 The rows the user marked in a shown log. It ends with the shown log, except that the record at its lead stays selected when the next shown log still shows it.
 _Avoid_: selected lines, marked rows
+
+**Filter**:
+What the user sets to choose a session's shown records: a query, and optionally a minimum level. A suspended filter is kept but shows all records.
+_Avoid_: search (that is find)
+
+**Query**:
+A filter's conditions: a group of rules and groups, typed as text or built in the visual editor.
+_Avoid_: expression, filter text
+
+**Rule**:
+One condition on one field, a template or a template variable, such as `level >= WARN` or `message == "Timeout*"`.
+_Avoid_: condition, criterion, clause
+
+**Group**:
+Rules and groups joined all with AND or all with OR, possibly negated; a query is one.
+_Avoid_: block, subquery
