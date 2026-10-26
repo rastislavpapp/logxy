@@ -16,6 +16,7 @@ import org.openjdk.jmh.annotations.Scope
 import org.openjdk.jmh.annotations.Setup
 import org.openjdk.jmh.annotations.State
 import org.openjdk.jmh.annotations.TearDown
+import org.openjdk.jmh.infra.BenchmarkParams
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
@@ -42,11 +43,10 @@ open class FollowBenchmark {
     private lateinit var bytes: ByteArray
     private lateinit var log: ParsedLog
     private lateinit var engine: FilterEngine
-    private lateinit var highlightEngine: FilterEngine
     private var covered = 0
 
     @Setup
-    fun setUp() {
+    fun setUp(params: BenchmarkParams) {
         val source = Path.of(file)
         // Next to the source, as the copy is as large; each JVM gets its own.
         followed = Files.createTempFile(source.toAbsolutePath().parent, "followed-", ".log")
@@ -55,11 +55,22 @@ open class FollowBenchmark {
         val parser = parserFor(source).compileFor(source)
         log = runBlocking { ParsedLog.build(followed, parser) }
         engine = FilterEngine(log)
-        // An engine of its own, so the filter's row measures the same cache as before row highlights existed.
-        highlightEngine = FilterEngine(log)
+        // Only what this JVM times: run in the filter's JVM, the row highlights leave the JIT compiling the filter
+        // several times slower in about half of the JVMs.
+        val highlights = params.benchmark.endsWith(".${::highlightAppended.name}")
         runBlocking {
-            engine.prepare(filter).run()
-            evaluateRowHighlights(highlightEngine, log.schema, benchmarkHighlights)
+            if (highlights) {
+                evaluateRowHighlights(engine, log.schema, benchmarkHighlights)
+            } else {
+                engine.prepare(filter).run()
+            }
+        }
+        // The row highlights' catch-up gets fast only after about ten calls, more than JMH's uncounted runs.
+        if (highlights) {
+            repeat(HIGHLIGHT_WARMUPS) {
+                append()
+                highlightAppended()
+            }
         }
     }
 
@@ -82,7 +93,11 @@ open class FollowBenchmark {
     /** [benchmarkHighlights] caught up on the appended records. */
     @Benchmark
     fun highlightAppended(): Int = runBlocking {
-        evaluateRowHighlights(highlightEngine, log.schema, benchmarkHighlights, highlightEngine.changedFrom(covered))
+        evaluateRowHighlights(engine, log.schema, benchmarkHighlights, engine.changedFrom(covered))
+    }
+
+    private companion object {
+        const val HIGHLIGHT_WARMUPS = 15
     }
 }
 
