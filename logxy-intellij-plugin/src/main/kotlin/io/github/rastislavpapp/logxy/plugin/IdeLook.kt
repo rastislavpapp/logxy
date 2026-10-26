@@ -61,6 +61,8 @@ object IdeLook : Look {
 
     override val border: Color get() = JBColor.border()
 
+    override val isDark: Boolean get() = !JBColor.isBright()
+
     /** The editor's font, as the console's text is in it. */
     override val monospacedFont: Font
         get() = EditorColorsManager.getInstance().globalScheme.getFont(EditorFontType.PLAIN)

@@ -1,5 +1,6 @@
 package io.github.rastislavpapp.logxy.ui
 
+import io.github.rastislavpapp.logxy.core.config.PaletteColor
 import java.awt.Color
 import java.awt.Font
 import java.awt.Insets
@@ -41,6 +42,15 @@ interface Look {
 
     /** Lines around and between components. */
     val border: Color
+
+    /** Whether the theme is dark: light text on a dark background. */
+    val isDark: Boolean
+
+    /**
+     * The background of the rows a row highlight of [color] colors: light in a light theme and dark in a dark one,
+     * so the level colours stay readable on it.
+     */
+    fun rowHighlight(color: PaletteColor): Color = rowHighlightBackground(color, isDark)
 
     /** The font of record text: table cells, the detail pane. */
     val monospacedFont: Font
@@ -97,3 +107,17 @@ interface Look {
 
 /** Short for [Look.current]. */
 internal val look: Look get() = Look.current
+
+/** The background of [Look.rowHighlight] in a light look, or a [dark] one. */
+private fun rowHighlightBackground(color: PaletteColor, dark: Boolean): Color = Color(
+    when (color) {
+        PaletteColor.RED -> if (dark) 0x5A2E2E else 0xFAD4D4
+        PaletteColor.ORANGE -> if (dark) 0x5A3F24 else 0xFBE0C6
+        PaletteColor.YELLOW -> if (dark) 0x4F4920 else 0xF7EDB0
+        PaletteColor.GREEN -> if (dark) 0x2E4A30 else 0xD3EFD0
+        PaletteColor.TEAL -> if (dark) 0x234846 else 0xCDECE8
+        PaletteColor.BLUE -> if (dark) 0x2A3D5A else 0xD3E3F8
+        PaletteColor.PURPLE -> if (dark) 0x432F57 else 0xE6DAF5
+        PaletteColor.GRAY -> if (dark) 0x45474B else 0xE3E3E3
+    },
+)

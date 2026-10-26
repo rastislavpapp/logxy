@@ -1,5 +1,6 @@
 package io.github.rastislavpapp.logxy.ui
 
+import io.github.rastislavpapp.logxy.core.config.PaletteColor
 import io.github.rastislavpapp.logxy.core.log.Field
 import io.github.rastislavpapp.logxy.core.log.Level
 import io.github.rastislavpapp.logxy.core.log.Role
@@ -145,6 +146,12 @@ class LogTableModel(val shown: ShownLog, private val names: ColumnNames) : Abstr
 
     /** Canonical level of the record shown in [row], if the parser has levels. */
     fun level(row: Int): Level? = shown.level(recordAt(row))
+
+    /** The color of the row highlight of the record shown in [row]; null if it has none. */
+    fun rowHighlight(row: Int): PaletteColor? {
+        val index = shown.rowHighlight(recordAt(row))
+        return if (index < 0) null else shown.rowHighlights[index].color
+    }
 
     /**
      * How many lines the record shown in [row] has after its first, counted in its first [MAX_DETAIL_BYTES] bytes by

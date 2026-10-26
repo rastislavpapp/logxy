@@ -590,8 +590,8 @@ class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
     }
 
     /**
-     * Renders a cell. In a row taller than rowHeight, it puts the text at the top, where it would be in a row
-     * rowHeight high.
+     * Renders a cell, on the color of its row's row highlight unless the row is selected. In a row taller than
+     * rowHeight, it puts the text at the top, where it would be in a row rowHeight high.
      */
     private open inner class CellRenderer : DefaultTableCellRenderer() {
         protected var isSelected = false
@@ -606,6 +606,9 @@ class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
         override fun getTableCellRendererComponent(
             table: JTable, value: Any?, isSelected: Boolean, hasFocus: Boolean, row: Int, column: Int,
         ): Component {
+            // Set before, as the background of an unselected cell, which the superclass keeps; null takes the
+            // table's own.
+            background = logModel.rowHighlight(row)?.let(look::rowHighlight)
             super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column)
             this.isSelected = isSelected
             showsExpandIcon = false
