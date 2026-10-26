@@ -1,6 +1,7 @@
 package io.github.rastislavpapp.logxy.app
 
 import com.formdev.flatlaf.FlatClientProperties
+import com.formdev.flatlaf.FlatLaf
 import com.formdev.flatlaf.extras.FlatSVGIcon
 import com.formdev.flatlaf.util.UIScale
 import io.github.rastislavpapp.logxy.ui.Look
@@ -34,6 +35,8 @@ object FlatLook : Look {
     override val warning: Color get() = UIManager.getColor("Actions.Yellow")
 
     override val errorText: Color get() = UIManager.getColor("Component.error.focusedBorderColor")
+
+    override val isDark: Boolean get() = FlatLaf.isLafDark()
 
     override val border: Color get() = UIManager.getColor("Component.borderColor")
 

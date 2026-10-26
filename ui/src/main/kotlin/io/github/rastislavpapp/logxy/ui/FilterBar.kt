@@ -1,5 +1,7 @@
 package io.github.rastislavpapp.logxy.ui
 
+import io.github.rastislavpapp.logxy.core.config.PaletteColor
+import io.github.rastislavpapp.logxy.core.config.RowHighlight
 import io.github.rastislavpapp.logxy.core.config.SavedFilter
 import io.github.rastislavpapp.logxy.core.log.Level
 import io.github.rastislavpapp.logxy.core.log.Role
@@ -80,6 +82,7 @@ class FilterBar(private val onApply: () -> Unit, names: ColumnNames, private val
         add(pauseButton)
         if (textArea != null) add(textMode)
         add(toolBarButton(DropDownIcon(Icons.star), "Saved filters") { showSavedMenu(it) })
+        add(toolBarButton(DropDownIcon(Icons.rowHighlights), "Row highlights") { showHighlightsMenu(it) })
         add(toolBarButton(Icons.closeSmall, "Remove all conditions (Esc)") { clear() })
     }
 
@@ -330,6 +333,70 @@ class FilterBar(private val onApply: () -> Unit, names: ColumnNames, private val
             add(PopupItem("Save Current Filter As", Icons.add, separatorBefore = true) { save() })
         }
         showPopupList(button, items)
+    }
+
+    private fun showHighlightsMenu(button: JButton) {
+        val highlights = host.settings.current.rowHighlights
+        val query = highlightQuery()
+        val items = buildList {
+            if (highlights.isEmpty()) add(PopupItem("No row highlights", enabled = false))
+            highlights.forEach { highlight ->
+                val deleteTool = PopupTool(Icons.clear, "Delete this row highlight") { deleteHighlight(highlight) }
+                val label = highlight.query.cut(MAX_MENU_CHARS)
+                add(PopupItem(label, SwatchIcon(highlight.color), tools = listOf(deleteTool)) {
+                    showColors(button, highlight.color) { color -> recolor(highlight, color) }
+                })
+            }
+            val enabled = query != null
+            add(PopupItem("Highlight Rows Like This…", Icons.add, enabled = enabled, separatorBefore = true) {
+                if (query != null) showColors(button, null) { color -> highlightLike(query, color) }
+            })
+        }
+        showPopupList(button, items)
+    }
+
+    /** The filter's query as [QueryPrinter] prints it, without the level; null if empty or it does not parse. */
+    private fun highlightQuery(): String? {
+        val query = runCatching { query() }.getOrNull() ?: return null
+        return if (query.items.isEmpty()) null else QueryPrinter.print(query)
+    }
+
+    /** Offers the palette colors, [current] checked, once the list that opened this one has closed. */
+    private fun showColors(button: JButton, current: PaletteColor?, choose: (PaletteColor) -> Unit) {
+        val items = PaletteColor.entries.map { color ->
+            PopupItem(color.label, SwatchIcon(color), selected = color == current) { choose(color) }
+        }
+        SwingUtilities.invokeLater { showPopupList(button, items) }
+    }
+
+    /**
+     * Adds [query] as a row highlight of [color] in front of the others, so it wins over them; one with the same
+     * query only gets the new color and keeps its place.
+     */
+    private fun highlightLike(query: String, color: PaletteColor) {
+        val highlights = host.settings.current.rowHighlights
+        fun printed(text: String) = runCatching { QueryPrinter.print(QueryParser.parse(text)) }.getOrDefault(text)
+        val same = highlights.indexOfFirst { printed(it.query) == query }
+        if (same >= 0) return recolor(highlights[same], color)
+        if (highlights.size >= RowHighlight.MAX) {
+            showError("There can be at most ${RowHighlight.MAX} row highlights.")
+            return
+        }
+        persistHighlights(listOf(RowHighlight(query, color)) + highlights)
+    }
+
+    private fun recolor(highlight: RowHighlight, color: PaletteColor) {
+        val highlights = host.settings.current.rowHighlights
+        persistHighlights(highlights.map { if (it == highlight) it.copy(color = color) else it })
+    }
+
+    private fun deleteHighlight(highlight: RowHighlight) {
+        if (!confirm("Delete the row highlight “${highlight.query}”?", "Delete Row Highlight")) return
+        persistHighlights(host.settings.current.rowHighlights.filter { it != highlight })
+    }
+
+    private fun persistHighlights(highlights: List<RowHighlight>) {
+        host.settings.updateOrShowError(this, host.settings.current.copy(rowHighlights = highlights))
     }
 
     /** The filter as edited, unnamed; Advanced text is kept as typed, even if it does not parse. */

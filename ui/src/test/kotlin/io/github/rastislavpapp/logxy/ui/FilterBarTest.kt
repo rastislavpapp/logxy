@@ -128,6 +128,7 @@ private object PlainLook : Look {
     override val warning: Color = Color.ORANGE
     override val errorText: Color = Color.RED
     override val border: Color = Color.GRAY
+    override val isDark = false
     override val monospacedFont = Font(Font.MONOSPACED, Font.PLAIN, 12)
     override val smallFont = Font(Font.SANS_SERIF, Font.PLAIN, 10)
     override val cellMargins = Insets(0, 0, 0, 0)

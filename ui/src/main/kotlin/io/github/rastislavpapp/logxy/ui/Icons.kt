@@ -1,7 +1,10 @@
 package io.github.rastislavpapp.logxy.ui
 
+import io.github.rastislavpapp.logxy.core.config.PaletteColor
 import java.awt.Component
 import java.awt.Graphics
+import java.awt.Graphics2D
+import java.awt.RenderingHints
 import javax.swing.Icon
 
 /** IntelliJ Platform "new UI" icons (Apache 2.0), from the IntelliJ icons artifact, loaded by the [Look]. */
@@ -24,6 +27,7 @@ object Icons {
     val remove get() = get("general/remove")
     val group get() = get("general/groups")
     val star get() = get("nodes/star")
+    val rowHighlights get() = get("toolwindows/palette")
     val logFile get() = get("fileTypes/text")
     val merged get() = get("vcs/merge")
     val theme get() = get("general/layout")
@@ -38,6 +42,33 @@ object Icons {
     // IntelliJ's editor fold icons, at their own 9 px: expand points right, collapse down.
     val expand get() = get("gutter/unfold", 9)
     val collapse get() = get("gutter/fold", 9)
+}
+
+/** A square in the row background of [color], as rows with a row highlight of that color show it. */
+class SwatchIcon(private val color: PaletteColor) : Icon {
+    override fun getIconWidth() = look.scale(SIZE)
+    override fun getIconHeight() = look.scale(SIZE)
+
+    override fun paintIcon(c: Component?, g: Graphics, x: Int, y: Int) {
+        val size = iconWidth
+        val arc = look.scale(ARC)
+        val g2 = g.create() as Graphics2D
+        try {
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+            g2.color = look.rowHighlight(color)
+            g2.fillRoundRect(x, y, size - 1, size - 1, arc, arc)
+            // The light colors are close to a light menu's background: an edge keeps them apart.
+            g2.color = look.border
+            g2.drawRoundRect(x, y, size - 1, size - 1, arc, arc)
+        } finally {
+            g2.dispose()
+        }
+    }
+
+    private companion object {
+        const val SIZE = 14
+        const val ARC = 4
+    }
 }
 
 /** [icon] followed by a small down arrow, for buttons that open a menu. */
