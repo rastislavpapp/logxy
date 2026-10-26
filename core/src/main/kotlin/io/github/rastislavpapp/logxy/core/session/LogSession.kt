@@ -231,15 +231,13 @@ class LogSession internal constructor(
     private var allValuesOf: Pair<LoadedLog, Int>? = null
 
     private var activeFilter: Filter? = null
-    private var filterJob: Job? = null
+
+    /** The evaluation of [activeFilter]; what it covers is what the shown filter result covers. */
+    private val filterRun = LoadEvaluation(scope)
 
     /** Whether the rows shown are [activeFilter]'s result, or all records while there is no active filter. */
     private var filterShown = false
 
-    // How much of the records the shown filter result covers: records, and bytes (the last record may grow without
-    // new ones).
-    private var filteredRecords = 0
-    private var filteredBytes = 0L
     private var filtering = false
     private var running: PreparedFilter? = null
 
@@ -250,7 +248,9 @@ class LogSession internal constructor(
     private var shownFilter: Filter? = null
 
     private var searchCondition: Filter? = null
-    private var searchJob: Job? = null
+
+    /** The evaluation of [searchCondition] among the shown rows; what it covers is what the found records cover. */
+    private val searchRun = LoadEvaluation(scope)
     private var searching: PreparedFilter? = null
 
     // The search [searchCondition] was made from, and, once its run is done, the search that found the found
@@ -267,10 +267,6 @@ class LogSession internal constructor(
      */
     var searchNarrows = false
         private set
-
-    // How much of the records the found records cover, as for the filter result.
-    private var foundRecords = 0
-    private var foundBytes = 0L
 
     /** How far the search over all rows got, from 0 to 1, while [ShownLog.isSearching]. */
     val searchProgress: Double get() = searching?.progress ?: 0.0
@@ -411,7 +407,7 @@ class LogSession internal constructor(
         try {
             val previous = searchSpec
             if (search != null && previous != null) {
-                val running = searchJob?.isActive == true
+                val running = searchRun.isRunning
                 if (running && searchError == null && search == previous) {
                     queuedSearch = null
                     return
@@ -869,7 +865,7 @@ class LogSession internal constructor(
 
     /** Runs [evaluation] of [activeFilter] over all records, or shows all records without a filter. */
     private fun runFilter(keepView: Boolean, evaluation: PreparedFilter?) {
-        filterJob?.cancel()
+        filterRun.cancel()
         filterShown = evaluation == null
         val shown = shown ?: return
         if (evaluation == null) {
@@ -888,7 +884,7 @@ class LogSession internal constructor(
         }
         val filter = activeFilter
         running = evaluation
-        filterJob = scope.launch {
+        filterRun.start {
             // Only slow filters say so; fast ones would just flash it.
             val indicator = launch {
                 delay(FILTERING_INDICATOR_MILLIS)
@@ -904,13 +900,13 @@ class LogSession internal constructor(
                 indicator.cancel()
                 filtering = false
                 running = null
-                filterJob = null
+                filterRun.finished()
                 problem = when (e) {
                     is OutOfMemoryError -> "Not enough memory to filter"
                     else -> e.message ?: e.javaClass.simpleName
                 }
                 updateStatus()
-                return@launch
+                return@start
             }
             indicator.cancel()
             filtering = false
@@ -918,42 +914,33 @@ class LogSession internal constructor(
             val oldSize = shown.size
             val recordBefore = shown.showRows(result.rows)
             filterShown = true
-            filteredRecords = result.recordCount
-            filteredBytes = result.indexedSize
+            filterRun.cover(result.recordCount, result.indexedSize)
             shownFilter = filter
             notifyRows { rowsReplaced(keepView, oldSize, recordBefore) }
             updateStatus()
             countTimes(anew = true)
             searchShown(anew = true)
             // Still the current job (a replaced one would have been cancelled), but done.
-            filterJob = null
+            filterRun.finished()
             catchUpFilter()
         }
     }
 
-    /**
-     * Filters what was appended since the shown result, keeping the result for older records. Never
-     * cancels a running filter: whichever finishes calls this again, so nothing appended is missed.
-     */
+    /** Filters what was appended since the shown result, keeping the result for older records; see [LoadEvaluation]. */
     private fun catchUpFilter() {
         val filter = activeFilter ?: return
         val shown = shown?.takeIf { it.isFiltered } ?: return
-        if (filterJob?.isActive == true || filteredBytes >= indexedSize()) return
-        // Records covered then may have grown since (the last one of each file), so they are filtered again.
         val engine = engine ?: return
-        val from = engine.changedFrom(filteredRecords)
-        val evaluation = engine.prepare(filter, from)
-        filterJob = scope.launch {
+        filterRun.catchUp(engine, indexedSize(), { from -> engine.prepare(filter, from) }) { from, evaluation ->
             val result = evaluation.run()
             val oldSize = shown.rowCount
             val firstChanged = shown.replaceRowsFrom(from, result.rows)
-            filteredRecords = result.recordCount
-            filteredBytes = result.indexedSize
+            filterRun.cover(result.recordCount, result.indexedSize)
             notifyRows { rowsChanged(firstChanged, oldSize) }
             updateStatus()
             countTimes(anew = false)
             searchShown(anew = false)
-            filterJob = null
+            filterRun.finished()
             catchUpFilter()
         }
     }
@@ -969,8 +956,7 @@ class LogSession internal constructor(
      */
     private fun searchShown(anew: Boolean, narrow: Boolean = false) {
         if (anew) {
-            searchJob?.cancel()
-            searchJob = null
+            searchRun.cancel()
             searching = null
             searchError = null
             queuedSearch = null
@@ -981,7 +967,7 @@ class LogSession internal constructor(
                 foundHistogram = null
                 foundTimes = null
             }
-        } else if (searchJob?.isActive == true) {
+        } else if (searchRun.isRunning) {
             return
         }
         val shown = shown ?: return
@@ -995,97 +981,108 @@ class LogSession internal constructor(
             return
         }
         // A failed search stops following the rows until the next one.
-        if (!anew && (searchError != null || foundBytes >= shownBytes())) return
-        val from = if (anew) 0 else engine.changedFrom(foundRecords)
-        // The found records were computed for the rows shown now; the last record may have grown since.
-        val within = if (anew && narrow) shown.narrowing(engine.changedFrom(foundRecords)) else null
-        val evaluation = engine.prepare(
-            shownFilter?.let { Filter.And(listOf(it, condition)) } ?: condition,
-            from,
-            within,
-        )
+        if (!anew && searchError != null) return
+        val shownCondition = shownFilter?.let { Filter.And(listOf(it, condition)) } ?: condition
         val spec = searchSpec
-        if (anew) {
-            searching = evaluation
-            foundChunked = false
-            if (within == null) {
-                foundRecords = 0
-                foundBytes = 0L
-                foundTimes = foundTimeCount(shown)
-                foundHistogram = foundTimes?.emptyHistogram()
-                shown.startFound(records?.recordCount ?: 0)
-                listener.foundChanged()
-            } else {
-                searchNarrows = true
-                shown.markSearching()
+        if (!anew) {
+            val prepare = { from: Int -> engine.prepare(shownCondition, from) }
+            searchRun.catchUp(engine, shownBytes(), prepare) { from, evaluation ->
+                runSearch(shown, evaluation, spec, from, anew = false, narrowed = false)
             }
+            return
         }
-        searchJob = scope.launch {
-            val result = try {
-                coroutineScope {
-                    // Only a search anew shows what it finds meanwhile, unless it narrows the records shown (they stay
-                    // until it is done); the chunks arrive on worker threads.
-                    val times = foundTimes
-                    val onChunk = ChunkListener { first, end, matches ->
-                        // Counted here, on the chunk's own thread: the other threads may all be busy searching.
-                        val counted = times?.countRecords(matches)
-                        launch { foundChunk(shown, first, end, matches, counted) }
-                    }
-                    evaluation.run(onChunk.takeIf { anew && within == null })
+        // The found records were computed for the rows shown now; the last record may have grown since.
+        val within = if (narrow) shown.narrowing(engine.changedFrom(searchRun.coveredRecords)) else null
+        val evaluation = engine.prepare(shownCondition, 0, within)
+        searching = evaluation
+        foundChunked = false
+        if (within == null) {
+            searchRun.cover(0, 0L)
+            foundTimes = foundTimeCount(shown)
+            foundHistogram = foundTimes?.emptyHistogram()
+            shown.startFound(records?.recordCount ?: 0)
+            listener.foundChanged()
+        } else {
+            searchNarrows = true
+            shown.markSearching()
+        }
+        searchRun.start { runSearch(shown, evaluation, spec, 0, anew = true, narrowed = within != null) }
+    }
+
+    /**
+     * The job of [searchShown]: runs [evaluation] of [spec] over the records from [from] on, [anew] over all of them,
+     * and shows what it finds. A search anew that is not [narrowed] shows its matches chunk by chunk meanwhile.
+     */
+    private suspend fun runSearch(
+        shown: ShownLog,
+        evaluation: PreparedFilter,
+        spec: TextSearch?,
+        from: Int,
+        anew: Boolean,
+        narrowed: Boolean,
+    ) {
+        val result = try {
+            coroutineScope {
+                // Only a search anew shows what it finds meanwhile, unless it narrows the records shown (they stay
+                // until it is done); the chunks arrive on worker threads.
+                val times = foundTimes
+                val onChunk = ChunkListener { first, end, matches ->
+                    // Counted here, on the chunk's own thread: the other threads may all be busy searching.
+                    val counted = times?.countRecords(matches)
+                    launch { foundChunk(shown, first, end, matches, counted) }
                 }
-            } catch (e: Throwable) {
-                if (e is CancellationException || (e !is Exception && e !is OutOfMemoryError)) throw e
-                log.warn("Cannot search {} for {}", pathsText(), spec, e)
-                // A failed catch-up keeps what was found before.
-                searchError = when (e) {
-                    is OutOfMemoryError -> "Not enough memory to search"
-                    else -> e.message ?: e.javaClass.simpleName
-                }
-                searching = null
-                searchJob = null
-                searchNarrows = false
-                if (anew) {
-                    foundRecords = 0
-                    foundBytes = 0L
-                    shown.clearFound()
-                    foundHistogram = null
-                }
-                // A search typed meanwhile has nothing to narrow, so it starts from scratch.
-                val queued = queuedSearch
-                if (queued != null) {
-                    queuedSearch = null
-                    searchSpec = queued
-                    searchCondition = queued.condition()
-                    searchShown(anew = true)
-                    return@launch
-                }
-                listener.foundChanged()
-                return@launch
+                evaluation.run(onChunk.takeIf { anew && !narrowed })
             }
-            val found = shownOnly(result.rows, shown)
-            val countFound = countFoundTimes(shown, from, found, anew)
-            if (anew) shown.showFound(found) else shown.replaceFoundFrom(from, found)
-            countFound?.invoke()
-            // Records past the shown rows were left out, so they are searched again once shown.
-            foundRecords = minOf(result.recordCount, shownRecords())
-            foundBytes = minOf(result.indexedSize, shownBytes())
+        } catch (e: Throwable) {
+            if (e is CancellationException || (e !is Exception && e !is OutOfMemoryError)) throw e
+            log.warn("Cannot search {} for {}", pathsText(), spec, e)
+            // A failed catch-up keeps what was found before.
+            searchError = when (e) {
+                is OutOfMemoryError -> "Not enough memory to search"
+                else -> e.message ?: e.javaClass.simpleName
+            }
             searching = null
-            searchJob = null
+            searchRun.finished()
             searchNarrows = false
-            if (anew) foundSpec = spec
-            // A search typed meanwhile narrows this one's found records. They are not announced, as the narrowing
-            // search replaces them.
+            if (anew) {
+                searchRun.cover(0, 0L)
+                shown.clearFound()
+                foundHistogram = null
+            }
+            // A search typed meanwhile has nothing to narrow, so it starts from scratch.
             val queued = queuedSearch
-            if (queued != null && foundSpec == searchSpec) {
+            if (queued != null) {
                 queuedSearch = null
                 searchSpec = queued
                 searchCondition = queued.condition()
-                searchShown(anew = true, narrow = true)
-                return@launch
+                searchShown(anew = true)
+                return
             }
             listener.foundChanged()
-            searchShown(anew = false)
+            return
         }
+        val found = shownOnly(result.rows, shown)
+        val countFound = countFoundTimes(shown, from, found, anew)
+        if (anew) shown.showFound(found) else shown.replaceFoundFrom(from, found)
+        countFound?.invoke()
+        // Records past the shown rows were left out, so they are searched again once shown.
+        searchRun.cover(minOf(result.recordCount, shownRecords()), minOf(result.indexedSize, shownBytes()))
+        searching = null
+        searchRun.finished()
+        searchNarrows = false
+        if (anew) foundSpec = spec
+        // A search typed meanwhile narrows this one's found records. They are not announced, as the narrowing
+        // search replaces them.
+        val queued = queuedSearch
+        if (queued != null && foundSpec == searchSpec) {
+            queuedSearch = null
+            searchSpec = queued
+            searchCondition = queued.condition()
+            searchShown(anew = true, narrow = true)
+            return
+        }
+        listener.foundChanged()
+        searchShown(anew = false)
     }
 
     /**
@@ -1157,7 +1154,7 @@ class LogSession internal constructor(
         val end = records.binarySearch(shownRecords()).let { if (it >= 0) it else -it - 1 }
         var size = end
         if (shown.isFiltered) {
-            val unsure = engine?.changedFrom(filteredRecords) ?: 0
+            val unsure = engine?.changedFrom(filterRun.coveredRecords) ?: 0
             size = records.binarySearch(unsure, 0, end).let { if (it >= 0) it else -it - 1 }
             for (i in size..<end) {
                 val record = records[i]
@@ -1169,9 +1166,10 @@ class LogSession internal constructor(
     }
 
     // How much of the records the shown rows cover: records, and bytes.
-    private fun shownRecords(): Int = if (shown?.isFiltered == true) filteredRecords else records?.recordCount ?: 0
+    private fun shownRecords(): Int =
+        if (shown?.isFiltered == true) filterRun.coveredRecords else records?.recordCount ?: 0
 
-    private fun shownBytes(): Long = if (shown?.isFiltered == true) filteredBytes else indexedSize()
+    private fun shownBytes(): Long = if (shown?.isFiltered == true) filterRun.coveredBytes else indexedSize()
 
     /**
      * Counts the times of the shown rows on other threads: [anew] all of them, keeping [histogram] meanwhile,
@@ -1193,7 +1191,7 @@ class LogSession internal constructor(
         val shown = shown ?: return
         val size = shown.rowCount
         // From the first record still growing on, rows may change: they are counted again each time.
-        val changing = engine.changedFrom(if (shown.isFiltered) filteredRecords else records.recordCount)
+        val changing = engine.changedFrom(if (shown.isFiltered) filterRun.coveredRecords else records.recordCount)
         val settle = shown.rowOf(changing).let { if (it < 0) size else it }
         val base = settled?.takeIf { !anew && settle >= settledRows }
         val from = if (base == null) 0 else settledRows
@@ -1289,16 +1287,13 @@ class LogSession internal constructor(
             shown = null
             listener.shownEnded()
         }
-        filterJob?.cancel()
-        searchJob?.cancel()
-        searchJob = null
+        filterRun.clear()
+        searchRun.clear()
         searching = null
         searchError = null
         queuedSearch = null
         foundSpec = null
         searchNarrows = false
-        foundRecords = 0
-        foundBytes = 0L
         foundHistogram = null
         foundTimes = null
         shownFilter = null
@@ -1309,8 +1304,6 @@ class LogSession internal constructor(
         histogram = null
         settled = null
         settledRows = 0
-        filteredRecords = 0
-        filteredBytes = 0L
         filtering = false
         running = null
         activeFilter = null
