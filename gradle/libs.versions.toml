@@ -45,7 +45,7 @@ junit-jupiter = { module = "org.junit.jupiter:junit-jupiter" }
 junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher" }
 junit4 = { module = "junit:junit", version = "4.13.2" }
 kotlin-gradle-plugin = { module = "org.jetbrains.kotlin:kotlin-gradle-plugin", version.ref = "kotlin" }
-zstd-jni = { module = "com.github.luben:zstd-jni", version = "1.5.7-23" }
+zstd-jni = { module = "com.github.luben:zstd-jni", version = "1.5.7-24" }
 intellij-platform-gradle-plugin = { module = "org.jetbrains.intellij.platform:intellij-platform-gradle-plugin", version.ref = "intellij-platform" }
 detekt-gradle-plugin = { module = "dev.detekt:detekt-gradle-plugin", version.ref = "detekt" }
 detekt-rules-ktlint-wrapper = { module = "dev.detekt:detekt-rules-ktlint-wrapper", version.ref = "detekt" }
