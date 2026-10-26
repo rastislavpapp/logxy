@@ -50,6 +50,7 @@ class ShownLogTest {
         override val origin get() = throw UnsupportedOperationException()
         override fun newFilter() = throw UnsupportedOperationException()
         override fun firstRecordFrom(part: Int, record: Int) = throw UnsupportedOperationException()
+        override fun recordOf(part: Int, record: Int) = throw UnsupportedOperationException()
         override fun templateOf(record: Int) = throw UnsupportedOperationException()
         override fun fieldReader(field: Int, records: IntArray?, count: Int) = throw UnsupportedOperationException()
         override fun sourceReader() = throw UnsupportedOperationException()

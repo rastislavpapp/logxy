@@ -9,7 +9,10 @@ import java.nio.file.Path
 import java.util.Properties
 
 /** A named filter: the minimum level (null for all) and the query text. */
-data class SavedFilter(val name: String, val minimumLevel: Level?, val query: String)
+data class SavedFilter(val name: String, val minimumLevel: Level?, val query: String) {
+    /** Whether it lets all records through: no minimum level, and no query. */
+    val isEmpty: Boolean get() = minimumLevel == null && query.isBlank()
+}
 
 /**
  * How to open files: added to the current tab's session, merged with that session's files in a new tab,
@@ -27,7 +30,9 @@ enum class OpenMode(val key: String) {
  * - their own parsers, level names and saved filters;
  * - [openMode], how to open files without asking, or null to ask each time;
  * - whether opened folders include their subfolders;
- * - [deletedBuiltIns], the names of the built-in parsers they deleted.
+ * - [deletedBuiltIns], the names of the built-in parsers they deleted;
+ * - [rememberRecent], whether closed sessions are kept as recent sessions to open again, and [reopenOnStart],
+ *   whether a start opens the sessions open at the last exit; the latter only counts while the former is on.
  *
  * The memory limit is not here but in [VmOptions], as the launcher reads it from there.
  */
@@ -38,6 +43,8 @@ data class Settings(
     val openMode: OpenMode? = null,
     val includeSubfolders: Boolean = true,
     val deletedBuiltIns: Set<String> = emptySet(),
+    val rememberRecent: Boolean = false,
+    val reopenOnStart: Boolean = false,
 ) {
     /** The built-in parsers the user kept. */
     val builtInParsers: List<Parser> get() = Parser.BUILT_IN.filter { it.name !in deletedBuiltIns }
@@ -99,9 +106,11 @@ data class Settings(
          * filter.1.query=logger == "com.example.db*"
          * open.mode=merge
          * open.subfolders=false
+         * recent.remember=true
+         * recent.reopen=true
          * ```
          * Level names are stored only once the user changed them, and then completely. Entries that cannot be read
-         * are skipped.
+         * are skipped. `recent.reopen` is read as off without `recent.remember`.
          */
         fun fromProperties(properties: Properties): Settings {
             val parsers = numbered(properties, "parser")
@@ -132,7 +141,12 @@ data class Settings(
             // Without the `level-names=custom` marker, the level entries only add to the built-in names, as
             // they did in the first release.
             val levelMapping = LevelMapping(if (custom) levels else Level.BUILT_IN_NAMES + levels)
-            return Settings(parsers, levelMapping, filters, openMode, includeSubfolders, deletedBuiltIns)
+            val rememberRecent = properties.getProperty("recent.remember") == "true"
+            val reopenOnStart = rememberRecent && properties.getProperty("recent.reopen") == "true"
+            return Settings(
+                parsers, levelMapping, filters, openMode, includeSubfolders, deletedBuiltIns, rememberRecent,
+                reopenOnStart,
+            )
         }
 
         /** [settings] as [fromProperties] reads them. */
@@ -149,6 +163,8 @@ data class Settings(
             }
             settings.openMode?.let { properties["open.mode"] = it.key }
             if (!settings.includeSubfolders) properties["open.subfolders"] = "false"
+            if (settings.rememberRecent) properties["recent.remember"] = "true"
+            if (settings.reopenOnStart) properties["recent.reopen"] = "true"
             if (settings.levels != LevelMapping.DEFAULT) {
                 properties["level-names"] = "custom"
                 settings.levels.names.forEach { (text, level) -> properties["level.$text"] = level.name }

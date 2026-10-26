@@ -33,6 +33,8 @@ class SettingsTest {
             openMode = OpenMode.MERGE_WITH_CURRENT_IN_NEW,
             includeSubfolders = false,
             deletedBuiltIns = setOf("Spring Boot 3", "JSON lines"),
+            rememberRecent = true,
+            reopenOnStart = true,
         )
         val file = dir.resolve("nested/dir/logxy.properties")
         Settings.save(file, settings)
@@ -96,6 +98,17 @@ class SettingsTest {
             ),
             Settings.load(file).parsers,
         )
+    }
+
+    @Test
+    fun `sessions are reopened on start only while recent sessions are remembered`() {
+        val properties = Settings.toProperties(Settings(rememberRecent = true, reopenOnStart = true))
+        properties.remove("recent.remember")
+
+        val settings = Settings.fromProperties(properties)
+
+        assertFalse(settings.rememberRecent)
+        assertFalse(settings.reopenOnStart)
     }
 
     @Test

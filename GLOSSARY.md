@@ -9,7 +9,7 @@ One or more open files shown together in one tab, followed while they change.
 _Avoid_: tab (the UI around a session), document
 
 **Recent session**:
-A closed session as it can be opened again: its files, the parser chosen for each, and its filter.
+A closed session as it can be opened again: its files, the parser chosen for each, its filter, and its position (the selection's lead record and the top row's record, by where each starts in its file).
 _Avoid_: recent file, history entry
 
 **Load**:

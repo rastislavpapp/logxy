@@ -4,6 +4,8 @@ import io.github.rastislavpapp.logxy.core.config.SavedFilter
 import io.github.rastislavpapp.logxy.core.log.Level
 import io.github.rastislavpapp.logxy.core.parse.Parser
 import io.github.rastislavpapp.logxy.core.parse.RoleKeys
+import io.github.rastislavpapp.logxy.core.session.RecordStart
+import io.github.rastislavpapp.logxy.core.session.SessionPosition
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
@@ -25,13 +27,19 @@ class SessionArgsTest {
                     Parser.Json("Json", RoleKeys(level = listOf("lvl"))),
                 ),
                 null,
+                SessionPosition(RecordStart("/logs/old.zip!c.log", 4096), RecordStart("/logs/b.log", 0)),
             ),
             OpenSession(
                 listOf("/logs/e.log"),
                 listOf(Parser.Regex("Re", """(?<level>\w+) (?<message>.*)""", "HH:mm")),
                 null,
             ),
-            OpenSession(listOf("/logs/f.log"), listOf(null), SavedFilter("", null, "level = ERROR")),
+            OpenSession(
+                listOf("/logs/f.log"),
+                listOf(null),
+                SavedFilter("", null, "level = ERROR"),
+                SessionPosition(lead = null, top = RecordStart("/logs/f.log", 120)),
+            ),
         )
 
         val reopened = SessionArgs.read(SessionArgs.write(sessions, selected = 2))

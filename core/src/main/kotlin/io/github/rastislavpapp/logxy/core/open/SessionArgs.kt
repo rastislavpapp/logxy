@@ -4,6 +4,8 @@ import io.github.rastislavpapp.logxy.core.config.SavedFilter
 import io.github.rastislavpapp.logxy.core.config.Settings
 import io.github.rastislavpapp.logxy.core.log.Level
 import io.github.rastislavpapp.logxy.core.parse.Parser
+import io.github.rastislavpapp.logxy.core.session.RecordStart
+import io.github.rastislavpapp.logxy.core.session.SessionPosition
 import java.io.StringReader
 import java.io.StringWriter
 import java.util.Base64
@@ -11,9 +13,39 @@ import java.util.Properties
 
 /**
  * A session to open: its [paths] (extracted files by their zip or compressed file, as written by
- * `ArchiveOrigin`), the parser for each ([parsers], null to detect it) and its [filter].
+ * `ArchiveOrigin`), the parser for each ([parsers], null to detect it), its [filter], and the [position] to go
+ * back to once it is loaded, whose files are among [paths].
  */
-data class OpenSession(val paths: List<String>, val parsers: List<Parser?>, val filter: SavedFilter?)
+data class OpenSession(
+    val paths: List<String>,
+    val parsers: List<Parser?>,
+    val filter: SavedFilter?,
+    val position: SessionPosition<String>? = null,
+) {
+    /** Whether this session has the same files as [other], in any order. */
+    fun sameFiles(other: OpenSession) = paths.toSet() == other.paths.toSet()
+
+    /**
+     * The number of [start]'s file among [paths], from 1, as stored sessions and restart arguments write a
+     * position's file; null if it is none of them.
+     */
+    fun fileNumber(start: RecordStart<String>): Int? {
+        val index = paths.indexOf(start.file)
+        return if (index < 0) null else index + 1
+    }
+
+    companion object {
+        /**
+         * The start at [offset] in the file numbered [file] among [paths], as [fileNumber] numbers them; null if
+         * either is missing or there is no such file.
+         */
+        fun startIn(paths: List<String>, file: Int?, offset: Long?): RecordStart<String>? {
+            val path = if (file == null) null else paths.getOrNull(file - 1)
+            if (path == null || offset == null) return null
+            return RecordStart(path, offset)
+        }
+    }
+}
 
 /** The sessions to open again, and the index of the one to select. */
 data class Reopen(val sessions: List<OpenSession>, val selected: Int)
@@ -26,6 +58,8 @@ object SessionArgs {
     private const val LEVEL_ARG = "--level"
     private const val QUERY_ARG = "--query"
     private const val PARSERS_ARG = "--parsers"
+    private const val LEAD_ARG = "--lead"
+    private const val TOP_ARG = "--top"
 
     /**
      * Arguments that make the next start reopen [sessions], each with its filter and chosen parsers, and select
@@ -52,6 +86,8 @@ object SessionArgs {
                 add(PARSERS_ARG)
                 add(encode(StringWriter().also { properties.store(it, null) }.toString()))
             }
+            addStart(LEAD_ARG, session, session.position?.lead)
+            addStart(TOP_ARG, session, session.position?.top)
         }
         if (selected >= 0) add(SELECT_ARG).also { add(selected.toString()) }
     }
@@ -64,16 +100,26 @@ object SessionArgs {
             var level: Level? = null,
             var query: String = "",
             var parsers: List<Parser?>? = null,
+            var lead: RecordStart<String>? = null,
+            var top: RecordStart<String>? = null,
         ) {
             fun session(): OpenSession {
-                val filter = SavedFilter("", level, query).takeIf { it.minimumLevel != null || it.query.isNotBlank() }
-                return OpenSession(paths, parsers ?: paths.map { null }, filter)
+                val filter = SavedFilter("", level, query).takeUnless { it.isEmpty }
+                val position = if (lead == null && top == null) null else SessionPosition(lead, top)
+                return OpenSession(paths, parsers ?: paths.map { null }, filter, position)
             }
         }
         val groups = ArrayList<Group>()
         var selected = 0
         val iterator = args.iterator()
         fun value() = if (iterator.hasNext()) iterator.next() else ""
+
+        // The start written after LEAD_ARG or TOP_ARG: its file's number among the group's paths, and its offset.
+        fun start(group: Group): RecordStart<String>? {
+            val file = value().toIntOrNull()
+            val offset = value().toLongOrNull()
+            return OpenSession.startIn(group.paths, file, offset)
+        }
         while (iterator.hasNext()) {
             when (val arg = iterator.next()) {
                 SESSION_ARG -> groups += Group()
@@ -86,11 +132,20 @@ object SessionArgs {
                     val properties = Properties().apply { load(StringReader(decode(value()).orEmpty())) }
                     group.parsers = group.paths.indices.map { Settings.readParser(properties, "${it + 1}.") }
                 }
+                LEAD_ARG -> groups.last().let { it.lead = start(it) }
+                TOP_ARG -> groups.last().let { it.top = start(it) }
                 SELECT_ARG -> selected = value().toIntOrNull() ?: 0
                 else -> groups.last().paths.add(arg)
             }
         }
         return Reopen(groups.map { it.session() }, selected)
+    }
+
+    /** Adds [start] after [arg] as the number of its file among [session]'s paths, from 1, and its offset. */
+    private fun MutableList<String>.addStart(arg: String, session: OpenSession, start: RecordStart<String>?) {
+        if (start == null) return
+        val file = session.fileNumber(start) ?: return
+        addAll(listOf(arg, "$file", "${start.offset}"))
     }
 
     private fun encode(text: String) = Base64.getUrlEncoder().encodeToString(text.toByteArray())
