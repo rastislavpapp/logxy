@@ -1,5 +1,6 @@
 package io.github.rastislavpapp.logxy.core.session
 
+import io.github.rastislavpapp.logxy.core.config.RowHighlight
 import io.github.rastislavpapp.logxy.core.filter.Narrowing
 import io.github.rastislavpapp.logxy.core.log.Level
 import io.github.rastislavpapp.logxy.core.log.Records
@@ -71,6 +72,9 @@ class ShownLog internal constructor(private val loaded: LoadedLog) {
     // What a search started anew has found so far, while it runs and reports chunk by chunk; null otherwise.
     private var foundSoFar: FoundChunks? = null
 
+    private val highlights = RecordHighlights()
+    private var highlightList = emptyList<RowHighlight>()
+
     var ended = false
         private set
 
@@ -134,6 +138,19 @@ class ShownLog internal constructor(private val loaded: LoadedLog) {
      * log ended.
      */
     fun level(record: Int): Level? = if (ended) null else records.level(record)
+
+    /**
+     * The row highlights that [rowHighlight] gives the index of: those of the settings when the records were last
+     * evaluated. Empty once the shown log ended.
+     */
+    val rowHighlights: List<RowHighlight> get() = if (ended) emptyList() else highlightList
+
+    /**
+     * The index in [rowHighlights] of [record]'s row highlight, the first one it matches; the same in every shown log
+     * of the load, whatever the filter. -1 for none, also while the record is not evaluated yet and once the shown
+     * log ended.
+     */
+    fun rowHighlight(record: Int): Int = if (ended) -1 else highlights.of(record)
 
     /** Epoch nanoseconds of [record]'s timestamp, or null if there is none. */
     fun timestamp(record: Int): Long? = if (ended) null else records.timestamp(record)
@@ -438,6 +455,18 @@ class ShownLog internal constructor(private val loaded: LoadedLog) {
 
     /** Forgets the found records, e.g. when the search is cleared. */
     internal fun clearFound() = showFound(IntArray(0))
+
+    /** Whether any record was evaluated for its row highlight. */
+    internal val hasRowHighlights: Boolean get() = highlights.size > 0
+
+    /**
+     * Shows [part], the row highlights of the records from its first one on, as indexes into [list]; a part from
+     * the first record replaces all of them.
+     */
+    internal fun showRowHighlights(list: List<RowHighlight>, part: HighlightsPart) {
+        highlights.replace(part)
+        highlightList = list
+    }
 
     /**
      * Ends the shown log before its load's files close: from now on it has no rows and its reads return nothing

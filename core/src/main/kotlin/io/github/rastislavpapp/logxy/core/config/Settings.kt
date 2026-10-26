@@ -15,6 +15,29 @@ data class SavedFilter(val name: String, val minimumLevel: Level?, val query: St
 }
 
 /**
+ * The colors a row highlight can have, stored by name in lower case (`red`); [label] is the name the user sees.
+ * The look gives each one a background for light themes and one for dark themes.
+ */
+enum class PaletteColor(val label: String) {
+    RED("Red"),
+    ORANGE("Orange"),
+    YELLOW("Yellow"),
+    GREEN("Green"),
+    TEAL("Teal"),
+    BLUE("Blue"),
+    PURPLE("Purple"),
+    GRAY("Gray"),
+}
+
+/** A row highlight: the rows of the records [query] (its text, as typed in the filter bar) matches get [color]. */
+data class RowHighlight(val query: String, val color: PaletteColor) {
+    companion object {
+        /** The most row highlights there can be, as each record keeps the index of its own in one byte. */
+        const val MAX = 255
+    }
+}
+
+/**
  * How to open files: added to the current tab's session, merged with that session's files in a new tab,
  * merged with each other in a new tab, or in a tab each.
  */
@@ -31,6 +54,7 @@ enum class OpenMode(val key: String) {
  * - [openMode], how to open files without asking, or null to ask each time;
  * - whether opened folders include their subfolders;
  * - [deletedBuiltIns], the names of the built-in parsers they deleted;
+ * - [rowHighlights], in order: a record takes the color of the first one it matches. At most [RowHighlight.MAX].
  * - [rememberRecent], whether closed sessions are kept as recent sessions to open again, and [reopenOnStart],
  *   whether a start opens the sessions open at the last exit; the latter only counts while the former is on.
  *
@@ -43,6 +67,7 @@ data class Settings(
     val openMode: OpenMode? = null,
     val includeSubfolders: Boolean = true,
     val deletedBuiltIns: Set<String> = emptySet(),
+    val rowHighlights: List<RowHighlight> = emptyList(),
     val rememberRecent: Boolean = false,
     val reopenOnStart: Boolean = false,
 ) {
@@ -104,6 +129,8 @@ data class Settings(
          * filter.1.name=Slow DB
          * filter.1.level=WARN
          * filter.1.query=logger == "com.example.db*"
+         * highlight.1.query=level >= ERROR
+         * highlight.1.color=red
          * open.mode=merge
          * open.subfolders=false
          * recent.remember=true
@@ -131,6 +158,12 @@ data class Settings(
                 val level = Level.entries.firstOrNull { it.name == levelName }
                 SavedFilter(name, level, properties.getProperty("filter.$n.query").orEmpty())
             }
+            val rowHighlights = numbered(properties, "highlight", "query").mapNotNull { n ->
+                val query = properties.getProperty("highlight.$n.query").trim()
+                val colorName = properties.getProperty("highlight.$n.color")?.trim()
+                val color = PaletteColor.entries.firstOrNull { it.name.equals(colorName, ignoreCase = true) }
+                if (query.isEmpty() || color == null) null else RowHighlight(query, color)
+            }.take(RowHighlight.MAX)
             val openModeKey = properties.getProperty("open.mode")
             val openMode = OpenMode.entries.firstOrNull { it.key == openModeKey }
             val includeSubfolders = properties.getProperty("open.subfolders") != "false"
@@ -144,8 +177,8 @@ data class Settings(
             val rememberRecent = properties.getProperty("recent.remember") == "true"
             val reopenOnStart = rememberRecent && properties.getProperty("recent.reopen") == "true"
             return Settings(
-                parsers, levelMapping, filters, openMode, includeSubfolders, deletedBuiltIns, rememberRecent,
-                reopenOnStart,
+                parsers, levelMapping, filters, openMode, includeSubfolders, deletedBuiltIns, rowHighlights,
+                rememberRecent, reopenOnStart,
             )
         }
 
@@ -160,6 +193,10 @@ data class Settings(
                 properties["filter.${i + 1}.name"] = filter.name
                 properties["filter.${i + 1}.level"] = filter.minimumLevel?.name.orEmpty()
                 properties["filter.${i + 1}.query"] = filter.query
+            }
+            settings.rowHighlights.forEachIndexed { i, highlight ->
+                properties["highlight.${i + 1}.query"] = highlight.query
+                properties["highlight.${i + 1}.color"] = highlight.color.name.lowercase()
             }
             settings.openMode?.let { properties["open.mode"] = it.key }
             if (!settings.includeSubfolders) properties["open.subfolders"] = "false"
@@ -196,11 +233,11 @@ data class Settings(
             properties["${prefix}name"] = parser.name
         }
 
-        /** The N of all `prefix.N.name` keys, in order. */
-        private fun numbered(properties: Properties, prefix: String): List<Int> {
-            val key = Regex("""${Regex.escape(prefix)}\.(\d+)\.name""")
+        /** The N of all `prefix.N.name` keys, or of the keys ending in [key] instead of `name`, in order. */
+        private fun numbered(properties: Properties, prefix: String, key: String = "name"): List<Int> {
+            val pattern = Regex("""${Regex.escape(prefix)}\.(\d+)\.${Regex.escape(key)}""")
             return properties.stringPropertyNames()
-                .mapNotNull { key.matchEntire(it)?.groupValues?.get(1)?.toInt() }
+                .mapNotNull { pattern.matchEntire(it)?.groupValues?.get(1)?.toInt() }
                 .sorted()
         }
     }

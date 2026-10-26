@@ -8,6 +8,7 @@ import io.github.rastislavpapp.logxy.core.filter.RecordTextCondition
 import io.github.rastislavpapp.logxy.core.filter.TextOp
 import io.github.rastislavpapp.logxy.core.log.Level
 import io.github.rastislavpapp.logxy.core.log.ParsedLog
+import io.github.rastislavpapp.logxy.core.session.evaluateRowHighlights
 import kotlinx.coroutines.runBlocking
 import org.openjdk.jmh.annotations.Benchmark
 import org.openjdk.jmh.annotations.Param
@@ -22,8 +23,8 @@ import java.nio.file.StandardOpenOption
 import org.openjdk.jmh.annotations.Level as JmhLevel
 
 /**
- * A followed log: a filter and a search catch up on the records of [appended] written to a copy of [file] before
- * each run. Open so JMH can generate its subclass.
+ * A followed log: a filter and a search, or the row highlights, catch up on the records of [appended] written to a
+ * copy of [file] before each run. Open so JMH can generate its subclass.
  */
 @State(Scope.Benchmark)
 open class FollowBenchmark {
@@ -53,7 +54,10 @@ open class FollowBenchmark {
         val parser = parserFor(source).compileFor(source)
         log = runBlocking { ParsedLog.build(followed, parser) }
         engine = FilterEngine(log)
-        runBlocking { engine.prepare(filter).run() }
+        runBlocking {
+            engine.prepare(filter).run()
+            evaluateRowHighlights(engine, log.schema, benchmarkHighlights)
+        }
     }
 
     @Setup(JmhLevel.Iteration)
@@ -71,10 +75,19 @@ open class FollowBenchmark {
 
     @Benchmark
     fun filterAppended(): FilterResult = runBlocking { engine.prepare(filter, engine.changedFrom(covered)).run() }
+
+    /** [benchmarkHighlights] caught up on the appended records. */
+    @Benchmark
+    fun highlightAppended(): Int = runBlocking {
+        evaluateRowHighlights(engine, log.schema, benchmarkHighlights, engine.changedFrom(covered))
+    }
 }
 
-/** The `follow` row; it has no `tools` command. */
-val followRows = listOf(BenchmarkRow(FollowBenchmark::class.java, "filterAppended", "follow: filter appended records"))
+/** The `follow` rows; they have no `tools` command. */
+val followRows = listOf(
+    BenchmarkRow(FollowBenchmark::class.java, "filterAppended", "follow: filter appended records"),
+    BenchmarkRow(FollowBenchmark::class.java, "highlightAppended", "follow: row highlights of appended records"),
+)
 
 /** Parameters of [FollowBenchmark]. */
 fun followParams(file: Path, appended: Path): Map<String, List<String>> = mapOf(

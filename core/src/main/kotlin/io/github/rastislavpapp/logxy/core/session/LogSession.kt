@@ -4,12 +4,14 @@ import io.github.rastislavpapp.logxy.core.FileActivity
 import io.github.rastislavpapp.logxy.core.FileChange
 import io.github.rastislavpapp.logxy.core.FileSnapshot
 import io.github.rastislavpapp.logxy.core.archive.ArchiveOrigin
+import io.github.rastislavpapp.logxy.core.config.RowHighlight
 import io.github.rastislavpapp.logxy.core.filter.ChunkListener
 import io.github.rastislavpapp.logxy.core.filter.Filter
 import io.github.rastislavpapp.logxy.core.filter.LevelCondition
 import io.github.rastislavpapp.logxy.core.filter.PreparedFilter
 import io.github.rastislavpapp.logxy.core.filter.RecordFilter
 import io.github.rastislavpapp.logxy.core.formatByteSize
+import io.github.rastislavpapp.logxy.core.index.ByteChunkList
 import io.github.rastislavpapp.logxy.core.index.IndexOptions
 import io.github.rastislavpapp.logxy.core.index.IndexProgress
 import io.github.rastislavpapp.logxy.core.log.Level
@@ -118,6 +120,12 @@ interface SessionListener {
      * A search started anew calls it for each chunk of records it decides, with [LogSession.foundHistogram] updated.
      */
     fun foundChanged()
+
+    /**
+     * The row highlights of the records from [fromRecord] on changed (see [ShownLog.rowHighlight]), e.g. they were
+     * evaluated for appended records, or anew for changed settings.
+     */
+    fun rowHighlightsChanged(fromRecord: Int)
 
     /** [LogSession.follow], keeping the end of the files in view, was turned on or off. */
     fun followChanged(follow: Boolean)
@@ -285,6 +293,18 @@ class LogSession internal constructor(
     // Counts the times of the matches a running search reports, from the snapshots it searches.
     private var foundTimes: TimeCount? = null
     private var foundChunked = false
+
+    /** The evaluation of the row highlights; what it covers is what [ShownLog.rowHighlight] covers. */
+    private val highlightRun = LoadEvaluation(scope)
+
+    /** The row highlights of the settings that were evaluated last, null while none were. */
+    private var highlightsOf: List<RowHighlight>? = null
+
+    /** [highlightsOf] compiled for the records: null for one that does not fit them. */
+    private var highlightFilters = emptyList<Filter?>()
+
+    /** Whether the row highlights of a new load wait for the filter's first result, so as not to delay it. */
+    private var highlightsWait = false
 
     /** Times of the shown rows; null until they are counted, or if the records have no timestamps. */
     var histogram: TimeHistogram? = null
@@ -672,7 +692,10 @@ class LogSession internal constructor(
             problem = null
             loggedReadProblem = null
             filterShown = false
+            highlightsWait = true
             listener.loaded(shown)
+            // The listener applies a filter, if any; without one there is nothing to wait for.
+            if (!filterRun.isRunning) highlightAfterFilter()
             if (isLive) follow = true
             updateStatus()
             return true
@@ -784,6 +807,7 @@ class LogSession internal constructor(
                         countTimes(anew = false)
                         searchShown(anew = false)
                     }
+                    catchUpHighlights()
                     if (promoted) follow = true
                 }
             } catch (e: IOException) {
@@ -855,6 +879,8 @@ class LogSession internal constructor(
         } else if (levelsChanged) {
             countTimes(anew = true)
         }
+        // A load waiting for its filter evaluates the current row highlights once it is done.
+        if (editedParser == null && (levelsChanged || settings.rowHighlights != highlightsOf)) highlightAll()
     }
 
     /** The saved parser that [parser] became by a rename, i.e. with the same definition under a new name. */
@@ -880,6 +906,7 @@ class LogSession internal constructor(
                 countTimes(anew = true)
                 searchShown(anew = true)
             }
+            highlightAfterFilter()
             return
         }
         val filter = activeFilter
@@ -906,6 +933,7 @@ class LogSession internal constructor(
                     else -> e.message ?: e.javaClass.simpleName
                 }
                 updateStatus()
+                highlightAfterFilter()
                 return@start
             }
             indicator.cancel()
@@ -920,6 +948,7 @@ class LogSession internal constructor(
             updateStatus()
             countTimes(anew = true)
             searchShown(anew = true)
+            highlightAfterFilter()
             // Still the current job (a replaced one would have been cancelled), but done.
             filterRun.finished()
             catchUpFilter()
@@ -943,6 +972,80 @@ class LogSession internal constructor(
             filterRun.finished()
             catchUpFilter()
         }
+    }
+
+    /** Starts the row highlights of a new load, which waited for the filter's first result: it is shown, or failed. */
+    private fun highlightAfterFilter() {
+        if (!highlightsWait) return
+        highlightsWait = false
+        highlightAll()
+    }
+
+    /**
+     * Evaluates the row highlights of the settings over all records, cancelling a running evaluation; the records
+     * keep the row highlights they have until it is done. Row highlights that do not fit the records are left out.
+     */
+    private fun highlightAll() {
+        if (highlightsWait) return
+        val shown = shown ?: return
+        val engine = engine ?: return
+        val records = records ?: return
+        highlightRun.cancel()
+        val highlights = settings.current.rowHighlights
+        val compiled = compileHighlights(highlights.map { it.query }, QueryCompiler(records.schema))
+        val evaluations = prepareHighlights(engine, compiled, 0)
+        highlightsOf = highlights
+        // One that does not prepare, such as one with an invalid regex, is left out of the catch-ups too.
+        highlightFilters = compiled.mapIndexed { i, filter -> filter.takeIf { evaluations[i] != null } }
+        if (evaluations.all { it == null }) {
+            highlightRun.cover(0, 0L)
+            val had = shown.hasRowHighlights
+            shown.showRowHighlights(highlights, HighlightsPart(0, ByteChunkList(), 0, 0L))
+            if (had) notifyRows { rowHighlightsChanged(0) }
+            return
+        }
+        highlightRun.start { showHighlights(shown, highlights, 0, evaluations) }
+    }
+
+    /** Evaluates the row highlights of what was appended since they were evaluated; see [LoadEvaluation]. */
+    private fun catchUpHighlights() {
+        if (highlightsWait || highlightFilters.all { it == null }) return
+        val shown = shown ?: return
+        val engine = engine ?: return
+        val highlights = highlightsOf ?: return
+        val filters = highlightFilters
+        val prepare = { from: Int -> prepareHighlights(engine, filters, from) }
+        highlightRun.catchUp(engine, indexedSize(), prepare) { from, evaluations ->
+            showHighlights(shown, highlights, from, evaluations)
+        }
+    }
+
+    /**
+     * The job of [highlightAll] and [catchUpHighlights]: runs [evaluations] of [highlights] over the records from
+     * [from] on and shows what they give. A failed evaluation keeps the row highlights the records had.
+     */
+    private suspend fun showHighlights(
+        shown: ShownLog,
+        highlights: List<RowHighlight>,
+        from: Int,
+        evaluations: List<PreparedFilter?>,
+    ) {
+        val part = try {
+            runHighlights(from, evaluations)
+        } catch (e: Throwable) {
+            if (e is CancellationException || (e !is Exception && e !is OutOfMemoryError)) throw e
+            log.warn("Cannot evaluate the row highlights of {}", pathsText(), e)
+            null
+        }
+        if (part == null) {
+            highlightRun.finished()
+            return
+        }
+        shown.showRowHighlights(highlights, part)
+        highlightRun.cover(part.recordCount, part.indexedSize)
+        highlightRun.finished()
+        notifyRows { rowHighlightsChanged(from) }
+        catchUpHighlights()
     }
 
     /**
@@ -1289,6 +1392,9 @@ class LogSession internal constructor(
         }
         filterRun.clear()
         searchRun.clear()
+        highlightRun.clear()
+        highlightsOf = null
+        highlightFilters = emptyList()
         searching = null
         searchError = null
         queuedSearch = null

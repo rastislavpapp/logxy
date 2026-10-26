@@ -33,6 +33,9 @@ class SettingsTest {
             openMode = OpenMode.MERGE_WITH_CURRENT_IN_NEW,
             includeSubfolders = false,
             deletedBuiltIns = setOf("Spring Boot 3", "JSON lines"),
+            // More than nine, so they must not come back in the order of their keys' text.
+            rowHighlights = (1..12).map { RowHighlight("Message == \"step $it\"", PaletteColor.entries[it % 8]) } +
+                RowHighlight("""level >= WARN AND logger == "com.example.db*"""", PaletteColor.RED),
             rememberRecent = true,
             reopenOnStart = true,
         )
@@ -62,6 +65,26 @@ class SettingsTest {
         val settings = Settings.load(file)
         assertEquals(listOf<Parser>(Parser.Pattern("Good", "%m%n")), settings.parsers)
         assertEquals(LevelMapping(Level.BUILT_IN_NAMES + ("NOTE" to Level.INFO)), settings.levels)
+    }
+
+    @Test
+    fun `row highlights with no query or an unknown color are skipped`() {
+        val file = Files.writeString(dir.resolve("logxy.properties"), """
+            highlight.1.query=level >= ERROR
+            highlight.1.color=Red
+            highlight.2.query=
+            highlight.2.color=blue
+            highlight.3.query=thread == main
+            highlight.3.color=magenta
+            highlight.4.query=thread == main
+            highlight.5.color=green
+            highlight.6.query=logger == db
+            highlight.6.color=teal
+        """.trimIndent())
+        assertEquals(
+            listOf(RowHighlight("level >= ERROR", PaletteColor.RED), RowHighlight("logger == db", PaletteColor.TEAL)),
+            Settings.load(file).rowHighlights,
+        )
     }
 
     @Test

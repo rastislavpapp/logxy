@@ -1,6 +1,8 @@
 package io.github.rastislavpapp.logxy.core.session
 
 import io.github.rastislavpapp.logxy.core.LogCapture
+import io.github.rastislavpapp.logxy.core.config.PaletteColor
+import io.github.rastislavpapp.logxy.core.config.RowHighlight
 import io.github.rastislavpapp.logxy.core.config.Settings
 import io.github.rastislavpapp.logxy.core.filter.ChunkListener
 import io.github.rastislavpapp.logxy.core.filter.Filter
@@ -148,6 +150,10 @@ class LogSessionTest {
         }
         override fun followChanged(follow: Boolean) {}
         override fun statusChanged(status: SessionStatus) {}
+        val highlightsChanged = ArrayList<Int>()
+        override fun rowHighlightsChanged(fromRecord: Int) {
+            highlightsChanged += fromRecord
+        }
     }
 
     private var n = 0
@@ -1495,6 +1501,155 @@ class LogSessionTest {
         withTimeout(10_000) {
             while (LogCapture.logged(LogLevel.WARN, "Cannot detect the parser of $file again").isEmpty()) delay(20)
         }
+        withContext(ui) { session.dispose() }
+    }
+
+    private val errors = RowHighlight("level >= ERROR", PaletteColor.RED)
+    private val unknownField = RowHighlight("Nowhere == x", PaletteColor.BLUE)
+    private val warnings = RowHighlight("level >= WARN", PaletteColor.YELLOW)
+    private val messageOne = RowHighlight("Message == \"message 1*\"", PaletteColor.GREEN)
+
+    /** The row highlight [errors], [unknownField], [warnings], [messageOne] give record [record] of [lines]. */
+    private fun firstMatch(record: Int): Int = when {
+        levels[record % 4] == "ERROR" -> 0
+        levels[record % 4] == "WARN " -> 2
+        "message $record".startsWith("message 1") -> 3
+        else -> -1
+    }
+
+    /** Opens [file] with [settings] and an engine that tells [prepared] the record each evaluation starts at. */
+    private suspend fun openHighlighting(
+        file: Path,
+        settings: SettingsStore,
+        recorder: Recorder,
+        prepared: MutableList<Int> = ArrayList(),
+    ): Pair<LogSession, ShownLog> {
+        val session = withContext(ui) {
+            LogSession(listOf(file), scope, settings, recorder, { null }, emptyList(), null) { loaded ->
+                val engine = loaded.newFilter()
+                object : RecordFilter by engine {
+                    override fun prepare(filter: Filter, from: Int, within: Narrowing?): PreparedFilter {
+                        prepared += from
+                        return engine.prepare(filter, from, within)
+                    }
+                }
+            }.also { it.start() }
+        }
+        return session to withTimeout(10_000) { recorder.loads.receive() }
+    }
+
+    /** Waits until every record of the session's shown log has the row highlight [expected] gives it. */
+    private suspend fun awaitHighlights(session: LogSession, recordCount: Int, expected: (ShownLog, Int) -> Int) =
+        awaitUi {
+            val shown = session.shown
+            shown != null && session.records!!.recordCount == recordCount &&
+                (0..<recordCount).all { shown.rowHighlight(it) == expected(shown, it) }
+        }
+
+    @Test
+    fun `a record takes the first row highlight it matches, skipping one that does not fit the log`() = runBlocking {
+        val file = Files.writeString(dir.resolve("first.log"), lines(200))
+        val highlights = listOf(errors, unknownField, warnings, messageOne)
+        val settings = ChangingSettings(Settings(rowHighlights = highlights))
+        val (session, shown) = openHighlighting(file, settings, Recorder())
+        awaitHighlights(session, 200) { _, record -> firstMatch(record) }
+        withContext(ui) { assertEquals(highlights, shown.rowHighlights) }
+    }
+
+    @Test
+    fun `appended records are highlighted by a catch-up from the first record that changed`() = runBlocking {
+        val file = Files.writeString(dir.resolve("appended.log"), lines(1000))
+        val recorder = Recorder()
+        val prepared = ArrayList<Int>()
+        val settings = ChangingSettings(Settings(rowHighlights = listOf(errors, unknownField, warnings, messageOne)))
+        val (session, _) = openHighlighting(file, settings, recorder, prepared)
+        awaitHighlights(session, 1000) { _, record -> firstMatch(record) }
+        append(file, lines(100))
+        awaitHighlights(session, 1100) { _, record -> firstMatch(record) }
+        withContext(ui) {
+            // The three row highlights that fit, once over all records and once over the appended ones. The last
+            // record may have grown, so it is evaluated again with them.
+            assertEquals(listOf(0, 0, 0, 999, 999, 999), prepared)
+            assertEquals(listOf(0, 999), recorder.highlightsChanged)
+        }
+    }
+
+    @Test
+    fun `changed row highlights or level mapping highlight the records again`() = runBlocking {
+        val file = Files.writeString(dir.resolve("changed.log"), withNotes(10))
+        val settings = ChangingSettings(Settings(rowHighlights = listOf(errors)))
+        val (session, _) = openHighlighting(file, settings, Recorder())
+        fun isNote(shown: ShownLog, record: Int) = shown.fieldText(record, 4).startsWith("note")
+        awaitHighlights(session, 110) { _, record -> if (record < 100 && levels[record % 4] == "ERROR") 0 else -1 }
+        withContext(ui) { settings.change(notesAreErrors.copy(rowHighlights = listOf(errors))) }
+        awaitHighlights(session, 110) { shown, record ->
+            if (isNote(shown, record) || levels[record % 4] == "ERROR") 0 else -1
+        }
+        withContext(ui) { settings.change(notesAreErrors.copy(rowHighlights = listOf(warnings, errors))) }
+        awaitHighlights(session, 110) { shown, record ->
+            if (isNote(shown, record) || levels[record % 4].trim() in setOf("WARN", "ERROR")) 0 else -1
+        }
+    }
+
+    @Test
+    fun `records keep their row highlight while a filter shows some of them`() = runBlocking {
+        val file = Files.writeString(dir.resolve("filtered.log"), lines(200))
+        val settings = ChangingSettings(Settings(rowHighlights = listOf(errors, unknownField, warnings, messageOne)))
+        val (session, shown) = openHighlighting(file, settings, Recorder())
+        awaitHighlights(session, 200) { _, record -> firstMatch(record) }
+        withContext(ui) { session.applyFilter(Level.WARN, Query.EMPTY) }
+        assertEquals(100, awaitShown(session, file, LevelCondition.atLeast("Level", Level.WARN)).size)
+        withContext(ui) {
+            for (row in 0..<shown.size) {
+                val record = shown.recordAt(row)
+                assertEquals(firstMatch(record), shown.rowHighlight(record))
+            }
+        }
+    }
+
+    @Test
+    fun `a reload ends the row highlights of the shown log`() = runBlocking {
+        val file = Files.writeString(dir.resolve("reloaded.log"), lines(100))
+        val recorder = Recorder()
+        val settings = ChangingSettings(Settings(rowHighlights = listOf(errors)))
+        val (session, shown) = openHighlighting(file, settings, recorder)
+        awaitHighlights(session, 100) { _, record -> if (levels[record % 4] == "ERROR") 0 else -1 }
+        withContext(ui) { session.reload() }
+        val next = withTimeout(10_000) { recorder.loads.receive() }
+        withContext(ui) {
+            assertEquals(-1, shown.rowHighlight(3))
+            assertEquals(emptyList(), shown.rowHighlights)
+        }
+        awaitHighlights(session, 100) { _, record -> if (levels[record % 4] == "ERROR") 0 else -1 }
+        withContext(ui) { assertSame(next, session.shown) }
+    }
+
+    @Test
+    fun `row highlights of a merge follow appends that interleave its records`() = runBlocking {
+        // Each file's records are a second apart, those of b between those of a.
+        fun at(seconds: IntProgression) = buildString {
+            for (i in seconds) {
+                append("2026-10-01 08:%02d:%02d.000 [main] INFO  app.L - message %d\n".format(i / 60, i % 60, i))
+            }
+        }
+        val a = Files.writeString(dir.resolve("a.log"), at(0..<200 step 2))
+        val b = Files.writeString(dir.resolve("b.log"), at(1..<100 step 2))
+        val inB = RowHighlight("Source == \"b.log\"", PaletteColor.TEAL)
+        val recorder = Recorder()
+        val session = withContext(ui) {
+            LogSession(listOf(a, b), scope, ChangingSettings(Settings(rowHighlights = listOf(inB))), recorder)
+                .also { it.start() }
+        }
+        withTimeout(10_000) { recorder.loads.receive() }
+        fun fromB(shown: ShownLog, record: Int): Int {
+            val source = shown.schema.indexOf(Role.SOURCE)
+            return if (shown.fieldText(record, source) == "b.log") 0 else -1
+        }
+        awaitHighlights(session, 150, ::fromB)
+        // b catches up with a, its records going in between those a has.
+        append(b, at(101..<240 step 2))
+        append(a, at(200..<240 step 2))
+        awaitHighlights(session, 240, ::fromB)
         withContext(ui) { session.dispose() }
     }
 }

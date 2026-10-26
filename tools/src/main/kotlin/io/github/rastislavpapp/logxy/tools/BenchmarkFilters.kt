@@ -36,6 +36,15 @@ val benchmarkFilters: Map<String, Filter> = linkedMapOf(
         RecordTextCondition(TextOp.MATCHES, "com\\.example\\.\\w+\\.api\\.", ignoreCase = true),
 )
 
+/** Row highlights a user might have, as query text: three on dictionary fields, two that read the message. */
+val benchmarkHighlights = listOf(
+    "level >= ERROR",
+    "level >= WARN AND thread == main",
+    """logger == "com.example.order*"""",
+    """message == "*timeout*"""",
+    """message =~ "order \d{6}:"""",
+)
+
 /**
  * Typical filters on the merged log of generated logs, by name: `tools merge` times them, and the baseline check
  * records each as `merge: filter <name>`.
