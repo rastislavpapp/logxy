@@ -75,3 +75,11 @@ _Avoid_: condition, criterion, clause
 **Group**:
 Rules and groups joined all with AND or all with OR, possibly negated; a query is one.
 _Avoid_: block, subquery
+
+**Row highlight**:
+A query paired with a palette color: the rows of the records it matches get that color as background, in every log the user opens. The user's row highlights are ordered, and a record takes the color of the first one it matches.
+_Avoid_: color rule, highlighting rule, row color
+
+**Mark**:
+The background painted behind the text a filter's query or a find matched, in the table and the detail pane.
+_Avoid_: highlight (that is a row highlight)
