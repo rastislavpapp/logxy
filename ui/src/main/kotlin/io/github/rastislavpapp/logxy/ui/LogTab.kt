@@ -3,12 +3,11 @@ package io.github.rastislavpapp.logxy.ui
 import io.github.rastislavpapp.logxy.core.archive.ArchiveOrigin
 import io.github.rastislavpapp.logxy.core.config.SavedFilter
 import io.github.rastislavpapp.logxy.core.formatByteSize
-import io.github.rastislavpapp.logxy.core.log.ColumnType
 import io.github.rastislavpapp.logxy.core.log.Field
-import io.github.rastislavpapp.logxy.core.log.Level
 import io.github.rastislavpapp.logxy.core.log.Role
 import io.github.rastislavpapp.logxy.core.log.Schema
 import io.github.rastislavpapp.logxy.core.parse.Parser
+import io.github.rastislavpapp.logxy.core.query.CellRules
 import io.github.rastislavpapp.logxy.core.query.Highlighter
 import io.github.rastislavpapp.logxy.core.query.Query
 import io.github.rastislavpapp.logxy.core.query.QueryException
@@ -17,7 +16,9 @@ import io.github.rastislavpapp.logxy.core.query.QueryPrinter
 import io.github.rastislavpapp.logxy.core.query.TemplateRules
 import io.github.rastislavpapp.logxy.core.query.TextSearch
 import io.github.rastislavpapp.logxy.core.query.TimeLiteral
-import io.github.rastislavpapp.logxy.core.query.escapeWildcards
+import io.github.rastislavpapp.logxy.core.query.and
+import io.github.rastislavpapp.logxy.core.query.withTimeRange
+import io.github.rastislavpapp.logxy.core.query.withoutTimeRange
 import io.github.rastislavpapp.logxy.core.session.CopyResult
 import io.github.rastislavpapp.logxy.core.session.LogSession
 import io.github.rastislavpapp.logxy.core.session.MAX_COPY_BYTES
@@ -74,8 +75,6 @@ import javax.swing.TransferHandler
 import javax.swing.text.JTextComponent
 
 private const val MAX_TITLE_CHARS = 40
-private const val MAX_RULE_CHARS = 1000
-private val RANGE_OPS = listOf(QueryOp.AT_LEAST, QueryOp.ABOVE, QueryOp.AT_MOST, QueryOp.BELOW)
 private val log = LoggerFactory.getLogger(LogTab::class.java)
 
 /** A search taking longer than this shows its progress. */
@@ -195,8 +194,7 @@ class LogTab(
         scope,
         { session.templateCounts() },
         { session.templateProgress },
-        filterBar::addRules,
-        filterBar::addRuleFor,
+        filterBar::edit,
         session::variableValues,
         variableCharts,
         ::canChart,
@@ -631,16 +629,7 @@ class LogTab(
         val fieldIndex = shown.schema.fields.indexOf(field)
         // The whole value, not the cell's text, which is cut to its first line and has its tabs expanded.
         val value = shown.fieldText(model.recordAt(row), fieldIndex)
-        val level = model.level(row)?.takeIf { field.role == Role.LEVEL && it != Level.UNKNOWN }
-        val firstLine = value.lineSequence().first()
-        val escaped = escapeWildcards(firstLine.take(MAX_RULE_CHARS))
-        // A long or multi-line value, such as a message with its stack trace, is matched by its start.
-        val pattern = if (firstLine.length > MAX_RULE_CHARS || firstLine.length < value.length) "$escaped*" else escaped
-        fun rule(op: QueryOp) = if (level != null) {
-            Query.Rule(field.name, op, level.name, bare = true)
-        } else {
-            Query.Rule(field.name, op, pattern)
-        }
+        val level = model.level(row)
         val popup = JPopupMenu()
         popup.add(JMenuItem("Copy Cell Value").apply {
             addActionListener { copy(shown.fieldText(model.recordAt(row), fieldIndex)) }
@@ -660,12 +649,10 @@ class LogTab(
         popup.addSeparator()
         fun add(rule: Query.Rule) {
             popup.add(JMenuItem(QueryPrinter.print(rule).cut(MAX_MENU_CHARS), Icons.filter).apply {
-                addActionListener { filterBar.addRule(rule) }
+                addActionListener { filterBar.edit { it.and(rule) } }
             })
         }
-        // `== ""` is a placeholder that filters nothing; `!= ""` keeps records with a value.
-        if (value.isNotEmpty()) add(rule(QueryOp.EQUALS))
-        add(rule(QueryOp.NOT_EQUALS))
+        CellRules.values(field, value, level).forEach(::add)
         val hasTemplate = field.role == Role.MESSAGE && shown.schema.hasTemplates()
         val template = if (hasTemplate) session.templateOf(model.recordAt(row)) else null
         if (template != null) {
@@ -673,6 +660,7 @@ class LogTab(
             add(TemplateRules.template(template, QueryOp.EQUALS))
             add(TemplateRules.template(template, QueryOp.NOT_EQUALS))
             // The cell shows the message's first line with its tabs expanded, unless it is cut.
+            val firstLine = value.lineSequence().first()
             val whole = table.getValueAt(row, column) == LogTableModel.expandTabs(firstLine)
             val shownAt = if (whole) table.textOffsetAt(row, column, x) else -1
             val offset = LogTableModel.offsetBeforeTabs(firstLine, shownAt)
@@ -682,25 +670,27 @@ class LogTab(
                 val shown = "{${variable + 1}} == “${word.cut(MAX_MENU_CHARS)}”"
                 popup.add(JMenuItem("Show Only $shown", Icons.filter).apply {
                     addActionListener {
-                        filterBar.addRuleFor { TemplateRules.showOnly(it, template, variable, word) }
+                        filterBar.edit { current ->
+                            current.and(TemplateRules.showOnly(current, template, variable, word))
+                        }
                     }
                 })
                 popup.add(JMenuItem("Hide $shown").apply {
-                    addActionListener { filterBar.addRule(TemplateRules.hide(template, variable, word)) }
+                    addActionListener {
+                        val hide = TemplateRules.hide(template, variable, word)
+                        filterBar.edit { it.and(hide) }
+                    }
                 })
                 chartItem(template, variable, word)?.let { popup.add(it) }
             }
         }
-        if (level != null) {
+        val time = shown.timestamp(model.recordAt(row))
+        val levelRanges = CellRules.levelRanges(field, level)
+        val timeRanges = CellRules.timeRanges(field, time, ZoneId.systemDefault())
+        for (ranges in listOf(levelRanges, timeRanges)) {
+            if (ranges.isEmpty()) continue
             popup.addSeparator()
-            for (op in RANGE_OPS) add(Query.Rule(field.name, op, level.name, bare = true))
-        }
-        // The literal is written from the record's time, as the log's own layout may not parse back (e.g. offsets).
-        val time = shown.timestamp(model.recordAt(row))?.takeIf { field.type == ColumnType.TIMESTAMP }
-        if (time != null) {
-            val literal = TimeLiteral.format(time, ZoneId.systemDefault())
-            popup.addSeparator()
-            for (op in RANGE_OPS) add(Query.Rule(field.name, op, literal))
+            ranges.forEach(::add)
         }
         popup.addSeparator()
         popup.add(JMenuItem(if (filterBar.suspended) "Resume Filter" else "Suspend Filter", Icons.pause).apply {
@@ -887,8 +877,12 @@ class LogTab(
         val histogramBar = timestampField?.let { field ->
             TimeHistogramBar({ session.histogram }, { session.foundHistogram }).apply {
                 onJump = ::jumpToSlice
-                onRange = { from, to -> filterBar.setTimeRange(field, timeLiteral(from), timeLiteral(to)) }
-                onShowAllTimes = { filterBar.setTimeRange(field, null, null) }
+                onRange = { from, to ->
+                    val start = timeLiteral(from)
+                    val end = timeLiteral(to)
+                    filterBar.edit { it.withTimeRange(field, start, end) }
+                }
+                onShowAllTimes = { filterBar.edit { it.withoutTimeRange(field) } }
                 hasTimeRange = { filterBar.hasTimeRange(field) }
             }
         }

@@ -85,11 +85,7 @@ class Highlighter private constructor(private val terms: List<Term>) {
         const val DETAIL_BUDGET_NANOS = 50_000_000L
 
         private val EMPTY = IntArray(0)
-        private const val NOT_AFTER_WORD = "(?<![\\p{L}\\p{N}_])"
-        private const val NOT_BEFORE_WORD = "(?![\\p{L}\\p{N}_])"
         val NONE = Highlighter(emptyList())
-
-        private fun isWordChar(c: Char) = c.isLetterOrDigit() || c == '_'
 
         /** Marks what [search] finds, in any field; nothing for an empty or invalid one. */
         fun of(search: TextSearch): Highlighter {

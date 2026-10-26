@@ -24,6 +24,15 @@ object TemplateRules {
         return if (own) rule else Query.Group(all = true, items = listOf(template(template, QueryOp.EQUALS), rule))
     }
 
+    /** The rule that shows only the records of [templates]: the one `Template ==` rule, or an OR group of them. */
+    fun showOnly(templates: List<String>): Query {
+        val rules = templates.map { template(it, QueryOp.EQUALS) }
+        return rules.singleOrNull() ?: Query.Group(all = false, items = rules)
+    }
+
+    /** The rules that hide the records of [templates], a `Template !=` rule each, to join with AND. */
+    fun hide(templates: List<String>): List<Query.Rule> = templates.map { template(it, QueryOp.NOT_EQUALS) }
+
     /**
      * The rule that hides the records of [template] whose variable value at template variable [variable], counted
      * from 0, is [value], keeping all others.

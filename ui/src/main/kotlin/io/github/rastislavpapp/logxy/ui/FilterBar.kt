@@ -6,9 +6,9 @@ import io.github.rastislavpapp.logxy.core.log.Role
 import io.github.rastislavpapp.logxy.core.log.Schema
 import io.github.rastislavpapp.logxy.core.query.Query
 import io.github.rastislavpapp.logxy.core.query.QueryException
-import io.github.rastislavpapp.logxy.core.query.QueryOp
 import io.github.rastislavpapp.logxy.core.query.QueryParser
 import io.github.rastislavpapp.logxy.core.query.QueryPrinter
+import io.github.rastislavpapp.logxy.core.query.hasTimeRange
 import io.github.rastislavpapp.logxy.core.query.withField
 import net.miginfocom.swing.MigLayout
 import java.awt.CardLayout
@@ -145,7 +145,7 @@ class FilterBar(private val onApply: () -> Unit, names: ColumnNames, private val
         editor.templates = schema.hasTemplates()
         editor.setFields(fields)
         queryText?.setFields(fields.map { it.name } + listOfNotNull(Query.TEMPLATE_FIELD.takeIf { editor.templates }))
-        // The editor starts placeholder rows over on new fields; text without real conditions follows it.
+        // The editor starts placeholder lines over on new fields; text without real rules follows it.
         if (text != null && editor.query().items.isEmpty()) {
             textArea?.text = QueryPrinter.print(editor.query(includeEmpty = true))
         }
@@ -210,63 +210,30 @@ class FilterBar(private val onApply: () -> Unit, names: ColumnNames, private val
     /** The text form as typed; empty without one. */
     private val typed: String get() = textArea?.text.orEmpty()
 
-    /** Called when rules are added from outside the bar, e.g. a cell's menu, so a hidden bar can show what changed. */
+    /** Called when [edit] changed the filter, e.g. from a cell's menu, so a hidden bar can show what changed. */
     var onRulesAdded: () -> Unit = {}
 
-    /** Adds [rule] to the filter, joined with AND, and applies it. */
-    fun addRule(rule: Query) = addRules(listOf(rule))
-
-    /** Adds [rules] to the filter, each joined with AND, and applies it once. */
-    fun addRules(rules: List<Query>) = combine({ rules }) { it }
-
-    /** Adds the rule [make] gives for the current filter, joined with AND, and applies it. */
-    fun addRuleFor(make: (current: Query.Group) -> Query) = combine({ listOf(make(it)) }) { it }
-
     /**
-     * Replaces the comparisons on [field] joined at the top of the filter with `>= from` and `< to`, or
-     * only removes them if [from] and [to] are null, and applies it.
+     * Changes the filter from outside the bar to what [change] makes of the current query, shown in the mode the
+     * bar is in, and applies it. If the text form has a syntax error, shows it instead and changes nothing.
      */
-    fun setTimeRange(field: String, from: String?, to: String?) {
-        val rules = if (from == null || to == null) {
-            emptyList()
-        } else {
-            listOf(
-                Query.Rule(field, QueryOp.AT_LEAST, from),
-                Query.Rule(field, QueryOp.BELOW, to),
-            )
-        }
-        combine({ rules }) { items -> items.filterNot { isTimeRule(it, field) } }
-    }
-
-    /** Whether the filter has comparisons on [field] that [setTimeRange] replaces. */
-    fun hasTimeRange(field: String): Boolean {
-        val current = runCatching { query() }.getOrNull() ?: return false
-        return current.all && !current.negated && current.items.any { isTimeRule(it, field) }
-    }
-
-    private fun isTimeRule(item: Query, field: String) =
-        item is Query.Rule && !item.negated && item.op.comparison && item.field.equals(field, ignoreCase = true)
-
-    /**
-     * Joins the rules [make] gives for the current filter to it with AND, after [keep] picked which of its top-level
-     * items stay, and applies it.
-     */
-    private fun combine(make: (current: Query.Group) -> List<Query>, keep: (List<Query>) -> List<Query>) {
+    fun edit(change: (Query.Group) -> Query.Group) {
         val current = try {
             query()
         } catch (e: QueryException) {
             showError("Fix the filter first: ${e.message}")
             return
         }
-        val rules = make(current)
-        val combined = when {
-            current.items.isEmpty() -> Query.Group(all = true, items = rules)
-            current.all && !current.negated -> current.copy(items = keep(current.items) + rules)
-            else -> Query.Group(all = true, items = listOf(current) + rules)
-        }
-        if (textMode.isSelected) textArea?.text = QueryPrinter.print(combined) else editor.setQuery(combined)
+        val changed = change(current)
+        if (textMode.isSelected) textArea?.text = QueryPrinter.print(changed) else editor.setQuery(changed)
         applyFilter()
         onRulesAdded()
+    }
+
+    /** Whether the filter has a time range on [field]; false while the text form has a syntax error. */
+    fun hasTimeRange(field: String): Boolean {
+        val current = runCatching { query() }.getOrNull() ?: return false
+        return current.hasTimeRange(field)
     }
 
     /** Shows how far a slow filter got, from 0 to 1; null hides it. */

@@ -4,6 +4,8 @@ import io.github.rastislavpapp.logxy.core.log.ColumnType
 import io.github.rastislavpapp.logxy.core.log.Field
 import io.github.rastislavpapp.logxy.core.log.Level
 import io.github.rastislavpapp.logxy.core.log.Role
+import io.github.rastislavpapp.logxy.core.query.EditorOp
+import io.github.rastislavpapp.logxy.core.query.EditorRule
 import io.github.rastislavpapp.logxy.core.query.Query
 import io.github.rastislavpapp.logxy.core.query.QueryOp
 import io.github.rastislavpapp.logxy.core.query.escapeWildcards
@@ -28,42 +30,31 @@ import javax.swing.KeyStroke
 import javax.swing.event.PopupMenuEvent
 import javax.swing.event.PopupMenuListener
 
-/** Operators as the visual editor offers them; several map to the same [QueryOp] with a wildcard shape. */
-private enum class RuleOp(val label: String) {
-    CONTAINS("contains"),
-    NOT_CONTAINS("does not contain"),
-    STARTS_WITH("starts with"),
-    ENDS_WITH("ends with"),
-    IS("is"),
-    IS_NOT("is not"),
-    MATCHES("matches regex"),
-    NOT_MATCHES("does not match regex"),
-    LEVEL_AT_LEAST("at least"),
-    LEVEL_ABOVE("above"),
-    LEVEL_AT_MOST("at most"),
-    LEVEL_BELOW("below"),
-    LEVEL_IS("is level"),
-    LEVEL_IS_NOT("is not level"),
-    TIME_FROM("at or after"),
-    TIME_AFTER("after"),
-    TIME_TO("at or before"),
-    TIME_BEFORE("before"),
-    NUMBER_AT_LEAST("≥"),
-    NUMBER_ABOVE(">"),
-    NUMBER_AT_MOST("≤"),
-    NUMBER_BELOW("<"),
-    ;
-
-    val usesLevel get() = name.startsWith("LEVEL_")
-    val usesCase get() = this in setOf(CONTAINS, NOT_CONTAINS, STARTS_WITH, ENDS_WITH, IS, IS_NOT)
-
-    override fun toString() = label
-
-    companion object {
-        val TEXT = listOf(CONTAINS, NOT_CONTAINS, STARTS_WITH, ENDS_WITH, IS, IS_NOT, MATCHES, NOT_MATCHES)
-        val LEVEL = listOf(LEVEL_AT_LEAST, LEVEL_ABOVE, LEVEL_AT_MOST, LEVEL_BELOW, LEVEL_IS, LEVEL_IS_NOT)
-        val TIME = listOf(TIME_FROM, TIME_AFTER, TIME_TO, TIME_BEFORE)
-        val NUMBER = listOf(NUMBER_AT_LEAST, NUMBER_ABOVE, NUMBER_AT_MOST, NUMBER_BELOW)
+/** An operator in a line's combo box, shown by its label; typing picks the item whose [toString] starts so. */
+private data class OpChoice(val op: EditorOp) {
+    override fun toString() = when (op) {
+        EditorOp.CONTAINS -> "contains"
+        EditorOp.NOT_CONTAINS -> "does not contain"
+        EditorOp.STARTS_WITH -> "starts with"
+        EditorOp.ENDS_WITH -> "ends with"
+        EditorOp.IS -> "is"
+        EditorOp.IS_NOT -> "is not"
+        EditorOp.MATCHES -> "matches regex"
+        EditorOp.NOT_MATCHES -> "does not match regex"
+        EditorOp.LEVEL_AT_LEAST -> "at least"
+        EditorOp.LEVEL_ABOVE -> "above"
+        EditorOp.LEVEL_AT_MOST -> "at most"
+        EditorOp.LEVEL_BELOW -> "below"
+        EditorOp.LEVEL_IS -> "is level"
+        EditorOp.LEVEL_IS_NOT -> "is not level"
+        EditorOp.TIME_FROM -> "at or after"
+        EditorOp.TIME_AFTER -> "after"
+        EditorOp.TIME_TO -> "at or before"
+        EditorOp.TIME_BEFORE -> "before"
+        EditorOp.NUMBER_AT_LEAST -> "≥"
+        EditorOp.NUMBER_ABOVE -> ">"
+        EditorOp.NUMBER_AT_MOST -> "≤"
+        EditorOp.NUMBER_BELOW -> "<"
     }
 }
 
@@ -94,7 +85,7 @@ fun applyOnEnter(combo: JComboBox<*>, action: () -> Unit) {
 }
 
 /**
- * Visual editor of a [Query]: rows of conditions, optionally in nested groups. Rows negate through
+ * Visual editor of a [Query]: lines of rules, optionally in nested groups. Lines negate through
  * their operator ("does not contain"), groups through "none" / "not all". Rules with an empty value
  * are ignored. Rules hold the fields' own names; the field choice shows their [columnNames].
  */
@@ -128,7 +119,7 @@ class QueryEditor(private val onApply: () -> Unit, private val columnNames: Colu
 
     fun setFields(fields: List<Field>) {
         val query = query(includeEmpty = true)
-        // Rows without values only stand in for conditions: start them over on the new fields (Line, not Message, for
+        // Lines without values only stand in for rules: start them over on the new fields (Line, not Message, for
         // raw text).
         val blank = query(includeEmpty = false).items.isEmpty()
         this.fields = fields
@@ -182,7 +173,7 @@ class QueryEditor(private val onApply: () -> Unit, private val columnNames: Colu
                 root.header.add(trailing, "cell 1 0")
             }
         }
-        // The editor grows with its rows, so everything up to the window must lay out again.
+        // The editor grows with its lines, so everything up to the window must lay out again.
         (topLevelAncestor as? JComponent ?: this).revalidate()
         topLevelAncestor?.validate()
         repaint()
@@ -276,7 +267,7 @@ class QueryEditor(private val onApply: () -> Unit, private val columnNames: Colu
         fun isEmpty() = items.componentCount == 0
 
         // The top level keeps at least one condition, so a lone condition there has no ×. A hidden × still takes its
-        // space, so the rows stay aligned.
+        // space, so the lines stay aligned.
         fun updateRemovable() {
             val single = isRoot && items.componentCount == 1
             items.components.forEach { (it as? RuleView)?.remove?.isVisible = !single }
@@ -305,7 +296,7 @@ class QueryEditor(private val onApply: () -> Unit, private val columnNames: Colu
         fun removeItem(view: JComponent) {
             items.remove(view)
             if (isEmpty()) {
-                // An empty group has no use: remove it too (which may empty its parent). The top level keeps one row.
+                // An empty group has no use: remove it too (which may empty its parent). The top level keeps one line.
                 if (!isRoot) return removeFromParent(this)
                 items.add(RuleView(defaultRule(), this))
             }
@@ -320,8 +311,8 @@ class QueryEditor(private val onApply: () -> Unit, private val columnNames: Colu
 
         /**
          * The template, as stored with `{}`, that the `{n}` rules in this group belong to, found as the query
-         * compiler finds it. If this group matches all of its items and has "Template is" rows, that is the template
-         * of its one such row, or null if it has several. Otherwise it is the template of the group around it, or
+         * compiler finds it. If this group matches all of its items and has "Template is" lines, that is the template
+         * of its one such line, or null if it has several. Otherwise it is the template of the group around it, or
          * null at the top.
          */
         fun template(): String? {
@@ -353,7 +344,7 @@ class QueryEditor(private val onApply: () -> Unit, private val columnNames: Colu
         JPanel(MigLayout("insets 0", "[][][grow, fill][][]")) {
 
         private val field = JComboBox<String>()
-        private val op = JComboBox<RuleOp>()
+        private val op = JComboBox<OpChoice>()
         private val case = fieldToggle("inline/matchCase", "Match exact case")
         private val text = JTextField(12).apply {
             addActionListener { onApply() }
@@ -381,7 +372,7 @@ class QueryEditor(private val onApply: () -> Unit, private val columnNames: Colu
             if (known == null) field.addItem(rule.field)
             field.selectedItem = known ?: rule.field
             field.addActionListener { fieldChanged() }
-            // The template the rows belong to may have changed since: its variables are offered as the list opens.
+            // The template the lines belong to may have changed since: its variables are offered as the list opens.
             field.addPopupMenuListener(object : PopupMenuListener {
                 override fun popupMenuWillBecomeVisible(e: PopupMenuEvent) = offerVariables()
                 override fun popupMenuWillBecomeInvisible(e: PopupMenuEvent) {}
@@ -391,7 +382,7 @@ class QueryEditor(private val onApply: () -> Unit, private val columnNames: Colu
                 val name = value as? String
                 if (name == null) null else columnNames.of(name)
             }
-            op.renderer = FormattingListCellRenderer { (it as? RuleOp)?.label }
+            op.renderer = FormattingListCellRenderer { it?.toString() }
             op.addActionListener { opChanged() }
             listOf(field, op, level).forEach { applyOnEnter(it, onApply) }
             add(field)
@@ -414,9 +405,11 @@ class QueryEditor(private val onApply: () -> Unit, private val columnNames: Colu
 
         private fun variableNumber() = variableNumber(field.selectedItem as String)
 
-        /** The template this row names, if it is a "Template is" row with one. */
+        private fun selectedOp() = (op.selectedItem as OpChoice?)?.op
+
+        /** The template this line names, if it is a "Template is" line with one. */
         fun templateIs(): String? =
-            text.text.takeIf { isTemplate() && op.selectedItem == RuleOp.IS && it.isNotEmpty() }
+            text.text.takeIf { isTemplate() && selectedOp() == EditorOp.IS && it.isNotEmpty() }
 
         /** Puts `{1}` to `{n}` in the field list, for the variables of the template the group belongs to. */
         private fun offerVariables() {
@@ -437,7 +430,7 @@ class QueryEditor(private val onApply: () -> Unit, private val columnNames: Colu
         }
 
         /**
-         * Loads the variable values of this row's template variable, most frequent first, if it is a `{n}` row whose
+         * Loads the variable values of this line's template variable, most frequent first, if it is a `{n}` line whose
          * group has a template; otherwise [onValues] gets null.
          */
         private fun loadValues(onValues: (List<Pair<String, Int>>?) -> Unit) {
@@ -450,34 +443,34 @@ class QueryEditor(private val onApply: () -> Unit, private val columnNames: Colu
         }
 
         // Templates match exactly.
-        private fun ops(): List<RuleOp> = if (isTemplate()) {
-            listOf(RuleOp.IS, RuleOp.IS_NOT)
+        private fun ops(): List<EditorOp> = if (isTemplate()) {
+            listOf(EditorOp.IS, EditorOp.IS_NOT)
         } else {
             when (fieldType()) {
-                ColumnType.LEVEL -> RuleOp.LEVEL + RuleOp.TEXT
-                ColumnType.TIMESTAMP -> RuleOp.TIME + RuleOp.TEXT
-                else -> RuleOp.TEXT + RuleOp.NUMBER
+                ColumnType.LEVEL -> EditorOp.LEVEL + EditorOp.TEXT
+                ColumnType.TIMESTAMP -> EditorOp.TIME + EditorOp.TEXT
+                else -> EditorOp.TEXT + EditorOp.NUMBER
             }
         }
 
-        private fun fillOps(selected: RuleOp) {
+        private fun fillOps(selected: EditorOp) {
             val listeners = op.actionListeners
             listeners.forEach(op::removeActionListener)
             op.removeAllItems()
-            ops().forEach(op::addItem)
-            op.selectedItem = if (selected in ops()) selected else ops().first()
+            ops().forEach { op.addItem(OpChoice(it)) }
+            op.selectedItem = OpChoice(if (selected in ops()) selected else ops().first())
             listeners.forEach(op::addActionListener)
             opChanged()
         }
 
         // A variable's value is mostly picked whole.
         private fun fieldChanged() {
-            val selected = op.selectedItem as RuleOp? ?: RuleOp.CONTAINS
-            fillOps(if (variableNumber() != null && selected == RuleOp.CONTAINS) RuleOp.IS else selected)
+            val selected = selectedOp() ?: EditorOp.CONTAINS
+            fillOps(if (variableNumber() != null && selected == EditorOp.CONTAINS) EditorOp.IS else selected)
         }
 
         private fun opChanged() {
-            val selected = op.selectedItem as RuleOp? ?: return
+            val selected = selectedOp() ?: return
             val wanted: JComponent = if (selected.usesLevel) level else text
             if (wanted !== valueSlot) {
                 val index = components.indexOf(valueSlot)
@@ -493,127 +486,29 @@ class QueryEditor(private val onApply: () -> Unit, private val columnNames: Colu
                 variableNumber() != null && selected.usesCase ->
                     "The word at this variable of the template; * matches any text, ? one character"
                 else -> when (selected) {
-                    RuleOp.MATCHES, RuleOp.NOT_MATCHES ->
+                    EditorOp.MATCHES, EditorOp.NOT_MATCHES ->
                         "Regular expression, found anywhere; ignores case unless it starts with (?-i)"
-                    in RuleOp.TIME -> "e.g. 2026-10-09 08:30:00.000, 2026-10-09 or 08:30"
-                    in RuleOp.NUMBER -> "A number, e.g. 500, -1.5 or 2e3; records whose value is no number are left out"
+                    in EditorOp.TIME -> "e.g. 2026-10-09 08:30:00.000, 2026-10-09 or 08:30"
+                    in EditorOp.NUMBER ->
+                        "A number, e.g. 500, -1.5 or 2e3; records whose value is no number are left out"
                     else -> "* matches any text, ? one character"
                 }
             }
         }
 
-        private fun load(original: Query.Rule) {
-            // Rows have no NOT of their own; a negated rule from the text form takes the opposite operator.
-            val rule = if (original.negated) original.copy(op = opposite(original.op), negated = false) else original
-            val type = fieldType()
-            val levelName = Level.entries.firstOrNull { it.name.equals(rule.value, ignoreCase = true) }
-            val bareLevel = type == ColumnType.LEVEL && rule.bare && levelName != null
-            val negated = rule.op == QueryOp.NOT_EQUALS || rule.op == QueryOp.NOT_EQUALS_CASE
-            val (ruleOp, value) = when {
-                rule.op.comparison && type == ColumnType.LEVEL -> when (rule.op) {
-                    QueryOp.AT_LEAST -> RuleOp.LEVEL_AT_LEAST
-                    QueryOp.ABOVE -> RuleOp.LEVEL_ABOVE
-                    QueryOp.AT_MOST -> RuleOp.LEVEL_AT_MOST
-                    else -> RuleOp.LEVEL_BELOW
-                } to rule.value
-                rule.op.comparison && type != ColumnType.TIMESTAMP -> when (rule.op) {
-                    QueryOp.AT_LEAST -> RuleOp.NUMBER_AT_LEAST
-                    QueryOp.ABOVE -> RuleOp.NUMBER_ABOVE
-                    QueryOp.AT_MOST -> RuleOp.NUMBER_AT_MOST
-                    else -> RuleOp.NUMBER_BELOW
-                } to rule.value
-                rule.op.comparison -> when (rule.op) {
-                    QueryOp.AT_LEAST -> RuleOp.TIME_FROM
-                    QueryOp.ABOVE -> RuleOp.TIME_AFTER
-                    QueryOp.AT_MOST -> RuleOp.TIME_TO
-                    else -> RuleOp.TIME_BEFORE
-                } to rule.value
-                bareLevel && rule.op == QueryOp.EQUALS -> RuleOp.LEVEL_IS to rule.value
-                bareLevel && rule.op == QueryOp.NOT_EQUALS -> RuleOp.LEVEL_IS_NOT to rule.value
-                isTemplate() -> (if (negated) RuleOp.IS_NOT else RuleOp.IS) to rule.value
-                rule.op == QueryOp.MATCHES -> RuleOp.MATCHES to rule.value
-                rule.op == QueryOp.NOT_MATCHES -> RuleOp.NOT_MATCHES to rule.value
-                // An empty value is a placeholder; show it as the default "contains".
-                rule.value.isEmpty() && rule.op == QueryOp.EQUALS -> RuleOp.CONTAINS to ""
-                else -> globShape(rule.value, negated)
-            }
-            case.isSelected = rule.op == QueryOp.EQUALS_CASE || rule.op == QueryOp.NOT_EQUALS_CASE
-            if (levelName != null) level.selectedItem = levelName
-            text.text = if (ruleOp.usesLevel) "" else value
-            fillOps(ruleOp)
-        }
-
-        private fun opposite(op: QueryOp) = when (op) {
-            QueryOp.EQUALS -> QueryOp.NOT_EQUALS
-            QueryOp.NOT_EQUALS -> QueryOp.EQUALS
-            QueryOp.EQUALS_CASE -> QueryOp.NOT_EQUALS_CASE
-            QueryOp.NOT_EQUALS_CASE -> QueryOp.EQUALS_CASE
-            QueryOp.MATCHES -> QueryOp.NOT_MATCHES
-            QueryOp.NOT_MATCHES -> QueryOp.MATCHES
-            QueryOp.AT_LEAST -> QueryOp.BELOW
-            QueryOp.BELOW -> QueryOp.AT_LEAST
-            QueryOp.ABOVE -> QueryOp.AT_MOST
-            QueryOp.AT_MOST -> QueryOp.ABOVE
-        }
-
-        /** The plainest operator showing [pattern]: "*x*" is "contains x", "x*" is "starts with x". */
-        private fun globShape(pattern: String, negated: Boolean): Pair<RuleOp, String> {
-            fun starAt(i: Int) = pattern[i] == '*' && (i == 0 || pattern[i - 1] != '\\')
-            fun noStars(from: Int, to: Int) = (from..<to).none { starAt(it) }
-            val n = pattern.length
-            return when {
-                n >= 2 && starAt(0) && starAt(n - 1) && noStars(1, n - 1) ->
-                    (if (negated) RuleOp.NOT_CONTAINS else RuleOp.CONTAINS) to pattern.substring(1, n - 1)
-                !negated && n >= 1 && starAt(n - 1) && noStars(0, n - 1) ->
-                    RuleOp.STARTS_WITH to pattern.substring(0, n - 1)
-                !negated && n >= 1 && starAt(0) && noStars(1, n) -> RuleOp.ENDS_WITH to pattern.substring(1)
-                else -> (if (negated) RuleOp.IS_NOT else RuleOp.IS) to pattern
-            }
+        private fun load(rule: Query.Rule) {
+            val line = EditorRule.of(rule, fieldType(), isTemplate())
+            case.isSelected = line.matchCase
+            line.level?.let { level.selectedItem = it }
+            text.text = line.value
+            fillOps(line.op)
         }
 
         fun rule(includeEmpty: Boolean): Query.Rule? {
-            val selected = op.selectedItem as RuleOp? ?: return null
+            val selected = selectedOp() ?: return null
             val name = field.selectedItem as String
-            val value = text.text
-            // "is not" nothing keeps the records that have a value.
-            val notEmpty = selected == RuleOp.IS_NOT && value.isEmpty()
-            if (!selected.usesLevel && value.isEmpty() && !includeEmpty && !notEmpty) return null
-            val exact = case.isSelected && !isTemplate()
-            val equals = if (exact) QueryOp.EQUALS_CASE else QueryOp.EQUALS
-            val notEquals = if (exact) QueryOp.NOT_EQUALS_CASE else QueryOp.NOT_EQUALS
-            val levelName = (level.selectedItem as Level).name
-            // An empty row reads as `field == ""`, a placeholder that filters nothing.
-            if (notEmpty) return Query.Rule(name, notEquals, "")
-            if (value.isEmpty() && !selected.usesLevel) {
-                val regex = selected == RuleOp.MATCHES || selected == RuleOp.NOT_MATCHES
-                val placeholderOp = if (regex) QueryOp.MATCHES else equals
-                return Query.Rule(name, placeholderOp, "")
-            }
-            val (queryOp, queryValue, bare) = when (selected) {
-                RuleOp.CONTAINS -> Triple(equals, "*$value*", false)
-                RuleOp.NOT_CONTAINS -> Triple(notEquals, "*$value*", false)
-                RuleOp.STARTS_WITH -> Triple(equals, "$value*", false)
-                RuleOp.ENDS_WITH -> Triple(equals, "*$value", false)
-                RuleOp.IS -> Triple(equals, value, false)
-                RuleOp.IS_NOT -> Triple(notEquals, value, false)
-                RuleOp.MATCHES -> Triple(QueryOp.MATCHES, value, false)
-                RuleOp.NOT_MATCHES -> Triple(QueryOp.NOT_MATCHES, value, false)
-                RuleOp.LEVEL_AT_LEAST -> Triple(QueryOp.AT_LEAST, levelName, true)
-                RuleOp.LEVEL_ABOVE -> Triple(QueryOp.ABOVE, levelName, true)
-                RuleOp.LEVEL_AT_MOST -> Triple(QueryOp.AT_MOST, levelName, true)
-                RuleOp.LEVEL_BELOW -> Triple(QueryOp.BELOW, levelName, true)
-                RuleOp.LEVEL_IS -> Triple(QueryOp.EQUALS, levelName, true)
-                RuleOp.LEVEL_IS_NOT -> Triple(QueryOp.NOT_EQUALS, levelName, true)
-                RuleOp.TIME_FROM -> Triple(QueryOp.AT_LEAST, value, false)
-                RuleOp.TIME_AFTER -> Triple(QueryOp.ABOVE, value, false)
-                RuleOp.TIME_TO -> Triple(QueryOp.AT_MOST, value, false)
-                RuleOp.TIME_BEFORE -> Triple(QueryOp.BELOW, value, false)
-                RuleOp.NUMBER_AT_LEAST -> Triple(QueryOp.AT_LEAST, value, true)
-                RuleOp.NUMBER_ABOVE -> Triple(QueryOp.ABOVE, value, true)
-                RuleOp.NUMBER_AT_MOST -> Triple(QueryOp.AT_MOST, value, true)
-                RuleOp.NUMBER_BELOW -> Triple(QueryOp.BELOW, value, true)
-            }
-            return Query.Rule(name, queryOp, queryValue, bare)
+            val line = EditorRule(name, selected, text.text, level.selectedItem as Level, case.isSelected)
+            return line.rule(isTemplate(), includeEmpty)
         }
     }
 
