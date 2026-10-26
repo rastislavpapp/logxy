@@ -5,6 +5,7 @@ import io.github.rastislavpapp.logxy.core.config.Settings
 import io.github.rastislavpapp.logxy.core.parse.Parser
 import io.github.rastislavpapp.logxy.core.query.Query
 import io.github.rastislavpapp.logxy.core.query.QueryOp
+import io.github.rastislavpapp.logxy.core.query.and
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import java.awt.Color
@@ -74,7 +75,7 @@ class FilterBarTest {
         host.state[UiState.FILTER_MODE] = "advanced"
         val bar = FilterBar({ applied++ }, ColumnNames(), host)
 
-        bar.addRule(Query.Rule("logger", QueryOp.EQUALS, "db"))
+        bar.edit { it.and(Query.Rule("logger", QueryOp.EQUALS, "db")) }
 
         assertEquals("logger == \"db\"", bar.current().query)
     }

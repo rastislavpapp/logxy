@@ -4,8 +4,8 @@ import io.github.rastislavpapp.logxy.core.log.Level
 import io.github.rastislavpapp.logxy.core.log.Role
 import io.github.rastislavpapp.logxy.core.log.Schema
 import io.github.rastislavpapp.logxy.core.query.Query
-import io.github.rastislavpapp.logxy.core.query.QueryOp
 import io.github.rastislavpapp.logxy.core.query.TemplateRules
+import io.github.rastislavpapp.logxy.core.query.and
 import io.github.rastislavpapp.logxy.core.template.TemplateCounts
 import io.github.rastislavpapp.logxy.core.template.Templates
 import io.github.rastislavpapp.logxy.core.template.VariableValues
@@ -96,11 +96,11 @@ fun Schema.hasTemplates() =
 /**
  * The shown rows grouped by the template of their message (see [Templates]), most frequent first, with
  * a count per level. Counts only while it is showing: [count] does the work and is cancelled when a newer
- * count starts. Filtering by the selected templates goes through [addRules].
+ * count starts. Filtering by the selected templates goes through [edit], which changes the filter.
  *
  * Templates show their variables numbered, `{1}`, `{2}`, …. Hovering one lists its most frequent values in the shown
  * rows, counted by [values] when first needed; right-clicking one offers to show only or hide one of them, through
- * [addRuleFor] and [addRules]. While [canChart], clicking a variable charts it in [charts], or stops charting it, as
+ * [edit] too. While [canChart], clicking a variable charts it in [charts], or stops charting it, as
  * the context menu can too. A charted variable is drawn bold in its chart's color, and one found to hold no number
  * faint, as it cannot be charted. The columns fit their contents; the template's takes the rest of the width.
  */
@@ -108,8 +108,7 @@ class TemplatesPanel(
     private val scope: CoroutineScope,
     private val count: suspend () -> TemplateCounts?,
     private val progress: () -> Double,
-    private val addRules: (List<Query>) -> Unit,
-    private val addRuleFor: ((current: Query.Group) -> Query) -> Unit,
+    private val edit: (change: (Query.Group) -> Query.Group) -> Unit,
     private val values: suspend (template: String, variable: Int) -> VariableValues?,
     private val charts: VariableCharts,
     private val canChart: () -> Boolean,
@@ -537,10 +536,10 @@ class TemplatesPanel(
             }
             val name = "{${number + 1}}"
             popup.add(valuesMenu("Show Only $name", Icons.filter) { value ->
-                addRuleFor { current -> TemplateRules.showOnly(current, template, number, value) }
+                edit { current -> current.and(TemplateRules.showOnly(current, template, number, value)) }
             })
             popup.add(valuesMenu("Hide $name", null) { value ->
-                addRules(listOf(TemplateRules.hide(template, number, value)))
+                edit { it.and(TemplateRules.hide(template, number, value)) }
             })
             popup.addSeparator()
         }
@@ -551,7 +550,7 @@ class TemplatesPanel(
         })
         popup.add(JMenuItem(if (several) "Hide These ${templates.size} Templates" else "Hide This Template").apply {
             isEnabled = canFilter && templates.isNotEmpty()
-            addActionListener { addRules(templates.map { TemplateRules.template(it, QueryOp.NOT_EQUALS) }) }
+            addActionListener { edit { it.and(TemplateRules.hide(templates)) } }
         })
         popup.addSeparator()
         popup.add(JMenuItem(if (several) "Copy Templates" else "Copy Template").apply {
@@ -580,8 +579,7 @@ class TemplatesPanel(
 
     private fun showOnly(templates: List<String>) {
         if (!canFilter || templates.isEmpty()) return
-        val rules = templates.map { TemplateRules.template(it, QueryOp.EQUALS) }
-        addRules(listOf(rules.singleOrNull() ?: Query.Group(all = false, items = rules)))
+        edit { it.and(TemplateRules.showOnly(templates)) }
     }
 
     private fun faint(color: Color) = Color(color.red, color.green, color.blue, color.alpha / 3)

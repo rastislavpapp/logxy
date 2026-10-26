@@ -69,6 +69,24 @@ enum class QueryOp(val symbol: String) {
      * ops, an empty value makes the rule a placeholder, which is ignored.
      */
     val excludesEmpty get() = this == NOT_EQUALS || this == NOT_EQUALS_CASE
+
+    /**
+     * The op that keeps the records this one leaves out, as far as they have a value: `<` for `>=`. Records without
+     * a value differ, as a comparison keeps none of them but a negated one keeps them all.
+     */
+    val opposite: QueryOp
+        get() = when (this) {
+            EQUALS -> NOT_EQUALS
+            NOT_EQUALS -> EQUALS
+            EQUALS_CASE -> NOT_EQUALS_CASE
+            NOT_EQUALS_CASE -> EQUALS_CASE
+            MATCHES -> NOT_MATCHES
+            NOT_MATCHES -> MATCHES
+            AT_LEAST -> BELOW
+            BELOW -> AT_LEAST
+            ABOVE -> AT_MOST
+            AT_MOST -> ABOVE
+        }
 }
 
 /** [text] as a wildcard pattern of [QueryOp.EQUALS] that matches it as it is: `\`, `*` and `?` escaped. */

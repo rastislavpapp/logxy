@@ -26,8 +26,7 @@ data class TextSearch(
     fun condition(): RecordTextCondition {
         // Plain text is matched straight on the bytes, as a wildcard pattern with its own wildcards escaped.
         if (!regex && !wholeWords) {
-            val escaped = text.replace("\\", "\\\\").replace("*", "\\*").replace("?", "\\?")
-            return RecordTextCondition(TextOp.EQUALS, "*$escaped*", ignoreCase = !matchCase)
+            return RecordTextCondition(TextOp.EQUALS, "*${escapeWildcards(text)}*", ignoreCase = !matchCase)
         }
         return RecordTextCondition(TextOp.MATCHES, pattern().pattern(), ignoreCase = !matchCase)
     }
@@ -47,12 +46,5 @@ data class TextSearch(
         } catch (e: PatternSyntaxException) {
             throw QueryException("Invalid regex: ${e.description}")
         }
-    }
-
-    private companion object {
-        const val NOT_AFTER_WORD = "(?<![\\p{L}\\p{N}_])"
-        const val NOT_BEFORE_WORD = "(?![\\p{L}\\p{N}_])"
-
-        fun isWordChar(c: Char) = c.isLetterOrDigit() || c == '_'
     }
 }

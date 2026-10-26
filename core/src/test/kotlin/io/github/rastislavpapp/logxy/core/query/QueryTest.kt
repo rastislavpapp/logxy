@@ -244,6 +244,22 @@ class QueryTest {
     }
 
     @Test
+    fun `several templates are shown with an OR group of their rules`() {
+        assertEquals(
+            "Template == \"Request {1} done\" OR Template == \"Cache warmed\"",
+            QueryPrinter.print(TemplateRules.showOnly(listOf("Request {} done", "Cache warmed"))),
+        )
+        assertEquals(
+            Query.Rule(Query.TEMPLATE_FIELD, QueryOp.EQUALS, "Request {1} done"),
+            TemplateRules.showOnly(listOf("Request {} done")),
+        )
+        assertEquals(
+            listOf("Template != \"Request {1} done\"", "Template != \"Cache warmed\""),
+            TemplateRules.hide(listOf("Request {} done", "Cache warmed")).map(QueryPrinter::print),
+        )
+    }
+
+    @Test
     fun `an empty value is a placeholder, except for not equals`() {
         assertEquals(all(), compiler.compile(QueryParser.parse("""thread == "" AND message =~ """"")))
         assertEquals(
