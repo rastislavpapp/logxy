@@ -72,7 +72,7 @@ A tag without a section in `logxy-intellij-plugin/CHANGELOG.md` fails the releas
 
 1. Upload the first version's zip from the GitHub release by hand on [plugins.jetbrains.com](https://plugins.jetbrains.com/plugin/add) (Marketplace takes a new plugin no other way) and accept the developer agreement. JetBrains reviews it before it is listed.
 2. On the plugin's Marketplace page, set the licence link (MIT), the source code and issue tracker URLs, the tags (Logging, Run) and the screenshots from `docs/images/plugin/`.
-3. Run `logxy-intellij-plugin/marketplace-secrets.sh`: it makes the signing key and certificate and sets them and the Marketplace token as the workflow's secrets. Until `PUBLISH_TOKEN` is set, releases skip the Marketplace publish. The certificate is valid for a year; run the script again to renew it.
+3. Set the workflow's secrets: `CERTIFICATE_CHAIN`, `PRIVATE_KEY` and `PRIVATE_KEY_PASSWORD` from a signing key and self-signed certificate made as in [JetBrains' signing guide](https://plugins.jetbrains.com/docs/intellij/plugin-signing.html), and `PUBLISH_TOKEN` from the Marketplace account's tokens page. Until `PUBLISH_TOKEN` is set, releases skip the Marketplace publish. The current certificate is valid for 10 years.
 
 ## AI-assisted contributions
 

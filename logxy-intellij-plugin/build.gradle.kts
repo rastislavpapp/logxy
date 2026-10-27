@@ -81,8 +81,7 @@ intellijPlatform {
     }
     buildSearchableOptions = false
     instrumentCode = false
-    // From the release workflow's secrets; marketplace-secrets.sh walks through making them. publishPlugin signs
-    // the zip first.
+    // From the release workflow's secrets; CONTRIBUTING.md says how to make them. publishPlugin signs the zip first.
     publishing {
         token = providers.environmentVariable("PUBLISH_TOKEN")
     }
