@@ -54,7 +54,7 @@ The logo's source is `app/src/main/resources/logxy.svg`. The packaging icons in 
 
 ## Releasing (maintainers)
 
-The app and the plugin share one version. Before tagging, turn the plugin changelog's Unreleased section into the version's section, and commit that to `main`:
+The app and the plugin share one version. When the plugin changelog has entries under Unreleased, turn them into the version's section before tagging, and commit that to `main`:
 
 ```sh
 ./gradlew -q :logxy-intellij-plugin:patchChangelog -Pversion=0.1.0
@@ -66,13 +66,13 @@ Then push an `X.Y.Z` tag on a commit in `main`. The release workflow builds and 
 git tag 0.1.0 && git push origin 0.1.0
 ```
 
-A tag without a section in `logxy-intellij-plugin/CHANGELOG.md` fails the release. When the section has entries, the workflow then publishes the plugin, signed, to JetBrains Marketplace; when it has none, the plugin did not change and Marketplace gets no new version, so Marketplace versions may skip numbers. The GitHub release always has the plugin zip.
+Every tag publishes the plugin, signed, to JetBrains Marketplace. Its change notes are every section of its minor in `logxy-intellij-plugin/CHANGELOG.md` up to the tag, newest first, so a fix release still shows what the minor added: 0.2.1's are its own section, if it has one, then 0.2.0's. A fix release needs no section of its own. Before anything is built, the release fails when entries are left under Unreleased or when the notes would be empty, as for an `X.Y.0` without entries.
 
 **Marketplace setup**, once:
 
 1. Upload the first version's zip from the GitHub release by hand on [plugins.jetbrains.com](https://plugins.jetbrains.com/plugin/add) (Marketplace takes a new plugin no other way) and accept the developer agreement. JetBrains reviews it before it is listed.
 2. On the plugin's Marketplace page, set the licence link (MIT), the source code and issue tracker URLs, the tags (Logging, Run) and the screenshots from `docs/images/plugin/`.
-3. Set the workflow's secrets: `CERTIFICATE_CHAIN`, `PRIVATE_KEY` and `PRIVATE_KEY_PASSWORD` from a signing key and self-signed certificate made as in [JetBrains' signing guide](https://plugins.jetbrains.com/docs/intellij/plugin-signing.html), and `PUBLISH_TOKEN` from the Marketplace account's tokens page. Until `PUBLISH_TOKEN` is set, releases skip the Marketplace publish. The current certificate is valid for 10 years.
+3. Set the workflow's secrets: `CERTIFICATE_CHAIN`, `PRIVATE_KEY` and `PRIVATE_KEY_PASSWORD` from a signing key and self-signed certificate made as in [JetBrains' signing guide](https://plugins.jetbrains.com/docs/intellij/plugin-signing.html), and `PUBLISH_TOKEN` from the Marketplace account's tokens page. Without them, a release's Marketplace publish fails. The current certificate is valid for 10 years.
 
 ## AI-assisted contributions
 
