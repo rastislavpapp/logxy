@@ -61,15 +61,51 @@ changelog {
     groups.empty()
 }
 
-intellijPlatform {
-    pluginConfiguration {
-        changeNotes = provider {
-            with(changelog) {
-                // A snapshot build has no section of its own yet.
-                val section = getOrNull(version.get()) ?: getUnreleased()
-                renderItem(section.withHeader(false).withEmptySections(false), Changelog.OutputType.HTML)
+/** A release version's minor and patch: `"0.2"` and 1 for 0.2.1; null for a snapshot. */
+fun minorAndPatch(version: String): Pair<String, Int>? {
+    val match = Regex("""(\d+\.\d+)\.(\d+)""").matchEntire(version) ?: return null
+    return match.groupValues[1] to match.groupValues[2].toInt()
+}
+
+// A release's notes are every section of its minor up to the release itself, newest first, so a fix release still
+// shows what the minor added: 0.2.1's are its own entries, if it has a section, then 0.2.0's. Each section gets its
+// version heading once there are several. A snapshot build's notes are the Unreleased section.
+val releaseNotes = provider {
+    with(changelog) {
+        val release = minorAndPatch(version.get())
+        val sections = if (release == null) {
+            listOf(getUnreleased())
+        } else {
+            getAll().values.filter { item ->
+                val section = minorAndPatch(item.version)
+                section != null && section.first == release.first && section.second <= release.second
             }
         }
+        val withHeaders = sections.size > 1
+        sections.joinToString("\n") { section ->
+            renderItem(section.withHeader(withHeaders).withEmptySections(false), Changelog.OutputType.HTML)
+        }
+    }
+}
+
+// The release workflow runs it before building anything: a release must not reach Marketplace with empty notes, as
+// an X.Y.0 without entries would, nor leave entries under Unreleased that patchChangelog did not move into a section.
+tasks.register("checkChangeNotes") {
+    val notes = releaseNotes
+    val unreleased = provider { changelog.getUnreleased().sections.values.any { it.isNotEmpty() } }
+    doLast {
+        if (unreleased.get()) {
+            throw GradleException("CHANGELOG.md has entries under Unreleased: run patchChangelog for this version")
+        }
+        if (notes.get().isBlank()) {
+            throw GradleException("CHANGELOG.md has no entries for this version's minor: the release notes are empty")
+        }
+    }
+}
+
+intellijPlatform {
+    pluginConfiguration {
+        changeNotes = releaseNotes
         ideaVersion {
             // The build of the IDE it compiles against: 2025.3 is 253.
             sinceBuild = libs.versions.intellij.idea.map { version ->
