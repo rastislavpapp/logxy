@@ -10,6 +10,8 @@ What's new in the logxy IntelliJ plugin, shown as its change notes in the IDE an
 - Runs whose console takes typed input, such as a REPL, get the logxy tab too.
 - The logxy tab no longer shares a tab with Spring Boot's Beans: it comes after Spring Boot's tabs.
 - The logxy tab shows the logxy icon.
+- Go to Time (Ctrl+G): a dialog that takes a date and time and jumps to the line closes to them.  
+- A date and time picker in the Go to Time dialog and in the Timestamp filter
 
 ## 0.1.2 - 2026-10-23
 
