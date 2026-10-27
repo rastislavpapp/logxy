@@ -4,6 +4,8 @@ What's new in the logxy IntelliJ plugin, shown as its change notes in the IDE an
 
 ## Unreleased
 
+## 0.2.0 - 2026-10-27
+
 - Row highlights: give the rows a query matches a background colour, added and edited from the filter bar's Row highlights button.
 - A long one-line record expands the same way as a multi-line record.
 - The Run tool window shows logxy as a tab beside the Console tab, as Debug does, instead of the Console | logxy switch in the toolbar. A run of a configuration opens on the tab it was last left on.
