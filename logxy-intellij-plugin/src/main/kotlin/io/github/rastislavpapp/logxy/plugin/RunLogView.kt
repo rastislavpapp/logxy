@@ -83,6 +83,8 @@ class RunLogView(
         bind(IdeActions.ACTION_FIND) { it.showFind() }
         bind(IdeActions.ACTION_FIND_NEXT) { it.findNext(forward = true) }
         bind(IdeActions.ACTION_FIND_PREVIOUS) { it.findNext(forward = false) }
+        // The editor's Go to Line keys go to a time here, while the focus is in the view.
+        bind("GotoLine") { it.showGoTo() }
 
         spool.onGrew = {
             val tab = tab

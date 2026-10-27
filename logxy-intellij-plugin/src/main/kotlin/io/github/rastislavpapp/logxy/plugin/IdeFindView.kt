@@ -134,7 +134,7 @@ class IdeFindView(
     }
 
     // Closed, the search ends, and the tab puts the focus back on the rows.
-    private fun close() {
+    override fun close() {
         if (!isOpen) return
         showBar(false)
         searchNow()

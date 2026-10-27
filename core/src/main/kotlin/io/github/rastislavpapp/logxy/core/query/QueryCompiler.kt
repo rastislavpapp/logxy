@@ -207,8 +207,11 @@ object TimeLiteral {
     private val DATE_TIME = Regex("""(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2})(?:[.,](\d{1,9}))?)?)?""")
     private val TIME = Regex("""(\d{2}):(\d{2})(?::(\d{2})(?:[.,](\d{1,9}))?)?""")
 
-    /** Epoch nanoseconds; a time alone is on 1970-01-01, like timestamps of logs that only print the time. */
-    fun parse(text: String, zone: ZoneId): Long {
+    /**
+     * Epoch nanoseconds. A time alone is on [day]: by default 1970-01-01, like timestamps of logs that only print
+     * the time.
+     */
+    fun parse(text: String, zone: ZoneId, day: LocalDate = LocalDate.EPOCH): Long {
         val trimmed = text.trim()
         try {
             DATE_TIME.matchEntire(trimmed)?.let { m ->
@@ -218,7 +221,7 @@ object TimeLiteral {
             }
             TIME.matchEntire(trimmed)?.let { m ->
                 val g = m.groupValues
-                return toNanos(LocalDate.EPOCH, g[1], g[2], g[3], g[4], zone)
+                return toNanos(day, g[1], g[2], g[3], g[4], zone)
             }
         } catch (e: DateTimeException) {
             throw QueryException("Invalid time “$text”: ${e.message}")

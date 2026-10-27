@@ -4,10 +4,12 @@ import io.github.rastislavpapp.logxy.core.archive.ArchiveOrigin
 import io.github.rastislavpapp.logxy.core.config.SavedFilter
 import io.github.rastislavpapp.logxy.core.formatByteSize
 import io.github.rastislavpapp.logxy.core.log.Field
+import io.github.rastislavpapp.logxy.core.log.Records
 import io.github.rastislavpapp.logxy.core.log.Role
 import io.github.rastislavpapp.logxy.core.log.Schema
 import io.github.rastislavpapp.logxy.core.parse.Parser
 import io.github.rastislavpapp.logxy.core.query.CellRules
+import io.github.rastislavpapp.logxy.core.query.GoToTime
 import io.github.rastislavpapp.logxy.core.query.Marker
 import io.github.rastislavpapp.logxy.core.query.Query
 import io.github.rastislavpapp.logxy.core.query.QueryException
@@ -31,6 +33,7 @@ import io.github.rastislavpapp.logxy.core.session.SessionListener
 import io.github.rastislavpapp.logxy.core.session.SessionPosition
 import io.github.rastislavpapp.logxy.core.session.SessionStatus
 import io.github.rastislavpapp.logxy.core.session.ShownLog
+import io.github.rastislavpapp.logxy.core.session.TimeLanding
 import io.github.rastislavpapp.logxy.core.session.copyLimit
 import io.github.rastislavpapp.logxy.core.template.Templates
 import kotlinx.coroutines.CancellationException
@@ -193,6 +196,14 @@ class LogTab(
     private val detail: DetailPane? = host.detailPane()
     private val filterBar = FilterBar(::applyFilter, columnNames, host)
     private val findBar = host.findView(this, ::searchFor) { forward -> find(forward) }
+    private val goToBar = GoToBar(findBar.floats, ::goToTime) { table?.requestFocusInWindow() }
+
+    /** The find bar and the Go to bar, of which at most one is open. */
+    private val barSlot = JPanel(BorderLayout()).apply {
+        isOpaque = false
+        add(findBar.component, BorderLayout.NORTH)
+        add(goToBar, BorderLayout.SOUTH)
+    }
 
     /** Variables charted under the histogram; they stay when the file is read again. */
     private val variableCharts: VariableCharts = VariableCharts(scope, session::variableSeries).apply {
@@ -950,10 +961,10 @@ class LogTab(
         detail?.show("")
         table.resizedWidths = rememberedWidths
         rowsView = if (findBar.floats) {
-            FloatingTopRight(scrollPane, findBar.component)
+            FloatingTopRight(scrollPane, barSlot)
         } else {
             JPanel(BorderLayout()).apply {
-                add(findBar.component, BorderLayout.NORTH)
+                add(barSlot, BorderLayout.NORTH)
                 add(scrollPane, BorderLayout.CENTER)
             }
         }
@@ -1129,7 +1140,54 @@ class LogTab(
 
     /** Opens the find bar, to find the text selected in the detail pane if it is one line. */
     fun showFind() {
+        goToBar.close()
         findBar.open(detail?.component?.selectedText?.takeIf { it.isNotBlank() && '\n' !in it })
+    }
+
+    /**
+     * Opens the Go to bar in the find bar's place, with the time Go to counts from typed in; does nothing while the
+     * shown log has no time to start from.
+     */
+    fun showGoTo() {
+        val from = goToReference() ?: return
+        if (findBar.isOpen) findBar.close()
+        goToBar.open(timeLiteral(from))
+    }
+
+    /**
+     * The time a relative time typed in the Go to bar counts from, whose day a time alone takes: the selected row's,
+     * else the first shown record's. Null if neither has one.
+     */
+    private fun goToReference(): Long? {
+        val model = model ?: return null
+        val table = table ?: return null
+        val lead = table.selection.lead
+        val selected = if (lead in table.selection) model.recordAtIndexOrNull(lead) else null
+        val selectedTime = selected?.let { model.shown.timestamp(it) }
+        if (selectedTime != null) return selectedTime
+        return model.shown.timeFrom(0).takeIf { it != Records.NO_TIMESTAMP }
+    }
+
+    /** Selects the first shown row at the time [text] names, as the Go to bar asks. */
+    private fun goToTime(text: String): GoToOutcome {
+        val model = model ?: return GoToOutcome.Went(null)
+        val scrollPane = scrollPane ?: return GoToOutcome.Went(null)
+        val from = goToReference() ?: return GoToOutcome.Went(null)
+        val time = try {
+            GoToTime.parse(text, from, ZoneId.systemDefault())
+        } catch (e: QueryException) {
+            return GoToOutcome.Invalid(e.message ?: "Invalid time")
+        }
+        val landing = model.shown.landingAt(time) ?: return GoToOutcome.Went(null)
+        session.follow = false
+        scrollPane.selectRow(landing.row)
+        table?.requestFocusInWindow()
+        val note = when (landing.miss) {
+            null -> null
+            TimeLanding.Miss.HIDDEN -> "No shown record at ${timeLiteral(time)}; went to the next one."
+            TimeLanding.Miss.PAST_LAST -> "No shown record at ${timeLiteral(time)} or later; went to the last one."
+        }
+        return GoToOutcome.Went(note)
     }
 
     /** Marks [search] and finds the records it matches, going to the first from the current one on. */
