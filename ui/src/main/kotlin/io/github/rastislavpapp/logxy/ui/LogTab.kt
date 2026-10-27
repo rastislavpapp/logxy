@@ -51,6 +51,7 @@ import java.awt.BorderLayout
 import java.awt.Component
 import java.awt.Container
 import java.awt.Dimension
+import java.awt.Point
 import java.awt.Toolkit
 import java.awt.datatransfer.StringSelection
 import java.awt.event.ActionEvent
@@ -76,6 +77,7 @@ import javax.swing.JScrollPane
 import javax.swing.JSplitPane
 import javax.swing.JTabbedPane
 import javax.swing.JTextArea
+import javax.swing.PopupFactory
 import javax.swing.ScrollPaneConstants
 import javax.swing.SwingUtilities
 import javax.swing.Timer
@@ -91,6 +93,10 @@ private const val SEARCH_PROGRESS_DELAY_MILLIS = 200
 /** Where the find box floats: below the top of the rows, left of the scroll bar. */
 private const val FLOATING_TOP_GAP = 6
 private const val FLOATING_RIGHT_GAP = 24
+
+/** How long a hint stays over the rows, and how far in from their top left corner. */
+private const val HINT_MILLIS = 5_000
+private const val HINT_INSET = 8
 
 private val EDGE = BottomEdge()
 
@@ -204,14 +210,6 @@ class LogTab(
     private val detail: DetailPane? = host.detailPane()
     private val filterBar = FilterBar(::applyFilter, columnNames, host)
     private val findBar = host.findView(this, ::searchFor) { forward -> find(forward) }
-    private val goToBar = GoToBar(findBar.floats, ::goToTime, ::timePickerLog) { table?.requestFocusInWindow() }
-
-    /** The find bar and the Go to bar, of which at most one is open. */
-    private val barSlot = JPanel(BorderLayout()).apply {
-        isOpaque = false
-        add(findBar.component, BorderLayout.NORTH)
-        add(goToBar, BorderLayout.SOUTH)
-    }
 
     /** Variables charted under the histogram; they stay when the file is read again. */
     private val variableCharts: VariableCharts = VariableCharts(scope, session::variableSeries).apply {
@@ -1006,10 +1004,10 @@ class LogTab(
         detail?.show("")
         table.resizedWidths = rememberedWidths
         rowsView = if (findBar.floats) {
-            FloatingTopRight(scrollPane, barSlot)
+            FloatingTopRight(scrollPane, findBar.component)
         } else {
             JPanel(BorderLayout()).apply {
-                add(barSlot, BorderLayout.NORTH)
+                add(findBar.component, BorderLayout.NORTH)
                 add(scrollPane, BorderLayout.CENTER)
             }
         }
@@ -1185,22 +1183,39 @@ class LogTab(
 
     /** Opens the find bar, to find the text selected in the detail pane if it is one line. */
     fun showFind() {
-        goToBar.close()
         findBar.open(detail?.component?.selectedText?.takeIf { it.isNotBlank() && '\n' !in it })
     }
 
     /**
-     * Opens the Go to bar in the find bar's place, with the time Go to counts from typed in; does nothing while the
-     * shown log has no time to start from.
+     * Asks for a time to go to in a dialog, with the time Go to counts from typed in, and shows a hint when the row
+     * gone to is not the record at that time; does nothing while the shown log has no time to start from.
      */
     fun showGoTo() {
         val from = goToReference() ?: return
-        if (findBar.isOpen) findBar.close()
-        goToBar.open(timeLiteral(from))
+        val dialog = GoToDialog(SwingUtilities.getWindowAncestor(this), timeLiteral(from), ::goToTime, ::timePickerLog)
+        dialog.isVisible = true
+        table?.requestFocusInWindow()
+        dialog.note?.let(::showHint)
+    }
+
+    /** Shows [text] for a moment over the top of the rows, as an editor shows a hint. */
+    private fun showHint(text: String) {
+        val table = table ?: return
+        if (!table.isShowing) return
+        val visible = table.visibleRect
+        val at = Point(visible.x + look.scale(HINT_INSET), visible.y + look.scale(HINT_INSET))
+        SwingUtilities.convertPointToScreen(at, table)
+        val tip = table.createToolTip().apply { tipText = text }
+        val popup = PopupFactory.getSharedInstance().getPopup(table, tip, at.x, at.y)
+        popup.show()
+        Timer(HINT_MILLIS) { popup.hide() }.apply {
+            isRepeats = false
+            start()
+        }
     }
 
     /**
-     * The time a relative time typed in the Go to bar counts from, whose day a time alone takes: the selected row's,
+     * The time a relative time typed in the Go to dialog counts from, whose day a time alone takes: the selected row's,
      * else the first shown record's. Null if neither has one.
      */
     private fun goToReference(): Long? {
@@ -1222,7 +1237,7 @@ class LogTab(
         return TimePickerLog(goToReference(), shown::anyRecordIn)
     }
 
-    /** Selects the first shown row at the time [text] names, as the Go to bar asks. */
+    /** Selects the first shown row at the time [text] names, as the Go to dialog asks. */
     private fun goToTime(text: String): GoToOutcome {
         val model = model ?: return GoToOutcome.Went(null)
         val scrollPane = scrollPane ?: return GoToOutcome.Went(null)
