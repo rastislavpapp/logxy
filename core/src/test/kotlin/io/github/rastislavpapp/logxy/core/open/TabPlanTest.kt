@@ -57,6 +57,21 @@ class TabPlanTest {
     }
 
     @Test
+    fun `files merged into a tab keep its timestamp shifts, and add their own`() {
+        val a = Path.of("/logs/a.log")
+        val b = Path.of("/logs/b.log")
+        val c = Path.of("/logs/c.log")
+        val tabs = listOf(SessionFiles(listOf(a, b), listOf(null, null), shifts = listOf(0, 5)))
+
+        val actions = TabPlan.open(OpenMode.MERGE_INTO_CURRENT, listOf(c), listOf(null), tabs, 0, shifts = listOf(-2))
+
+        val merged = SessionFiles(listOf(a, b, c), listOf(null, null, null), shifts = listOf(0, 5, -2))
+        assertEquals(listOf(TabAction.Replace(0, merged)), actions)
+        val unshifted = TabPlan.open(OpenMode.MERGE, listOf(b, c), listOf(null, null), emptyList(), null, listOf(0, 0))
+        assertEquals(listOf(TabAction.Add(SessionFiles(listOf(b, c), listOf(null, null)))), unshifted)
+    }
+
+    @Test
     fun `a restore selects the tab of the selected session when one before it is skipped or open already`() {
         val open = SessionFiles(listOf(Path.of("/logs/a.log")), listOf(null))
         val skipped = SessionFiles(emptyList(), emptyList())

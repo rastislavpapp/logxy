@@ -122,7 +122,8 @@ class VariableSeries internal constructor(
          * [template], all in one pass, and returns their series in the order of [variables]. Row i is `rows[i]`,
          * or i if [rows] is null. [origin] tells which log each row is a record of, and which record; without it,
          * row r is record r of the first log. A log's snapshot and index are at its position in [snapshots] and
-         * [indexes]. Updates the indexes first.
+         * [indexes]. A log's times are read with its timestamp shift in [shifts] added, none if it is null. Updates
+         * the indexes first.
          */
         suspend fun collect(
             indexes: List<TemplateIndex>,
@@ -132,6 +133,7 @@ class VariableSeries internal constructor(
             origin: RowOrigin?,
             template: String,
             variables: IntArray,
+            shifts: LongArray? = null,
         ): List<VariableSeries> = withContext(Dispatchers.Default) {
             val matching = coroutineScope {
                 indexes.indices.map { async { indexes[it].matching(snapshots[it], setOf(template)) } }.awaitAll()
@@ -164,7 +166,7 @@ class VariableSeries internal constructor(
                                 ?: MessageReader(snapshot, messageFields[p], snapshot.channels.forTask(task))
                                     .also { readers[p] = it }
                             // Adding may grow the values, so they are taken after.
-                            val at = found.add(row, time)
+                            val at = found.add(row, if (shifts == null) time else time + shifts[p])
                             reader.variableNumbers(r, variables, at, found.values, out, places)
                         }
                         found

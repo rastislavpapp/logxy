@@ -49,6 +49,7 @@ class ShownLogTest {
         override val parts get() = throw UnsupportedOperationException()
         override val origin get() = throw UnsupportedOperationException()
         override fun newFilter() = throw UnsupportedOperationException()
+        override fun shift(part: Int) = 0L
         override fun firstRecordFrom(part: Int, record: Int) = throw UnsupportedOperationException()
         override fun recordOf(part: Int, record: Int) = throw UnsupportedOperationException()
         override fun templateOf(record: Int) = throw UnsupportedOperationException()

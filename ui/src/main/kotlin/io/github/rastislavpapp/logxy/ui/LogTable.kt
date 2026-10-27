@@ -3,6 +3,7 @@ package io.github.rastislavpapp.logxy.ui
 import io.github.rastislavpapp.logxy.core.log.ColumnType
 import io.github.rastislavpapp.logxy.core.log.Level
 import io.github.rastislavpapp.logxy.core.log.Role
+import io.github.rastislavpapp.logxy.core.merge.TimestampShift
 import io.github.rastislavpapp.logxy.core.query.Marker
 import io.github.rastislavpapp.logxy.core.session.Selection
 import java.awt.Color
@@ -494,9 +495,9 @@ class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
             }
             val chars = when {
                 field == null -> maxOf(logModel.totalRowCount.toString().length, 3)
-                field.type == ColumnType.TIMESTAMP -> sampleLength(column, 23)
+                field.type == ColumnType.TIMESTAMP -> sampleLength(column, 23) + shiftMarkChars(field.role)
                 field.role == Role.LEVEL -> 5
-                field.role == Role.SOURCE -> sampleWidest(column).coerceIn(6, 32)
+                field.role == Role.SOURCE -> sampleWidest(column).coerceIn(6, 32) + shiftMarkChars(field.role)
                 field.role == Role.THREAD -> 18
                 field.role == Role.LOGGER -> 36
                 // E.g. MDC keys: short values (ids, numbers) leave more room for the message.
@@ -513,6 +514,19 @@ class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
             }
             // Narrow windows shrink the other columns; a cut level would be unreadable.
             if (field?.role == Role.LEVEL) tableColumn.minWidth = width
+        }
+    }
+
+    /**
+     * The room the longest timestamp shift mark takes after a value of [role], in characters: ` +5:30` after a time,
+     * ` (+5:30)` after a source; 0 if no file is shifted.
+     */
+    private fun shiftMarkChars(role: Role?): Int {
+        val longest = logModel.shown.timestampShifts.maxOfOrNull { TimestampShift.format(it).length } ?: 0
+        return when {
+            longest == 0 -> 0
+            role == Role.SOURCE -> longest + 3
+            else -> longest + 1
         }
     }
 
@@ -653,11 +667,24 @@ class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
         /** After the text of a record with more lines: how many there are. */
         private var more = ""
 
+        /** After the time or source of a record whose file has a timestamp shift: the shift, e.g. ` +2h`. */
+        private var shiftMark = ""
+
         override fun getTableCellRendererComponent(
             table: JTable, value: Any?, isSelected: Boolean, hasFocus: Boolean, row: Int, column: Int,
         ): Component {
             super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column)
             val field = logModel.fieldAt(column)
+            val shift = when (field?.role) {
+                Role.TIMESTAMP, Role.SOURCE -> TimestampShift.format(logModel.timestampShift(row))
+                else -> ""
+            }
+            shiftMark = when {
+                shift.isEmpty() -> ""
+                field?.role == Role.SOURCE -> " ($shift)"
+                else -> " $shift"
+            }
+            toolTipText = if (shift.isEmpty()) null else "This file's times are shifted by $shift"
             ranges = if (field == null || value !is String || isSelected) {
                 IntArray(0)
             } else {
@@ -670,12 +697,13 @@ class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
                 1 -> " … +1 line"
                 else -> " … +$moreLines lines"
             }
-            // The text is cut before the hint rather than under it.
-            if (more.isNotEmpty()) border = CompoundBorder(border, EmptyBorder(0, 0, 0, moreWidth()))
+            // The text is cut before the hints rather than under them.
+            val hints = shiftMark + more
+            if (hints.isNotEmpty()) border = CompoundBorder(border, EmptyBorder(0, 0, 0, hintWidth(hints)))
             return this
         }
 
-        private fun moreWidth() = getFontMetrics(font).stringWidth(more)
+        private fun hintWidth(hint: String) = getFontMetrics(font).stringWidth(hint)
 
         // A click on the "… +N lines" hint toggles too: it is a bigger target than the icon.
         override fun togglesAt(x: Int, y: Int): Boolean {
@@ -683,12 +711,14 @@ class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
             if (more.isEmpty()) return false
             val textBounds = Rectangle()
             layOut(this, text, textBounds)
-            return Rectangle(textBounds.x + textBounds.width, 0, moreWidth(), rowHeight).contains(x, y)
+            val moreX = textBounds.x + textBounds.width + hintWidth(shiftMark)
+            return Rectangle(moreX, 0, hintWidth(more), rowHeight).contains(x, y)
         }
 
         override fun paintComponent(g: Graphics) {
             val marked = ranges.isNotEmpty() || foundRanges.isNotEmpty()
-            if (!marked && more.isEmpty()) return super.paintComponent(g)
+            val hints = shiftMark + more
+            if (!marked && hints.isEmpty()) return super.paintComponent(g)
             var cleared = false
             // Marks stop where a cut value's "..." begins.
             val textBounds = Rectangle()
@@ -707,10 +737,10 @@ class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
             }
             super.paintComponent(g)
             if (cleared) isOpaque = true
-            if (more.isNotEmpty()) {
+            if (hints.isNotEmpty()) {
                 g.font = font
                 val baseline = textBounds.y + getFontMetrics(font).ascent
-                drawHint(g, more, textBounds.x + textBounds.width, baseline)
+                drawHint(g, hints, textBounds.x + textBounds.width, baseline)
             }
         }
     }

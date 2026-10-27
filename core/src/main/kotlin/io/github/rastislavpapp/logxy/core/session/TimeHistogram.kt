@@ -1,6 +1,9 @@
 package io.github.rastislavpapp.logxy.core.session
 
 import io.github.rastislavpapp.logxy.core.log.Level
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
 
 private const val MICROS = 1_000L
 private const val MILLIS = 1_000_000L
@@ -76,6 +79,27 @@ class TimeHistogram(
         if (bin < firstBin) firstBin = bin
         if (bin > lastBin) lastBin = bin
     }
+
+    /**
+     * The days in [zone] that bins with records touch: every day a counted record may fall on, as precisely as the
+     * bins' [width] tells.
+     */
+    fun daysWithRecords(zone: ZoneId): Set<LocalDate> {
+        val days = HashSet<LocalDate>()
+        for (bin in firstBin..lastBin) {
+            if ((0..<CATEGORIES).all { counts[it][bin] == 0 }) continue
+            var day = dayOf(binStart(bin), zone)
+            val last = dayOf(binStart(bin) + width - 1, zone)
+            while (day <= last) {
+                days += day
+                day = day.plusDays(1)
+            }
+        }
+        return days
+    }
+
+    private fun dayOf(nanos: Long, zone: ZoneId): LocalDate =
+        Instant.ofEpochSecond(Math.floorDiv(nanos, SECONDS)).atZone(zone).toLocalDate()
 
     /** Adds the records counted in [other]. */
     fun addAll(other: TimeHistogram) = merge(other, 1)

@@ -30,18 +30,21 @@ sealed interface GoToOutcome {
 /**
  * Goes to a typed time, in the slot of the find view: a box floating over the rows like [FindBar] if [floats], else a
  * bar above them. [onGo] goes to the time typed when Enter is pressed; [onClose] is called whenever the bar hides.
+ * [pickerLog] gives what the field's time picker opens on.
  */
 class GoToBar(
     private val floats: Boolean,
     private val onGo: (text: String) -> GoToOutcome,
+    pickerLog: () -> TimePickerLog?,
     private val onClose: () -> Unit,
-) : JPanel(MigLayout("insets 6 8 6 6, gap 2 2, hidemode 3, wrap 2", "[240!, fill]4[]")) {
+) : JPanel(MigLayout("insets 6 8 6 6, gap 2 2, hidemode 3, wrap 2", "[260!, fill]4[]")) {
 
     /** The field the time is typed in. */
     val input = JTextField().apply {
         look.placeholder(this, "Time, e.g. 14:32:05 or -10m")
         toolTipText = "<html>A time, such as 2026-10-09 14:32:05.250, or 14:32 on the selected row's day;<br>" +
             "or a time from the selected row's: 1h30m forward, -10s back (units s, m, h, d)</html>"
+        withToggles(timePickerButton(this, pickerLog))
         limitPaste()
     }
     private val note = JLabel()

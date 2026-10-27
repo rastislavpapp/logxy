@@ -7,6 +7,7 @@ import io.github.rastislavpapp.logxy.core.log.Field
 import io.github.rastislavpapp.logxy.core.log.Records
 import io.github.rastislavpapp.logxy.core.log.Role
 import io.github.rastislavpapp.logxy.core.log.Schema
+import io.github.rastislavpapp.logxy.core.merge.TimestampShift
 import io.github.rastislavpapp.logxy.core.parse.Parser
 import io.github.rastislavpapp.logxy.core.query.CellRules
 import io.github.rastislavpapp.logxy.core.query.GoToTime
@@ -55,6 +56,8 @@ import java.awt.datatransfer.StringSelection
 import java.awt.event.ActionEvent
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
+import java.awt.event.WindowAdapter
+import java.awt.event.WindowEvent
 import java.nio.file.Path
 import java.text.NumberFormat
 import java.time.ZoneId
@@ -123,6 +126,8 @@ class LogTab(
     redetection: Redetection? = null,
     /** Where to go once the records are first shown, with [filter] applied: a [position] this tab had before. */
     restore: SessionPosition<Path>? = null,
+    /** The timestamp shift of each of a merge's [paths] in nanoseconds; 0 (or missing) for none. */
+    shifts: List<Long> = emptyList(),
     private val onStatusChanged: () -> Unit,
 ) : JPanel(BorderLayout()) {
 
@@ -131,7 +136,7 @@ class LogTab(
         log.error("Failed in the tab of {}", paths.joinToString(), e)
     }
     private val scope = CoroutineScope(SupervisorJob() + host.uiDispatcher + failed)
-    private val session = LogSession(paths, scope, host.settings, Listener(), origin, parsers, redetection)
+    private val session = LogSession(paths, scope, host.settings, Listener(), origin, parsers, redetection, shifts)
 
     /** The files shown; for a merge, without those that turned out to have no timestamps. */
     val paths: List<Path> get() = session.paths
@@ -143,6 +148,9 @@ class LogTab(
 
     /** The parser chosen for each of [paths], null where it is detected. */
     val chosenParsers: List<Parser?> get() = session.chosenParsers
+
+    /** The timestamp shift of each of [paths] in nanoseconds, 0 for none. */
+    val shifts: List<Long> get() = session.shifts
 
     /** Short names of [paths], as the merge's source column shows them. */
     val sourceNames: List<String> get() = session.sourceNames
@@ -196,7 +204,7 @@ class LogTab(
     private val detail: DetailPane? = host.detailPane()
     private val filterBar = FilterBar(::applyFilter, columnNames, host)
     private val findBar = host.findView(this, ::searchFor) { forward -> find(forward) }
-    private val goToBar = GoToBar(findBar.floats, ::goToTime) { table?.requestFocusInWindow() }
+    private val goToBar = GoToBar(findBar.floats, ::goToTime, ::timePickerLog) { table?.requestFocusInWindow() }
 
     /** The find bar and the Go to bar, of which at most one is open. */
     private val barSlot = JPanel(BorderLayout()).apply {
@@ -391,6 +399,7 @@ class LogTab(
         showParser()
         filter?.let(filterBar::load)
         filterBar.onRulesAdded = { shownParts += LogPart.FILTER }
+        filterBar.timePickerLog = ::timePickerLog
         // Over all records: the shown rows may already be narrowed by the very rule being edited.
         filterBar.variableValues = { template, variable, onValues ->
             scope.launch {
@@ -475,6 +484,36 @@ class LogTab(
         val window = SwingUtilities.getWindowAncestor(this)
         val chosen = host.chooseParsersPerFile(window, paths, sourceNames, descriptions, session.chosenParsers)
         session.useParsers(chosen ?: return)
+    }
+
+    /** Asks for the timestamp shift of the merge's file [part], and merges again with it. */
+    private fun askShift(part: Int) {
+        val field = TimestampShiftField(session.shifts[part])
+        val message = arrayOf<Any>(
+            "Added to every timestamp of ${sourceNames[part]}, for a file logged in another time zone:",
+            "hours, e.g. 2 or -5, or with minutes, e.g. +5:30; up to ${TimestampShift.MAX_HOURS} hours either way.",
+            field,
+        )
+        var shift: Long? = null
+        while (shift == null) {
+            val pane = JOptionPane(message, JOptionPane.PLAIN_MESSAGE, JOptionPane.OK_CANCEL_OPTION)
+            val dialog = pane.createDialog(this, "Shift Timestamps")
+            dialog.addWindowFocusListener(object : WindowAdapter() {
+                override fun windowGainedFocus(e: WindowEvent) {
+                    field.selectAll()
+                    field.requestFocusInWindow()
+                }
+            })
+            dialog.isVisible = true
+            dialog.dispose()
+            if (pane.value != JOptionPane.OK_OPTION) return
+            shift = field.shift
+        }
+        val shifts = session.shifts.toMutableList().also { it[part] = shift }
+        if (shifts == session.shifts) return
+        // The selected record and the top one stay where they were, as when a recent session is opened again.
+        restoring = position
+        session.shiftTimestamps(shifts)
     }
 
     /** Shows a menu of checks for the columns to show; it stays open while they are toggled. */
@@ -681,6 +720,12 @@ class LogTab(
                     val prepared = shown.copyColumn(fieldIndex, copyLimit(), selectedRows())
                     copyColumn(prepared)
                 }
+            })
+        }
+        val part = if (isMerged && field.role == Role.SOURCE) sourceNames.indexOf(value) else -1
+        if (part >= 0) {
+            popup.add(JMenuItem("Shift This File's Timestamps…").apply {
+                addActionListener { askShift(part) }
             })
         }
         popup.addSeparator()
@@ -1166,6 +1211,16 @@ class LogTab(
         val selectedTime = selected?.let { model.shown.timestamp(it) }
         if (selectedTime != null) return selectedTime
         return model.shown.timeFrom(0).takeIf { it != Records.NO_TIMESTAMP }
+    }
+
+    /**
+     * What a time picker opens on: the time Go to counts from, and the days the shown log's histogram counts records
+     * on. Null while nothing is shown.
+     */
+    private fun timePickerLog(): TimePickerLog? {
+        if (model == null) return null
+        val days = session.histogram?.daysWithRecords(ZoneId.systemDefault()).orEmpty()
+        return TimePickerLog(goToReference(), days)
     }
 
     /** Selects the first shown row at the time [text] names, as the Go to bar asks. */

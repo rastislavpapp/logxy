@@ -5,6 +5,7 @@ import io.github.rastislavpapp.logxy.core.config.PropertiesFiles
 import io.github.rastislavpapp.logxy.core.config.SavedFilter
 import io.github.rastislavpapp.logxy.core.config.Settings
 import io.github.rastislavpapp.logxy.core.log.Level
+import io.github.rastislavpapp.logxy.core.merge.TimestampShift
 import io.github.rastislavpapp.logxy.core.session.RecordStart
 import io.github.rastislavpapp.logxy.core.session.SessionPosition
 import java.nio.file.Files
@@ -63,6 +64,7 @@ data class RecentSessions(val recent: List<OpenSession> = emptyList(), val atExi
          * recent.1.parser.2.name=My app
          * recent.1.parser.2.type=pattern
          * recent.1.parser.2.layout=%d [%t] %-5p %c - %m%n
+         * recent.1.shift.2=+5:30
          * recent.1.level=WARN
          * recent.1.query=logger == "com.example.db*"
          * recent.1.lead.file=2
@@ -99,6 +101,9 @@ data class RecentSessions(val recent: List<OpenSession> = emptyList(), val atExi
             session.parsers.forEachIndexed { i, parser ->
                 if (parser != null) Settings.writeParser(properties, "${prefix}parser.${i + 1}.", parser)
             }
+            session.shifts.forEachIndexed { i, shift ->
+                if (shift != 0L) properties["${prefix}shift.${i + 1}"] = TimestampShift.format(shift)
+            }
             val filter = session.filter
             filter?.minimumLevel?.let { properties["${prefix}level"] = it.name }
             if (filter != null && filter.query.isNotBlank()) properties["${prefix}query"] = filter.query
@@ -128,6 +133,9 @@ data class RecentSessions(val recent: List<OpenSession> = emptyList(), val atExi
                 .map { it!! }
                 .toList()
             val parsers = paths.indices.map { Settings.readParser(properties, "${prefix}parser.${it + 1}.") }
+            val shifts = paths.indices.map { i ->
+                properties.getProperty("${prefix}shift.${i + 1}")?.let(TimestampShift::parse) ?: 0L
+            }
             val levelName = properties.getProperty("${prefix}level")
             val level = Level.entries.firstOrNull { it.name == levelName }
             val query = properties.getProperty("${prefix}query").orEmpty()
@@ -140,7 +148,7 @@ data class RecentSessions(val recent: List<OpenSession> = emptyList(), val atExi
             val lead = readStart("lead")
             val top = readStart("top")
             val position = if (lead == null && top == null) null else SessionPosition(lead, top)
-            return OpenSession(paths, parsers, filter, position)
+            return OpenSession(paths, parsers, filter, position, OpenSession.keptShifts(shifts))
         }
     }
 }

@@ -6,6 +6,7 @@ import io.github.rastislavpapp.logxy.core.filter.LevelCondition
 import io.github.rastislavpapp.logxy.core.filter.PresenceCondition
 import io.github.rastislavpapp.logxy.core.filter.TextCondition
 import io.github.rastislavpapp.logxy.core.filter.TextOp
+import io.github.rastislavpapp.logxy.core.filter.TimeCondition
 import io.github.rastislavpapp.logxy.core.index.IndexProgress
 import io.github.rastislavpapp.logxy.core.log.ColumnType
 import io.github.rastislavpapp.logxy.core.log.Field
@@ -14,15 +15,18 @@ import io.github.rastislavpapp.logxy.core.log.ParsedLog
 import io.github.rastislavpapp.logxy.core.log.Role
 import io.github.rastislavpapp.logxy.core.log.Schema
 import io.github.rastislavpapp.logxy.core.parse.CompiledPattern
+import io.github.rastislavpapp.logxy.core.session.countTimes
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardOpenOption
+import java.time.Instant
 import java.time.ZoneOffset
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 class MergedLogTest {
 
@@ -64,6 +68,27 @@ class MergedLogTest {
             assertEquals(listOf("b.log", "a.log", "a.log", "b.log"), log.column("Source"))
             assertEquals(listOf(1, 0, 0, 1), List(log.recordCount) { log.part(it) })
             assertEquals(1, log.position(1, 0) + 1)
+        }
+    }
+
+    @Test
+    fun `a file's timestamp shift moves it in the merge, its times and time filters`() {
+        val hour = 3_600_000_000_000L
+        val parts = listOf(fileA, fileB)
+        runBlocking { MergedLog.build(parts, shifts = longArrayOf(0, -hour)) }.use { log ->
+            assertEquals(listOf("B1", "B2", "A1", "A2"), log.column("Message"))
+            // The Time column keeps the file's own text.
+            assertEquals("2026-10-01 10:00:01.300", log.column("Timestamp").first())
+            val b1 = Instant.parse("2026-10-01T09:00:01.300Z")
+            assertEquals(b1.epochSecond * 1_000_000_000 + b1.nano, log.timestampNanos(0))
+            assertEquals(-hour, log.shift(1))
+            val ten = Instant.parse("2026-10-01T10:00:00Z").epochSecond * 1_000_000_000
+            assertEquals(listOf(2, 3), log.rows(TimeCondition("Timestamp", from = ten)))
+            assertEquals(listOf(0, 1), log.rows(TimeCondition("Timestamp", to = ten)))
+            // The histogram counts B1 at its shifted time.
+            val histogram = runBlocking { countTimes(log) }
+            val b1Nanos = b1.epochSecond * 1_000_000_000 + b1.nano
+            assertTrue(b1Nanos - histogram.binStart(histogram.firstBin) in 0..<histogram.width)
         }
     }
 

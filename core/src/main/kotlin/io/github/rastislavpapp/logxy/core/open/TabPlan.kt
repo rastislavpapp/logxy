@@ -9,13 +9,15 @@ import java.nio.file.Path
 
 /**
  * The files of a session open in a tab, or to open in one, with the parser for each ([parsers], null to detect
- * it), its [filter] and, for a session opened again, the [position] to go back to.
+ * it), its [filter] and, for a session opened again, the [position] to go back to. [shifts] has the timestamp shift
+ * of each of a merge's [paths] in nanoseconds, empty if none has one.
  */
 data class SessionFiles(
     val paths: List<Path>,
     val parsers: List<Parser?>,
     val filter: SavedFilter? = null,
     val position: SessionPosition<Path>? = null,
+    val shifts: List<Long> = emptyList(),
 )
 
 /** A change to the tabs. Changes apply in order, and an index refers to the tabs as they are when it applies. */
@@ -39,14 +41,20 @@ sealed interface TabAction {
  */
 object TabPlan {
 
-    /** Opens [files] (read with [parsers]) in [mode] next to the open [tabs], of which [current] is selected. */
+    /**
+     * Opens [files] (read with [parsers], and when merged with their timestamp [shifts]) in [mode] next to the open
+     * [tabs], of which [current] is selected.
+     */
     fun open(
         mode: OpenMode,
         files: List<Path>,
         parsers: List<Parser?>,
         tabs: List<SessionFiles>,
         current: Int?,
+        shifts: List<Long> = emptyList(),
     ): List<TabAction> {
+        // Each file's shift, 0 where the list has none.
+        fun shiftsOf(paths: List<Path>, shifts: List<Long>) = paths.indices.map { shifts.getOrElse(it) { 0 } }
         val open = OpenTabs(tabs)
         fun place(session: SessionFiles, action: TabAction): TabAction {
             open.indexOf(session.paths)?.let { return TabAction.Select(it) }
@@ -57,7 +65,13 @@ object TabPlan {
             OpenMode.MERGE_INTO_CURRENT, OpenMode.MERGE_WITH_CURRENT_IN_NEW -> {
                 val index = requireNotNull(current) { "$mode needs a current tab" }
                 val tab = tabs[index]
-                val merged = SessionFiles(tab.paths + files, tab.parsers + parsers, tab.filter)
+                val mergedShifts = shiftsOf(tab.paths, tab.shifts) + shiftsOf(files, shifts)
+                val merged = SessionFiles(
+                    tab.paths + files,
+                    tab.parsers + parsers,
+                    tab.filter,
+                    shifts = OpenSession.keptShifts(mergedShifts),
+                )
                 val action = if (mode == OpenMode.MERGE_INTO_CURRENT) {
                     TabAction.Replace(index, merged)
                 } else {
@@ -65,7 +79,10 @@ object TabPlan {
                 }
                 listOf(place(merged, action))
             }
-            OpenMode.MERGE -> SessionFiles(files, parsers).let { listOf(place(it, TabAction.Add(it))) }
+            OpenMode.MERGE -> {
+                val merged = SessionFiles(files, parsers, shifts = OpenSession.keptShifts(shiftsOf(files, shifts)))
+                listOf(place(merged, TabAction.Add(merged)))
+            }
             OpenMode.TABS -> files
                 .zip(parsers) { file, parser -> SessionFiles(listOf(file), listOf(parser)) }
                 .map { place(it, TabAction.Add(it)) }

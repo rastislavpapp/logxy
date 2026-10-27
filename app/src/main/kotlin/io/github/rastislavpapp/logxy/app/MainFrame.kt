@@ -263,7 +263,8 @@ class MainFrame : JFrame("logxy") {
     private fun sessionOf(tab: LogTab): OpenSession {
         val filter = tab.filter.takeUnless { it.isEmpty }
         val position = tab.position?.mapFiles(::storedPath)
-        return OpenSession(tab.paths.map(::storedPath), tab.chosenParsers, filter, position)
+        val shifts = OpenSession.keptShifts(tab.shifts)
+        return OpenSession(tab.paths.map(::storedPath), tab.chosenParsers, filter, position, shifts)
     }
 
     /** The sessions of the open tabs as they can be opened again, in tab order. */
@@ -477,22 +478,30 @@ class MainFrame : JFrame("logxy") {
                 AppSettings.current.copy(openMode = answer.mode, includeSubfolders = answer.includeSubfolders)
             AppSettings.updateOrShowError(this, remembered)
         }
-        open(answer.mode, answer.files, answer.parsers, current)
+        open(answer.mode, answer.files, answer.parsers, current, answer.shifts)
     }
 
     /**
-     * Opens [files] (read with [parsers]) in [mode], merged with [current] if the mode says so, selecting the tab
-     * that shows them already if there is one.
+     * Opens [files] (read with [parsers], and when merged with their timestamp [shifts]) in [mode], merged with
+     * [current] if the mode says so, selecting the tab that shows them already if there is one.
      */
-    private fun open(mode: OpenMode, files: List<Path>, parsers: List<Parser?>, current: LogTab?) {
+    private fun open(
+        mode: OpenMode,
+        files: List<Path>,
+        parsers: List<Parser?>,
+        current: LogTab?,
+        shifts: List<Long> = emptyList(),
+    ) {
         // By the tab, not the selected index: tabs may have opened or closed while the user was asked.
         val index = current?.let(tabs::indexOfComponent)?.takeIf { it >= 0 }
         if (index == null && (mode == OpenMode.MERGE_INTO_CURRENT || mode == OpenMode.MERGE_WITH_CURRENT_IN_NEW)) return
         // Files can go between finding them and the user's answer.
-        val filesWithParsers = files.zip(parsers).filter { (file, _) -> checkOpenable(file) }
-        val openableFiles = filesWithParsers.map { it.first }
+        val openable = files.indices.filter { checkOpenable(files[it]) }
+        val openableFiles = openable.map { files[it] }
+        val openableParsers = openable.map { parsers[it] }
+        val openableShifts = openable.map { shifts.getOrElse(it) { 0 } }
         log.info("Opening files $openableFiles with mode=$mode")
-        perform(TabPlan.open(mode, openableFiles, filesWithParsers.map { it.second }, openSessions(), index))
+        perform(TabPlan.open(mode, openableFiles, openableParsers, openSessions(), index, openableShifts))
     }
 
     private fun askHowToOpen(files: List<Path>, inSubfolders: Set<Path>, current: LogTab?): OpenAnswer? {
@@ -559,6 +568,7 @@ class MainFrame : JFrame("logxy") {
         val sessions = restored.sessions.map { session ->
             val files = LinkedHashMap<String, Path>()
             val parsers = ArrayList<Parser?>()
+            val shifts = ArrayList<Long>()
             session.paths.forEachIndexed { i, stored ->
                 val file = path(stored)
                 val problem = OpenPlan.problem(file)
@@ -567,9 +577,11 @@ class MainFrame : JFrame("logxy") {
                 } else {
                     files[stored] = file
                     parsers += session.parsers.getOrNull(i)
+                    shifts += session.shifts.getOrElse(i) { 0 }
                 }
             }
-            SessionFiles(files.values.toList(), parsers, session.filter, session.position?.mapFiles(files::get))
+            val position = session.position?.mapFiles(files::get)
+            SessionFiles(files.values.toList(), parsers, session.filter, position, OpenSession.keptShifts(shifts))
         }
         if (leftOut.isNotEmpty()) {
             TableNoticeDialog(
@@ -635,7 +647,9 @@ class MainFrame : JFrame("logxy") {
     fun openEach(paths: List<Path>) = open(OpenMode.TABS, paths, paths.map { null }, current = null)
 
     private fun openSessions() = (0..<tabs.tabCount).map { i ->
-        (tabs.getComponentAt(i) as LogTab).let { SessionFiles(it.paths, it.chosenParsers, it.filter) }
+        (tabs.getComponentAt(i) as LogTab).let { tab ->
+            SessionFiles(tab.paths, tab.chosenParsers, tab.filter, shifts = OpenSession.keptShifts(tab.shifts))
+        }
     }
 
     private fun perform(actions: List<TabAction>) = actions.forEach { action ->
@@ -655,6 +669,7 @@ class MainFrame : JFrame("logxy") {
         val tab = LogTab(
             session.paths, AppHost, ::openFiles, ::openEach, session.filter, ::originOf, session.parsers,
             restore = session.position,
+            shifts = session.shifts,
         ) {
             updateStatus()
         }

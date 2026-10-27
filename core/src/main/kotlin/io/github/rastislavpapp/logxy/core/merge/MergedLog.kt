@@ -28,6 +28,8 @@ class MergedLog private constructor(
     val parts: List<LogData>,
     /** Shown in the source field: file names, with as much of the path as needed to tell them apart. */
     val names: List<String>,
+    /** Per part, its [TimestampShift] in nanoseconds; the part's timestamps are read with it added. */
+    private val shifts: LongArray,
 ) : Records {
 
     private var partSchemas = parts.map { it.schema }
@@ -83,7 +85,14 @@ class MergedLog private constructor(
 
     override fun level(record: Int): Level? = parts[part(record)].level(record(record))
 
-    override fun timestampNanos(record: Int): Long = parts[part(record)].timestampNanos(record(record))
+    /** The [TimestampShift] of [part] in nanoseconds, which every time read from it has added. */
+    fun shift(part: Int): Long = shifts[part]
+
+    override fun timestampNanos(record: Int): Long {
+        val part = part(record)
+        val time = parts[part].timestampNanos(record(record))
+        return if (time == Records.NO_TIMESTAMP) time else time + shifts[part]
+    }
 
     override fun row(record: Int, maxBytes: Int, countBytes: Int): RowText {
         val part = part(record)
@@ -171,7 +180,7 @@ class MergedLog private constructor(
             val cursor = cursors[part]
             cursor.moveTo(next[part])
             val time = cursor.timestamp(timestampFields[part])
-            heads[part] = if (time == Columns.ABSENT_TIMESTAMP) times[part] else time
+            heads[part] = if (time == Columns.ABSENT_TIMESTAMP) times[part] else time + shifts[part]
         }
 
         for (part in 0..<count) loadHead(part)
@@ -205,11 +214,16 @@ class MergedLog private constructor(
         const val MAX_PARTS = 255
 
         /**
-         * Merges [parts], which must all have a timestamp field. Call on the thread that owns them; the
-         * merge itself runs on [Dispatchers.Default].
+         * Merges [parts], which must all have a timestamp field, each with its timestamps shifted by [shifts]
+         * nanoseconds. Call on the thread that owns them; the merge itself runs on [Dispatchers.Default].
          */
-        suspend fun build(parts: List<LogData>, names: List<String> = sourceNames(parts.map { it.path })): MergedLog {
-            val log = MergedLog(parts, names)
+        suspend fun build(
+            parts: List<LogData>,
+            names: List<String> = sourceNames(parts.map { it.path }),
+            shifts: LongArray = LongArray(parts.size),
+        ): MergedLog {
+            require(shifts.size == parts.size) { "${shifts.size} shifts for ${parts.size} logs" }
+            val log = MergedLog(parts, names, shifts)
             val snapshots = parts.map { it.filterSnapshot() }
             withContext(Dispatchers.Default) { log.add(log.order(snapshots)) }
             return log

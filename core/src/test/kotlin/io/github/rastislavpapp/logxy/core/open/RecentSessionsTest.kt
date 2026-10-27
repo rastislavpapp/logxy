@@ -29,6 +29,8 @@ class RecentSessionsTest {
             listOf(Parser.Pattern("Mine", "%d [%t] %p %m%n"), Parser.Json("Json", RoleKeys(level = listOf("lvl")))),
             SavedFilter("", Level.WARN, """message ~ "time out""""),
             SessionPosition(RecordStart(zipEntry, 4096), RecordStart(log, 0)),
+            // -9:45 for the second file.
+            shifts = listOf(0, -35_100_000_000_000),
         )
         val compressedTop = SessionPosition(lead = null, top = RecordStart(compressed, 7))
         val single = OpenSession(listOf(compressed), listOf(null), null, compressedTop)

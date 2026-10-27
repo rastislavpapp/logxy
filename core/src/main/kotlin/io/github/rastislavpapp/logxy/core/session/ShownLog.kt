@@ -164,6 +164,20 @@ class ShownLog internal constructor(private val loaded: LoadedLog) {
      */
     fun rowHighlight(record: Int): Int = if (ended) -1 else recordHighlights.of(record)
 
+    /**
+     * The timestamp shift of [record]'s file in nanoseconds, which [timestamp] has added; 0 if it has none, also for
+     * a single file and once the shown log ended.
+     */
+    fun timestampShift(record: Int): Long {
+        val origin = loaded.origin
+        if (ended || origin == null) return 0
+        return loaded.shift(origin.part(record))
+    }
+
+    /** The timestamp shift of each file of a merge, in nanoseconds; empty for a single file. */
+    val timestampShifts: List<Long>
+        get() = if (loaded.origin == null) emptyList() else loaded.parts.indices.map { loaded.shift(it) }
+
     /** Epoch nanoseconds of [record]'s timestamp, or null if there is none. */
     fun timestamp(record: Int): Long? = if (ended) null else records.timestamp(record)
 

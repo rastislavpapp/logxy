@@ -23,6 +23,22 @@ class TimeHistogramTest {
     }
 
     @Test
+    fun `tells the days that have records, in a zone`() {
+        val day = 86_400 * SECOND
+        // 2025-10-09 08:53:20 UTC, then two days later, and that day at 23:53:20 UTC.
+        val histogram = TimeHistogram(T0, T0 + 3 * day)
+        histogram.add(T0, Level.INFO)
+        histogram.add(T0 + 2 * day, Level.WARN)
+        histogram.add(T0 + 2 * day + 15 * 3600 * SECOND, Level.ERROR)
+
+        val utc = histogram.daysWithRecords(java.time.ZoneOffset.UTC)
+        assertEquals(listOf("2025-10-09", "2025-10-11"), utc.sorted().map { "$it" })
+        // Two hours east, the last record is past midnight.
+        val east = histogram.daysWithRecords(java.time.ZoneOffset.ofHours(2))
+        assertEquals(listOf("2025-10-09", "2025-10-11", "2025-10-12"), east.sorted().map { "$it" })
+    }
+
+    @Test
     fun `counts records by level category`() {
         val histogram = TimeHistogram(T0, T0 + 100 * SECOND)
         histogram.add(T0, Level.INFO)

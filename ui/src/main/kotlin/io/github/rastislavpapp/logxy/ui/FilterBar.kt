@@ -135,6 +135,9 @@ class FilterBar(private val onApply: () -> Unit, names: ColumnNames, private val
     /** Gives the values of a template's variable to pick from; see [QueryEditor.variableValues]. */
     var variableValues by editor::variableValues
 
+    /** Gives what the time picker of a time rule's value opens on; see [QueryEditor.timePickerLog]. */
+    var timePickerLog by editor::timePickerLog
+
     /**
      * Sets the fields of the log being filtered, which the editors offer; the level choice shows only if one is a
      * level field.
