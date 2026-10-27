@@ -118,6 +118,23 @@ class ShownLogTest {
     }
 
     @Test
+    fun `going to a time tells when the record there is hidden or the time is past the last`() {
+        val shown = shown(10, none, 20, 30, 40)
+        // As for firstRowAt, a row without a time before the record at 20 counts as at 20.
+        assertEquals(TimeLanding(1, miss = null), shown.landingAt(15))
+        assertEquals(TimeLanding(0, miss = null), shown.landingAt(10))
+        assertEquals(TimeLanding(4, TimeLanding.Miss.PAST_LAST), shown.landingAt(41))
+
+        shown.showRows(intArrayOf(0, 3))
+        // Record 2, at 20, is the one at 15 or later, but the filter hides it.
+        assertEquals(TimeLanding(1, TimeLanding.Miss.HIDDEN), shown.landingAt(15))
+        assertEquals(TimeLanding(1, miss = null), shown.landingAt(30))
+        // Record 4, at 40, is hidden, and no shown record is that late.
+        assertEquals(TimeLanding(1, TimeLanding.Miss.PAST_LAST), shown.landingAt(35))
+        assertEquals(null, shown(*LongArray(0)).landingAt(10))
+    }
+
+    @Test
     fun `the first row in a time range at a level`() {
         val times = longArrayOf(10, 20, none, 30, 40, 50)
         val levels = listOf(Level.ERROR, Level.INFO, Level.FATAL, Level.WARN, Level.ERROR, Level.WARN)

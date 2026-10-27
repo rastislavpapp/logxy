@@ -311,6 +311,7 @@ class MainFrame : JFrame("logxy") {
             add(menuItem("Find Previous", null, KeyEvent.VK_F3, InputEvent.SHIFT_DOWN_MASK) {
                 selectedTab()?.findNext(forward = false)
             })
+            add(menuItem("Go To…", null, KeyEvent.VK_G, shortcut) { selectedTab()?.showGoTo() })
             addSeparator()
             add(menuItem("Edit Filter", Icons.filter, KeyEvent.VK_F, shortcut or InputEvent.SHIFT_DOWN_MASK) {
                 selectedTab()?.focusFilter()

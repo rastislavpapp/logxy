@@ -124,7 +124,7 @@ class FindBar(
         input.requestFocusInWindow()
     }
 
-    fun close() {
+    override fun close() {
         if (!isVisible) return
         isVisible = false
         searchNow()

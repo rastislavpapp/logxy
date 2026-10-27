@@ -32,6 +32,17 @@ sealed interface CopyResult {
     data class Failed(val message: String) : CopyResult
 }
 
+/** The row going to a time lands on, see [ShownLog.landingAt]; [miss] is null if it is the record at that time. */
+data class TimeLanding(val row: Int, val miss: Miss?) {
+    enum class Miss {
+        /** The filter hides the record at the time; the row is the next one shown. */
+        HIDDEN,
+
+        /** No shown record is at the time or later; the row is the last one. */
+        PAST_LAST,
+    }
+}
+
 /** What [ShownLog.nextFound] gives while the search has not decided the records that may hold the match. */
 const val NOT_YET_FOUND = -2
 
@@ -198,15 +209,46 @@ class ShownLog internal constructor(private val loaded: LoadedLog) {
     fun firstRowAt(time: Long): Int {
         val size = size
         if (size == 0) return -1
-        // Rows are about in time order; a few out of order only make this land near them.
+        return minOf(firstAt(time, size, ::timeFrom), size - 1)
+    }
+
+    /**
+     * Where going to [time] lands: the first row at [time] or later, or the last row if none is, as [firstRowAt];
+     * null if there are no rows. Its [TimeLanding.miss] tells why the row is not the record at [time] or just after.
+     */
+    fun landingAt(time: Long): TimeLanding? {
+        val row = firstRowAt(time)
+        if (row < 0) return null
+        val rowTime = timeFrom(row)
+        if (rowTime == Records.NO_TIMESTAMP || rowTime < time) return TimeLanding(row, TimeLanding.Miss.PAST_LAST)
+        if (rows == null) return TimeLanding(row, miss = null)
+        val firstRecord = firstAt(time, records.recordCount, ::recordTimeFrom)
+        val miss = if (firstRecord < recordAt(row)) TimeLanding.Miss.HIDDEN else null
+        return TimeLanding(row, miss)
+    }
+
+    /**
+     * The first of [count] places, rows or records, whose time ([timeFrom] of it) is [time] or later; [count] if none
+     * is. Places are about in time order; a few out of order only make this land near them.
+     */
+    private inline fun firstAt(time: Long, count: Int, timeFrom: (Int) -> Long): Int {
         var low = 0
-        var high = size
+        var high = count
         while (low < high) {
             val middle = (low + high) ushr 1
             val found = timeFrom(middle)
             if (found != Records.NO_TIMESTAMP && found < time) low = middle + 1 else high = middle
         }
-        return minOf(low, size - 1)
+        return low
+    }
+
+    /** Like [timeFrom], but of [record] among all records, shown or not. */
+    private fun recordTimeFrom(record: Int): Long {
+        for (i in record..<minOf(records.recordCount, record + UNTIMED_ROWS)) {
+            val time = records.timestampNanos(i)
+            if (time != Records.NO_TIMESTAMP) return time
+        }
+        return Records.NO_TIMESTAMP
     }
 
     /**
