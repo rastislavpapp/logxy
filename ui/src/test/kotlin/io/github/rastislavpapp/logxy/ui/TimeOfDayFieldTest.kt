@@ -9,7 +9,7 @@ class TimeOfDayFieldTest {
 
     private fun field(time: String): TimeOfDayField {
         val (hours, minutes, seconds) = time.split(':').map(String::toInt)
-        return TimeOfDayField(hours * 3600 + minutes * 60 + seconds) { days += it }
+        return TimeOfDayField(hours * 3600 + minutes * 60 + seconds, onNextDay = { days += it })
     }
 
     private fun TimeOfDayField.type(digits: String) = digits.forEach { typeDigit(it.digitToInt()) }

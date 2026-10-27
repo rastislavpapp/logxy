@@ -35,9 +35,13 @@ private const val PART_WIDTH = 3
  * A time of day as `HH:mm:ss`, edited a part at a time as a system's date fields are: the part being edited is
  * selected, digits typed overwrite it and move on once it is full, Up and Down (or the mouse wheel) step it and carry
  * into the larger parts, Left, Right and Tab move between the parts, Backspace sets it to 0. Stepping over midnight
- * calls [onNextDay] with 1, or -1 back.
+ * calls [onNextDay] with 1, or -1 back; any change by the user then calls [onChanged].
  */
-internal class TimeOfDayField(secondOfDay: Int, private val onNextDay: (days: Int) -> Unit) : JTextField(6) {
+internal class TimeOfDayField(
+    secondOfDay: Int,
+    private val onNextDay: (days: Int) -> Unit,
+    private val onChanged: () -> Unit = {},
+) : JTextField(6) {
 
     /** The time shown, in seconds since midnight. */
     var secondOfDay = secondOfDay
@@ -118,6 +122,13 @@ internal class TimeOfDayField(secondOfDay: Int, private val onNextDay: (days: In
         })
     }
 
+    /** Shows [secondOfDay] instead, as the user did not change it. */
+    fun showSecondOfDay(secondOfDay: Int) {
+        this.secondOfDay = secondOfDay
+        pending = null
+        showTime()
+    }
+
     /** Types [digit] into the part being edited. */
     fun typeDigit(digit: Int) {
         val first = pending
@@ -131,6 +142,7 @@ internal class TimeOfDayField(secondOfDay: Int, private val onNextDay: (days: In
             if (digit * 10 <= MAXES[part]) pending = digit else nextPart()
         }
         showTime()
+        onChanged()
     }
 
     /** Steps the part being edited by one, up or down, carrying into the larger parts and over midnight. */
@@ -141,6 +153,7 @@ internal class TimeOfDayField(secondOfDay: Int, private val onNextDay: (days: In
         pending = null
         showTime()
         if (days != 0) onNextDay(days)
+        onChanged()
     }
 
     /** Edits the part [by] parts after the one being edited, before it if negative, kept within the parts. */
@@ -155,6 +168,7 @@ internal class TimeOfDayField(secondOfDay: Int, private val onNextDay: (days: In
         setPart(0)
         pending = null
         showTime()
+        onChanged()
     }
 
     // A time pasted, such as 14:32 or 14:32:05, replaces the whole time.
@@ -171,6 +185,7 @@ internal class TimeOfDayField(secondOfDay: Int, private val onNextDay: (days: In
         }
         pending = null
         showTime()
+        onChanged()
     }
 
     override fun cut() = copy()

@@ -116,4 +116,15 @@ class EditorRuleTest {
             assertEquals(expected, load(rule), rule.toString())
         }
     }
+
+    @Test
+    fun `a level or time field compares unless a comparison of its own is picked already`() {
+        assertEquals(EditorOp.LEVEL_AT_LEAST, EditorOp.forField(ColumnType.LEVEL, EditorOp.CONTAINS))
+        assertEquals(EditorOp.LEVEL_BELOW, EditorOp.forField(ColumnType.LEVEL, EditorOp.LEVEL_BELOW))
+        assertEquals(EditorOp.TIME_FROM, EditorOp.forField(ColumnType.TIMESTAMP, EditorOp.IS))
+        assertEquals(EditorOp.TIME_BEFORE, EditorOp.forField(ColumnType.TIMESTAMP, EditorOp.TIME_BEFORE))
+        // Text fields keep what is picked; the editor drops what does not fit them.
+        assertEquals(EditorOp.ENDS_WITH, EditorOp.forField(ColumnType.DICT, EditorOp.ENDS_WITH))
+        assertEquals(EditorOp.TIME_FROM, EditorOp.forField(ColumnType.SPAN, EditorOp.TIME_FROM))
+    }
 }
