@@ -8,6 +8,10 @@ A desktop viewer for large log files: it indexes one file, or several merged by 
 One or more open files shown together in one tab, followed while they change.
 _Avoid_: tab (the UI around a session), document
 
+**Archive**:
+A zip or tar file, possibly compressed, or a single compressed file, whose files a session opens after extracting them.
+_Avoid_: bundle, package
+
 **Recent session**:
 A closed session as it can be opened again: its files, the parser chosen for each, its filter, and its position (the selection's lead record and the top row's record, by where each starts in its file).
 _Avoid_: recent file, history entry
