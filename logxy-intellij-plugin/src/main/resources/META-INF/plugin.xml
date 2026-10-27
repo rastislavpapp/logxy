@@ -23,9 +23,9 @@ timeline where they cluster.</p>
       Right-click a cell to copy it or filter by its value. Save filters for later.</li>
   <li><b>Row highlights.</b> Give the rows a query matches a background colour, in every log you
       open, to spot them without filtering the rest away.</li>
-  <li><b>Bookmarks.</b> Bookmark records to come back to, with the IDE's Toggle Bookmark key or a click
-      in the strip left of the rows, and step through them. They stay through a reload and a
-      filter, and show on the time histogram.</li>
+  <li><b>Bookmarks.</b> Bookmark records to come back to, with the IDE's Toggle Bookmark key or the
+      row menu, and step through them. They stay through a reload and a filter, and show on the
+      time histogram.</li>
   <li><b>Time histogram.</b> Record volume with warnings and errors over time, and where search
       matches fall. Click to jump there, drag to narrow to a time range.</li>
   <li><b>Templates.</b> logxy groups lines that are the same message with different values:
