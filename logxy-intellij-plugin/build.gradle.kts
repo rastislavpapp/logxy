@@ -67,10 +67,15 @@ fun minorAndPatch(version: String): Pair<String, Int>? {
     return match.groupValues[1] to match.groupValues[2].toInt()
 }
 
-// A release's notes are every section of its minor up to the release itself, newest first, so a fix release still
-// shows what the minor added: 0.2.1's are its own entries, if it has a section, then 0.2.0's. Each section gets its
-// version heading once there are several. A snapshot build's notes are the Unreleased section.
-val releaseNotes = provider {
+/** Whether a changelog section has any text: list entries, or a line above them such as 0.1.0's "First release." */
+fun hasEntries(section: Changelog.Item) =
+    section.summary.isNotBlank() || section.sections.values.any { it.isNotEmpty() }
+
+// A release's change notes are every section of its minor up to the release itself, newest first, so a fix release
+// still shows what the minor added: 0.2.1's are its own entries, if it has any, then 0.2.0's. Sections without entries
+// are left out, and each section gets its version heading once there are several. A snapshot build's change notes
+// are the Unreleased section.
+val pluginChangeNotes = provider {
     with(changelog) {
         val release = minorAndPatch(version.get())
         val sections = if (release == null) {
@@ -81,31 +86,38 @@ val releaseNotes = provider {
                 section != null && section.first == release.first && section.second <= release.second
             }
         }
-        val withHeaders = sections.size > 1
-        sections.joinToString("\n") { section ->
+        val shown = sections.filter(::hasEntries)
+        val withHeaders = shown.size > 1
+        shown.joinToString("\n") { section ->
             renderItem(section.withHeader(withHeaders).withEmptySections(false), Changelog.OutputType.HTML)
         }
     }
 }
 
-// The release workflow runs it before building anything: a release must not reach Marketplace with empty notes, as
-// an X.Y.0 without entries would, nor leave entries under Unreleased that patchChangelog did not move into a section.
+// The release workflow runs it before building anything: a release must not reach Marketplace with empty change
+// notes, as an X.Y.0 without entries would, nor leave entries under Unreleased that patchChangelog did not move into a
+// section.
 tasks.register("checkChangeNotes") {
-    val notes = releaseNotes
-    val unreleased = provider { changelog.getUnreleased().sections.values.any { it.isNotEmpty() } }
+    val version = changelog.version
+    val release = version.map { minorAndPatch(it) != null }
+    val notes = pluginChangeNotes
+    val unreleased = provider { hasEntries(changelog.getUnreleased()) }
     doLast {
+        if (!release.get()) {
+            throw GradleException("checkChangeNotes checks a release: pass -Pversion=X.Y.Z, not ${version.get()}")
+        }
         if (unreleased.get()) {
             throw GradleException("CHANGELOG.md has entries under Unreleased: run patchChangelog for this version")
         }
         if (notes.get().isBlank()) {
-            throw GradleException("CHANGELOG.md has no entries for this version's minor: the release notes are empty")
+            throw GradleException("CHANGELOG.md has no entries for this version's minor: the change notes are empty")
         }
     }
 }
 
 intellijPlatform {
     pluginConfiguration {
-        changeNotes = releaseNotes
+        changeNotes = pluginChangeNotes
         ideaVersion {
             // The build of the IDE it compiles against: 2025.3 is 253.
             sinceBuild = libs.versions.intellij.idea.map { version ->
@@ -117,7 +129,7 @@ intellijPlatform {
     }
     buildSearchableOptions = false
     instrumentCode = false
-    // From the release workflow's secrets; CONTRIBUTING.md says how to make them. publishPlugin signs the zip first.
+    // From the release workflow's secrets. publishPlugin signs the zip first.
     publishing {
         token = providers.environmentVariable("PUBLISH_TOKEN")
     }

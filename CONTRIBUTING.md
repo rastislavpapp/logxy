@@ -68,12 +68,6 @@ git tag 0.1.0 && git push origin 0.1.0
 
 Every tag publishes the plugin, signed, to JetBrains Marketplace. Its change notes are every section of its minor in `logxy-intellij-plugin/CHANGELOG.md` up to the tag, newest first, so a fix release still shows what the minor added: 0.2.1's are its own section, if it has one, then 0.2.0's. A fix release needs no section of its own. Before anything is built, the release fails when entries are left under Unreleased or when the notes would be empty, as for an `X.Y.0` without entries.
 
-**Marketplace setup**, once:
-
-1. Upload the first version's zip from the GitHub release by hand on [plugins.jetbrains.com](https://plugins.jetbrains.com/plugin/add) (Marketplace takes a new plugin no other way) and accept the developer agreement. JetBrains reviews it before it is listed.
-2. On the plugin's Marketplace page, set the licence link (MIT), the source code and issue tracker URLs, the tags (Logging, Run) and the screenshots from `docs/images/plugin/`.
-3. Set the workflow's secrets: `CERTIFICATE_CHAIN`, `PRIVATE_KEY` and `PRIVATE_KEY_PASSWORD` from a signing key and self-signed certificate made as in [JetBrains' signing guide](https://plugins.jetbrains.com/docs/intellij/plugin-signing.html), and `PUBLISH_TOKEN` from the Marketplace account's tokens page. Without them, a release's Marketplace publish fails. The current certificate is valid for 10 years.
-
 ## AI-assisted contributions
 
 This project is itself developed with AI coding tools, so AI-assisted pull requests are fine. You are responsible for what you submit: read it, run it and be able to explain it.
