@@ -244,6 +244,23 @@ class ShownLog internal constructor(private val loaded: LoadedLog) {
     }
 
     /**
+     * Whether a record, shown or not, has a time in `[from, to)`, as far as the records' time order tells; records
+     * without a time count as none.
+     */
+    fun anyRecordIn(from: Long, to: Long): Boolean {
+        val count = records.recordCount
+        var record = firstAt(from, count, ::recordTimeFrom)
+        // Records without a time land the search on them: the next one with a time tells.
+        val end = minOf(count, record + UNTIMED_SKIP)
+        while (record < end) {
+            val time = recordTimeFrom(record)
+            if (time != Records.NO_TIMESTAMP) return time < to
+            record++
+        }
+        return false
+    }
+
+    /**
      * The first of [count] places, rows or records, whose time ([timeFrom] of it) is [time] or later; [count] if none
      * is. Places are about in time order; a few out of order only make this land near them.
      */
@@ -573,3 +590,6 @@ private fun wholeCharacters(bytes: ByteArray): Int {
 }
 
 private const val UTF8_MAX_BYTES = 4
+
+/** How many records without a time [ShownLog.anyRecordIn] passes over before it takes there to be none. */
+private const val UNTIMED_SKIP = 1_000

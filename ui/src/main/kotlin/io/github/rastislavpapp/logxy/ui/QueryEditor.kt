@@ -355,7 +355,9 @@ class QueryEditor(private val onApply: () -> Unit, private val columnNames: Colu
         private val text = JTextField(12)
 
         // Shown instead of the case toggle while the rule compares a timestamp with a time.
-        private val picker = timePickerButton(text) { timePickerLog() }
+        private val picker = timePickerButton(text) { timePickerLog() }.also {
+            text.picksTimeOnClick({ timePickerLog() }) { it.isVisible }
+        }
 
         init {
             text.apply {
@@ -479,7 +481,8 @@ class QueryEditor(private val onApply: () -> Unit, private val columnNames: Colu
         // A variable's value is mostly picked whole.
         private fun fieldChanged() {
             val selected = selectedOp() ?: EditorOp.CONTAINS
-            fillOps(if (variableNumber() != null && selected == EditorOp.CONTAINS) EditorOp.IS else selected)
+            if (variableNumber() != null && selected == EditorOp.CONTAINS) return fillOps(EditorOp.IS)
+            fillOps(EditorOp.forField(fieldType(), selected))
         }
 
         private fun opChanged() {

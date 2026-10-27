@@ -40,6 +40,16 @@ enum class EditorOp {
         val LEVEL = listOf(LEVEL_AT_LEAST, LEVEL_ABOVE, LEVEL_AT_MOST, LEVEL_BELOW, LEVEL_IS, LEVEL_IS_NOT)
         val TIME = listOf(TIME_FROM, TIME_AFTER, TIME_TO, TIME_BEFORE)
         val NUMBER = listOf(NUMBER_AT_LEAST, NUMBER_ABOVE, NUMBER_AT_MOST, NUMBER_BELOW)
+
+        /**
+         * The operator a line takes when its field turns to one of [type], [selected] before: a level field compares
+         * by at least, a time field by at or after, unless one of their own comparisons is [selected] already.
+         */
+        fun forField(type: ColumnType?, selected: EditorOp): EditorOp = when {
+            type == ColumnType.LEVEL && selected !in LEVEL -> LEVEL_AT_LEAST
+            type == ColumnType.TIMESTAMP && selected !in TIME -> TIME_FROM
+            else -> selected
+        }
     }
 }
 

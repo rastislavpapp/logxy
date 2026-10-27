@@ -141,6 +141,18 @@ class ShownLogTest {
     }
 
     @Test
+    fun `whether any record has a time in a range, shown or not`() {
+        val shown = shown(10, none, 20, 30, 40)
+        shown.showRows(intArrayOf(0))
+        assertEquals(true, shown.anyRecordIn(20, 21))
+        assertEquals(true, shown.anyRecordIn(11, 31))
+        assertEquals(false, shown.anyRecordIn(21, 30))
+        assertEquals(false, shown.anyRecordIn(41, 99))
+        // The record without a time before the one at 20 is passed over.
+        assertEquals(true, shown.anyRecordIn(15, 25))
+    }
+
+    @Test
     fun `the first row in a time range at a level`() {
         val times = longArrayOf(10, 20, none, 30, 40, 50)
         val levels = listOf(Level.ERROR, Level.INFO, Level.FATAL, Level.WARN, Level.ERROR, Level.WARN)

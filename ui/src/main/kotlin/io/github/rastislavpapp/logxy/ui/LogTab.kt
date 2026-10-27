@@ -1214,13 +1214,12 @@ class LogTab(
     }
 
     /**
-     * What a time picker opens on: the time Go to counts from, and the days the shown log's histogram counts records
-     * on. Null while nothing is shown.
+     * What a time picker opens on: the time Go to counts from, and the records, whether the filter shows them or not,
+     * to mark the days that have some. Null while nothing is shown.
      */
     private fun timePickerLog(): TimePickerLog? {
-        if (model == null) return null
-        val days = session.histogram?.daysWithRecords(ZoneId.systemDefault()).orEmpty()
-        return TimePickerLog(goToReference(), days)
+        val shown = model?.shown ?: return null
+        return TimePickerLog(goToReference(), shown::anyRecordIn)
     }
 
     /** Selects the first shown row at the time [text] names, as the Go to bar asks. */
