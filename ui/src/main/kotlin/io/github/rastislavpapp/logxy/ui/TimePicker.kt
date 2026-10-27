@@ -24,6 +24,8 @@ import java.time.YearMonth
 import java.time.ZoneId
 import java.time.ZonedDateTime
 import java.time.format.TextStyle
+import java.time.temporal.ChronoUnit
+import java.time.temporal.TemporalAdjusters
 import java.time.temporal.WeekFields
 import java.util.Locale
 import javax.swing.AbstractAction
@@ -34,15 +36,14 @@ import javax.swing.JDialog
 import javax.swing.JLabel
 import javax.swing.JPanel
 import javax.swing.JRootPane
-import javax.swing.JSpinner
 import javax.swing.JTextField
 import javax.swing.KeyStroke
-import javax.swing.SpinnerNumberModel
 import javax.swing.SwingConstants
 import javax.swing.SwingUtilities
 import javax.swing.UIManager
 
 private const val NANOS_PER_SECOND = 1_000_000_000L
+private const val NANOS_PER_MILLI = 1_000_000
 private const val DAYS_PER_WEEK = 7
 private const val WEEKS_SHOWN = 6
 
@@ -54,6 +55,28 @@ class TimePickerLog(
     val days: Set<LocalDate>,
 )
 
+/** A time a picker offers next to the calendar, worked out from now: [at]. */
+internal enum class TimeShortcut(
+    val label: String,
+    private val from: (now: ZonedDateTime, firstDay: DayOfWeek) -> ZonedDateTime,
+) {
+    NOW("Now", { now, _ -> now }),
+    MINUTES_15("15 minutes ago", { now, _ -> now.minusMinutes(15) }),
+    HOUR_1("1 hour ago", { now, _ -> now.minusHours(1) }),
+    HOURS_24("24 hours ago", { now, _ -> now.minusHours(24) }),
+    TODAY("Today", { now, _ -> now.truncatedTo(ChronoUnit.DAYS) }),
+    YESTERDAY("Yesterday", { now, _ -> now.truncatedTo(ChronoUnit.DAYS).minusDays(1) }),
+    THIS_WEEK("This week", { now, firstDay ->
+        now.truncatedTo(ChronoUnit.DAYS).with(TemporalAdjusters.previousOrSame(firstDay))
+    }),
+    DAYS_7("7 days ago", { now, _ -> now.minusDays(7) }),
+    DAYS_30("30 days ago", { now, _ -> now.minusDays(30) }),
+    ;
+
+    /** The time from [now], to the second, with weeks starting on [firstDay]. */
+    fun at(now: ZonedDateTime, firstDay: DayOfWeek): ZonedDateTime = from(now.withNano(0), firstDay)
+}
+
 /**
  * A button for the end of [field] that opens a [TimePicker] under it. Picking writes the time into [field] as
  * [TimeLiteral.format] has it, and changes nothing else: Enter in the field then does what it does with typed text.
@@ -63,10 +86,10 @@ fun timePickerButton(field: JTextField, log: () -> TimePickerLog?) =
     toolBarButton(CalendarIcon, "Pick a date and time") { TimePicker.open(field, log()) }
 
 /**
- * A popup under a time field: a month calendar and hour, minute and second spinners; finer parts are kept from a
- * typed time it opened on. Times are in the zone the filter uses. For a log whose timestamps carry no date, which
- * [TimeLiteral] puts on 1970-01-01, only the time shows. Arrows move the day, Page Up and Page Down the month, Enter
- * picks, Esc closes; so does clicking elsewhere.
+ * A popup under a time field: [TimeShortcut]s, a month calendar and a [TimeOfDayField]; finer parts than seconds are
+ * kept from a typed time it opened on. Times are in the zone the filter uses. For a log whose timestamps carry no
+ * date, which [TimeLiteral] puts on 1970-01-01, only the time shows. Arrows move the day, Page Up and Page Down the
+ * month, Enter picks, Esc closes; so does clicking elsewhere. A shortcut picks its time at once.
  */
 internal class TimePicker private constructor(
     owner: Window,
@@ -84,16 +107,29 @@ internal class TimePicker private constructor(
 
     private val title = JLabel("", SwingConstants.CENTER)
     private val grid = DayGrid()
-    private val hour = timeSpinner(start.hour, 23)
-    private val minute = timeSpinner(start.minute, 59)
-    private val second = timeSpinner(start.second, 59)
+    private val time = TimeOfDayField(start.toLocalTime().toSecondOfDay()) { days ->
+        // A dateless log has one day only: the time wraps around midnight.
+        if (!dateless) moveDays(days.toLong())
+    }
 
     init {
         isUndecorated = true
         // A look that draws window decorations itself, such as FlatLaf's, would still give it a title bar.
         rootPane.windowDecorationStyle = JRootPane.NONE
-        val content = JPanel(MigLayout("insets 8, gap 4, hidemode 3, wrap 1", "[fill]"))
+        val content = JPanel(MigLayout("insets 8, gap 4, hidemode 3", "[]8[fill]"))
         content.border = BorderFactory.createLineBorder(look.border)
+        val shortcuts = JPanel(MigLayout("insets 0, gap 0, wrap 1", "[fill]")).apply {
+            isOpaque = false
+            val firstDay = firstDay
+            for (shortcut in TimeShortcut.entries) {
+                val button = toolBarButton(null, "Insert this time, worked out from now", shortcut.label) {
+                    pick(shortcut.at(ZonedDateTime.now(zone), firstDay))
+                }
+                button.horizontalAlignment = SwingConstants.LEADING
+                add(button)
+            }
+            isVisible = !dateless
+        }
         val header = JPanel(MigLayout("insets 0, gap 0", "[][grow, fill][]")).apply {
             isOpaque = false
             add(toolBarButton(Icons.get("general/chevronLeft"), "Previous month (Page Up)") { moveMonths(-1) })
@@ -102,19 +138,24 @@ internal class TimePicker private constructor(
             isVisible = !dateless
         }
         grid.isVisible = !dateless
-        val time = JPanel(MigLayout("insets 0, gap 2")).apply {
+        val timeRow = JPanel(MigLayout("insets 0, gap 0")).apply {
             isOpaque = false
             add(JLabel("Time"), "gapright 6")
-            add(hour)
-            add(JLabel(":"))
-            add(minute)
-            add(JLabel(":"))
-            add(second)
+            add(time)
+            // What the time keeps of a typed time below a second.
+            if (fraction != 0) {
+                val kept = JLabel(fractionText())
+                kept.foreground = UIManager.getColor("Label.disabledForeground")
+                kept.toolTipText = "Kept from the time typed"
+                add(kept, "gapleft 2")
+            }
         }
+        time.addActionListener { pick() }
         val pick = JButton("Insert").apply { addActionListener { pick() } }
-        content.add(header)
-        content.add(grid)
-        content.add(time, "split 2")
+        content.add(shortcuts, "spany 3, top")
+        content.add(header, "wrap")
+        content.add(grid, "wrap")
+        content.add(timeRow, "split 2")
         content.add(pick, "gapleft push")
         contentPane = content
         rootPane.defaultButton = pick
@@ -127,22 +168,17 @@ internal class TimePicker private constructor(
         pack()
     }
 
-    private fun timeSpinner(value: Int, max: Int) = JSpinner(SpinnerNumberModel(value, 0, max, 1)).apply {
-        editor = JSpinner.NumberEditor(this, "00")
-        val text = (editor as JSpinner.DefaultEditor).textField
-        text.columns = 2
-        // The spinner's own field would keep Enter to commit its text.
-        bind(text, "ENTER", "logxyPickTime", JComponent.WHEN_FOCUSED) {
-            text.commitEdit()
-            pick()
-        }
-    }
-
     private fun bind(component: JComponent, key: String, name: String, condition: Int, action: () -> Unit) {
         component.getInputMap(condition).put(KeyStroke.getKeyStroke(key), name)
         component.actionMap.put(name, object : AbstractAction() {
             override fun actionPerformed(e: ActionEvent) = action()
         })
+    }
+
+    /** [fraction] as it follows the seconds: milliseconds, or nanoseconds if it has finer digits. */
+    private fun fractionText(): String {
+        if (fraction % NANOS_PER_MILLI == 0) return ".%03d".format(fraction / NANOS_PER_MILLI)
+        return ".%09d".format(fraction)
     }
 
     private fun moveMonths(months: Long) {
@@ -162,10 +198,15 @@ internal class TimePicker private constructor(
         grid.repaint()
     }
 
-    /** Writes the picked time into the field, and closes. */
+    /** Writes the time picked in the calendar and the time field into the field, and closes. */
     private fun pick() {
-        val time = LocalTime.of(hour.value as Int, minute.value as Int, second.value as Int, fraction)
-        val instant = LocalDateTime.of(selected, time).atZone(zone).toInstant()
+        val timeOfDay = LocalTime.ofSecondOfDay(time.secondOfDay.toLong()).withNano(fraction)
+        pick(LocalDateTime.of(selected, timeOfDay).atZone(zone))
+    }
+
+    /** Writes [picked] into the field, and closes. */
+    private fun pick(picked: ZonedDateTime) {
+        val instant = picked.toInstant()
         field.text = TimeLiteral.format(instant.epochSecond * NANOS_PER_SECOND + instant.nano, zone)
         dispose()
         field.requestFocusInWindow()
@@ -283,7 +324,7 @@ internal class TimePicker private constructor(
             val picker = TimePicker(owner, field, start, log?.days.orEmpty())
             picker.place(field)
             picker.isVisible = true
-            if (picker.dateless) picker.hour.requestFocusInWindow() else picker.grid.requestFocusInWindow()
+            if (picker.dateless) picker.time.requestFocusInWindow() else picker.grid.requestFocusInWindow()
         }
 
         private fun atZone(nanos: Long, zone: ZoneId): ZonedDateTime =
