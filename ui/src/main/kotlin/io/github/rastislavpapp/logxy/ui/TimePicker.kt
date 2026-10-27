@@ -98,13 +98,9 @@ internal enum class TimeShortcut(
 }
 
 /**
- * A button for the end of [field] that opens a [TimePicker] under it, or closes the one open. [log] gives what the
- * picker opens on; null when there is nothing to pick from.
+ * Makes a click in this field open a [TimePicker] under it while [active], with what [log] gives; null when there is
+ * nothing to pick from.
  */
-fun timePickerButton(field: JTextField, log: () -> TimePickerLog?) =
-    toolBarButton(CalendarIcon, "Pick a date and time") { TimePicker.toggle(field, log()) }
-
-/** Makes a click in this field open a [TimePicker] under it while [active], with what [log] gives. */
 fun JTextField.picksTimeOnClick(log: () -> TimePickerLog?, active: () -> Boolean) {
     val field = this
     addMouseListener(object : MouseAdapter() {
@@ -563,12 +559,6 @@ internal class TimePicker private constructor(
     }
 
     companion object {
-        /** Opens a picker under [field] unless one is open there, or closes it. */
-        fun toggle(field: JTextField, log: TimePickerLog?) {
-            val open = field.getClientProperty(OPEN_PICKER) as TimePicker?
-            if (open != null) open.dispose() else open(field, log)
-        }
-
         /**
          * Opens a picker under [field], unless one is open there, on the time it holds if that is an absolute time (a
          * time alone on the day of [log]'s fallback time, as Go to reads it), else on the fallback time to the second;

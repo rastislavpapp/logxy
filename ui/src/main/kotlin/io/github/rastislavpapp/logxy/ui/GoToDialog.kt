@@ -41,8 +41,9 @@ class GoToDialog(
         look.placeholder(this, "Time, e.g. 14:32:05 or -10m")
         toolTipText = "<html>A time, such as 2026-10-09 14:32:05.250, or 14:32 on the selected row's day;<br>" +
             "or a time from the selected row's: 1h30m forward, -10s back (units s, m, h, d)</html>"
-        withToggles(timePickerButton(this, pickerLog))
         limitPaste()
+        // As in a filter's time value, a click opens a time picker.
+        picksTimeOnClick(pickerLog) { true }
     }
 
     /** Under the field: what can be typed, or why the text is no time. */
@@ -51,9 +52,10 @@ class GoToDialog(
     init {
         val ok = JButton("OK").apply { addActionListener { go() } }
         val cancel = JButton("Cancel").apply { addActionListener { dispose() } }
+        // The same width, never narrower than their text, whatever the look's font.
         val buttons = JPanel(MigLayout("insets 0", "push[]6[]")).apply {
-            add(ok, "sg button")
-            add(cancel, "sg button")
+            add(ok, "sg button, wmin pref")
+            add(cancel, "sg button, wmin pref")
         }
         contentPane = JPanel(MigLayout("insets dialog, wrap 2", "[]6[grow, fill]")).apply {
             add(JLabel("Time:"))
