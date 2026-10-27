@@ -49,7 +49,7 @@ The logo's source is `app/src/main/resources/logxy.svg`. The packaging icons in 
 
 - Branch from `main` and keep each pull request to one change.
 - `./gradlew build` must pass; it runs the tests and detekt, and fails when the app or the plugin bundles a library missing from [THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md).
-- Follow the commit rules in [AGENTS.md](AGENTS.md#commits).
+- Follow the commit rules in [AGENTS.md](AGENTS.md#commits), and its plugin changelog rule in [Rules](AGENTS.md#rules).
 - Describe what changed and how you checked it. A screenshot helps for UI changes.
 
 ## Releasing (maintainers)
@@ -67,8 +67,6 @@ git tag 0.1.0 && git push origin 0.1.0
 ```
 
 A tag without a section in `logxy-intellij-plugin/CHANGELOG.md` fails the release. When the section has entries, the workflow then publishes the plugin, signed, to JetBrains Marketplace; when it has none, the plugin did not change and Marketplace gets no new version, so Marketplace versions may skip numbers. The GitHub release always has the plugin zip.
-
-**The plugin's changelog** lists what a plugin user notices. Changes in `core` or `ui` that show in the plugin get an entry too, not only those in `logxy-intellij-plugin`.
 
 **Marketplace setup**, once:
 
