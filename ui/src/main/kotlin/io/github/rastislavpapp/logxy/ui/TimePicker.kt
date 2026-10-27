@@ -63,8 +63,8 @@ fun timePickerButton(field: JTextField, log: () -> TimePickerLog?) =
     toolBarButton(CalendarIcon, "Pick a date and time") { TimePicker.open(field, log()) }
 
 /**
- * A popup under a time field: a month calendar and hour, minute and second spinners; finer parts are kept from the
- * time it opened on. Times are in the zone the filter uses. For a log whose timestamps carry no date, which
+ * A popup under a time field: a month calendar and hour, minute and second spinners; finer parts are kept from a
+ * typed time it opened on. Times are in the zone the filter uses. For a log whose timestamps carry no date, which
  * [TimeLiteral] puts on 1970-01-01, only the time shows. Arrows move the day, Page Up and Page Down the month, Enter
  * picks, Esc closes; so does clicking elsewhere.
  */
@@ -264,26 +264,23 @@ internal class TimePicker private constructor(
     }
 
     companion object {
-        /** Where a picker opens on [field] whose text is a date and time, as [TimeLiteral] reads it. */
-        private val DATED = Regex("""\s*\d{4}-.*""")
-
         /**
-         * Opens a picker under [field], on the time it holds if that is an absolute time, else on [log]'s fallback
-         * time; does nothing if there is neither.
+         * Opens a picker under [field], on the time it holds if that is an absolute time (a time alone on the day of
+         * [log]'s fallback time, as Go to reads it), else on the fallback time to the second; does nothing if there
+         * is neither.
          */
         fun open(field: JTextField, log: TimePickerLog?) {
             val owner = SwingUtilities.getWindowAncestor(field) ?: return
             val zone = ZoneId.systemDefault()
-            val fallback = log?.fallback
-            // A time alone is absolute only in a log whose times carry no date either, which are all on 1970-01-01.
-            val undatedLog = fallback != null && atZone(fallback, zone).toLocalDate() == LocalDate.EPOCH
+            val fallback = log?.fallback?.let { atZone(it, zone) }
+            val day = fallback?.toLocalDate() ?: LocalDate.EPOCH
             val typed = try {
-                if (DATED.matches(field.text) || undatedLog) TimeLiteral.parse(field.text, zone) else null
+                atZone(TimeLiteral.parse(field.text, zone, day), zone)
             } catch (_: QueryException) {
                 null
             }
-            val start = typed ?: fallback ?: return
-            val picker = TimePicker(owner, field, atZone(start, zone), log?.days.orEmpty())
+            val start = typed ?: fallback?.withNano(0) ?: return
+            val picker = TimePicker(owner, field, start, log?.days.orEmpty())
             picker.place(field)
             picker.isVisible = true
             if (picker.dateless) picker.hour.requestFocusInWindow() else picker.grid.requestFocusInWindow()

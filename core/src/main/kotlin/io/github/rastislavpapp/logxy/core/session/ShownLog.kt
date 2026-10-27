@@ -236,8 +236,10 @@ class ShownLog internal constructor(private val loaded: LoadedLog) {
         val rowTime = timeFrom(row)
         if (rowTime == Records.NO_TIMESTAMP || rowTime < time) return TimeLanding(row, TimeLanding.Miss.PAST_LAST)
         if (rows == null) return TimeLanding(row, miss = null)
+        // Hidden records at the row's time do not count: a record at that time still shows.
         val firstRecord = firstAt(time, records.recordCount, ::recordTimeFrom)
-        val miss = if (firstRecord < recordAt(row)) TimeLanding.Miss.HIDDEN else null
+        val firstAtRow = firstAt(rowTime, records.recordCount, ::recordTimeFrom)
+        val miss = if (firstRecord < firstAtRow) TimeLanding.Miss.HIDDEN else null
         return TimeLanding(row, miss)
     }
 

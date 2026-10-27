@@ -148,7 +148,7 @@ object SessionArgs {
                 TOP_ARG -> groups.last().let { it.top = start(it) }
                 SHIFTS_ARG -> groups.last().let { group ->
                     val texts = value().split(',')
-                    val shifts = group.paths.indices.map { TimestampShift.parse(texts.getOrElse(it) { "" }) ?: 0L }
+                    val shifts = group.paths.indices.map { TimestampShift.read(texts.getOrNull(it)) }
                     group.shifts = OpenSession.keptShifts(shifts)
                 }
                 SELECT_ARG -> selected = value().toIntOrNull() ?: 0

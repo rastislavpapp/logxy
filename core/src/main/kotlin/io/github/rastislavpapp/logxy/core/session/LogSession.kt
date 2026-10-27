@@ -185,7 +185,9 @@ class LogSession internal constructor(
 
     private val redetectionClock = redetection?.let(::RedetectionClock)
 
-    private var sources = paths.mapIndexed { i, path -> Source(path, chosen.getOrNull(i), shifts.getOrElse(i) { 0 }) }
+    private var sources = paths.mapIndexed { i, path ->
+        Source(path, chosen.getOrNull(i), TimestampShift.of(shifts, i))
+    }
         set(value) {
             field = value
             sourceNames = MergedLog.sourceNames(paths, origin)
@@ -395,7 +397,8 @@ class LogSession internal constructor(
         require(shifts.size == sources.size) { "${shifts.size} shifts for ${sources.size} files" }
         if (shifts == this.shifts) return
         sources.forEachIndexed { i, source -> source.shift = shifts[i] }
-        reload("timestamp shifts: " + shifts.joinToString { TimestampShift.format(it).ifEmpty { "none" } })
+        val texts = shifts.map(TimestampShift::format)
+        reload("timestamp shifts: " + texts.joinToString { it.ifEmpty { "none" } })
     }
 
     /** Starts over with the files now at [paths], e.g. after rotation, truncation or a parser change. */

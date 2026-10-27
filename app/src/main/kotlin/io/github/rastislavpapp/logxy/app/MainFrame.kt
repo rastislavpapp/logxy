@@ -9,6 +9,7 @@ import io.github.rastislavpapp.logxy.core.config.OpenMode
 import io.github.rastislavpapp.logxy.core.config.Settings
 import io.github.rastislavpapp.logxy.core.formatTimeSpan
 import io.github.rastislavpapp.logxy.core.merge.MergedLog
+import io.github.rastislavpapp.logxy.core.merge.TimestampShift
 import io.github.rastislavpapp.logxy.core.open.Decision
 import io.github.rastislavpapp.logxy.core.open.Found
 import io.github.rastislavpapp.logxy.core.open.FoundFile
@@ -499,7 +500,7 @@ class MainFrame : JFrame("logxy") {
         val openable = files.indices.filter { checkOpenable(files[it]) }
         val openableFiles = openable.map { files[it] }
         val openableParsers = openable.map { parsers[it] }
-        val openableShifts = openable.map { shifts.getOrElse(it) { 0 } }
+        val openableShifts = openable.map { TimestampShift.of(shifts, it) }
         log.info("Opening files $openableFiles with mode=$mode")
         perform(TabPlan.open(mode, openableFiles, openableParsers, openSessions(), index, openableShifts))
     }
@@ -577,7 +578,7 @@ class MainFrame : JFrame("logxy") {
                 } else {
                     files[stored] = file
                     parsers += session.parsers.getOrNull(i)
-                    shifts += session.shifts.getOrElse(i) { 0 }
+                    shifts += TimestampShift.of(session.shifts, i)
                 }
             }
             val position = session.position?.mapFiles(files::get)
