@@ -26,6 +26,9 @@ internal const val HISTOGRAM_HEIGHT = 40
 internal const val HISTOGRAM_PADDING = 4
 private const val MATCH_STRIP_HEIGHT = 3
 
+/** How far a bookmark's tick reaches down from the top edge, in unscaled pixels. */
+private const val BOOKMARK_TICK_HEIGHT = 7
+
 /** Pixels per slice of time: wide enough that counts are not mostly noise, narrow enough to look continuous. */
 private const val SLICE_WIDTH = 2
 
@@ -37,7 +40,8 @@ internal const val DRAG_THRESHOLD = 3
  * scale, so heights compare truthfully. The scale is the square root, so one spike does not flatten the rest
  * and a burst that is a small share of all records still rises well off the bottom. The selected rows, or the
  * top row in view, are marked. The records a search found are a strip along the bottom, in every slice with a match;
- * [found] counts them on bins of their own, which are mapped onto the slices by time.
+ * [found] counts them on bins of their own, which are mapped onto the slices by time. Each slice with a bookmarked
+ * record among the [bookmarks], their times, has a tick at the top edge.
  * Clicking calls [onJump] with the slice there; dragging calls [onRange] with the times covered; the
  * context menu calls [onShowAllTimes] when [hasTimeRange].
  *
@@ -50,6 +54,7 @@ internal const val DRAG_THRESHOLD = 3
 class TimeHistogramBar(
     private val histogram: () -> TimeHistogram?,
     private val found: () -> TimeHistogram? = { null },
+    private val bookmarks: () -> LongArray = { LongArray(0) },
 ) : JComponent() {
 
     /**
@@ -98,7 +103,12 @@ class TimeHistogramBar(
     private var selection: IntRange? = null
 
     /** The histogram as painted, sliced by [layout]. */
-    private class Slices(val histogram: TimeHistogram, layout: SliceLayout, found: TimeHistogram?) {
+    private class Slices(
+        val histogram: TimeHistogram,
+        layout: SliceLayout,
+        found: TimeHistogram?,
+        bookmarkTimes: LongArray,
+    ) {
         val first = layout.first
         val group = layout.group
         val count = layout.count
@@ -109,6 +119,9 @@ class TimeHistogramBar(
         /** Matches of the search per slice; null if there is no search. */
         val matches: IntArray? = found?.let { IntArray(count) }
 
+        /** Bookmarked records per slice. */
+        val bookmarks = IntArray(count)
+
         init {
             for (bin in first..histogram.lastBin) {
                 val slice = (bin - first) / group
@@ -118,6 +131,10 @@ class TimeHistogramBar(
             }
             for (i in 0..<count) totals[i] += warnings[i] + errors[i]
             if (found != null && matches != null) addMatches(found, matches)
+            for (time in bookmarkTimes) {
+                val slice = Math.floorDiv(time - start(0), start(1) - start(0))
+                if (slice in 0..<count) bookmarks[slice.toInt()]++
+            }
         }
 
         /**
@@ -238,7 +255,7 @@ class TimeHistogramBar(
     private fun slices(): Slices? {
         val histogram = histogram() ?: return null
         val layout = layout(histogram, width) ?: return null
-        return Slices(histogram, layout, found())
+        return Slices(histogram, layout, found(), bookmarks())
     }
 
     /** [count] slices of [group] bins each, the first starting at bin [first]. */
@@ -277,6 +294,7 @@ class TimeHistogramBar(
             paintLine(g2, slices, slices.warnings, peak, look.warning)
             paintLine(g2, slices, slices.errors, peak, look.error)
             paintPeak(g2, slices)
+            paintBookmarks(g2, slices)
             val accent = look.accent
             markedTimes?.let { (from, to) ->
                 val x1 = timeX(slices, from)
@@ -313,6 +331,18 @@ class TimeHistogramBar(
             if (matches[slice] == 0) continue
             val x = sliceX(slices, slice)
             g2.fillRect(x, chartBottom - strip, maxOf(1, sliceX(slices, slice + 1) - x), strip)
+        }
+    }
+
+    /** A short tick down from the top edge in every slice with a bookmarked record, at least 2 pixels wide. */
+    private fun paintBookmarks(g2: Graphics2D, slices: Slices) {
+        g2.color = look.accent
+        val tick = look.scale(BOOKMARK_TICK_HEIGHT)
+        val narrowest = look.scale(2)
+        for (slice in 0..<slices.count) {
+            if (slices.bookmarks[slice] == 0) continue
+            val x = sliceX(slices, slice)
+            g2.fillRect(x, 0, maxOf(narrowest, sliceX(slices, slice + 1) - x), tick)
         }
     }
 
@@ -393,6 +423,7 @@ class TimeHistogramBar(
             slices.errors[i].takeIf { it > 0 }?.let { add(count(it, "error")) }
             slices.warnings[i].takeIf { it > 0 }?.let { add(count(it, "warning")) }
             slices.matches?.get(i)?.takeIf { it > 0 }?.let { add(count(it, "match", "matches")) }
+            slices.bookmarks[i].takeIf { it > 0 }?.let { add(count(it, "bookmark")) }
         }
         val lines = listOf(
             formatTimeRange(slices.start(i), slices.start(i + 1), zone, multiDay) to

@@ -22,6 +22,7 @@ import io.github.rastislavpapp.logxy.core.open.SessionFiles
 import io.github.rastislavpapp.logxy.core.open.TabAction
 import io.github.rastislavpapp.logxy.core.open.TabPlan
 import io.github.rastislavpapp.logxy.core.parse.Parser
+import io.github.rastislavpapp.logxy.ui.BookmarkAction
 import io.github.rastislavpapp.logxy.ui.FileDropHandler
 import io.github.rastislavpapp.logxy.ui.Icons
 import io.github.rastislavpapp.logxy.ui.LogTab
@@ -314,6 +315,15 @@ class MainFrame : JFrame("logxy") {
                 selectedTab()?.findNext(forward = false)
             })
             add(menuItem("Go To…", null, KeyEvent.VK_G, shortcut) { selectedTab()?.showGoTo() })
+            addSeparator()
+            // The rows have the same keys while they have the focus; these are for the rest of the window.
+            val bookmarkKeys = BookmarkAction.defaultKeys()
+            for (action in BookmarkAction.entries) {
+                add(JMenuItem(action.label, action.icon).apply {
+                    accelerator = bookmarkKeys[action]
+                    addActionListener { selectedTab()?.runBookmarkAction(action) }
+                })
+            }
             addSeparator()
             add(menuItem("Edit Filter", Icons.filter, KeyEvent.VK_F, shortcut or InputEvent.SHIFT_DOWN_MASK) {
                 selectedTab()?.focusFilter()

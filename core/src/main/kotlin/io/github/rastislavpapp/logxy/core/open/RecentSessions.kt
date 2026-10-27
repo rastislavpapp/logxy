@@ -71,10 +71,13 @@ data class RecentSessions(val recent: List<OpenSession> = emptyList(), val atExi
          * recent.1.lead.offset=4096
          * recent.1.top.file=1
          * recent.1.top.offset=0
+         * recent.1.bookmark.1.file=1
+         * recent.1.bookmark.1.offset=512
          * open.1.file.1=/logs/b.log
          * open.selected=1
          * ```
-         * A position's file is the number of one of the session's files. Sessions without files are skipped.
+         * A position's file, also a bookmark's, is the number of one of the session's files; bookmarks are numbered
+         * from 1 without gaps. Sessions without files are skipped.
          */
         fun fromProperties(properties: Properties): RecentSessions {
             val recent = sessions(properties, RECENT)
@@ -115,6 +118,9 @@ data class RecentSessions(val recent: List<OpenSession> = emptyList(), val atExi
             }
             writeStart("lead", session.position?.lead)
             writeStart("top", session.position?.top)
+            // Numbered without gaps, as reading stops at the first one missing.
+            val bookmarks = session.position?.bookmarks.orEmpty().filter { session.fileNumber(it) != null }
+            bookmarks.forEachIndexed { i, start -> writeStart("bookmark.${i + 1}", start) }
         }
 
         /** The sessions stored under `[name].N.`, in the order of N. */
@@ -145,7 +151,11 @@ data class RecentSessions(val recent: List<OpenSession> = emptyList(), val atExi
             }
             val lead = readStart("lead")
             val top = readStart("top")
-            val position = if (lead == null && top == null) null else SessionPosition(lead, top)
+            val bookmarks = generateSequence(1) { it + 1 }
+                .takeWhile { properties.getProperty("${prefix}bookmark.$it.offset") != null }
+                .mapNotNull { readStart("bookmark.$it") }
+                .toList()
+            val position = SessionPosition.of(lead, top, bookmarks)
             return OpenSession(paths, parsers, filter, position, OpenSession.keptShifts(shifts))
         }
     }

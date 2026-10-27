@@ -13,7 +13,7 @@ A zip or tar file, possibly compressed, or a single compressed file, whose files
 _Avoid_: bundle, package
 
 **Recent session**:
-A closed session as it can be opened again: its files, the parser chosen for each and its timestamp shift, its filter, and its position (the selection's lead record and the top row's record, by where each starts in its file).
+A closed session as it can be opened again: its files, the parser chosen for each and its timestamp shift, its filter, its position (the selection's lead record and the top row's record) and its bookmarks, each record by where it starts in its file.
 _Avoid_: recent file, history entry
 
 **Timestamp shift**:
@@ -63,6 +63,10 @@ _Avoid_: argument
 **Shown log**:
 The records of one load as the user sees them: all of them, or a filter's result. It ends when the session reloads or closes.
 _Avoid_: view, shown rows, filtered rows
+
+**Bookmark**:
+A record the user chose to come back to. It stays until the user removes it, also when the session reloads, and a recent session keeps it.
+_Avoid_: mark (that is the text a query or find matched), flag, pin
 
 **Selection**:
 The rows the user marked in a shown log. It ends with the shown log, except that the record at its lead stays selected when the next shown log still shows it.

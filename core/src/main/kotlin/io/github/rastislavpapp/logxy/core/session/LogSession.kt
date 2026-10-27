@@ -586,6 +586,43 @@ class LogSession internal constructor(
         return loaded.recordOf(part, low)
     }
 
+    private val bookmarkStore = Bookmarks(::startOf, ::recordAt)
+
+    // The records as bookmarks are found in: an appended record of a merge can come between earlier ones.
+    private val bookmarkLoad: Any? get() = loaded?.let { it to it.records.recordCount }
+
+    /** The bookmarked records of the loaded records, sorted; empty while nothing is loaded. */
+    val bookmarks: IntArray get() = bookmarkStore.records(bookmarkLoad)
+
+    /**
+     * Where each bookmarked record starts, to keep the bookmarks for when the session opens again. It can be set
+     * before the records are loaded, e.g. to the bookmarks of a recent session: the session finds their records once
+     * it has loaded, and drops a bookmark whose record no longer starts where it did.
+     */
+    var bookmarkStarts: List<RecordStart<Path>>
+        get() = bookmarkStore.starts(bookmarkLoad)
+        set(value) = bookmarkStore.restore(value)
+
+    /**
+     * Removes the bookmarks of [records] if every one has one, else bookmarks them all, up to [MAX_BOOKMARKS]. Reads
+     * only as many of [records] as it needs. Null, having done nothing, while nothing is loaded.
+     */
+    fun toggleBookmarks(records: Sequence<Int>): BookmarkToggle? {
+        val load = bookmarkLoad ?: return null
+        return bookmarkStore.toggle(load, records)
+    }
+
+    fun removeAllBookmarks() = bookmarkStore.clear()
+
+    /** The bookmarked records the shown log shows, sorted; the filter hides the others, which keep their bookmark. */
+    fun shownBookmarks(): IntArray {
+        val shown = shown ?: return IntArray(0)
+        return bookmarks.filter { record ->
+            val row = shown.rowOf(record)
+            row >= 0 && shown.recordAt(row) == record
+        }.toIntArray()
+    }
+
     /** Cancels running work and releases the files. */
     fun dispose() {
         settings.removeListener(settingsListener)

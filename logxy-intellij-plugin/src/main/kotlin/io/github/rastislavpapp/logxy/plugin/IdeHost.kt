@@ -1,10 +1,15 @@
 package io.github.rastislavpapp.logxy.plugin
 
 import com.intellij.ide.util.PropertiesComponent
+import com.intellij.openapi.actionSystem.ActionManager
+import com.intellij.openapi.actionSystem.CustomShortcutSet
+import com.intellij.openapi.actionSystem.KeyboardShortcut
 import com.intellij.openapi.options.ShowSettingsUtil
+import com.intellij.openapi.project.DumbAwareAction
 import com.intellij.openapi.project.Project
 import io.github.rastislavpapp.logxy.core.parse.Parser
 import io.github.rastislavpapp.logxy.core.query.TextSearch
+import io.github.rastislavpapp.logxy.ui.BookmarkAction
 import io.github.rastislavpapp.logxy.ui.DetailPane
 import io.github.rastislavpapp.logxy.ui.FindView
 import io.github.rastislavpapp.logxy.ui.LogViewHost
@@ -16,6 +21,7 @@ import kotlinx.coroutines.CoroutineDispatcher
 import java.awt.Window
 import java.nio.file.Path
 import javax.swing.JComponent
+import javax.swing.KeyStroke
 import javax.swing.SwingUtilities
 import kotlin.coroutines.CoroutineContext
 
@@ -61,7 +67,35 @@ class IdeHost(private val project: Project) : LogViewHost, SettingsDialogs {
     ): List<Parser?>? = null
 
     override val moreMemoryHint get() = "Give the IDE more memory in Help › Change Memory Settings to copy more."
+
+    // The keys of the IDE's own bookmark actions, as the keymap has them, so a user's bindings work here too. The
+    // app's Ctrl+F2 would take Stop away from a run's tab.
+    override fun bindBookmarkKeys(rows: JComponent, run: (BookmarkAction) -> Unit): Map<BookmarkAction, KeyStroke> {
+        val keys = HashMap<BookmarkAction, KeyStroke>()
+        // The app's keys for the actions the keymap has no key for, as by default for next and previous; not its
+        // toggle key.
+        val fallbacks = BookmarkAction.defaultKeys() - BookmarkAction.TOGGLE
+        for ((action, id) in BOOKMARK_ACTIONS) {
+            val ideAction = ActionManager.getInstance().getAction(id)
+            val bound = ideAction?.shortcutSet?.shortcuts.orEmpty()
+            val fallback = fallbacks[action]?.let { KeyboardShortcut(it, null) }
+            val shortcuts = if (bound.isNotEmpty()) bound.toList() else listOfNotNull(fallback)
+            if (shortcuts.isEmpty()) continue
+            val shortcutSet = CustomShortcutSet(*shortcuts.toTypedArray())
+            DumbAwareAction.create { run(action) }.registerCustomShortcutSet(shortcutSet, rows)
+            val single = shortcuts.filterIsInstance<KeyboardShortcut>().firstOrNull { it.secondKeyStroke == null }
+            if (single != null) keys[action] = single.firstKeyStroke
+        }
+        return keys
+    }
 }
+
+/** The IDE actions whose keys run the bookmark actions in a run's view. */
+private val BOOKMARK_ACTIONS = mapOf(
+    BookmarkAction.TOGGLE to "ToggleBookmark",
+    BookmarkAction.NEXT to "GotoNextBookmark",
+    BookmarkAction.PREVIOUS to "GotoPreviousBookmark",
+)
 
 /** The views' UI state, among the IDE's application properties. */
 object IdeUiState : UiState {

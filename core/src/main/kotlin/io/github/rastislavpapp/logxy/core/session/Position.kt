@@ -10,9 +10,13 @@ data class RecordStart<F>(val file: F, val offset: Long) {
 
 /**
  * Where a session's shown log was, to go back there when the session opens again: the [lead] record of the
- * selection and the record in the [top] visible row, each null if there was none.
+ * selection and the record in the [top] visible row, each null if there was none, and the session's [bookmarks].
  */
-data class SessionPosition<F>(val lead: RecordStart<F>?, val top: RecordStart<F>?) {
+data class SessionPosition<F>(
+    val lead: RecordStart<F>?,
+    val top: RecordStart<F>?,
+    val bookmarks: List<RecordStart<F>> = emptyList(),
+) {
 
     /** This position with each file turned into another form by [file]; a start whose file it maps to null is lost. */
     fun <G : Any> mapFiles(file: (F) -> G?): SessionPosition<G> {
@@ -21,6 +25,14 @@ data class SessionPosition<F>(val lead: RecordStart<F>?, val top: RecordStart<F>
             val mapped = file(start.file) ?: return null
             return start.withFile(mapped)
         }
-        return SessionPosition(map(lead), map(top))
+        return SessionPosition(map(lead), map(top), bookmarks.mapNotNull(::map))
+    }
+
+    companion object {
+        /** The position of [lead], [top] and [bookmarks]; null if there is none of them. */
+        fun <F> of(lead: RecordStart<F>?, top: RecordStart<F>?, bookmarks: List<RecordStart<F>>): SessionPosition<F>? {
+            if (lead == null && top == null && bookmarks.isEmpty()) return null
+            return SessionPosition(lead, top, bookmarks)
+        }
     }
 }
