@@ -16,11 +16,12 @@
 - **Formats detected for you.** Log4j and logback patterns, Spring Boot's default log output, Python's logging, JSON lines (logstash and ECS style), logfmt, CSV files with a header row (`.csv`, comma or semicolon separated), MDC maps (one column per key) and raw text are recognised from the first lines. For a format logxy doesn't know, it infers a parser from the lines themselves. You can also define your own with a pattern, a regex or a JSON key mapping, or save a detected one and adjust it.
 - **Visual filters.** Combine conditions on any column in all / any / none groups: contains, wildcards, regular expressions, case-sensitive matching, level and time ranges. Or type the filter as text, such as `level >= WARN AND thread == "main*"`. Right-click a cell to copy it or filter by its value. Save filters for later.
 - **Row highlights.** Give the rows a query matches a background colour, in every log you open, to spot them without filtering the rest away.
+- **Bookmarks.** Bookmark records to come back to with Ctrl+F2, or a click in the strip left of the rows, and step through them with F2 and Shift+F2. They stay through a reload and a filter, and show on the time histogram.
 - **Time histogram.** Record volume with warnings and errors over time, and where search matches fall. Click to jump there, drag to narrow to a time range.
 - **Templates.** logxy groups lines that are the same message with different values: `Request 4711 done in 12 ms` and `Request 4712 done in 230 ms` are both `Request {1} done in {2} ms`. The Templates panel lists these message kinds with how often each occurs, so you can show or hide a whole kind at once, and chart a value, such as the duration, over time.
 - **Merging.** Open several files together in one session, interleaved by timestamp, even when each needs a different parser. A Source column tells the files apart.
 - **Following.** Live files are tailed as they grow, including rotation and truncation.
-- **Recent sessions.** Reopen a closed session with its files, parsers, filter and position, or have the sessions open at exit reopen on start.
+- **Recent sessions.** Reopen a closed session with its files, parsers, filter, position and bookmarks, or have the sessions open at exit reopen on start.
 - **Compressed files and folders.** Open `.zip`, `.gz` and `.zst` files, or a whole folder of logs.
 - **Themes.** Light and dark, with a choice of FlatLaf and IntelliJ themes.
 - **IntelliJ plugin.** The same viewer in the Run and Debug tool windows of IntelliJ-based IDEs; see [below](#intellij-plugin).

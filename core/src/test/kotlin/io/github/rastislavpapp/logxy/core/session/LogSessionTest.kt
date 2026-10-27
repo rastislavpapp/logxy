@@ -1676,4 +1676,132 @@ class LogSessionTest {
         awaitHighlights(session, 240, ::fromB)
         withContext(ui) { session.dispose() }
     }
+
+    @Test
+    fun `toggling bookmarks adds all of the records unless every one is bookmarked, then removes them`() =
+        runBlocking {
+            val file = Files.writeString(dir.resolve("bookmarks.log"), lines(10))
+            val (session, _) = open(file, Recorder())
+            withContext(ui) {
+                assertEquals(BookmarkToggle.ADDED, session.toggleBookmarks(sequenceOf(2, 5)))
+                assertEquals(listOf(2, 5), session.bookmarks.toList())
+                // Mixed: 5 is bookmarked, 7 is not.
+                assertEquals(BookmarkToggle.ADDED, session.toggleBookmarks(sequenceOf(5, 7)))
+                assertEquals(listOf(2, 5, 7), session.bookmarks.toList())
+                assertEquals(BookmarkToggle.REMOVED, session.toggleBookmarks(sequenceOf(2, 7)))
+                assertEquals(listOf(5), session.bookmarks.toList())
+                session.removeAllBookmarks()
+                assertEquals(emptyList<Int>(), session.bookmarks.toList())
+                session.dispose()
+            }
+        }
+
+    @Test
+    fun `bookmarks stop at the limit, also for a selection of all records`() = runBlocking {
+        val file = Files.writeString(dir.resolve("limit.log"), lines(300))
+        val (session, _) = open(file, Recorder())
+        withContext(ui) {
+            assertEquals(BookmarkToggle.ADDED, session.toggleBookmarks(sequenceOf(250, 260)))
+            assertEquals(BookmarkToggle.LIMITED, session.toggleBookmarks((0..<300).asSequence()))
+            assertEquals((0..<98).toList() + listOf(250, 260), session.bookmarks.toList())
+            // All are bookmarked already: the selection is not every one of them, so nothing is removed.
+            assertEquals(BookmarkToggle.LIMITED, session.toggleBookmarks((0..<300).asSequence()))
+            assertEquals(MAX_BOOKMARKS, session.bookmarks.size)
+            assertEquals(BookmarkToggle.REMOVED, session.toggleBookmarks((0..<98).asSequence()))
+            assertEquals(listOf(250, 260), session.bookmarks.toList())
+            session.dispose()
+        }
+    }
+
+    @Test
+    fun `bookmarks survive a reload and appended records, and those past a truncated file's end are dropped`() =
+        runBlocking {
+            val text = lines(100)
+            val file = Files.writeString(dir.resolve("kept.log"), text)
+            val recorder = Recorder()
+            val (session, _) = open(file, recorder)
+            withContext(ui) { session.toggleBookmarks(sequenceOf(3, 40, 90)) }
+            withContext(ui) { session.reload() }
+            withTimeout(10_000) { recorder.loads.receive() }
+            assertEquals(listOf(3, 40, 90), withContext(ui) { session.bookmarks.toList() })
+            append(file, lines(20))
+            session.grew()
+            awaitUi { session.records?.recordCount == 120 }
+            assertEquals(listOf(3, 40, 90), withContext(ui) { session.bookmarks.toList() })
+            // The first 50 records again, so record 90 is past the end.
+            Files.writeString(file, text.lines().take(50).joinToString("\n", postfix = "\n"))
+            withTimeout(10_000) { recorder.loads.receive() }
+            withContext(ui) {
+                assertEquals(listOf(3, 40), session.bookmarks.toList())
+                assertEquals(listOf(3, 40), session.bookmarkStarts.map { session.recordAt(it) })
+                session.dispose()
+            }
+        }
+
+    @Test
+    fun `a merge's bookmarks follow its records when appends interleave them and when a shift changes`() =
+        runBlocking {
+            fun at(seconds: IntProgression) = buildString {
+                for (i in seconds) {
+                    append("2026-10-01 08:%02d:%02d.000 [main] INFO  app.L - message %d\n".format(i / 60, i % 60, i))
+                }
+            }
+            val a = Files.writeString(dir.resolve("a.log"), at(0..<20 step 2))
+            val b = Files.writeString(dir.resolve("b.log"), at(1..<10 step 2))
+            val recorder = Recorder()
+            val (session, shown) = open(listOf(a, b), recorder)
+            fun message(record: Int) = session.shown!!.fieldText(record, shown.schema.indexOf(Role.MESSAGE))
+            // Messages 8 (from a) and 12 (from a, after b's last record).
+            withContext(ui) {
+                session.toggleBookmarks(sequenceOf(8, 11))
+                assertEquals(listOf("message 8", "message 12"), session.bookmarks.map(::message))
+            }
+            // b catches up, its records going in between a's.
+            append(b, at(11..<20 step 2))
+            session.grew()
+            awaitUi { session.records?.recordCount == 20 }
+            withContext(ui) { assertEquals(listOf("message 8", "message 12"), session.bookmarks.map(::message)) }
+            withContext(ui) { session.shiftTimestamps(listOf(0L, -3_600_000_000_000L)) }
+            withTimeout(10_000) { recorder.loads.receive() }
+            withContext(ui) {
+                assertEquals(listOf("message 8", "message 12"), session.bookmarks.map(::message))
+                session.dispose()
+            }
+        }
+
+    @Test
+    fun `bookmarks set before the records are loaded are found once they are`() = runBlocking {
+        val first = "2026-10-01 08:00:00.000 [main] INFO  app.L - one\n"
+        val file = Files.writeString(dir.resolve("restored.log"), first + lines(5))
+        val recorder = Recorder()
+        val session = withContext(ui) {
+            LogSession(listOf(file), scope, NoSettings, recorder).also {
+                // The second record's start, and an offset inside it, which starts no record.
+                it.bookmarkStarts = listOf(RecordStart(file, first.length.toLong()), RecordStart(file, 3))
+                it.start()
+            }
+        }
+        withTimeout(10_000) { recorder.loads.receive() }
+        withContext(ui) {
+            assertEquals(listOf(1), session.bookmarks.toList())
+            session.dispose()
+        }
+    }
+
+    @Test
+    fun `only the bookmarks the filter shows are shown`() = runBlocking {
+        val file = Files.writeString(dir.resolve("shown.log"), lines(40))
+        val (session, _) = open(file, Recorder())
+        withContext(ui) {
+            // Levels cycle INFO, WARN, DEBUG, ERROR: 1 and 3 are WARN or worse.
+            session.toggleBookmarks(sequenceOf(0, 1, 2, 3))
+            session.applyFilter(Level.WARN, Query.EMPTY)
+        }
+        awaitUi { session.shown?.isFiltered == true }
+        withContext(ui) {
+            assertEquals(listOf(1, 3), session.shownBookmarks().toList())
+            assertEquals(listOf(0, 1, 2, 3), session.bookmarks.toList())
+            session.dispose()
+        }
+    }
 }

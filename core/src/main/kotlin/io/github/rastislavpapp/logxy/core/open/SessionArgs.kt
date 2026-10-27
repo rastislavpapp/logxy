@@ -66,6 +66,7 @@ object SessionArgs {
     private const val PARSERS_ARG = "--parsers"
     private const val LEAD_ARG = "--lead"
     private const val TOP_ARG = "--top"
+    private const val BOOKMARK_ARG = "--bookmark"
     private const val SHIFTS_ARG = "--shifts"
 
     /**
@@ -95,6 +96,7 @@ object SessionArgs {
             }
             addStart(LEAD_ARG, session, session.position?.lead)
             addStart(TOP_ARG, session, session.position?.top)
+            session.position?.bookmarks.orEmpty().forEach { addStart(BOOKMARK_ARG, session, it) }
             if (session.shifts.isNotEmpty()) {
                 add(SHIFTS_ARG)
                 add(session.shifts.joinToString(",") { TimestampShift.format(it) })
@@ -113,11 +115,12 @@ object SessionArgs {
             var parsers: List<Parser?>? = null,
             var lead: RecordStart<String>? = null,
             var top: RecordStart<String>? = null,
+            val bookmarks: MutableList<RecordStart<String>> = ArrayList(),
             var shifts: List<Long> = emptyList(),
         ) {
             fun session(): OpenSession {
                 val filter = SavedFilter("", level, query).takeUnless { it.isEmpty }
-                val position = if (lead == null && top == null) null else SessionPosition(lead, top)
+                val position = SessionPosition.of(lead, top, bookmarks)
                 return OpenSession(paths, parsers ?: paths.map { null }, filter, position, shifts)
             }
         }
@@ -126,7 +129,8 @@ object SessionArgs {
         val iterator = args.iterator()
         fun value() = if (iterator.hasNext()) iterator.next() else ""
 
-        // The start written after LEAD_ARG or TOP_ARG: its file's number among the group's paths, and its offset.
+        // The start written after LEAD_ARG, TOP_ARG or BOOKMARK_ARG: its file's number among the group's paths, and
+        // its offset.
         fun start(group: Group): RecordStart<String>? {
             val file = value().toIntOrNull()
             val offset = value().toLongOrNull()
@@ -146,6 +150,11 @@ object SessionArgs {
                 }
                 LEAD_ARG -> groups.last().let { it.lead = start(it) }
                 TOP_ARG -> groups.last().let { it.top = start(it) }
+                BOOKMARK_ARG -> {
+                    val group = groups.last()
+                    val start = start(group)
+                    if (start != null) group.bookmarks += start
+                }
                 SHIFTS_ARG -> groups.last().let { group ->
                     val texts = value().split(',')
                     val shifts = group.paths.indices.map { TimestampShift.read(texts.getOrNull(it)) }

@@ -22,8 +22,10 @@ import io.github.rastislavpapp.logxy.core.query.TimeLiteral
 import io.github.rastislavpapp.logxy.core.query.and
 import io.github.rastislavpapp.logxy.core.query.withTimeRange
 import io.github.rastislavpapp.logxy.core.query.withoutTimeRange
+import io.github.rastislavpapp.logxy.core.session.BookmarkToggle
 import io.github.rastislavpapp.logxy.core.session.CopyResult
 import io.github.rastislavpapp.logxy.core.session.LogSession
+import io.github.rastislavpapp.logxy.core.session.MAX_BOOKMARKS
 import io.github.rastislavpapp.logxy.core.session.MAX_COPY_BYTES
 import io.github.rastislavpapp.logxy.core.session.NOT_YET_FOUND
 import io.github.rastislavpapp.logxy.core.session.PreparedCopy
@@ -55,6 +57,8 @@ import java.awt.Point
 import java.awt.Toolkit
 import java.awt.datatransfer.StringSelection
 import java.awt.event.ActionEvent
+import java.awt.event.InputEvent
+import java.awt.event.KeyEvent
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import java.awt.event.WindowAdapter
@@ -77,6 +81,8 @@ import javax.swing.JScrollPane
 import javax.swing.JSplitPane
 import javax.swing.JTabbedPane
 import javax.swing.JTextArea
+import javax.swing.KeyStroke
+import javax.swing.Popup
 import javax.swing.PopupFactory
 import javax.swing.ScrollPaneConstants
 import javax.swing.SwingUtilities
@@ -165,22 +171,25 @@ class LogTab(
     private var restoring: SessionPosition<Path>? = restore
 
     /**
-     * The lead record of the selection, if selected, and the record in the top visible row, by where they start in
-     * the files, to go back there when the session is opened again; until the records are first shown, the position
-     * this tab was opened to restore. Null if there is neither.
+     * The lead record of the selection, if selected, the record in the top visible row and the bookmarks, by where
+     * they start in the files, to go back there when the session is opened again; until the records are first shown,
+     * the position this tab was opened to restore. Null if there is none of them.
      */
     val position: SessionPosition<Path>?
         get() {
             restoring?.let { return it }
-            val model = model ?: return null
-            val table = table ?: return null
-            val scrollPane = scrollPane ?: return null
-            if (model.totalRowCount == 0) return null
+            val bookmarks = session.bookmarkStarts
+            val model = model
+            val table = table
+            val scrollPane = scrollPane
+            if (model == null || table == null || scrollPane == null || model.totalRowCount == 0) {
+                return SessionPosition.of(null, null, bookmarks)
+            }
             val lead = table.selection.lead
             val selected = if (lead in table.selection) model.recordAtIndexOrNull(lead) else null
             val leadStart = if (selected == null) null else session.startOf(selected)
             val topStart = session.startOf(model.recordAtIndex(scrollPane.firstVisibleRow))
-            return SessionPosition(leadStart, topStart)
+            return SessionPosition(leadStart, topStart, bookmarks)
         }
 
     /** The names the columns show. They are kept when the file is read again, also those renamed for this tab only. */
@@ -325,6 +334,13 @@ class LogTab(
     private var table: LogTable? = null
     private var scrollPane: VirtualScrollPane? = null
     private var histogramBar: TimeHistogramBar? = null
+    private var bookmarkStrip: BookmarkStrip? = null
+
+    /** The key the host bound to each bookmark action, to show in the row menu. */
+    private var bookmarkKeys = emptyMap<BookmarkAction, KeyStroke>()
+
+    /** The hint over the rows, until its time is up or the next one replaces it. */
+    private var hint: Popup? = null
 
     /** The variable charts under the histogram, and the rows under them; null while there is no histogram. */
     private var chartPanel: VariableChartPanel? = null
@@ -412,6 +428,7 @@ class LogTab(
                 onValues(values)
             }
         }
+        restore?.bookmarks?.let { session.bookmarkStarts = it }
         session.start()
     }
 
@@ -726,6 +743,7 @@ class LogTab(
                 addActionListener { askShift(part) }
             })
         }
+        addBookmarkItems(popup, table, row)
         popup.addSeparator()
         fun add(rule: Query.Rule) {
             popup.add(JMenuItem(QueryPrinter.print(rule).cut(MAX_MENU_CHARS), Icons.filter).apply {
@@ -778,6 +796,107 @@ class LogTab(
             addActionListener { filterBar.toggleSuspended() }
         })
         popup.show(table, x, y)
+    }
+
+    /**
+     * The bookmark actions, under their keys: Toggle Bookmark acts on the selection if [row] is in it, else on
+     * [row] alone.
+     */
+    private fun addBookmarkItems(popup: JPopupMenu, table: LogTable, row: Int) {
+        val model = model ?: return
+        popup.addSeparator()
+        for (action in BookmarkAction.entries) {
+            popup.add(JMenuItem(action.label, action.icon).apply {
+                accelerator = bookmarkKeys[action]
+                // Next and Previous stay enabled, to say there is none as their keys do.
+                isEnabled = action != BookmarkAction.REMOVE_ALL || session.bookmarks.isNotEmpty()
+                addActionListener {
+                    if (action == BookmarkAction.TOGGLE && !table.isRowSelected(row)) {
+                        toggleBookmarks(sequenceOf(model.recordAt(row)))
+                    } else {
+                        runBookmarkAction(action)
+                    }
+                }
+            })
+        }
+    }
+
+    /** What the bookmark [action] does: on the selected rows, or from the selected row on. */
+    fun runBookmarkAction(action: BookmarkAction) {
+        when (action) {
+            BookmarkAction.TOGGLE -> toggleSelectedBookmarks()
+            BookmarkAction.NEXT -> goToBookmark(forward = true)
+            BookmarkAction.PREVIOUS -> goToBookmark(forward = false)
+            BookmarkAction.REMOVE_ALL -> {
+                session.removeAllBookmarks()
+                bookmarksChanged()
+            }
+        }
+    }
+
+    /** ` (Ctrl+F2)` for the key of [action], to append to a tooltip; empty if it has none. */
+    private fun keyText(action: BookmarkAction): String {
+        val key = bookmarkKeys[action] ?: return ""
+        val modifiers = InputEvent.getModifiersExText(key.modifiers)
+        val name = KeyEvent.getKeyText(key.keyCode)
+        return if (modifiers.isEmpty()) " ($name)" else " ($modifiers+$name)"
+    }
+
+    /** Toggles the bookmarks of the selected rows, all or none, as [LogSession.toggleBookmarks] does. */
+    private fun toggleSelectedBookmarks() {
+        val shown = model?.shown ?: return
+        val rows = selectedRows()
+        if (rows.isEmpty()) return
+        val records = (0..<rows.rangeCount).asSequence()
+            .flatMap { rows.rangeStart(it)..<rows.rangeEnd(it) }
+            .map(shown::recordAt)
+        toggleBookmarks(records)
+    }
+
+    private fun toggleBookmarks(records: Sequence<Int>) {
+        if (session.toggleBookmarks(records) == BookmarkToggle.LIMITED) showHint("At most $MAX_BOOKMARKS bookmarks")
+        bookmarksChanged()
+    }
+
+    private fun bookmarksChanged() {
+        bookmarkStrip?.repaint()
+        histogramBar?.repaint()
+    }
+
+    /** The times of the bookmarked records the shown log shows, for the histogram; those without one are left out. */
+    private fun shownBookmarkTimes(): LongArray {
+        val shown = model?.shown ?: return LongArray(0)
+        return session.shownBookmarks().asList().mapNotNull(shown::timestamp).toLongArray()
+    }
+
+    /**
+     * Selects the next shown bookmarked record after the current one, or the previous before it, wrapping around as
+     * find does, and tells which of them it is. The current record is the selected one, or the top one in view if
+     * none is, which then can be gone to itself.
+     */
+    private fun goToBookmark(forward: Boolean) {
+        val model = model ?: return
+        val table = table ?: return
+        val scrollPane = scrollPane ?: return
+        val bookmarks = session.shownBookmarks()
+        if (bookmarks.isEmpty() || model.totalRowCount == 0) return showHint("No bookmarks")
+        val lead = table.selection.lead
+        val selected = if (lead in table.selection) model.recordAtIndexOrNull(lead) else null
+        val current = selected ?: model.recordAtIndex(scrollPane.firstVisibleRow)
+        val at = bookmarks.binarySearch(current)
+        // Where the current record is among the bookmarks, or would go if it is none.
+        val insertion = if (at >= 0) at else -at - 1
+        val next = when {
+            at >= 0 && selected == null -> at
+            forward -> if (at >= 0) at + 1 else insertion
+            else -> insertion - 1
+        }
+        val index = Math.floorMod(next, bookmarks.size)
+        val row = model.indexOfRecord(bookmarks[index])
+        session.follow = false
+        scrollPane.selectRow(row, scroll = row !in scrollPane.firstVisibleRow..scrollPane.lastVisibleRow)
+        table.requestFocusInWindow()
+        showHint("Bookmark ${index + 1} of ${bookmarks.size}")
     }
 
     /** Whether variables can be charted: the records have templates and times. */
@@ -950,12 +1069,20 @@ class LogTab(
             override fun actionPerformed(e: ActionEvent) = copySelectedRows()
         })
         val scrollPane = VirtualScrollPane(table, model)
+        val strip = BookmarkStrip(
+            table,
+            isBookmarked = { row -> session.bookmarks.binarySearch(model.recordAt(row)) >= 0 },
+            onToggle = { row -> toggleBookmarks(sequenceOf(model.recordAt(row))) },
+        )
+        strip.toolTipText = "Toggle bookmark" + keyText(BookmarkAction.TOGGLE)
+        scrollPane.setRowHeader(strip)
+        bookmarkKeys = host.bindBookmarkKeys(table, ::runBookmarkAction)
         scrollPane.onFollowChanged = { session.follow = it }
         scrollPane.resumeFollowAtEnd = { session.isLive }
         val timestampField = shown.schema.fields.firstOrNull { it.role == Role.TIMESTAMP }?.name
         scrollPane.onRowsInViewChanged = ::showMarkedTimes
         val histogramBar = timestampField?.let { field ->
-            TimeHistogramBar({ session.histogram }, { session.foundHistogram }).apply {
+            TimeHistogramBar({ session.histogram }, { session.foundHistogram }, ::shownBookmarkTimes).apply {
                 onJump = ::jumpToSlice
                 onRange = { from, to ->
                     val start = timeLiteral(from)
@@ -988,6 +1115,7 @@ class LogTab(
         this.model = model
         this.table = table
         this.scrollPane = scrollPane
+        this.bookmarkStrip = strip
         this.histogramBar = histogramBar
         this.chartPanel = chartPanel
         table.found = foundMarks
@@ -1206,9 +1334,14 @@ class LogTab(
         val at = Point(visible.x + look.scale(HINT_INSET), visible.y + look.scale(HINT_INSET))
         SwingUtilities.convertPointToScreen(at, table)
         val tip = table.createToolTip().apply { tipText = text }
+        hint?.hide()
         val popup = PopupFactory.getSharedInstance().getPopup(table, tip, at.x, at.y)
+        hint = popup
         popup.show()
-        Timer(HINT_MILLIS) { popup.hide() }.apply {
+        Timer(HINT_MILLIS) {
+            popup.hide()
+            if (hint === popup) hint = null
+        }.apply {
             isRepeats = false
             start()
         }
@@ -1528,6 +1661,7 @@ class LogTab(
             model = null
             table = null
             scrollPane = null
+            bookmarkStrip = null
         }
 
         override fun problem(title: String, detail: String, hint: String?) {

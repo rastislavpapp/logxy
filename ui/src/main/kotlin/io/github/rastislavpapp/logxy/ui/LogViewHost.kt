@@ -7,9 +7,16 @@ import io.github.rastislavpapp.logxy.core.query.TextSearch
 import io.github.rastislavpapp.logxy.core.session.SettingsStore
 import kotlinx.coroutines.CoroutineDispatcher
 import java.awt.Component
+import java.awt.Toolkit
 import java.awt.Window
+import java.awt.event.ActionEvent
+import java.awt.event.InputEvent
+import java.awt.event.KeyEvent
 import java.nio.file.Path
+import javax.swing.AbstractAction
+import javax.swing.Icon
 import javax.swing.JComponent
+import javax.swing.KeyStroke
 import javax.swing.text.JTextComponent
 
 /**
@@ -58,6 +65,49 @@ interface LogViewHost {
 
     /** How to raise the limit on copying, appended to a refused copy's message; null if the user cannot. */
     val moreMemoryHint: String?
+
+    /**
+     * Binds keys to the bookmark actions while the focus is in [rows], a [LogTab]'s table, to call [run] with the
+     * action, and returns the key of each to show in the row menu; an action without a key is missing. The default
+     * binds [BookmarkAction.defaultKeys].
+     */
+    fun bindBookmarkKeys(rows: JComponent, run: (BookmarkAction) -> Unit): Map<BookmarkAction, KeyStroke> {
+        val keys = BookmarkAction.defaultKeys()
+        // In the map JTable binds its own keys in, where F2 would start editing a cell.
+        val inputMap = rows.getInputMap(JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT)
+        for ((action, key) in keys) {
+            val name = "logxy${action.name}Bookmark"
+            inputMap.put(key, name)
+            rows.actionMap.put(name, object : AbstractAction() {
+                override fun actionPerformed(e: ActionEvent) = run(action)
+            })
+        }
+        return keys
+    }
+}
+
+/** What the user can do with a session's bookmarks, from the row menu or by keys the host binds. */
+enum class BookmarkAction(val label: String) {
+    TOGGLE("Toggle Bookmark"),
+    NEXT("Next Bookmark"),
+    PREVIOUS("Previous Bookmark"),
+    REMOVE_ALL("Remove All Bookmarks"),
+    ;
+
+    /** The icon of the action's menu items: the bookmark for Toggle Bookmark, none for the others. */
+    val icon: Icon? get() = if (this == TOGGLE) Icons.bookmark else null
+
+    companion object {
+        /** Ctrl+F2 (Cmd+F2 on macOS) toggles a bookmark, F2 goes to the next and Shift+F2 to the previous. */
+        fun defaultKeys(): Map<BookmarkAction, KeyStroke> {
+            val menuKey = Toolkit.getDefaultToolkit().menuShortcutKeyMaskEx
+            return mapOf(
+                TOGGLE to KeyStroke.getKeyStroke(KeyEvent.VK_F2, menuKey),
+                NEXT to KeyStroke.getKeyStroke(KeyEvent.VK_F2, 0),
+                PREVIOUS to KeyStroke.getKeyStroke(KeyEvent.VK_F2, InputEvent.SHIFT_DOWN_MASK),
+            )
+        }
+    }
 }
 
 /** The settings in use, saved where the host keeps them. Used on the UI thread only. */

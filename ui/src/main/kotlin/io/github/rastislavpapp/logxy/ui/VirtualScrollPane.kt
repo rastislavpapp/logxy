@@ -2,6 +2,7 @@ package io.github.rastislavpapp.logxy.ui
 
 import java.awt.BorderLayout
 import java.awt.Dimension
+import java.awt.Graphics
 import java.awt.Point
 import java.awt.event.ActionEvent
 import java.awt.event.KeyAdapter
@@ -132,6 +133,21 @@ class VirtualScrollPane(private val table: JTable, private val window: RowWindow
             }
         })
         installJumpActions()
+    }
+
+    /**
+     * Shows [header] beside the table's rows, scrolling with them, e.g. a [BookmarkStrip]; above it, beside the
+     * table's header, the header's background.
+     */
+    fun setRowHeader(header: JComponent) {
+        scrollPane.setRowHeaderView(header)
+        val corner = object : JComponent() {
+            override fun paintComponent(g: Graphics) {
+                g.color = table.tableHeader.background
+                g.fillRect(0, 0, width, height)
+            }
+        }
+        scrollPane.setCorner(ScrollPaneConstants.UPPER_LEFT_CORNER, corner)
     }
 
     /** Scrolls to the bottom of the last row, also of one taller than the view. */

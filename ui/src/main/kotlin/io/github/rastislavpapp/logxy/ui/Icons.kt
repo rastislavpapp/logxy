@@ -39,6 +39,9 @@ object Icons {
     val warning get() = get("status/warning")
     val fits get() = get("general/greenCheckmark")
 
+    // A gutter icon, at its own 14 px.
+    val bookmark get() = get("gutter/bookmark", 14)
+
     // IntelliJ's editor fold icons, at their own 9 px: expand points right, collapse down.
     val expand get() = get("gutter/unfold", 9)
     val collapse get() = get("gutter/fold", 9)
