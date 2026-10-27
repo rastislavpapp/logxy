@@ -4,7 +4,7 @@ What's new in the logxy IntelliJ plugin, shown as its change notes in the IDE an
 
 ## Unreleased
 
-- Bookmarks: bookmark records with the IDE's Toggle Bookmark key (F11), a click in the strip left of the rows or the row menu, and step through them with the IDE's Next and Previous Bookmark keys (F2 and Shift+F2 unless the keymap has others). They stay while the tab is open, also through a reload, and show as ticks on the time histogram.
+- Bookmarks: bookmark records with the IDE's Toggle Bookmark key (F11) or the row menu, and step through them with the IDE's Next and Previous Bookmark keys (F2 and Shift+F2 unless the keymap has others). Once there are some, a strip left of the rows shows them, where a click adds or removes one. They stay while the tab is open, also through a reload, and show as ticks on the time histogram.
 
 ## 0.2.0 - 2026-10-27
 

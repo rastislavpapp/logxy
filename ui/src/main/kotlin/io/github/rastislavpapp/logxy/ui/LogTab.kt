@@ -859,7 +859,7 @@ class LogTab(
     }
 
     private fun bookmarksChanged() {
-        bookmarkStrip?.repaint()
+        bookmarkStrip?.bookmarksChanged()
         histogramBar?.repaint()
     }
 
@@ -1071,6 +1071,7 @@ class LogTab(
         val scrollPane = VirtualScrollPane(table, model)
         val strip = BookmarkStrip(
             table,
+            hasBookmarks = { session.bookmarks.isNotEmpty() },
             isBookmarked = { row -> session.bookmarks.binarySearch(model.recordAt(row)) >= 0 },
             onToggle = { row -> toggleBookmarks(sequenceOf(model.recordAt(row))) },
         )
