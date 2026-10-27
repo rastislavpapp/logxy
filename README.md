@@ -13,13 +13,17 @@
 <!-- The IntelliJ plugin's overview in logxy-intellij-plugin/src/main/resources/META-INF/plugin.xml describes the shared features too; keep the two in step. -->
 
 - **Large files.** Multi-GB logs open in seconds and scroll smoothly.
-- **Structured parsing.** Log4j and logback patterns, Spring Boot's default log output, Python's logging, JSON lines (logstash and ECS style), logfmt, CSV files with a header row (`.csv`, comma or semicolon separated), MDC maps (one column per key) and raw text. logxy picks the right parser automatically, and you can define your own with a pattern, a regex or a JSON key mapping.
-- **Filtering.** Combine conditions on any column with AND, OR and NOT, either in a visual editor or as a text expression such as `level >= WARN AND thread == "main*"`. Wildcards, regular expressions, case-sensitive matching, level and time ranges are supported. Save filters for later.
+- **Formats detected for you.** Log4j and logback patterns, Spring Boot's default log output, Python's logging, JSON lines (logstash and ECS style), logfmt, CSV files with a header row (`.csv`, comma or semicolon separated), MDC maps (one column per key) and raw text are recognised from the first lines. For a format logxy doesn't know, it infers a parser from the lines themselves. You can also define your own with a pattern, a regex or a JSON key mapping, or save a detected one and adjust it.
+- **Filtering.** Combine conditions on any column with AND, OR and NOT, either in a visual editor or as a text expression such as `level >= WARN AND thread == "main*"`. Wildcards, regular expressions, case-sensitive matching, level and time ranges are supported. Right-click a cell to copy it or filter by its value. Save filters for later.
+- **Row highlights.** Give the rows a query matches a background colour, in every log you open, to spot them without filtering the rest away.
+- **Time histogram.** Record volume with warnings and errors over time, and where search matches fall. Click to jump there, drag to narrow to a time range.
+- **Templates.** logxy groups lines that are the same message with different values: `Request 4711 done in 12 ms` and `Request 4712 done in 230 ms` are both `Request {1} done in {2} ms`. The Templates panel lists these message kinds with how often each occurs, so you can show or hide a whole kind at once, and chart a value, such as the duration, over time.
 - **Merging.** Open several files together in one session, interleaved by timestamp, even when each needs a different parser. A Source column tells the files apart.
 - **Following.** Live files are tailed as they grow, including rotation and truncation.
-- **Time histogram.** See where the errors and warnings are, and where your search matches fall, then jump there.
+- **Recent sessions.** Reopen a closed session with its files, parsers, filter and position, or have the sessions open at exit reopen on start.
 - **Compressed files and folders.** Open `.zip`, `.gz` and `.zst` files, or a whole folder of logs.
 - **Themes.** Light and dark, with a choice of FlatLaf and IntelliJ themes.
+- **IntelliJ plugin.** The same viewer in the Run and Debug tool windows of IntelliJ-based IDEs; see [below](#intellij-plugin).
 
 ![The Open Files dialog merging a log4j-style file with a JSON-lines file](docs/images/open-files.png)
 
