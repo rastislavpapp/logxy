@@ -1,6 +1,6 @@
 # Changelog
 
-What's new in the logxy IntelliJ plugin, shown as its change notes in the IDE and on JetBrains Marketplace. The app's changes are in its GitHub release notes.
+What's new in the logxy IntelliJ plugin, shown as its change notes in the IDE and on JetBrains Marketplace: a version's notes are every section of its minor up to it. The app's changes are in its GitHub release notes.
 
 ## Unreleased
 
