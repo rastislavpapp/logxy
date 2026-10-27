@@ -19,8 +19,8 @@ timeline where they cluster.</p>
       the lines themselves. You can also define your own with a pattern, a regex or a JSON key
       mapping, or save a detected one and adjust it.</li>
   <li><b>Visual filters.</b> Combine conditions on any column in all / any / none groups:
-      contains, wildcards, regular expressions, level and time ranges. Right-click a cell to copy
-      it or filter by its value. Save filters for later.</li>
+      contains, wildcards, regular expressions, case-sensitive matching, level and time ranges.
+      Right-click a cell to copy it or filter by its value. Save filters for later.</li>
   <li><b>Time histogram.</b> Record volume with warnings and errors over time, and where search
       matches fall. Click to jump there, drag to narrow to a time range.</li>
   <li><b>Templates.</b> logxy groups lines that are the same message with different values:
