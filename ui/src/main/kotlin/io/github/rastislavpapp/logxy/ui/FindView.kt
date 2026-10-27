@@ -19,9 +19,6 @@ interface FindView {
     /** Opens the view and selects its text for typing over; with [text], looks for that instead. */
     fun open(text: String? = null)
 
-    /** Hides the view, which ends the search, e.g. as the Go to bar opens in its place. */
-    fun close()
-
     /**
      * Shows how many records match: [total]. The search still runs while [progress], from 0 to 1, is not null, or
      * while [total] is null; [total] is then how many were found so far, or null if that is not known yet.
