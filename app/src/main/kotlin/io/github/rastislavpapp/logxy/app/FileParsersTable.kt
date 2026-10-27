@@ -46,7 +46,7 @@ import javax.swing.table.TableColumn
  * column's header. Each file is checked right away against the start of the file, with its chosen parser or,
  * on Auto-detect, with the parser detection picks. A check mark shows that the parser fits, a warning that it
  * does not. If [excludable], a checkbox per file leaves it out. With [shiftable], a column after the parser sets each
- * file's timestamp shift for a merge; it shows while more than one file is included. [onChange] is called on any
+ * file's timestamp shift for a merge; it shows until [showShiftColumn] hides it. [onChange] is called on any
  * change. Call [dispose] when done.
  */
 class FileParsersTable(
@@ -112,7 +112,7 @@ class FileParsersTable(
     /** The timestamp shift set for each of [included] in nanoseconds, 0 for none. */
     val chosenShifts: List<Long> get() = included.map { shifts[it] ?: 0 }
 
-    /** The Shift column while it is hidden, with one file included; null while it shows, or if there is none. */
+    /** The Shift column while it is hidden; null while it shows, or if there is none. */
     private var hiddenShiftColumn: TableColumn? = null
 
     /** Whether every file included was checked and fits its parser, so the files can be opened. */
@@ -201,7 +201,6 @@ class FileParsersTable(
         val scrollBar = scrollPane.verticalScrollBar.preferredSize.width
         scrollPane.preferredSize = Dimension(width + scrollBar + 4, height(files.size.coerceIn(3, 12)))
         scrollPane.minimumSize = Dimension(0, height(3))
-        showShiftColumn(included.size > 1)
         files.forEach(::check)
     }
 
@@ -259,7 +258,6 @@ class FileParsersTable(
 
     private fun changed() {
         model.fireTableDataChanged()
-        showShiftColumn(included.size > 1)
         table.tableHeader.repaint()
         val mismatched = included.filter { it in problems }
         warning.icon = if (mismatched.isEmpty()) null else Icons.warning
@@ -278,7 +276,7 @@ class FileParsersTable(
     }
 
     /** Shows the Shift column, if the table has one, or hides it; a shift matters only in a merge. */
-    private fun showShiftColumn(shown: Boolean) {
+    fun showShiftColumn(shown: Boolean) {
         if (shiftColumn < 0) return
         val hidden = hiddenShiftColumn
         if (shown && hidden != null) {

@@ -5,6 +5,8 @@ import java.awt.Graphics
 import java.awt.Graphics2D
 import java.awt.RenderingHints
 import java.awt.event.ActionEvent
+import java.awt.event.FocusAdapter
+import java.awt.event.FocusEvent
 import javax.swing.AbstractAction
 import javax.swing.JLabel
 import javax.swing.JPanel
@@ -61,6 +63,10 @@ class GoToBar(
         add(note, "span, gapleft 4")
         bind("ENTER", "logxyGoTo") { go() }
         bind("ESCAPE", "logxyCloseGoTo") { close() }
+        // Back in the field after a note, the user means to go on: the bar no longer closes on its own.
+        input.addFocusListener(object : FocusAdapter() {
+            override fun focusGained(e: FocusEvent) = noteTimer.stop()
+        })
     }
 
     // Floating, rounded like the find bar; otherwise a bar with a line under it, above the rows.

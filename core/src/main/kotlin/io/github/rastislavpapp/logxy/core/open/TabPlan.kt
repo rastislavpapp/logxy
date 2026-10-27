@@ -3,6 +3,7 @@ package io.github.rastislavpapp.logxy.core.open
 import io.github.rastislavpapp.logxy.core.config.OpenMode
 import io.github.rastislavpapp.logxy.core.config.SavedFilter
 import io.github.rastislavpapp.logxy.core.fileKey
+import io.github.rastislavpapp.logxy.core.merge.TimestampShift
 import io.github.rastislavpapp.logxy.core.parse.Parser
 import io.github.rastislavpapp.logxy.core.session.SessionPosition
 import java.nio.file.Path
@@ -53,8 +54,7 @@ object TabPlan {
         current: Int?,
         shifts: List<Long> = emptyList(),
     ): List<TabAction> {
-        // Each file's shift, 0 where the list has none.
-        fun shiftsOf(paths: List<Path>, shifts: List<Long>) = paths.indices.map { shifts.getOrElse(it) { 0 } }
+        fun shiftsOf(paths: List<Path>, shifts: List<Long>) = paths.indices.map { TimestampShift.of(shifts, it) }
         val open = OpenTabs(tabs)
         fun place(session: SessionFiles, action: TabAction): TabAction {
             open.indexOf(session.paths)?.let { return TabAction.Select(it) }

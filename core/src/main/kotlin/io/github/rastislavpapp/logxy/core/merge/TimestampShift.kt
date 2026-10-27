@@ -29,7 +29,16 @@ object TimestampShift {
         return if (sign == "-") -nanos else nanos
     }
 
-    /** [nanos] as a cell marks a shifted time, e.g. `+2h` or `-9:45`; empty for no shift. */
+    /** The shift a stored [text] stands for; 0 where there is none or it is not a shift. */
+    fun read(text: String?): Long {
+        if (text == null) return 0
+        return parse(text) ?: 0
+    }
+
+    /** The shift of file [index] of [shifts]; 0 where the list has none. */
+    fun of(shifts: List<Long>, index: Int): Long = shifts.getOrElse(index) { 0 }
+
+    /** The text for [nanos], as [parse] reads it back, e.g. `+2h` or `-9:45`; empty for no shift. */
     fun format(nanos: Long): String {
         if (nanos == 0L) return ""
         val sign = if (nanos < 0) "-" else "+"

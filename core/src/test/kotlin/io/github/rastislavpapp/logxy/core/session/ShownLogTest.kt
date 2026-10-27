@@ -133,6 +133,11 @@ class ShownLogTest {
         // Record 4, at 40, is hidden, and no shown record is that late.
         assertEquals(TimeLanding(1, TimeLanding.Miss.PAST_LAST), shown.landingAt(35))
         assertEquals(null, shown(*LongArray(0)).landingAt(10))
+
+        // Of two records at 20 the first is hidden, but a record at 20 still shows.
+        val twice = shown(10, 20, 20, 30)
+        twice.showRows(intArrayOf(0, 2))
+        assertEquals(TimeLanding(1, miss = null), twice.landingAt(20))
     }
 
     @Test

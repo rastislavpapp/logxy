@@ -71,7 +71,10 @@ class OpenFilesDialog(
         val group = ButtonGroup()
         radios.forEachIndexed { i, radio ->
             group.add(radio)
-            radio.addActionListener { picked = choices[i] }
+            radio.addActionListener {
+                picked = choices[i]
+                update()
+            }
         }
         subfolders.addActionListener {
             parsers.shown = if (subfolders.isSelected) files else files.filter { it !in inSubfolders }
@@ -107,10 +110,10 @@ class OpenFilesDialog(
     }
 
     /**
-     * Brings the dialog up to date with the files to open, after a change of subfolders, exclusions or parsers: the
-     * heading, the choices that fit how many files there are, and Open, which opens only files that fit their
-     * parsers. The answer can be remembered only while every parser is detected, as chosen parsers are not
-     * remembered, though the user might expect them to be.
+     * Brings the dialog up to date with the files to open, after a change of subfolders, exclusions, parsers or
+     * choice: the heading, the choices that fit how many files there are, the Shift column for a merge, and Open,
+     * which opens only files that fit their parsers. The answer can be remembered only while every parser is
+     * detected, as chosen parsers are not remembered, though the user might expect them to be.
      */
     private fun update() {
         val files = parsers.included
@@ -126,6 +129,7 @@ class OpenFilesDialog(
         }
         val selected = picked?.takeIf { it in possible } ?: choices.firstOrNull { it in possible }
         radios.forEachIndexed { i, radio -> radio.isSelected = choices[i] == selected }
+        parsers.showShiftColumn(selected != null && selected != OpenMode.TABS)
         openButton.isEnabled = parsers.allFit
         openButton.toolTipText = parsers.notReady
         val detected = parsers.chosenParsers.all { it == null }

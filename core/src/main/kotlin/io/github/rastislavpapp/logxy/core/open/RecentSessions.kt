@@ -133,9 +133,7 @@ data class RecentSessions(val recent: List<OpenSession> = emptyList(), val atExi
                 .map { it!! }
                 .toList()
             val parsers = paths.indices.map { Settings.readParser(properties, "${prefix}parser.${it + 1}.") }
-            val shifts = paths.indices.map { i ->
-                properties.getProperty("${prefix}shift.${i + 1}")?.let(TimestampShift::parse) ?: 0L
-            }
+            val shifts = paths.indices.map { TimestampShift.read(properties.getProperty("${prefix}shift.${it + 1}")) }
             val levelName = properties.getProperty("${prefix}level")
             val level = Level.entries.firstOrNull { it.name == levelName }
             val query = properties.getProperty("${prefix}query").orEmpty()
