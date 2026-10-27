@@ -28,6 +28,7 @@ class SessionArgsTest {
                 ),
                 null,
                 SessionPosition(RecordStart("/logs/old.zip!c.log", 4096), RecordStart("/logs/b.log", 0)),
+                shifts = listOf(0, 7_200_000_000_000, -35_100_000_000_000),
             ),
             OpenSession(
                 listOf("/logs/e.log"),

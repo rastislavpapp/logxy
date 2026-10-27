@@ -19,6 +19,7 @@ import io.github.rastislavpapp.logxy.core.log.LogData
 import io.github.rastislavpapp.logxy.core.log.Records
 import io.github.rastislavpapp.logxy.core.log.Role
 import io.github.rastislavpapp.logxy.core.merge.MergedLog
+import io.github.rastislavpapp.logxy.core.merge.TimestampShift
 import io.github.rastislavpapp.logxy.core.parse.Parser
 import io.github.rastislavpapp.logxy.core.parse.ParserMismatchException
 import io.github.rastislavpapp.logxy.core.parse.open
@@ -151,6 +152,8 @@ class LogSession internal constructor(
     private val origin: (Path) -> ArchiveOrigin?,
     chosen: List<Parser?>,
     private val redetection: Redetection?,
+    /** The timestamp shift of each of the paths of a merge in nanoseconds; 0 (or missing) for none. */
+    shifts: List<Long> = emptyList(),
     /** Filters the records of a load; tests watch what it is asked. */
     private val engineOf: (LoadedLog) -> RecordFilter,
 ) {
@@ -162,12 +165,13 @@ class LogSession internal constructor(
         origin: (Path) -> ArchiveOrigin? = { null },
         chosen: List<Parser?> = emptyList(),
         redetection: Redetection? = null,
-    ) : this(paths, scope, settings, listener, origin, chosen, redetection, { it.newFilter() })
+        shifts: List<Long> = emptyList(),
+    ) : this(paths, scope, settings, listener, origin, chosen, redetection, shifts, { it.newFilter() })
 
     constructor(path: Path, scope: CoroutineScope, settings: SettingsStore, listener: SessionListener) :
         this(listOf(path), scope, settings, listener)
 
-    private class Source(val path: Path, var chosen: Parser?) {
+    private class Source(val path: Path, var chosen: Parser?, var shift: Long) {
         var parser: Parser = Parser.Raw
         var log: LogData? = null
         var known: FileSnapshot? = null
@@ -181,7 +185,7 @@ class LogSession internal constructor(
 
     private val redetectionClock = redetection?.let(::RedetectionClock)
 
-    private var sources = paths.mapIndexed { i, path -> Source(path, chosen.getOrNull(i)) }
+    private var sources = paths.mapIndexed { i, path -> Source(path, chosen.getOrNull(i), shifts.getOrElse(i) { 0 }) }
         set(value) {
             field = value
             sourceNames = MergedLog.sourceNames(paths, origin)
@@ -210,6 +214,9 @@ class LogSession internal constructor(
 
     /** The parser the user picked for each of [paths], null where it is detected. */
     val chosenParsers: List<Parser?> get() = sources.map { it.chosen }
+
+    /** The timestamp shift of each of [paths] in nanoseconds, 0 for none; only a merge's files have one. */
+    val shifts: List<Long> get() = sources.map { it.shift }
 
     /** The parser in use (or last used) for each of [paths]. */
     val parsers: List<Parser> get() = sources.map { it.parser }
@@ -378,6 +385,17 @@ class LogSession internal constructor(
         listener.parserChanged()
         val picked = parsers.map { parser -> if (parser == null) "detect" else "“${parser.name}”" }
         reload("parser picked: " + picked.joinToString())
+    }
+
+    /**
+     * Shifts the timestamps of each of a merge's [paths] by [shifts] nanoseconds from now on, and merges them again;
+     * the files are read again too.
+     */
+    fun shiftTimestamps(shifts: List<Long>) {
+        require(shifts.size == sources.size) { "${shifts.size} shifts for ${sources.size} files" }
+        if (shifts == this.shifts) return
+        sources.forEachIndexed { i, source -> source.shift = shifts[i] }
+        reload("timestamp shifts: " + shifts.joinToString { TimestampShift.format(it).ifEmpty { "none" } })
     }
 
     /** Starts over with the files now at [paths], e.g. after rotation, truncation or a parser change. */
@@ -671,7 +689,8 @@ class LogSession internal constructor(
                 setStatus(SessionStatus(message = "Nothing to merge"))
                 return false
             }
-            val loaded = loadedLog(sources.map { it.log!! }, sourceNames)
+            val shifts = LongArray(sources.size) { sources[it].shift }
+            val loaded = loadedLog(sources.map { it.log!! }, sourceNames, shifts)
             engine = engineOf(loaded)
             this.loaded = loaded
             val shown = ShownLog(loaded)

@@ -116,6 +116,7 @@ class MergedFilter(private val log: MergedLog) : RecordFilter {
             origin,
             template,
             variables,
+            LongArray(log.parts.size) { log.shift(it) },
         )
 
     override suspend fun variableValues(rows: IntArray?, rowCount: Int, template: String, variable: Int) =
@@ -170,8 +171,29 @@ class MergedFilter(private val log: MergedLog) : RecordFilter {
                 val partField = if (field < 0) -1 else log.partField(part, field)
                 // A field the part lacks is absent in all its records. The engine treats a field name its log
                 // lacks that way, so the condition gets a name no log has.
-                renamed(filter, if (partField < 0) MISSING_FIELD else log.parts[part].schema.fields[partField].name)
+                val name = if (partField < 0) MISSING_FIELD else log.parts[part].schema.fields[partField].name
+                val renamed = renamed(filter, name)
+                // The part's engine reads its own times, before the shift: its bounds move back by the shift instead.
+                if (renamed is TimeCondition && log.shift(part) != 0L) unshifted(renamed, log.shift(part)) else renamed
             }
+        }
+    }
+
+    private fun unshifted(condition: TimeCondition, shift: Long) = condition.copy(
+        from = condition.from?.let { unshifted(it, shift) },
+        to = condition.to?.let { unshifted(it, shift) },
+    )
+
+    /**
+     * [time] less [shift]. Past either end of a Long it stays at that end, but above [Long.MIN_VALUE], which stands
+     * for a record without a time.
+     */
+    private fun unshifted(time: Long, shift: Long): Long {
+        val moved = time - shift
+        return when {
+            shift > 0 && moved > time -> Long.MIN_VALUE + 1
+            shift < 0 && moved < time -> Long.MAX_VALUE
+            else -> maxOf(moved, Long.MIN_VALUE + 1)
         }
     }
 

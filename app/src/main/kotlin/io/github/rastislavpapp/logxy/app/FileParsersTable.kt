@@ -1,9 +1,11 @@
 package io.github.rastislavpapp.logxy.app
 
+import io.github.rastislavpapp.logxy.core.merge.TimestampShift
 import io.github.rastislavpapp.logxy.core.parse.Parser
 import io.github.rastislavpapp.logxy.core.parse.mismatch
 import io.github.rastislavpapp.logxy.ui.Icons
 import io.github.rastislavpapp.logxy.ui.PopupItem
+import io.github.rastislavpapp.logxy.ui.TimestampShiftField
 import io.github.rastislavpapp.logxy.ui.escapeHtml
 import io.github.rastislavpapp.logxy.ui.showPopupList
 import kotlinx.coroutines.CoroutineScope
@@ -36,14 +38,16 @@ import javax.swing.UIManager
 import javax.swing.table.AbstractTableModel
 import javax.swing.table.DefaultTableCellRenderer
 import javax.swing.table.TableCellRenderer
+import javax.swing.table.TableColumn
 
 /**
  * A table of [files], shown by their [names] with their [descriptions] in tooltips, and the parser for each,
  * null for Auto-detect. A parser is chosen per file, or for all files at once through a combo in the parser
  * column's header. Each file is checked right away against the start of the file, with its chosen parser or,
  * on Auto-detect, with the parser detection picks. A check mark shows that the parser fits, a warning that it
- * does not. If [excludable], a checkbox per file leaves it out. [onChange] is called on any change. Call
- * [dispose] when done.
+ * does not. If [excludable], a checkbox per file leaves it out. With [shiftable], a column after the parser sets each
+ * file's timestamp shift for a merge; it shows while more than one file is included. [onChange] is called on any
+ * change. Call [dispose] when done.
  */
 class FileParsersTable(
     private val files: List<Path>,
@@ -51,14 +55,19 @@ class FileParsersTable(
     private val descriptions: List<String>,
     initial: List<Parser?> = emptyList(),
     private val excludable: Boolean = false,
+    shiftable: Boolean = false,
     private val onChange: () -> Unit = {},
 ) {
     private val parsers: List<Parser?> = listOf(null) + AppSettings.current.knownParsers
     private val chosen = HashMap<Path, Parser?>().apply {
         files.forEachIndexed { i, file -> put(file, initial.getOrNull(i)) }
     }
+
+    /** The timestamp shift of each file with one, in nanoseconds. */
+    private val shifts = HashMap<Path, Long>()
     private val fileColumn = if (excludable) 1 else 0
     private val parserColumn = fileColumn + 1
+    private val shiftColumn = if (shiftable) parserColumn + 1 else -1
     private val excluded = HashSet<Path>()
     private val model = FilesModel()
     private val table = JTable(model)
@@ -99,6 +108,12 @@ class FileParsersTable(
 
     /** The parser chosen for each of [included], null where it is detected. */
     val chosenParsers: List<Parser?> get() = included.map { chosen[it] }
+
+    /** The timestamp shift set for each of [included] in nanoseconds, 0 for none. */
+    val chosenShifts: List<Long> get() = included.map { shifts[it] ?: 0 }
+
+    /** The Shift column while it is hidden, with one file included; null while it shows, or if there is none. */
+    private var hiddenShiftColumn: TableColumn? = null
 
     /** Whether every file included was checked and fits its parser, so the files can be opened. */
     val allFit: Boolean get() = included.isNotEmpty() && included.all { it in fitting }
@@ -142,6 +157,15 @@ class FileParsersTable(
                     maxWidth = width
                 }
             }
+            if (shiftColumn >= 0) {
+                columnModel.getColumn(shiftColumn).apply {
+                    preferredWidth = tableHeader.getFontMetrics(tableHeader.font).stringWidth("-26:00") + CELL_PADDING
+                    cellEditor = ShiftEditor()
+                    cellRenderer = DefaultTableCellRenderer().apply {
+                        toolTipText = "Added to the file's times in the merge, e.g. 2 or -5 hours, or +5:30"
+                    }
+                }
+            }
             columnModel.getColumn(parserColumn).cellRenderer = object : DefaultTableCellRenderer() {
                 override fun getTableCellRendererComponent(
                     table: JTable, value: Any?, isSelected: Boolean, hasFocus: Boolean, row: Int, column: Int,
@@ -177,6 +201,7 @@ class FileParsersTable(
         val scrollBar = scrollPane.verticalScrollBar.preferredSize.width
         scrollPane.preferredSize = Dimension(width + scrollBar + 4, height(files.size.coerceIn(3, 12)))
         scrollPane.minimumSize = Dimension(0, height(3))
+        showShiftColumn(included.size > 1)
         files.forEach(::check)
     }
 
@@ -234,6 +259,7 @@ class FileParsersTable(
 
     private fun changed() {
         model.fireTableDataChanged()
+        showShiftColumn(included.size > 1)
         table.tableHeader.repaint()
         val mismatched = included.filter { it in problems }
         warning.icon = if (mismatched.isEmpty()) null else Icons.warning
@@ -249,6 +275,21 @@ class FileParsersTable(
         }
         warning.toolTipText = mismatched.firstOrNull()?.let { problems[it] }?.let(::htmlLines)
         onChange()
+    }
+
+    /** Shows the Shift column, if the table has one, or hides it; a shift matters only in a merge. */
+    private fun showShiftColumn(shown: Boolean) {
+        if (shiftColumn < 0) return
+        val hidden = hiddenShiftColumn
+        if (shown && hidden != null) {
+            table.addColumn(hidden)
+            hiddenShiftColumn = null
+        } else if (!shown && hidden == null) {
+            stopEditing()
+            val column = table.columnModel.getColumn(shiftColumn)
+            table.removeColumn(column)
+            hiddenShiftColumn = column
+        }
     }
 
     /** Sets the parser of all files listed. */
@@ -273,10 +314,11 @@ class FileParsersTable(
 
     private inner class FilesModel : AbstractTableModel() {
         override fun getRowCount() = shown.size
-        override fun getColumnCount() = parserColumn + 1
+        override fun getColumnCount() = maxOf(parserColumn, shiftColumn) + 1
         override fun getColumnName(column: Int) = when (column) {
             fileColumn -> "File"
             parserColumn -> "Parser"
+            shiftColumn -> "Shift"
             else -> "Open"
         }
         override fun getColumnClass(column: Int): Class<*> =
@@ -288,6 +330,7 @@ class FileParsersTable(
             return when (column) {
                 fileColumn -> names[files.indexOf(file)]
                 parserColumn -> chosen[file]
+                shiftColumn -> TimestampShift.format(shifts[file] ?: 0)
                 else -> file !in excluded
             }
         }
@@ -297,6 +340,13 @@ class FileParsersTable(
             if (column < fileColumn) {
                 if (value == true) excluded.remove(file) else excluded.add(file)
                 changed()
+                return
+            }
+            if (column == shiftColumn) {
+                val shift = TimestampShift.parse(value as String) ?: return
+                if (shift == 0L) shifts.remove(file) else shifts[file] = shift
+                // A shift costs no check: the parser reads the file the same.
+                onChange()
                 return
             }
             if (chosen[file] == value) return
@@ -323,6 +373,18 @@ class FileParsersTable(
             headerCombo.isVisible = files.size > 1
             panel.background = table.tableHeader.background
             return panel
+        }
+    }
+
+    /** Edits a shift in a [TimestampShiftField]; text that is no shift stays in editing, outlined as an error. */
+    private class ShiftEditor : DefaultCellEditor(TimestampShiftField()) {
+        init {
+            clickCountToStart = 1
+        }
+
+        override fun stopCellEditing(): Boolean {
+            if ((component as TimestampShiftField).shift == null) return false
+            return super.stopCellEditing()
         }
     }
 

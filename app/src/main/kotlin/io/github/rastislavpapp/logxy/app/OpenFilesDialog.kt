@@ -18,7 +18,10 @@ import javax.swing.JRadioButton
 import javax.swing.KeyStroke
 import javax.swing.UIManager
 
-/** How the user chose to open files: [parsers] has the parser for each of [files], null to detect it. */
+/**
+ * How the user chose to open files: [parsers] has the parser for each of [files], null to detect it, and [shifts] the
+ * timestamp shift of each in nanoseconds for a merge, empty if none has one.
+ */
 class OpenAnswer(
     val mode: OpenMode,
     val files: List<Path>,
@@ -26,6 +29,7 @@ class OpenAnswer(
     val includeSubfolders: Boolean,
     /** Open files this way from now on, without asking. */
     val remember: Boolean,
+    val shifts: List<Long> = emptyList(),
 )
 
 /**
@@ -47,7 +51,8 @@ class OpenFilesDialog(
         private set
 
     private val heading = JLabel().apply { putClientProperty("FlatLaf.styleClass", "h3") }
-    private val parsers: FileParsersTable = FileParsersTable(files, names, descriptions, excludable = true) { update() }
+    private val parsers: FileParsersTable =
+        FileParsersTable(files, names, descriptions, excludable = true, shiftable = true) { update() }
     private val subfolders = JCheckBox("Include subfolders", true)
     private val remember = JCheckBox("Always open files this way")
     private val openButton = JButton("Open")
@@ -133,7 +138,14 @@ class OpenFilesDialog(
     private fun open() {
         parsers.stopEditing()
         val mode = choices.getOrNull(radios.indexOfFirst { it.isSelected && it.isEnabled }) ?: return
-        answer = OpenAnswer(mode, parsers.included, parsers.chosenParsers, subfolders.isSelected, remember.isSelected)
+        answer = OpenAnswer(
+            mode,
+            parsers.included,
+            parsers.chosenParsers,
+            subfolders.isSelected,
+            remember.isSelected,
+            parsers.chosenShifts,
+        )
         dispose()
     }
 

@@ -35,8 +35,11 @@ fun accentToggle(icon: Icon?, tooltip: String, text: String = ""): JToggleButton
 /** A small option toggle, such as match case, shown inside a text field by [withToggles]. */
 fun fieldToggle(icon: String, tooltip: String) = accentToggle(Icons.get(icon), tooltip)
 
-/** Shows [toggles] at the end of the field, inside it, like an editor's find options. */
-fun JTextField.withToggles(vararg toggles: JToggleButton) = apply {
+/**
+ * Shows [toggles] at the end of the field, inside it, like an editor's find options; also buttons, such as one that
+ * opens a [TimePicker].
+ */
+fun JTextField.withToggles(vararg toggles: AbstractButton) = apply {
     val bar = JToolBar().apply {
         isFloatable = false
         isOpaque = false

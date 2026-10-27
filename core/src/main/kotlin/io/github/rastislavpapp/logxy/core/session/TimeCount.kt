@@ -167,13 +167,15 @@ internal class TimeCount(
         private val timeField = snapshot.schema.indexOf(Role.TIMESTAMP)
         private val levelField = snapshot.schema.indexOf(Role.LEVEL)
         private val categories = this@TimeCount.categories[part]
+        private val shift = loaded.shift(part)
 
         fun addTo(histogram: TimeHistogram, record: Int) {
             if (timeField < 0) return
             cursor.moveTo(record)
             val time = cursor.timestamp(timeField)
             if (time == Records.NO_TIMESTAMP) return
-            histogram.add(time, if (levelField < 0) TimeHistogram.OTHER else categories[cursor.levelId(levelField)], 1)
+            val category = if (levelField < 0) TimeHistogram.OTHER else categories[cursor.levelId(levelField)]
+            histogram.add(time + shift, category, 1)
         }
     }
 }

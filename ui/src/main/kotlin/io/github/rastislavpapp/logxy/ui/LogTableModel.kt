@@ -147,6 +147,9 @@ class LogTableModel(val shown: ShownLog, private val names: ColumnNames) : Abstr
     /** Canonical level of the record shown in [row], if the parser has levels. */
     fun level(row: Int): Level? = shown.level(recordAt(row))
 
+    /** The timestamp shift of the file of the record shown in [row], in nanoseconds; 0 for none. */
+    fun timestampShift(row: Int): Long = shown.timestampShift(recordAt(row))
+
     /** The color of the row highlight of the record shown in [row]; null if it has none. */
     fun rowHighlight(row: Int): PaletteColor? {
         val index = shown.rowHighlight(recordAt(row))

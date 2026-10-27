@@ -237,6 +237,30 @@ class LogSessionTest {
     }
 
     @Test
+    fun `a merge shifts its files' timestamps, and merges again when the shifts change`() = runBlocking {
+        val hour = 3_600_000_000_000L
+        val a = Files.writeString(dir.resolve("a.log"), "2026-10-01 08:00:00.000 [main] INFO app.L - in a\n")
+        val b = Files.writeString(dir.resolve("b.log"), "2026-10-01 07:30:00.000 [main] INFO app.L - in b\n")
+        val recorder = Recorder()
+        val session = withContext(ui) {
+            LogSession(listOf(a, b), scope, NoSettings, recorder, shifts = listOf(0, hour)).also { it.start() }
+        }
+        var shown = withTimeout(10_000) { recorder.loads.receive() }
+        withContext(ui) {
+            assertEquals(listOf(0L, hour), session.shifts)
+            // b at 07:30 is 08:30 shifted, after a.
+            assertEquals(listOf("in a", "in b"), List(shown.size) { shown.rowValues(it, 100).last() })
+            session.shiftTimestamps(listOf(0, 0))
+        }
+        shown = withTimeout(10_000) { recorder.loads.receive() }
+        withContext(ui) {
+            assertEquals(listOf(0L, 0L), session.shifts)
+            assertEquals(listOf("in b", "in a"), List(shown.size) { shown.rowValues(it, 100).last() })
+            session.dispose()
+        }
+    }
+
+    @Test
     fun `a merge uses the parsers chosen for its files and detects the others`() = runBlocking {
         val a = Files.writeString(dir.resolve("a.log"), lines(10))
         val b = Files.writeString(dir.resolve("b.log"), lines(10))

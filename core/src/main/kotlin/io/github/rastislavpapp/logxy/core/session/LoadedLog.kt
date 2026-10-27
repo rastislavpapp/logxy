@@ -40,6 +40,9 @@ internal interface LoadedLog {
     /** A new filter for [records]. */
     fun newFilter(): RecordFilter
 
+    /** The timestamp shift of [part] in nanoseconds, added to every time read from its own records. */
+    fun shift(part: Int): Long
+
     /** The first record of [part] at [record] or later; the part's record count if none. */
     fun firstRecordFrom(part: Int, record: Int): Int
 
@@ -108,9 +111,16 @@ private class SnapshotSourceReader(
     override fun read(part: Int, position: Long, length: Int) = snapshots[part].read(position, length)
 }
 
-/** The records of [parts]: the single one's, or [parts] merged and named by [names]. */
-internal suspend fun loadedLog(parts: List<LogData>, names: List<String>): LoadedLog =
-    if (parts.size == 1) SingleLoad(parts.single()) else MergedLoad(MergedLog.build(parts, names))
+/**
+ * The records of [parts]: the single one's, or [parts] merged, named by [names] and with their timestamps shifted by
+ * [shifts] nanoseconds.
+ */
+internal suspend fun loadedLog(
+    parts: List<LogData>,
+    names: List<String>,
+    shifts: LongArray = LongArray(parts.size),
+): LoadedLog =
+    if (parts.size == 1) SingleLoad(parts.single()) else MergedLoad(MergedLog.build(parts, names, shifts))
 
 /** A load of one file: its records are the log's own, and a row's origin is the record itself. */
 internal class SingleLoad(private val log: LogData) : LoadedLog {
@@ -121,6 +131,8 @@ internal class SingleLoad(private val log: LogData) : LoadedLog {
     override val origin: RowOrigin? get() = null
 
     override fun newFilter(): RecordFilter = FilterEngine(log)
+
+    override fun shift(part: Int) = 0L
 
     override fun firstRecordFrom(part: Int, record: Int) = record
 
@@ -165,6 +177,8 @@ internal class MergedLoad(private val log: MergedLog) : LoadedLog {
     }
 
     override fun newFilter(): RecordFilter = MergedFilter(log)
+
+    override fun shift(part: Int) = log.shift(part)
 
     override fun firstRecordFrom(part: Int, record: Int) = log.firstRecordFrom(part, record)
 

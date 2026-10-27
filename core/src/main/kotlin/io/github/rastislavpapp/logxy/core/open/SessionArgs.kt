@@ -3,6 +3,7 @@ package io.github.rastislavpapp.logxy.core.open
 import io.github.rastislavpapp.logxy.core.config.SavedFilter
 import io.github.rastislavpapp.logxy.core.config.Settings
 import io.github.rastislavpapp.logxy.core.log.Level
+import io.github.rastislavpapp.logxy.core.merge.TimestampShift
 import io.github.rastislavpapp.logxy.core.parse.Parser
 import io.github.rastislavpapp.logxy.core.session.RecordStart
 import io.github.rastislavpapp.logxy.core.session.SessionPosition
@@ -21,6 +22,8 @@ data class OpenSession(
     val parsers: List<Parser?>,
     val filter: SavedFilter?,
     val position: SessionPosition<String>? = null,
+    /** The timestamp shift of each of [paths] in nanoseconds; empty if none has one. */
+    val shifts: List<Long> = emptyList(),
 ) {
     /** Whether this session has the same files as [other], in any order. */
     fun sameFiles(other: OpenSession) = paths.toSet() == other.paths.toSet()
@@ -44,6 +47,9 @@ data class OpenSession(
             if (path == null || offset == null) return null
             return RecordStart(path, offset)
         }
+
+        /** [shifts] as [OpenSession.shifts] keeps them: empty if none is a shift. */
+        fun keptShifts(shifts: List<Long>): List<Long> = if (shifts.all { it == 0L }) emptyList() else shifts
     }
 }
 
@@ -60,6 +66,7 @@ object SessionArgs {
     private const val PARSERS_ARG = "--parsers"
     private const val LEAD_ARG = "--lead"
     private const val TOP_ARG = "--top"
+    private const val SHIFTS_ARG = "--shifts"
 
     /**
      * Arguments that make the next start reopen [sessions], each with its filter and chosen parsers, and select
@@ -88,6 +95,10 @@ object SessionArgs {
             }
             addStart(LEAD_ARG, session, session.position?.lead)
             addStart(TOP_ARG, session, session.position?.top)
+            if (session.shifts.isNotEmpty()) {
+                add(SHIFTS_ARG)
+                add(session.shifts.joinToString(",") { TimestampShift.format(it) })
+            }
         }
         if (selected >= 0) add(SELECT_ARG).also { add(selected.toString()) }
     }
@@ -102,11 +113,12 @@ object SessionArgs {
             var parsers: List<Parser?>? = null,
             var lead: RecordStart<String>? = null,
             var top: RecordStart<String>? = null,
+            var shifts: List<Long> = emptyList(),
         ) {
             fun session(): OpenSession {
                 val filter = SavedFilter("", level, query).takeUnless { it.isEmpty }
                 val position = if (lead == null && top == null) null else SessionPosition(lead, top)
-                return OpenSession(paths, parsers ?: paths.map { null }, filter, position)
+                return OpenSession(paths, parsers ?: paths.map { null }, filter, position, shifts)
             }
         }
         val groups = ArrayList<Group>()
@@ -134,6 +146,11 @@ object SessionArgs {
                 }
                 LEAD_ARG -> groups.last().let { it.lead = start(it) }
                 TOP_ARG -> groups.last().let { it.top = start(it) }
+                SHIFTS_ARG -> groups.last().let { group ->
+                    val texts = value().split(',')
+                    val shifts = group.paths.indices.map { TimestampShift.parse(texts.getOrElse(it) { "" }) ?: 0L }
+                    group.shifts = OpenSession.keptShifts(shifts)
+                }
                 SELECT_ARG -> selected = value().toIntOrNull() ?: 0
                 else -> groups.last().paths.add(arg)
             }

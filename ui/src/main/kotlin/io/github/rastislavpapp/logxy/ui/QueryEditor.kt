@@ -103,6 +103,12 @@ class QueryEditor(private val onApply: () -> Unit, private val columnNames: Colu
      */
     var variableValues: (template: String, variable: Int, onValues: (VariableValues?) -> Unit) -> Unit =
         { _, _, onValues -> onValues(null) }
+
+    /**
+     * Gives what the time picker opens on, offered in the value of a rule comparing a timestamp with a time; null
+     * while there is nothing to pick from.
+     */
+    var timePickerLog: () -> TimePickerLog? = { null }
     private var root = GroupView(Query.EMPTY, isRoot = true)
 
     init {
@@ -346,11 +352,18 @@ class QueryEditor(private val onApply: () -> Unit, private val columnNames: Colu
         private val field = JComboBox<String>()
         private val op = JComboBox<OpChoice>()
         private val case = fieldToggle("inline/matchCase", "Match exact case")
-        private val text = JTextField(12).apply {
-            addActionListener { onApply() }
-            toolTipText = "* matches any text, ? one character"
-            withToggles(case)
-            limitPaste()
+        private val text = JTextField(12)
+
+        // Shown instead of the case toggle while the rule compares a timestamp with a time.
+        private val picker = timePickerButton(text) { timePickerLog() }
+
+        init {
+            text.apply {
+                addActionListener { onApply() }
+                toolTipText = "* matches any text, ? one character"
+                withToggles(case, picker)
+                limitPaste()
+            }
         }
         private val level = JComboBox(Level.entries.filter { it != Level.UNKNOWN }.toTypedArray())
         private var valueSlot: JComponent = text
@@ -480,6 +493,9 @@ class QueryEditor(private val onApply: () -> Unit, private val columnNames: Colu
                 changed()
             }
             case.isEnabled = selected.usesCase && !isTemplate()
+            val picksTime = selected in EditorOp.TIME && fieldType() == ColumnType.TIMESTAMP
+            case.isVisible = !picksTime
+            picker.isVisible = picksTime
             suggestions.enabled = variableNumber() != null && !selected.usesLevel
             text.toolTipText = when {
                 isTemplate() -> "The message with its variable parts (numbers, ids, …) written as {1}, {2}, …"

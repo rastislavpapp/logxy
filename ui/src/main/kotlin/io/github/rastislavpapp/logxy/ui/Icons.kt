@@ -1,6 +1,7 @@
 package io.github.rastislavpapp.logxy.ui
 
 import io.github.rastislavpapp.logxy.core.config.PaletteColor
+import java.awt.Color
 import java.awt.Component
 import java.awt.Graphics
 import java.awt.Graphics2D
@@ -68,6 +69,40 @@ class SwatchIcon(private val color: PaletteColor) : Icon {
     private companion object {
         const val SIZE = 14
         const val ARC = 4
+    }
+}
+
+/**
+ * A small calendar page, drawn in the gray of the "new UI" icons, as the icons artifact has none: a frame with a band
+ * on top, two rings, and a few days.
+ */
+object CalendarIcon : Icon {
+    private const val SIZE = 16
+    private const val LIGHT = 0x6C707E
+    private const val DARK = 0xCED0D6
+
+    override fun getIconWidth() = look.scale(SIZE)
+    override fun getIconHeight() = look.scale(SIZE)
+
+    override fun paintIcon(c: Component?, g: Graphics, x: Int, y: Int) {
+        val g2 = g.create() as Graphics2D
+        try {
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+            g2.translate(x, y)
+            // Drawn on a 16 px grid, scaled as the screen is.
+            val scale = iconWidth / SIZE.toDouble()
+            g2.scale(scale, scale)
+            g2.color = Color(if (look.isDark) DARK else LIGHT)
+            g2.drawRoundRect(2, 3, 12, 11, 3, 3)
+            g2.drawLine(2, 6, 14, 6)
+            g2.drawLine(5, 1, 5, 4)
+            g2.drawLine(11, 1, 11, 4)
+            for (row in 0..1) {
+                for (column in 0..2) g2.fillRect(4 + column * 3, 8 + row * 3, 2, 2)
+            }
+        } finally {
+            g2.dispose()
+        }
     }
 }
 

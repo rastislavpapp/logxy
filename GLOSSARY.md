@@ -13,8 +13,12 @@ A zip or tar file, possibly compressed, or a single compressed file, whose files
 _Avoid_: bundle, package
 
 **Recent session**:
-A closed session as it can be opened again: its files, the parser chosen for each, its filter, and its position (the selection's lead record and the top row's record, by where each starts in its file).
+A closed session as it can be opened again: its files, the parser chosen for each and its timestamp shift, its filter, and its position (the selection's lead record and the top row's record, by where each starts in its file).
 _Avoid_: recent file, history entry
+
+**Timestamp shift**:
+An amount added to every timestamp of one file of a merged session, for a file logged in another time zone: whole hours, or hours and minutes. The session merges, filters and goes to times with it; the Time column keeps the file's own text.
+_Avoid_: clock shift, offset, time zone
 
 **Load**:
 One pass of a session over its files: indexed, merged if there are several, then followed until the session reloads or closes.
