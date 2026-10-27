@@ -1,5 +1,6 @@
 package io.github.rastislavpapp.logxy.ui
 
+import java.awt.Dimension
 import java.awt.Toolkit
 import java.awt.datatransfer.DataFlavor
 import java.awt.event.ActionEvent
@@ -30,6 +31,9 @@ private val MAXES = intArrayOf(23, 59, 59)
 
 /** Characters a part takes in the text, with the colon after it. */
 private const val PART_WIDTH = 3
+
+/** Room for the caret after the text, in pixels at 100 %. */
+private const val CARET_ROOM = 4
 
 /**
  * A time of day as `HH:mm:ss`, edited a part at a time as a system's date fields are: the part being edited is
@@ -114,6 +118,15 @@ internal class TimeOfDayField(
         })
         showTime()
     }
+
+    // Wide enough for the whole time in the look's font and field padding, which a count of columns is not in all.
+    override fun getPreferredSize(): Dimension {
+        val size = super.getPreferredSize()
+        val text = getFontMetrics(font).stringWidth("00:00:00") + insets.left + insets.right + look.scale(CARET_ROOM)
+        return Dimension(maxOf(size.width, text), size.height)
+    }
+
+    override fun getMinimumSize(): Dimension = preferredSize
 
     private fun bind(key: String, name: String, action: () -> Unit) {
         getInputMap(WHEN_FOCUSED).put(KeyStroke.getKeyStroke(key), name)

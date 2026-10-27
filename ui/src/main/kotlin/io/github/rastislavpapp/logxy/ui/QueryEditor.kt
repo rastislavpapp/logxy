@@ -354,17 +354,16 @@ class QueryEditor(private val onApply: () -> Unit, private val columnNames: Colu
         private val case = fieldToggle("inline/matchCase", "Match exact case")
         private val text = JTextField(12)
 
-        // Shown instead of the case toggle while the rule compares a timestamp with a time.
-        private val picker = timePickerButton(text) { timePickerLog() }.also {
-            text.picksTimeOnClick({ timePickerLog() }) { it.isVisible }
-        }
+        /** Whether the rule compares a timestamp with a time: a click in the value then opens a time picker. */
+        private var picksTime = false
 
         init {
             text.apply {
                 addActionListener { onApply() }
                 toolTipText = "* matches any text, ? one character"
-                withToggles(case, picker)
+                withToggles(case)
                 limitPaste()
+                picksTimeOnClick({ timePickerLog() }) { picksTime }
             }
         }
         private val level = JComboBox(Level.entries.filter { it != Level.UNKNOWN }.toTypedArray())
@@ -496,9 +495,8 @@ class QueryEditor(private val onApply: () -> Unit, private val columnNames: Colu
                 changed()
             }
             case.isEnabled = selected.usesCase && !isTemplate()
-            val picksTime = selected in EditorOp.TIME && fieldType() == ColumnType.TIMESTAMP
+            picksTime = selected in EditorOp.TIME && fieldType() == ColumnType.TIMESTAMP
             case.isVisible = !picksTime
-            picker.isVisible = picksTime
             suggestions.enabled = variableNumber() != null && !selected.usesLevel
             text.toolTipText = when {
                 isTemplate() -> "The message with its variable parts (numbers, ids, …) written as {1}, {2}, …"
