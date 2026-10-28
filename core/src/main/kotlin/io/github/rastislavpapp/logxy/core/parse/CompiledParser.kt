@@ -23,9 +23,6 @@ abstract class CompiledParser {
      * inferring a header must take the first lines that are not blank.
      */
     open val headerLines: Int get() = 0
-
-    /** The record `bytes[from, to)` laid out for reading in full, or null to show it as written. */
-    open fun detailText(bytes: ByteArray, from: Int, to: Int): String? = null
 }
 
 /** Recognizes the first line of a record. Stateful; one per thread. */

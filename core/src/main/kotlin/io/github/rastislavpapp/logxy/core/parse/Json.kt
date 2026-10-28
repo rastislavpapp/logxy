@@ -110,7 +110,7 @@ internal object Json {
     }
 
     /** Like [forEachEntry], for the elements of an array. */
-    private inline fun forEachElement(bytes: ByteArray, from: Int, to: Int, element: (Int, Int) -> Unit): Boolean {
+    inline fun forEachElement(bytes: ByteArray, from: Int, to: Int, element: (Int, Int) -> Unit): Boolean {
         var i = skipSpace(bytes, from, to)
         if (i >= to || bytes[i] != OPEN_ARRAY) return false
         i = skipSpace(bytes, i + 1, to)
@@ -242,16 +242,13 @@ internal object Json {
     }
 
     /**
-     * The object in `bytes[from, to)` indented for reading, or null if it holds none. Strings are
-     * unescaped, so a stack trace shows as lines of its own.
+     * The object or array that is exactly `bytes[from, to)`, indented for reading, as UTF-8 text; null if it is no
+     * well-formed object or array. Strings are unescaped, so a stack trace shows as lines of its own.
      */
-    fun pretty(bytes: ByteArray, from: Int, to: Int): String? {
-        val start = skipSpace(bytes, from, to)
-        if (start >= to || bytes[start] != OPEN_OBJECT) return null
-        val end = valueEnd(bytes, start, to)
-        if (end < 0 || skipSpace(bytes, end, to) != to) return null
+    fun pretty(bytes: ByteArray, from: Int, to: Int): ByteArray? {
+        if (from >= to || (bytes[from] != OPEN_OBJECT && bytes[from] != OPEN_ARRAY)) return null
         val out = ByteArrayOutputStream(to - from + 64)
-        return if (writePretty(bytes, start, end, out, 0)) out.toString(Charsets.UTF_8) else null
+        return if (writePretty(bytes, from, to, out, 0)) out.toByteArray() else null
     }
 
     /**
@@ -264,7 +261,12 @@ internal object Json {
             writeString(bytes, from, to, out)
             return true
         }
-        if ((first != OPEN_OBJECT && first != OPEN_ARRAY) || depth >= MAX_PRETTY_DEPTH) {
+        if (first != OPEN_OBJECT && first != OPEN_ARRAY) {
+            if (!isScalar(bytes, from, to)) return false
+            out.write(bytes, from, to - from)
+            return true
+        }
+        if (depth >= MAX_PRETTY_DEPTH) {
             out.write(bytes, from, to - from)
             return true
         }
@@ -313,6 +315,49 @@ internal object Json {
         out.write(content, 0, length)
         out.write(QUOTE.toInt())
     }
+
+    /**
+     * Whether `bytes[from, to)` is `true`, `false`, `null` or a number as JSON writes it, such as `-1.5e3`;
+     * [valueEnd] only checks the first byte of these.
+     */
+    private fun isScalar(bytes: ByteArray, from: Int, to: Int): Boolean {
+        val length = to - from
+        if (length == 4 && (matches(bytes, from, TRUE) || matches(bytes, from, NULL))) return true
+        if (length == 5 && matches(bytes, from, FALSE)) return true
+        var i = from
+        if (i < to && bytes[i] == '-'.code.toByte()) i++
+        val integer = i
+        i = skipDigits(bytes, i, to)
+        if (i == integer) return false
+        val leadingZero = bytes[integer] == '0'.code.toByte() && i - integer > 1
+        if (leadingZero) return false
+        if (i < to && bytes[i] == '.'.code.toByte()) {
+            val fraction = i + 1
+            i = skipDigits(bytes, fraction, to)
+            if (i == fraction) return false
+        }
+        if (i < to && (bytes[i] == 'e'.code.toByte() || bytes[i] == 'E'.code.toByte())) {
+            i++
+            if (i < to && (bytes[i] == '+'.code.toByte() || bytes[i] == '-'.code.toByte())) i++
+            val exponent = i
+            i = skipDigits(bytes, exponent, to)
+            if (i == exponent) return false
+        }
+        return i == to
+    }
+
+    private fun matches(bytes: ByteArray, from: Int, word: ByteArray) =
+        java.util.Arrays.equals(bytes, from, from + word.size, word, 0, word.size)
+
+    private fun skipDigits(bytes: ByteArray, from: Int, to: Int): Int {
+        var i = from
+        while (i < to && bytes[i] in '0'.code.toByte()..'9'.code.toByte()) i++
+        return i
+    }
+
+    private val TRUE = "true".toByteArray()
+    private val FALSE = "false".toByteArray()
+    private val NULL = "null".toByteArray()
 
     private val INDENT = "  ".toByteArray()
 }

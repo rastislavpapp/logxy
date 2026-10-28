@@ -38,6 +38,7 @@ object Icons {
     val columns get() = get("nodes/dataColumn")
     val warning get() = get("status/warning")
     val fits get() = get("general/greenCheckmark")
+    val prettyPrint get() = get("actions/reformatCode")
 
     // A gutter icon, at its own 14 px.
     val bookmark get() = get("gutter/bookmark", 14)

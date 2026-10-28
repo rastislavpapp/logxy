@@ -206,7 +206,6 @@ class ParsedLog private constructor(
         val bytes = read(start, minOf(length, maxBytes + 2L).toInt())
         val complete = bytes.size.toLong() == length
         val end = if (complete) Bytes.trimLineEnd(bytes, 0, bytes.size) else bytes.size
-        if (complete) parser.detailText(bytes, 0, end)?.let { return it }
         return Bytes.utf8Text(bytes, 0, end, maxBytes)
     }
 

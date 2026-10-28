@@ -129,6 +129,9 @@ interface UiState {
 
     companion object {
         const val DETAIL_DIVIDER = "detail.divider"
+
+        /** Whether the detail pane pretty-prints JSON and XML: `true`, or absent for the record as written. */
+        const val DETAIL_PRETTY_PRINT = "detail.prettyPrint"
         const val FILTER_MODE = "filter.mode"
     }
 }

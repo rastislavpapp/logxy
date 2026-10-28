@@ -40,8 +40,6 @@ class CompiledJson(
     override fun formatTimestamp(field: Int, nanos: Long): String =
         displayFormat.format(Instant.ofEpochSecond(Math.floorDiv(nanos, NANOS), Math.floorMod(nanos, NANOS)))
 
-    override fun detailText(bytes: ByteArray, from: Int, to: Int): String? = Json.pretty(bytes, from, to)
-
     override fun newMatcher(): LineMatcher = Matcher()
 
     private inner class Matcher : LineMatcher {
