@@ -80,9 +80,15 @@ fun measure(
 fun measureOrList(rows: List<BenchmarkRow>, params: Map<String, List<String>>, runs: Runs, only: String?) {
     val times = measure(rows, params, runs, ::printRow, only)
     if (times.isNotEmpty()) return
-    val names = rows.flatMap { row -> row.named(params).map { it.first } }
-    error("No row named \"$only\"; the rows are:\n${names.joinToString("\n")}")
+    error(noSuchRow(only, rowNames(rows, params)))
 }
+
+/** The names of the rows [rows] make with [params], as [measure] reports them. */
+fun rowNames(rows: List<BenchmarkRow>, params: Map<String, List<String>>): List<String> =
+    rows.flatMap { row -> row.named(params).map { it.first } }
+
+/** Says that none of [names] is [name], and lists them. */
+fun noSuchRow(name: String?, names: List<String>) = "No row named \"$name\"; the rows are:\n${names.joinToString("\n")}"
 
 /** The measured runs of each forked JVM, in seconds. */
 private fun scoresPerFork(result: RunResult): List<DoubleArray> = result.benchmarkResults.map { fork ->

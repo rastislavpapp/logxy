@@ -14,7 +14,8 @@
 #   exec CMD...        run a command inside the container
 #   build | stop       build the image | stop and remove the sandbox
 # Environment: GUI_ENGINE (podman or docker), GUI_SIZE (default 1600x1000), GUI_OUT (default out/),
-# JAVA_TOOL_OPTIONS (passed to the app, e.g. -Xmx64m).
+# JAVA_TOOL_OPTIONS (passed to the app, e.g. -Xmx64m), GUI_SETTINGS (a logxy.properties to start with,
+# e.g. fixtures/recent-on.properties; default settings without it).
 set -euo pipefail
 
 name=logxy-gui
@@ -54,12 +55,22 @@ case "${1:-}" in
       args+=("/data/$i/$(basename "$f")")
       i=$((i + 1))
     done
+    # The app reads its settings from $XDG_CONFIG_HOME/logxy: a copy of GUI_SETTINGS there, so the app can save
+    # changes without touching the file on the host.
+    seed=:
+    if [[ -n ${GUI_SETTINGS:-} ]]; then
+      [[ -f $GUI_SETTINGS ]] || { echo "no such settings file: $GUI_SETTINGS" >&2; exit 1; }
+      mounts+=(-v "$(host_path "$(cd "$(dirname "$GUI_SETTINGS")" && pwd)"):/settings:ro")
+      seed="mkdir -p /tmp/config/logxy && cp /settings/$(basename "$GUI_SETTINGS") /tmp/config/logxy/logxy.properties"
+    fi
     "$engine" rm -f "$name" >/dev/null 2>&1 || true
     mkdir -p "$out"
     # JAVA_TOOL_OPTIONS reaches the app, e.g. -Xmx64m to see how it copes with little memory.
-    "$engine" run -d --name "$name" "${run_opts[@]}" -e HOME=/tmp -e JAVA_TOOL_OPTIONS="${JAVA_TOOL_OPTIONS:-}" \
+    "$engine" run -d --name "$name" "${run_opts[@]}" -e HOME=/tmp -e XDG_CONFIG_HOME=/tmp/config \
+      -e JAVA_TOOL_OPTIONS="${JAVA_TOOL_OPTIONS:-}" \
       -v "$(host_path "$root/app/build/libs"):/app:ro" -v "$(host_path "$out"):/out" "${mounts[@]}" \
       "$image" bash -c "
+        $seed
         Xvfb :99 -screen 0 ${size}x24 -nolisten tcp &
         until xdpyinfo >/dev/null 2>&1; do sleep 0.1; done
         openbox &
@@ -94,5 +105,5 @@ case "${1:-}" in
   exec)   shift; in_box "$@" ;;
   logs)   cat "$out/app.log" ;;
   stop)   "$engine" rm -f "$name" >/dev/null && echo stopped ;;
-  *) sed -n '3,17p' "$0" | cut -c3-; exit 1 ;;
+  *) sed -n '3,18p' "$0" | cut -c3-; exit 1 ;;
 esac

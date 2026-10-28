@@ -51,8 +51,14 @@ fun verdict(seconds: Double, baseline: Double, tolerance: Double, noise: Double)
 }
 
 /**
+ * Set by `-PbenchmarkOnly=<row>`: the name of the one row to measure, as the check prints it, e.g. a row just added;
+ * null for all of them.
+ */
+private val ONLY: String? = System.getProperty("benchmark.only")
+
+/**
  * Measures indexing, parsing, typical filters, following and merging on fixed-seed generated files, the rows of the
- * `tools` commands. The files are generated into `build/benchmark` once.
+ * `tools` commands, or only the row [ONLY] names. The files are generated into `build/benchmark` once.
  */
 private fun measureAll(): Map<String, Timings> {
     val main = dataFile("main.log", MAIN_SIZE, 1)
@@ -69,7 +75,11 @@ private fun measureAll(): Map<String, Timings> {
     val runs = Runs(RUNS, FORKS)
     printHeader(runs)
     val results = LinkedHashMap<String, Timings>()
-    for ((rows, params) in groups) results += measure(rows, params, runs, ::printRow)
+    for ((rows, params) in groups) results += measure(rows, params, runs, ::printRow, ONLY)
+    if (ONLY != null && results.isEmpty()) {
+        val names = groups.flatMap { (rows, params) -> rowNames(rows, params) }
+        error(noSuchRow(ONLY, names))
+    }
     return results
 }
 
@@ -144,6 +154,8 @@ private fun recordBaseline(committed: Properties?, local: Properties?, machine: 
     val file = if (committed == null || committed.matches(machine)) BASELINE_FILE else LOCAL_BASELINE_FILE
     val saved = if (file == BASELINE_FILE) committed else local
     val kept = saved?.takeIf { it.getProperty("setup") == SETUP && it.sameForks() && it.matches(machine) }
+    // One row alone would leave every other row of a baseline recorded anew without a time.
+    check(ONLY == null || kept != null) { "$file must be recorded again with all rows: drop -PbenchmarkOnly." }
     val results = measureAll()
     val added = results.keys.filter { kept?.getProperty(it) == null }
     save(file, machine, results, kept)
@@ -175,6 +187,7 @@ class BaselineTest {
             local != null && local.getProperty("setup") == SETUP && local.matches(machine) ->
                 LOCAL_BASELINE_FILE to local
             else -> {
+                check(ONLY == null) { "No baseline for this machine ($machine): drop -PbenchmarkOnly to record one." }
                 println("No baseline for this machine ($machine), recording one in $LOCAL_BASELINE_FILE.")
                 save(LOCAL_BASELINE_FILE, machine, measureAll())
                 return
