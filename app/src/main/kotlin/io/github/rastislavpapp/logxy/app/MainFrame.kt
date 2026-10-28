@@ -298,6 +298,8 @@ class MainFrame : JFrame("logxy") {
             })
             add(reopenClosedTabItem)
             addSeparator()
+            add(menuItem("Export…", null, null) { selectedTab()?.export() })
+            addSeparator()
             add(menuItem("Preferences", Icons.settings, KeyEvent.VK_S, shortcut or InputEvent.ALT_DOWN_MASK) {
                 PreferencesDialog(this@MainFrame, previewFile = selectedTab()?.path).isVisible = true
             })

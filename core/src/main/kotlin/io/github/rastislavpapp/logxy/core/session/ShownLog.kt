@@ -10,10 +10,22 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.job
 import kotlinx.coroutines.withContext
 import java.io.IOException
+import java.nio.ByteBuffer
+import java.nio.channels.FileChannel
+import java.nio.file.AccessDeniedException
+import java.nio.file.FileAlreadyExistsException
+import java.nio.file.FileSystemException
+import java.nio.file.Files
+import java.nio.file.NoSuchFileException
+import java.nio.file.Path
+import java.nio.file.StandardCopyOption
+import java.nio.file.StandardOpenOption
+import kotlin.random.Random
 
 /** What a [PreparedCopy] got. */
 sealed interface CopyResult {
@@ -30,6 +42,30 @@ sealed interface CopyResult {
     data object FileChanged : CopyResult
 
     data class Failed(val message: String) : CopyResult
+}
+
+/** What a [PreparedExport] got. */
+sealed interface ExportResult {
+    /** The file holds the records, [bytes] in all. */
+    data class Written(val bytes: Long) : ExportResult
+
+    /** The session reloaded or closed the files while exporting; nothing was written. */
+    data object FileChanged : ExportResult
+
+    /** Reading or writing failed, e.g. the disk is full; nothing was written. */
+    data class Failed(val message: String) : ExportResult
+}
+
+/** An export taken on the session's thread, ready to write on another; see [ShownLog.exportRows]. */
+interface PreparedExport {
+    /**
+     * Writes the file on another thread; cancelling the calling coroutine stops it. Unless it returns
+     * [ExportResult.Written], the file is left as it was before.
+     */
+    suspend fun run(): ExportResult
+
+    /** How far [run] got, from 0 to 1; readable from any thread. */
+    val progress: Double
 }
 
 /** The row going to a time lands on, see [ShownLog.landingAt]; [miss] is null if it is the record at that time. */
@@ -308,12 +344,38 @@ class ShownLog internal constructor(private val loaded: LoadedLog) {
      */
     fun copyRows(rows: RowRanges, limit: Long): PreparedCopy {
         if (ended) return EndedCopy
+        return RowsCopy(recordRuns(rows), loaded.sourceReader(), limit)
+    }
+
+    /**
+     * Exports [rows], all below [size], to [file]: the bytes of their records exactly as in the files, in row order.
+     * The one byte added is a line end between a record that ends its file without one and the next record, so
+     * exporting every record of one file unfiltered writes the file's own bytes. The records are read and written a
+     * chunk at a time, so an export of any size holds little in memory. The bytes go to a temporary file next to
+     * [file] that replaces it once complete: a cancelled or failed export leaves [file] as it was.
+     */
+    fun exportRows(rows: RowRanges, file: Path): PreparedExport {
+        if (ended) return EndedExport
+        return RowsExport(recordRuns(rows), loaded.sourceReader(), file)
+    }
+
+    /** The rows of those of [records] the shown log shows, e.g. of the bookmarked records; others are left out. */
+    fun rowsOf(records: IntArray): RowRanges {
+        val rows = RowRanges()
+        for (record in records) {
+            val row = rowOf(record)
+            if (row >= 0 && recordAt(row) == record) rows.add(row, row + 1)
+        }
+        return rows
+    }
+
+    /** The records of [rows], taken now as a filter's rows may change later. */
+    private fun recordRuns(rows: RowRanges): RecordRuns {
         requireShown(rows)
         val ranges = rows.copy()
         val first = maxOf(0, ranges.min)
-        // A filter's rows array may change later: the part the rows cover is copied now.
         val records = this.rows?.array()?.copyOfRange(first, ranges.max + 1)
-        return RowsCopy(ranges, records, first, loaded.sourceReader(), limit)
+        return RecordRuns(ranges, records, first)
     }
 
     /**
@@ -362,7 +424,7 @@ class ShownLog internal constructor(private val loaded: LoadedLog) {
         override var progress = 0.0
             private set
 
-        override suspend fun run(): CopyResult = readOff {
+        override suspend fun run(): CopyResult = copyOff {
             val text = StringBuilder()
             for (i in 0..<count) {
                 if (i % CANCEL_CHECK_ROWS == 0) {
@@ -370,64 +432,46 @@ class ShownLog internal constructor(private val loaded: LoadedLog) {
                     progress = i.toDouble() / count
                 }
                 text.append(read(i)).append('\n')
-                if (text.length > limit) return@readOff CopyResult.TooLarge(count, text.length.toLong())
+                if (text.length > limit) return@copyOff CopyResult.TooLarge(count, text.length.toLong())
             }
             progress = 1.0
             CopyResult.Copied(text.toString())
         }
     }
 
-    /** Reads off the owner thread; the result is [CopyResult.FileChanged] once the load ended meanwhile. */
-    private suspend fun readOff(read: suspend CoroutineScope.() -> CopyResult): CopyResult {
+    /** Reads for a copy off the owner thread, see [readOff]. */
+    private suspend fun copyOff(read: suspend CoroutineScope.() -> CopyResult): CopyResult =
+        readOff(CopyResult.FileChanged, { e -> CopyResult.Failed(reason(e)) }, read)
+
+    /**
+     * Runs [read] off the owner thread. The result is [changed] once the load ended meanwhile, and what [failed] makes
+     * of an I/O error otherwise.
+     */
+    private suspend fun <T> readOff(
+        changed: T,
+        failed: (IOException) -> T,
+        read: suspend CoroutineScope.() -> T,
+    ): T {
         val result = try {
             withContext(Dispatchers.IO, read)
         } catch (e: Exception) {
             if (e is CancellationException) throw e
             // Closing the files under the read fails it.
-            if (ended) return CopyResult.FileChanged
+            if (ended) return changed
             if (e !is IOException) throw e
-            CopyResult.Failed(e.message ?: e.javaClass.simpleName)
+            failed(e)
         }
-        return if (ended) CopyResult.FileChanged else result
+        return if (ended) changed else result
     }
 
     /**
-     * Copies the records of the rows in [ranges]. While all records are shown, a row is its record; for a filter's
-     * result, [records] holds the records of the rows from [firstRow] on.
+     * The records of the rows in [ranges]. While all records are shown, a row is its record; for a filter's result,
+     * [records] holds the records of the rows from [firstRow] on.
      */
-    private inner class RowsCopy(
-        private val ranges: RowRanges,
-        private val records: IntArray?,
-        private val firstRow: Int,
-        private val reader: SourceReader,
-        private val limit: Long,
-    ) : PreparedCopy {
-        @Volatile
-        override var progress = 0.0
-            private set
-
-        private var bytes = 0L
-        private var done = 0L
-
-        override suspend fun run(): CopyResult = readOff {
-            val job = coroutineContext.job
-            forEachRun { from, to ->
-                job.ensureActive()
-                reader.spans(from, to) { _, start, end -> bytes += end - start }
-            }
-            if (bytes > limit) return@readOff CopyResult.TooLarge(ranges.count, bytes)
-            // Each character takes at least a byte; a line end may be added after each part's last record.
-            val capacity = minOf(bytes + ranges.rangeCount, Int.MAX_VALUE - 8L)
-            val text = StringBuilder(capacity.toInt())
-            forEachRun { from, to ->
-                reader.spans(from, to) { part, start, end -> append(part, start, end, text, job) }
-            }
-            progress = 1.0
-            CopyResult.Copied(text.toString())
-        }
+    private class RecordRuns(val ranges: RowRanges, private val records: IntArray?, private val firstRow: Int) {
 
         /** Calls [run] with each run of the rows' records that follow each other, as records [from] to [to]. */
-        private inline fun forEachRun(run: (from: Int, to: Int) -> Unit) {
+        inline fun forEach(run: (from: Int, to: Int) -> Unit) {
             val records = records ?: return ranges.forEachRange(run)
             ranges.forEachRange { start, end ->
                 var i = start - firstRow
@@ -439,6 +483,44 @@ class ShownLog internal constructor(private val loaded: LoadedLog) {
                     i = next
                 }
             }
+        }
+
+        /** How many bytes the records take in the files, as [reader] tells from the index alone. */
+        fun bytes(reader: SourceReader, job: Job): Long {
+            var bytes = 0L
+            forEach { from, to ->
+                job.ensureActive()
+                reader.spans(from, to) { _, start, end -> bytes += end - start }
+            }
+            return bytes
+        }
+    }
+
+    /** Copies the records of [runs]. */
+    private inner class RowsCopy(
+        private val runs: RecordRuns,
+        private val reader: SourceReader,
+        private val limit: Long,
+    ) : PreparedCopy {
+        @Volatile
+        override var progress = 0.0
+            private set
+
+        private var bytes = 0L
+        private var done = 0L
+
+        override suspend fun run(): CopyResult = copyOff {
+            val job = coroutineContext.job
+            bytes = runs.bytes(reader, job)
+            if (bytes > limit) return@copyOff CopyResult.TooLarge(runs.ranges.count, bytes)
+            // Each character takes at least a byte; a line end may be added after each part's last record.
+            val capacity = minOf(bytes + runs.ranges.rangeCount, Int.MAX_VALUE - 8L)
+            val text = StringBuilder(capacity.toInt())
+            runs.forEach { from, to ->
+                reader.spans(from, to) { part, start, end -> append(part, start, end, text, job) }
+            }
+            progress = 1.0
+            CopyResult.Copied(text.toString())
         }
 
         /** Appends [part]'s bytes from [start] to [end], read a chunk at a time. */
@@ -459,6 +541,105 @@ class ShownLog internal constructor(private val loaded: LoadedLog) {
             }
             // A file's last line may have no line end; the next record must still start on a line of its own.
             if (last != NEWLINE) out.append('\n')
+        }
+    }
+
+    /** Exports the records of [runs] to [file], see [exportRows]. */
+    private inner class RowsExport(
+        private val runs: RecordRuns,
+        private val reader: SourceReader,
+        private val file: Path,
+    ) : PreparedExport {
+        @Volatile
+        override var progress = 0.0
+            private set
+
+        private var bytes = 0L
+        private var written = 0L
+
+        // Whether the bytes written so far end a line, so the next record starts on a line of its own.
+        private var endsLine = true
+
+        override suspend fun run(): ExportResult {
+            var partial: Path? = null
+            val failed = { e: IOException -> ExportResult.Failed(reason(e)) }
+            try {
+                val result = readOff(ExportResult.FileChanged, failed) {
+                    val job = coroutineContext.job
+                    bytes = runs.bytes(reader, job)
+                    val temporary = createPartial()
+                    partial = temporary
+                    FileChannel.open(temporary, StandardOpenOption.WRITE).use { out ->
+                        runs.forEach { from, to ->
+                            reader.spans(from, to) { part, start, end -> write(part, start, end, out, job) }
+                        }
+                    }
+                    ExportResult.Written(written)
+                }
+                val complete = partial
+                if (result !is ExportResult.Written || complete == null) return result
+                // Moved only once the load is known not to have ended while reading. Not cancellable: a Cancel
+                // landing during the move would otherwise report a cancelled export that is in place.
+                withContext(NonCancellable + Dispatchers.IO) {
+                    Files.move(complete, file, StandardCopyOption.REPLACE_EXISTING)
+                }
+                progress = 1.0
+                return result
+            } catch (e: IOException) {
+                return failed(e)
+            } finally {
+                val left = partial
+                if (left != null) withContext(NonCancellable + Dispatchers.IO) { deleteQuietly(left) }
+            }
+        }
+
+        /** Deletes [partial] if it is still there; a failure, e.g. a lock on Windows, must not hide the result. */
+        private fun deleteQuietly(partial: Path) {
+            try {
+                Files.deleteIfExists(partial)
+            } catch (_: IOException) {
+                // Left behind with its ".part" name, which tells what it is.
+            }
+        }
+
+        /**
+         * Creates the file the bytes go to until complete, next to [file]. Not by [Files.createTempFile], which makes
+         * the file readable by its owner only on POSIX, so the export would not get the permissions of a new file.
+         */
+        private fun createPartial(): Path {
+            val directory = file.toAbsolutePath().parent
+            while (true) {
+                val name = "${file.fileName}.${Random.nextInt(Int.MAX_VALUE)}.part"
+                try {
+                    return Files.createFile(directory.resolve(name))
+                } catch (_: FileAlreadyExistsException) {
+                    // Another export's, or left over from a crash: another name is taken.
+                }
+            }
+        }
+
+        /** Writes [part]'s bytes from [start] to [end] to [out], read a chunk at a time. */
+        private fun write(part: Int, start: Long, end: Long, out: FileChannel, job: Job) {
+            if (!endsLine) {
+                writeFully(out, ByteBuffer.wrap(LINE_END))
+                written++
+            }
+            var position = start
+            while (position < end) {
+                job.ensureActive()
+                val length = minOf(end - position, READ_BYTES.toLong()).toInt()
+                val chunk = reader.read(part, position, length)
+                if (chunk.size < length) throw IOException("The file is shorter than when it was read")
+                writeFully(out, ByteBuffer.wrap(chunk, 0, length))
+                endsLine = chunk[length - 1] == NEWLINE
+                position += length
+                written += length
+                progress = written.toDouble() / bytes
+            }
+        }
+
+        private fun writeFully(out: FileChannel, buffer: ByteBuffer) {
+            while (buffer.hasRemaining()) out.write(buffer)
         }
     }
 
@@ -562,6 +743,9 @@ class ShownLog internal constructor(private val loaded: LoadedLog) {
         private const val READ_BYTES = 1 shl 20
 
         private const val NEWLINE = '\n'.code.toByte()
+
+        /** What an export writes after a record that ends its file without a line end, before the next record. */
+        private val LINE_END = byteArrayOf(NEWLINE)
     }
 }
 
@@ -569,6 +753,23 @@ class ShownLog internal constructor(private val loaded: LoadedLog) {
 private object EndedCopy : PreparedCopy {
     override suspend fun run() = CopyResult.FileChanged
     override val progress = 1.0
+}
+
+/** What exporting from a shown log that already ended gets. */
+private object EndedExport : PreparedExport {
+    override suspend fun run() = ExportResult.FileChanged
+    override val progress = 1.0
+}
+
+/**
+ * Why [e] failed, in words for the user; for a file it could not reach, without the path, as that may be the
+ * export's temporary file.
+ */
+private fun reason(e: IOException): String = when (e) {
+    is AccessDeniedException -> "Access denied"
+    is NoSuchFileException -> "No such folder"
+    is FileSystemException -> e.reason ?: e.javaClass.simpleName
+    else -> e.message ?: e.javaClass.simpleName
 }
 
 /**
