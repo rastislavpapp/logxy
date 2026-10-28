@@ -75,8 +75,9 @@ internal interface LoadedLog {
 }
 
 /**
- * Where records are written in the files, and their bytes there, for the records there were when it was created.
- * Usable on any thread, but by one at a time.
+ * Reads records as they are written in their files: first where each record's bytes lie, then the bytes themselves.
+ * Covers only the records the log had when [LoadedLog.sourceReader] made this reader; later records are not in it.
+ * Usable on any thread, but by one thread at a time.
  */
 internal interface SourceReader {
     /**
