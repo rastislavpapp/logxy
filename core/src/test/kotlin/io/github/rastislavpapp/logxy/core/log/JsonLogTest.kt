@@ -17,7 +17,6 @@ import java.nio.file.Path
 import java.time.ZoneOffset
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertTrue
 
 class JsonLogTest {
 
@@ -83,13 +82,11 @@ class JsonLogTest {
     }
 
     @Test
-    fun `shows the whole record pretty-printed`() {
+    fun `shows the whole record as written`() {
         parse(sample).use { log ->
             assertEquals("Starting the application", log.recordText(0, 1000))
-            val detail = log.recordText(2, 10_000)
-            assertTrue(detail.startsWith("{\n  \"@timestamp\": \"2026-10-01T08:00:00.002Z\",\n"), detail)
-            val trace = "java.lang.IllegalStateException: boom\n\tat com.example.Db.query(Db.java:10)"
-            assertTrue("\"stack_trace\": \"$trace\"" in detail, detail)
+            assertEquals(sample.lines()[1], log.recordText(1, 10_000))
+            assertEquals(sample.lines()[4], log.recordText(3, 10_000))
         }
     }
 

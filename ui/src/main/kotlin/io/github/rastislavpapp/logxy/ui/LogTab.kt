@@ -9,6 +9,7 @@ import io.github.rastislavpapp.logxy.core.log.Role
 import io.github.rastislavpapp.logxy.core.log.Schema
 import io.github.rastislavpapp.logxy.core.merge.TimestampShift
 import io.github.rastislavpapp.logxy.core.parse.Parser
+import io.github.rastislavpapp.logxy.core.parse.PrettyPrint
 import io.github.rastislavpapp.logxy.core.query.CellRules
 import io.github.rastislavpapp.logxy.core.query.GoToTime
 import io.github.rastislavpapp.logxy.core.query.Marker
@@ -58,6 +59,7 @@ import java.awt.Point
 import java.awt.Toolkit
 import java.awt.datatransfer.StringSelection
 import java.awt.event.ActionEvent
+import java.awt.event.HierarchyEvent
 import java.awt.event.InputEvent
 import java.awt.event.KeyEvent
 import java.awt.event.MouseAdapter
@@ -84,6 +86,7 @@ import javax.swing.JScrollPane
 import javax.swing.JSplitPane
 import javax.swing.JTabbedPane
 import javax.swing.JTextArea
+import javax.swing.JToolBar
 import javax.swing.KeyStroke
 import javax.swing.Popup
 import javax.swing.PopupFactory
@@ -220,6 +223,33 @@ class LogTab(
     val description: String get() = paths.joinToString("\n") { (origin(it) ?: it).toString() }
     private val content = JPanel(BorderLayout())
     private val detail: DetailPane? = host.detailPane()
+
+    /** Whether the detail pane pretty-prints JSON and XML; one setting for all tabs, kept between runs. */
+    private var prettyPrint: Boolean
+        get() = host.state[UiState.DETAIL_PRETTY_PRINT] == "true"
+        set(value) {
+            host.state[UiState.DETAIL_PRETTY_PRINT] = if (value) "true" else null
+        }
+
+    /** The detail pane's *Pretty-print* toggle; made only where the host has a detail pane. */
+    private val prettyPrintButton by lazy {
+        accentToggle(Icons.prettyPrint, "Pretty-print JSON and XML").apply {
+            isSelected = prettyPrint
+            addActionListener {
+                prettyPrint = isSelected
+                showDetailAgain()
+            }
+            // Another tab may have switched it since this one last showed.
+            addHierarchyListener { e ->
+                val showingChanged = e.changeFlags and HierarchyEvent.SHOWING_CHANGED.toLong() != 0L
+                if (showingChanged && isShowing && isSelected != prettyPrint) {
+                    isSelected = prettyPrint
+                    showDetailAgain()
+                }
+            }
+        }
+    }
+
     private val filterBar = FilterBar(::applyFilter, columnNames, host)
     private val findBar = host.findView(this, ::searchFor) { forward -> find(forward) }
 
@@ -261,7 +291,15 @@ class LogTab(
             if (detail != null) {
                 val vertical = ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED
                 val horizontal = ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER
-                addTab("Detail", JScrollPane(detail.component, vertical, horizontal))
+                val tools = JToolBar().apply {
+                    isFloatable = false
+                    add(prettyPrintButton)
+                }
+                val view = JPanel(BorderLayout()).apply {
+                    add(tools, BorderLayout.NORTH)
+                    add(JScrollPane(detail.component, vertical, horizontal), BorderLayout.CENTER)
+                }
+                addTab("Detail", view)
             }
             addTab("Templates", templates)
         }
@@ -1318,9 +1356,22 @@ class LogTab(
     private fun showDetail(model: LogTableModel, row: Int) {
         val detail = detail ?: return
         val record = model.recordAtIndexOrNull(row)
-        detail.show(if (record != null) model.shown.recordText(record, MAX_DETAIL_BYTES) else "")
+        detail.show(if (record != null) detailText(model, record) else "")
         // A long record, e.g. with a stack trace, shows where the find bar's text is.
         detail.component.caretPosition = detail.firstFound
+    }
+
+    /** Shows the selected record again, e.g. once *Pretty-print* switched. */
+    private fun showDetailAgain() {
+        val model = model ?: return
+        val row = table?.selection?.lead ?: return
+        showDetail(model, row)
+    }
+
+    /** The text the detail pane shows for [record]: as written, or pretty-printed while [prettyPrint] is on. */
+    private fun detailText(model: LogTableModel, record: Int): String {
+        val text = model.shown.recordText(record, MAX_DETAIL_BYTES)
+        return if (prettyPrint) PrettyPrint.text(text) else text
     }
 
     /** Shows [record] again if it is selected; it may have grown, e.g. by a stack trace written after it. */
@@ -1329,7 +1380,7 @@ class LogTab(
         val model = model ?: return
         val row = table?.selection?.lead ?: return
         if (model.recordAtIndexOrNull(row) != record) return
-        val text = model.shown.recordText(record, MAX_DETAIL_BYTES)
+        val text = detailText(model, record)
         val area = detail.component
         if (text == area.text) return
         val caret = area.caretPosition

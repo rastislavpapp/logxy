@@ -61,32 +61,6 @@ class CompiledJsonTest {
         assertEquals("42", text("42"))
     }
 
-    @Test
-    fun `pretty-prints an object with strings unescaped`() {
-        val json = """{"a":1,"msg":"two\nlines","nested":{"list":[1,"x",{}],"empty":[]}}"""
-        val bytes = json.toByteArray()
-        assertEquals(
-            """
-            {
-              "a": 1,
-              "msg": "two
-            lines",
-              "nested": {
-                "list": [
-                  1,
-                  "x",
-                  {}
-                ],
-                "empty": []
-              }
-            }
-            """.trimIndent(),
-            Json.pretty(bytes, 0, bytes.size),
-        )
-        assertNull(Json.pretty("not json".toByteArray(), 0, 8))
-        assertNull("""{"a" 1}""".toByteArray().let { Json.pretty(it, 0, it.size) })
-    }
-
     private fun nanos(text: String, zone: ZoneId = ZoneOffset.UTC): Long? {
         val parser = JsonTimestampParser(zone)
         val bytes = text.toByteArray()
