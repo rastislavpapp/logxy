@@ -54,6 +54,8 @@ tasks.register<Test>("benchmark") {
     providers.gradleProperty("baselineTolerance").orNull?.let { systemProperty("baseline.tolerance", it) }
     // JVMs per row, 3 by default; recording a baseline uses the same.
     providers.gradleProperty("benchmarkForks").orNull?.let { systemProperty("benchmark.forks", it) }
+    // -PbenchmarkOnly=<row> measures and compares that row alone, by the name the check prints.
+    providers.gradleProperty("benchmarkOnly").orNull?.let { systemProperty("benchmark.only", it) }
     // -PbaselineRecord writes the rows the baseline lacks into it instead of comparing.
     if (providers.gradleProperty("baselineRecord").isPresent) systemProperty("baseline.record", "true")
     // The comparison table is the result, so it shows also with -q, as AGENTS.md runs it.
