@@ -25,7 +25,6 @@ import java.awt.Graphics
 import java.awt.Graphics2D
 import java.awt.Point
 import java.awt.Rectangle
-import java.awt.RenderingHints
 import java.awt.Toolkit
 import java.awt.datatransfer.StringSelection
 import java.awt.event.ComponentAdapter
@@ -54,22 +53,12 @@ import javax.swing.border.EmptyBorder
 import javax.swing.plaf.basic.BasicGraphicsUtils
 import javax.swing.table.AbstractTableModel
 import javax.swing.table.DefaultTableCellRenderer
-import kotlin.math.PI
-import kotlin.math.sin
 
 /** Counting again while a file is tailed waits this long, so a busy file does not keep it counting. */
 private const val REFRESH_MILLIS = 1000
 
 /** Counts that take longer show their progress. */
 private const val PROGRESS_DELAY_MILLIS = 200
-
-private const val PROGRESS_HEIGHT = 3
-
-/**
- * How many milliseconds the progress strip's segment takes to cross the panel while the progress is unknown, and the
- * placeholders take to pulse once.
- */
-private const val CYCLE_MILLIS = 1200.0
 
 private const val TABLE_CARD = "table"
 private const val PLACEHOLDERS_CARD = "placeholders"
@@ -145,7 +134,7 @@ class TemplatesPanel(
     private val summary = JLabel(" ")
 
     private val scrollPane = JScrollPane(table).apply { border = NO_OUTLINE }
-    private val placeholders = Placeholders()
+    private val placeholders = PlaceholderRows(table)
     private val center = JPanel(CardLayout()).apply {
         add(scrollPane, TABLE_CARD)
         add(placeholders, PLACEHOLDERS_CARD)
@@ -422,16 +411,7 @@ class TemplatesPanel(
     // Painted over the top inset, like the filter bar's strip, so showing it moves nothing.
     override fun paint(g: Graphics) {
         super.paint(g)
-        val fraction = shownProgress ?: return
-        g.color = look.accent
-        if (fraction >= 0) {
-            g.fillRect(0, 0, (width * fraction.coerceIn(0.0, 1.0)).toInt(), PROGRESS_HEIGHT)
-        } else {
-            val segment = width / 4
-            val phase = System.currentTimeMillis() % CYCLE_MILLIS.toLong() / CYCLE_MILLIS
-            val x = (phase * (width + segment)).toInt() - segment
-            g.fillRect(x, 0, segment, PROGRESS_HEIGHT)
-        }
+        paintProgressStrip(g, width, shownProgress ?: return)
     }
 
     private fun show(counts: TemplateCounts?) {
@@ -583,41 +563,6 @@ class TemplatesPanel(
     }
 
     private fun faint(color: Color) = Color(color.red, color.green, color.blue, color.alpha / 3)
-
-    /** Pulsing boxes where the counts and templates will be, while they are counted. */
-    private inner class Placeholders : JComponent() {
-        override fun paintComponent(g: Graphics) {
-            val g2 = g.create() as Graphics2D
-            try {
-                g2.color = table.background
-                g2.fillRect(0, 0, width, height)
-                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
-                val pulse = (1 + sin(System.currentTimeMillis() / CYCLE_MILLIS * 2 * PI)) / 2
-                val base = UIManager.getColor("Label.disabledForeground")
-                g2.color = Color(base.red, base.green, base.blue, (40 + 40 * pulse).toInt())
-                val metrics = table.getFontMetrics(table.font)
-                val rowHeight = table.rowHeight
-                val boxHeight = rowHeight / 2
-                val countWidth = metrics.stringWidth("000,000")
-                val templateX = metrics.stringWidth("0,000,000,000") + 24
-                val arc = look.scale(6)
-                var y = table.tableHeader.preferredSize.height + (rowHeight - boxHeight) / 2
-                var row = 0
-                while (y < height) {
-                    // Varied, but the same on every repaint, so the boxes do not jump about.
-                    val shape = ((row + 1) * -7046029254386353131L ushr 56) / 255.0
-                    val count = (countWidth * (0.5 + shape / 2)).toInt()
-                    g2.fillRoundRect(templateX - 24 - count, y, count, boxHeight, arc, arc)
-                    val template = ((width - templateX - 16) * (0.3 + 0.55 * shape)).toInt()
-                    if (template > 0) g2.fillRoundRect(templateX, y, template, boxHeight, arc, arc)
-                    y += rowHeight
-                    row++
-                }
-            } finally {
-                g2.dispose()
-            }
-        }
-    }
 
     /** Columns: the total, one per level that some counted row has, and the template. */
     private class TemplatesModel : AbstractTableModel() {

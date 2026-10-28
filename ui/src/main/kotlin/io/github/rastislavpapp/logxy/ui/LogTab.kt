@@ -41,6 +41,7 @@ import io.github.rastislavpapp.logxy.core.session.ShownLog
 import io.github.rastislavpapp.logxy.core.session.TimeLanding
 import io.github.rastislavpapp.logxy.core.session.copyLimit
 import io.github.rastislavpapp.logxy.core.template.Templates
+import io.github.rastislavpapp.logxy.core.trace.Traces
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
@@ -119,7 +120,10 @@ private val EDGE = BottomEdge()
 private val PADDED_EDGE = BottomEdge(HISTOGRAM_PADDING)
 
 /** The views around a [LogTab]'s rows, which the user can show and hide one by one where the host offers it. */
-enum class LogPart { FILTER, HISTOGRAM, CHARTS, TEMPLATES }
+enum class LogPart { FILTER, HISTOGRAM, CHARTS, TEMPLATES, TRACES }
+
+/** The parts below the rows; tabs there when more than one shows. */
+private val BOTTOM_PARTS = listOf(LogPart.TEMPLATES, LogPart.TRACES)
 
 /**
  * One open file, or several merged: shows the records of its [LogSession], with the filter bar and, if the host has
@@ -128,7 +132,7 @@ enum class LogPart { FILTER, HISTOGRAM, CHARTS, TEMPLATES }
  * [openFiles] opens dropped files; [openEach] opens files in tabs of their own. [filter] is applied once the
  * records are there. [origin] tells which files were extracted from zips or decompressed. The [host] keeps the
  * settings and gives what only the app or the plugin has. With [togglesParts], the [shownParts] are shown or hidden
- * as set; without it, the detail and the templates are tabs below the rows, which a divider arrow hides.
+ * as set; without it, the detail, the templates and the traces are tabs below the rows, which a divider arrow hides.
  */
 class LogTab(
     paths: List<Path>,
@@ -146,6 +150,8 @@ class LogTab(
     restore: SessionPosition<Path>? = null,
     /** The timestamp shift of each of a merge's [paths] in nanoseconds; 0 (or missing) for none. */
     shifts: List<Long> = emptyList(),
+    /** The name of the field the Traces panel takes trace ids from; null until the user picks one. */
+    traceColumn: String? = null,
     private val onStatusChanged: () -> Unit,
 ) : JPanel(BorderLayout()) {
 
@@ -285,7 +291,16 @@ class LogTab(
         ::canChart,
     )
 
-    /** Below the table, unless [togglesParts]: the selected record, or the message templates of the shown rows. */
+    private val traces = TracesPanel(scope, session::traces, { session.traceProgress }, filterBar::edit, ::goToTrace)
+        .apply { column = traceColumn }
+
+    /** The name of the field the Traces panel takes trace ids from; null until the user picks one. */
+    val traceColumn: String? get() = traces.column
+
+    /**
+     * Below the table, unless [togglesParts]: the selected record, the message templates of the shown log, or the
+     * traces.
+     */
     private val bottomTabs by lazy {
         JTabbedPane().apply {
             if (detail != null) {
@@ -302,6 +317,7 @@ class LogTab(
                 addTab("Detail", view)
             }
             addTab("Templates", templates)
+            addTab("Traces", traces)
         }
     }
 
@@ -312,7 +328,7 @@ class LogTab(
     var shownParts: Set<LogPart> = LogPart.entries.toSet()
         set(value) {
             if (value == field) return
-            val bottomChanged = (LogPart.TEMPLATES in value) != (LogPart.TEMPLATES in field)
+            val bottomChanged = BOTTOM_PARTS.any { (it in value) != (it in field) }
             field = value
             filterBar.isVisible = filterReady && LogPart.FILTER in value
             histogramBar?.isVisible = LogPart.HISTOGRAM in value
@@ -640,6 +656,12 @@ class LogTab(
             }
         })
         popup.addSeparator()
+        popup.add(JMenuItem("Show Traces by “$name”").apply {
+            isEnabled = Traces.canHoldTraceIds(field)
+            if (!isEnabled) toolTipText = "Trace ids come from a text column: not the time, the level or the message"
+            addActionListener { showTraces(field.name) }
+        })
+        popup.addSeparator()
         popup.add(JMenuItem("Copy Column").apply {
             toolTipText = "The whole value of “$name” of every shown row, one row per line"
             addActionListener {
@@ -649,6 +671,38 @@ class LogTab(
             }
         })
         popup.show(header, x, y)
+    }
+
+    /** Shows the Traces panel, with its trace ids taken from the field named [column]. */
+    private fun showTraces(column: String) {
+        traces.column = column
+        if (togglesParts) shownParts += LogPart.TRACES
+        (traces.parent as? JTabbedPane)?.selectedComponent = traces
+    }
+
+    /** The trace ids the Traces panel can take, from the fields of [schema], by the names their columns show. */
+    private fun traceChoices(schema: Schema): List<TraceColumnChoice> =
+        schema.fields.filter(Traces::canHoldTraceIds).map { TraceColumnChoice(it.name, columnNames.of(it)) }
+
+    /**
+     * Goes to [record], the first record of a trace, as Go to does: selects it if it is shown, else the first shown
+     * row after it, or the last row if there is none, with a hint saying so.
+     */
+    private fun goToTrace(record: Int) {
+        val model = model ?: return
+        val scrollPane = scrollPane ?: return
+        if (model.totalRowCount == 0) return
+        val next = model.indexOfRecord(record)
+        val row = if (next >= 0) next else model.totalRowCount - 1
+        session.follow = false
+        scrollPane.selectRow(row)
+        table?.requestFocusInWindow()
+        val note = when {
+            next < 0 -> "The filter hides the trace's first record and all after it; went to the last one."
+            model.recordAtIndex(row) != record -> "The filter hides the trace's first record; went to the next one."
+            else -> null
+        }
+        note?.let(::showHint)
     }
 
     /** The user's saved parser that reads all the files, so a column name can be saved with it; null if none does. */
@@ -684,6 +738,7 @@ class LogTab(
     private fun columnNamesChanged() {
         table?.columnNamesChanged()
         filterBar.columnNamesChanged()
+        model?.let { traces.setChoices(traceChoices(it.shown.schema)) }
     }
 
     /** Copies the selected rows as their records are written in the file. */
@@ -1270,6 +1325,8 @@ class LogTab(
         shownRaw = raw
         filterBar.setSchema(shown.schema)
         templates.canFilter = shown.schema.hasTemplates()
+        traces.setChoices(traceChoices(shown.schema))
+        traces.refresh()
         setFilterVisible(true)
 
         detail?.show("")
@@ -1307,13 +1364,22 @@ class LogTab(
         applyFilter()
     }
 
-    /** Lays out the rows and, below them, the detail and the templates as tabs, or those of [shownParts]. */
+    /**
+     * Lays out the rows and, below them, the detail, the templates and the traces as tabs, or those of [shownParts]:
+     * one alone, or several as tabs.
+     */
     private fun showParts() {
         val rows = rowsPanel ?: return
+        val shownBottom = BOTTOM_PARTS.filter { it in shownParts }
         val bottom = when {
             !togglesParts -> bottomTabs
-            LogPart.TEMPLATES in shownParts -> templates
-            else -> null
+            shownBottom.size > 1 -> JTabbedPane().apply {
+                addTab("Templates", templates)
+                addTab("Traces", traces)
+            }
+            shownBottom.isEmpty() -> null
+            shownBottom.single() == LogPart.TEMPLATES -> templates
+            else -> traces
         }
         content.removeAll()
         if (bottom == null) {
@@ -1760,6 +1826,7 @@ class LogTab(
     fun dispose() {
         stopProgress()
         templates.reset()
+        traces.reset()
         variableCharts.reset()
         showFilterProgress(false)
         showSearchProgress(false)
@@ -1811,6 +1878,7 @@ class LogTab(
             rowsView = null
             rowsPanel = null
             templates.reset()
+            traces.reset()
             variableCharts.reset()
             // The table may still be painted until indexing shows its progress: with no rows.
             model?.rowsReplaced()
@@ -1845,12 +1913,14 @@ class LogTab(
             val model = model ?: return
             model.schemaChanged()
             filterBar.setSchema(model.shown.schema)
+            traces.setChoices(traceChoices(model.shown.schema))
         }
 
         override fun recordsGrew(changed: IntArray) {
             model?.recordsGrew(changed)
             table?.recordsGrew(changed)
             changed.forEach(::refreshDetail)
+            traces.refreshSoon()
         }
 
         override fun rowsReplaced(keepView: Boolean, oldSize: Int, recordBefore: (row: Int) -> Int) =
@@ -1876,6 +1946,7 @@ class LogTab(
         override fun levelMappingChanged() {
             model?.let { it.fireTableRowsUpdated(0, maxOf(0, it.rowCount - 1)) }
             templates.refresh()
+            traces.refresh()
         }
 
         override fun histogramChanged() {

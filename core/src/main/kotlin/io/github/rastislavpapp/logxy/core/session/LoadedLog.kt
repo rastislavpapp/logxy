@@ -11,6 +11,8 @@ import io.github.rastislavpapp.logxy.core.merge.MergedFilter
 import io.github.rastislavpapp.logxy.core.merge.MergedLog
 import io.github.rastislavpapp.logxy.core.template.RowOrigin
 import io.github.rastislavpapp.logxy.core.template.TemplateIndex
+import io.github.rastislavpapp.logxy.core.trace.TraceIndex
+import io.github.rastislavpapp.logxy.core.trace.TraceSource
 
 /** What appending to the files of a load did to its records. */
 internal enum class Appended {
@@ -61,6 +63,9 @@ internal interface LoadedLog {
 
     /** Reads the records there are now as written in the files. Created on the owner thread. */
     fun sourceReader(): SourceReader
+
+    /** The records there are now, for a [TraceIndex] of [field]. Created on the owner thread. */
+    fun traceSource(field: Int): TraceSource
 
     /** Applies [data] appended to [part]; returns the record that may have more text now, -1 if none. */
     fun append(part: Int, data: AppendedData): Int
@@ -148,6 +153,9 @@ internal class SingleLoad(private val log: LogData) : LoadedLog {
 
     override fun sourceReader(): SourceReader = SnapshotSourceReader(listOf(log.filterSnapshot()), { 0 }, { it })
 
+    override fun traceSource(field: Int) =
+        TraceSource(listOf(log.filterSnapshot()), log.recordCount, null, intArrayOf(field), longArrayOf(0))
+
     override fun append(part: Int, data: AppendedData): Int {
         val changed = log.recordCount - 1
         log.append(data)
@@ -193,6 +201,15 @@ internal class MergedLoad(private val log: MergedLog) : LoadedLog {
     // The merge's lists of parts and records may be read on other threads below the count there was.
     override fun sourceReader(): SourceReader =
         SnapshotSourceReader(log.parts.map { it.filterSnapshot() }, log::part, log::record)
+
+    // As for sourceReader, the merge's lists are read on other threads below the count there was.
+    override fun traceSource(field: Int) = TraceSource(
+        log.parts.map { it.filterSnapshot() },
+        log.recordCount,
+        origin,
+        IntArray(log.parts.size) { log.partField(it, field) },
+        LongArray(log.parts.size) { log.shift(it) },
+    )
 
     override fun append(part: Int, data: AppendedData): Int {
         val merged = log.mergedCount(part)

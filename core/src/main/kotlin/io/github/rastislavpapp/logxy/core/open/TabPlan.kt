@@ -19,6 +19,8 @@ data class SessionFiles(
     val filter: SavedFilter? = null,
     val position: SessionPosition<Path>? = null,
     val shifts: List<Long> = emptyList(),
+    /** The name of the field the Traces panel takes trace ids from; null if none was chosen. */
+    val traceColumn: String? = null,
 )
 
 /** A change to the tabs. Changes apply in order, and an index refers to the tabs as they are when it applies. */
@@ -71,6 +73,7 @@ object TabPlan {
                     tab.parsers + parsers,
                     tab.filter,
                     shifts = OpenSession.keptShifts(mergedShifts),
+                    traceColumn = tab.traceColumn,
                 )
                 val action = if (mode == OpenMode.MERGE_INTO_CURRENT) {
                     TabAction.Replace(index, merged)

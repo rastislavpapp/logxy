@@ -689,19 +689,6 @@ private class Leaf(
                 }
             }
 
-        /** The range of [key]'s value in the reader's buffer, packed as by [MdcMap]; -1 if the record has none. */
-        private fun mapValue(c: RecordCursor, reader: SpanReader, key: MapKey, map: MapSyntax): Long {
-            val length = c.spanLength(key.field)
-            if (length == Columns.ABSENT_LENGTH) return -1
-            val from = c.start + c.spanStart(key.field)
-            val to = if (length == Columns.TO_RECORD_END) c.end else from + length
-            val offset = reader.load(from, to)
-            val end = minOf(offset + (to - from).toInt(), reader.loaded)
-            val entries = map.entries(reader.buffer, offset, end)
-            if (entries < 0) return -1
-            return map.value(reader.buffer, MdcMap.from(entries), MdcMap.to(entries), key)
-        }
-
         private fun present(c: RecordCursor, field: Int, type: ColumnType) = when (type) {
             ColumnType.TIMESTAMP -> c.timestamp(field) != Columns.ABSENT_TIMESTAMP
             ColumnType.LEVEL -> c.levelId(field) <= Columns.MAX_LEVEL_ID
@@ -709,6 +696,22 @@ private class Leaf(
             ColumnType.SPAN -> c.spanLength(field) != Columns.ABSENT_LENGTH
         }
     }
+}
+
+/**
+ * The range of [key]'s value in the reader's buffer, packed as by [MdcMap], for the record [c] is at; -1 if it has
+ * none.
+ */
+internal fun mapValue(c: RecordCursor, reader: SpanReader, key: MapKey, map: MapSyntax): Long {
+    val length = c.spanLength(key.field)
+    if (length == Columns.ABSENT_LENGTH) return -1
+    val from = c.start + c.spanStart(key.field)
+    val to = if (length == Columns.TO_RECORD_END) c.end else from + length
+    val offset = reader.load(from, to)
+    val end = minOf(offset + (to - from).toInt(), reader.loaded)
+    val entries = map.entries(reader.buffer, offset, end)
+    if (entries < 0) return -1
+    return map.value(reader.buffer, MdcMap.from(entries), MdcMap.to(entries), key)
 }
 
 /** Tests a value's text, as shown, in `bytes[from, to)`. */

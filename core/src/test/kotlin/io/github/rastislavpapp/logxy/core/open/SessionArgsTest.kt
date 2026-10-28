@@ -40,6 +40,7 @@ class SessionArgsTest {
                 listOf(null),
                 SavedFilter("", null, "level = ERROR"),
                 SessionPosition(lead = null, top = RecordStart("/logs/f.log", 120)),
+                traceColumn = "Thread",
             ),
         )
 

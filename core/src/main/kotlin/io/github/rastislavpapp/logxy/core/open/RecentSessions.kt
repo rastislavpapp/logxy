@@ -73,6 +73,7 @@ data class RecentSessions(val recent: List<OpenSession> = emptyList(), val atExi
          * recent.1.top.offset=0
          * recent.1.bookmark.1.file=1
          * recent.1.bookmark.1.offset=512
+         * recent.1.traces=MDC[requestId]
          * open.1.file.1=/logs/b.log
          * open.selected=1
          * ```
@@ -121,6 +122,7 @@ data class RecentSessions(val recent: List<OpenSession> = emptyList(), val atExi
             // Numbered without gaps, as reading stops at the first one missing.
             val bookmarks = session.position?.bookmarks.orEmpty().filter { session.fileNumber(it) != null }
             bookmarks.forEachIndexed { i, start -> writeStart("bookmark.${i + 1}", start) }
+            session.traceColumn?.let { properties["${prefix}traces"] = it }
         }
 
         /** The sessions stored under `[name].N.`, in the order of N. */
@@ -156,7 +158,8 @@ data class RecentSessions(val recent: List<OpenSession> = emptyList(), val atExi
                 .mapNotNull { readStart("bookmark.$it") }
                 .toList()
             val position = SessionPosition.of(lead, top, bookmarks)
-            return OpenSession(paths, parsers, filter, position, OpenSession.keptShifts(shifts))
+            val traceColumn = properties.getProperty("${prefix}traces")
+            return OpenSession(paths, parsers, filter, position, OpenSession.keptShifts(shifts), traceColumn)
         }
     }
 }
