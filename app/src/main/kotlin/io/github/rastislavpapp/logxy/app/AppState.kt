@@ -35,5 +35,6 @@ object AppState : UiState {
     const val THEME = "theme"
     const val TITLE_BAR = "titleBar.integrated"
     const val LAST_DIRECTORY = "lastDirectory"
+    const val EXPORT_DIRECTORY = "export.directory"
     const val PREFERENCES_SECTION = "preferences.section"
 }

@@ -11,6 +11,7 @@ import io.github.rastislavpapp.logxy.core.parse.Parser
 import io.github.rastislavpapp.logxy.core.query.TextSearch
 import io.github.rastislavpapp.logxy.ui.BookmarkAction
 import io.github.rastislavpapp.logxy.ui.DetailPane
+import io.github.rastislavpapp.logxy.ui.ExportFiles
 import io.github.rastislavpapp.logxy.ui.FindView
 import io.github.rastislavpapp.logxy.ui.LogViewHost
 import io.github.rastislavpapp.logxy.ui.QueryText
@@ -67,6 +68,8 @@ class IdeHost(private val project: Project) : LogViewHost, SettingsDialogs {
     ): List<Parser?>? = null
 
     override val moreMemoryHint get() = "Give the IDE more memory in Help › Change Memory Settings to copy more."
+
+    override val exportFiles: ExportFiles? get() = null
 
     // The keys of the IDE's own bookmark actions, as the keymap has them, so a user's bindings work here too. The
     // app's Ctrl+F2 would take Stop away from a run's tab.

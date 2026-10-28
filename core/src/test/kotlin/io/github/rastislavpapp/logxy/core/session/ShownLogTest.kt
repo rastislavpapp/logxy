@@ -11,6 +11,8 @@ import io.github.rastislavpapp.logxy.core.merge.MergedLog
 import io.github.rastislavpapp.logxy.core.parse.CompiledPattern
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.async
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Files
@@ -18,6 +20,7 @@ import java.nio.file.Path
 import java.nio.file.StandardOpenOption
 import java.time.ZoneOffset
 import kotlin.test.Test
+import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
@@ -306,6 +309,124 @@ class ShownLogTest {
             assertEquals(CopyResult.Copied((1..1000).joinToString("") { "m$it\n" }), result)
         }
     }
+
+    @Test
+    fun `exports all records of a file unfiltered as the same bytes`() {
+        // CRLF line ends, a non-UTF-8 byte (é in Latin-1) and no line end after the last record.
+        val content = "2026-10-01 10:00:01.000 INFO  a.A - café\r\n" +
+            "2026-10-01 10:00:02.000 WARN  a.B - two\r\nat x.y\r\n" +
+            "2026-10-01 10:00:03.000 INFO  a.A - three"
+        val bytes = content.toByteArray(Charsets.ISO_8859_1)
+        val file = Files.write(dir.resolve("a.log"), bytes)
+        runBlocking { ParsedLog.build(file, parser, IndexProgress()) }.use { log ->
+            val shown = ShownLog(SingleLoad(log))
+            val out = dir.resolve("out.log")
+            val export = shown.exportRows(rows(0..<shown.size), out)
+            assertEquals(ExportResult.Written(bytes.size.toLong()), runBlocking { export.run() })
+            assertEquals(1.0, export.progress)
+            assertContentEquals(bytes, Files.readAllBytes(out))
+        }
+    }
+
+    @Test
+    fun `exports a filter's records of a merge as their bytes, in merged order`() {
+        val a = parse("a.log", "2026-10-01 10:00:01.000 INFO  a.A - A1\n2026-10-01 10:00:03.000 INFO  a.A - A2\n")
+        // No line end after the last record.
+        val b = parse("b.log", "2026-10-01 10:00:02.000 WARN  b.B - B1\nat x.y\n2026-10-01 10:00:04.000 WARN  b.B - B2")
+        val merged = runBlocking { MergedLog.build(listOf(a, b)) }
+        a.use {
+            b.use {
+                val shown = ShownLog(MergedLoad(merged))
+                // A1, B1, B2: B2 follows A2 in the merge, and the line end B2 lacks is added only before a record.
+                shown.showRows(intArrayOf(0, 1, 3))
+                val out = dir.resolve("out.log")
+                runBlocking { shown.exportRows(rows(0..2), out).run() }
+                val expected = "2026-10-01 10:00:01.000 INFO  a.A - A1\n2026-10-01 10:00:02.000 WARN  b.B - B1\n" +
+                    "at x.y\n2026-10-01 10:00:04.000 WARN  b.B - B2"
+                assertEquals(expected, Files.readString(out))
+                shown.showRows(intArrayOf(2, 3))
+                val written = runBlocking { shown.exportRows(rows(1..1, 0..0), out).run() }
+                // The rows are in row order, whatever the order they were added in.
+                val swapped = "2026-10-01 10:00:03.000 INFO  a.A - A2\n2026-10-01 10:00:04.000 WARN  b.B - B2"
+                assertEquals(ExportResult.Written(swapped.length.toLong()), written)
+                assertEquals(swapped, Files.readString(out))
+            }
+        }
+    }
+
+    @Test
+    fun `exports the selected rows and the shown bookmarked records`() {
+        val content = (1..6).joinToString("") { "2026-10-01 10:00:0$it.000 INFO  a.A - m$it\n" }
+        parse("a.log", content).use { log ->
+            val shown = ShownLog(SingleLoad(log))
+            shown.showRows(intArrayOf(0, 2, 3, 5))
+            val out = dir.resolve("out.log")
+            runBlocking { shown.exportRows(rows(1..2), out).run() }
+            assertEquals(listOf("m3", "m4"), Files.readAllLines(out).map { it.substringAfter(" - ") })
+            // Record 1 is hidden by the filter, so it has no row.
+            val bookmarked = shown.rowsOf(intArrayOf(0, 1, 5))
+            assertEquals(listOf(0, 3), listOf(bookmarked.min, bookmarked.max))
+            runBlocking { shown.exportRows(bookmarked, out).run() }
+            assertEquals(listOf("m1", "m6"), Files.readAllLines(out).map { it.substringAfter(" - ") })
+        }
+    }
+
+    @Test
+    fun `exports records much larger than a read, a chunk at a time`() {
+        // About 3 MB of records, several of the export's reads, with a line split across reads.
+        val line = "2026-10-01 10:00:01.000 INFO  a.A - " + "x".repeat(1000) + "\n"
+        val content = line.repeat(3000)
+        parse("a.log", content).use { log ->
+            val shown = ShownLog(SingleLoad(log))
+            val out = dir.resolve("out.log")
+            val result = runBlocking { shown.exportRows(rows(0..<shown.size), out).run() }
+            assertEquals(ExportResult.Written(content.length.toLong()), result)
+            assertEquals(content, Files.readString(out))
+        }
+    }
+
+    @Test
+    fun `an export leaves no file when the load ends meanwhile, and keeps one that was there`() {
+        parse("a.log", "2026-10-01 10:00:01.000 INFO  a.A - one\n").use { log ->
+            val shown = ShownLog(SingleLoad(log))
+            val out = Files.writeString(dir.resolve("out.log"), "before")
+            val export = shown.exportRows(rows(0..0), out)
+            shown.end()
+            log.close()
+            assertEquals(ExportResult.FileChanged, runBlocking { export.run() })
+            assertEquals("before", Files.readString(out))
+            assertEquals(listOf("a.log", "out.log"), filesInDir())
+            assertEquals(ExportResult.FileChanged, runBlocking { shown.exportRows(RowRanges(), out).run() })
+        }
+    }
+
+    @Test
+    fun `an export that cannot write tells why and leaves no file`() {
+        parse("a.log", "2026-10-01 10:00:01.000 INFO  a.A - one\n").use { log ->
+            val shown = ShownLog(SingleLoad(log))
+            val out = dir.resolve("missing").resolve("out.log")
+            assertEquals(ExportResult.Failed("No such folder"), runBlocking { shown.exportRows(rows(0..0), out).run() })
+            assertFalse(Files.exists(out.parent))
+        }
+    }
+
+    @Test
+    fun `a cancelled export leaves no file`() {
+        val content = ("2026-10-01 10:00:01.000 INFO  a.A - " + "x".repeat(1000) + "\n").repeat(3000)
+        parse("a.log", content).use { log ->
+            val shown = ShownLog(SingleLoad(log))
+            val out = dir.resolve("out.log")
+            val export = shown.exportRows(rows(0..<shown.size), out)
+            runBlocking {
+                // Runs up to writing on another thread, as from the UI thread, and is cancelled meanwhile.
+                launch(start = CoroutineStart.UNDISPATCHED) { export.run() }.cancelAndJoin()
+            }
+            assertEquals(listOf("a.log"), filesInDir())
+        }
+    }
+
+    /** The names of the files in [dir], sorted. */
+    private fun filesInDir() = Files.list(dir).use { files -> files.map { "${it.fileName}" }.toList().sorted() }
 
     @Test
     fun `copies a column of a merge`() {

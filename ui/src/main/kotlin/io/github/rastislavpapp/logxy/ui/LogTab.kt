@@ -24,6 +24,7 @@ import io.github.rastislavpapp.logxy.core.query.withTimeRange
 import io.github.rastislavpapp.logxy.core.query.withoutTimeRange
 import io.github.rastislavpapp.logxy.core.session.BookmarkToggle
 import io.github.rastislavpapp.logxy.core.session.CopyResult
+import io.github.rastislavpapp.logxy.core.session.ExportResult
 import io.github.rastislavpapp.logxy.core.session.LogSession
 import io.github.rastislavpapp.logxy.core.session.MAX_BOOKMARKS
 import io.github.rastislavpapp.logxy.core.session.MAX_COPY_BYTES
@@ -63,6 +64,8 @@ import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import java.awt.event.WindowAdapter
 import java.awt.event.WindowEvent
+import java.io.IOException
+import java.nio.file.Files
 import java.nio.file.Path
 import java.text.NumberFormat
 import java.time.ZoneId
@@ -673,29 +676,125 @@ class LogTab(
         what: String,
         prepared: PreparedCopy,
         tooLarge: (CopyResult.TooLarge) -> String,
+    ) = runWithProgress(title, progressText, { prepared.progress }) {
+        when (val result = prepared.run()) {
+            is CopyResult.Copied -> {
+                copy(result.text)
+                null
+            }
+            is CopyResult.TooLarge -> refusal(tooLarge(result))
+            CopyResult.FileChanged -> "The file changed while copying; copy the $what again."
+            is CopyResult.Failed -> "Cannot copy the $what: ${result.message}"
+        }
+    }
+
+    /**
+     * Runs [work] off the UI thread, with a progress dialog saying [progressText] and showing [progress] if it takes
+     * a while, and shows the error message [work] returns, if any. Cancel cancels [work], and so does closing the tab.
+     */
+    private fun runWithProgress(
+        title: String,
+        progressText: String,
+        progress: () -> Double,
+        work: suspend () -> String?,
     ) {
         val window = SwingUtilities.getWindowAncestor(this) ?: return
         lateinit var job: Job
         var finished = false
-        val dialog = ProgressDialog(window, title, progress = { prepared.progress }) { job.cancel() }
+        val dialog = ProgressDialog(window, title, progress = progress) { job.cancel() }
         dialog.text = progressText
-        // Undispatched: the dialog is disposed even if the tab closes before the copy would have started.
+        // Undispatched: the dialog is disposed even if the tab closes before the work would have started.
         job = scope.launch(start = CoroutineStart.UNDISPATCHED) {
-            val result = try {
-                prepared.run()
+            val message = try {
+                work()
             } finally {
                 finished = true
                 dialog.dispose()
             }
-            val message = when (result) {
-                is CopyResult.Copied -> return@launch copy(result.text)
-                is CopyResult.TooLarge -> refusal(tooLarge(result))
-                CopyResult.FileChanged -> "The file changed while copying; copy the $what again."
-                is CopyResult.Failed -> "Cannot copy the $what: ${result.message}"
-            }
-            JOptionPane.showMessageDialog(this@LogTab, message, title, JOptionPane.ERROR_MESSAGE)
+            if (message != null) JOptionPane.showMessageDialog(this@LogTab, message, title, JOptionPane.ERROR_MESSAGE)
         }
         dialog.showLater { finished }
+    }
+
+    private val canExport: Boolean get() = host.exportFiles != null
+
+    /**
+     * Asks where to export records to, and which: all the shown log's, the selection's, or the shown bookmarked
+     * records, as there are any; then exports them.
+     */
+    fun export() {
+        val shown = model?.shown ?: return
+        if (shown.size == 0) return
+        val all = RowRanges().apply { add(0, shown.size) }
+        val allLabel = if (shown.isFiltered) "The filter's" else "All"
+        val choices = mutableListOf("$allLabel ${counted(all.count, "record")}" to all)
+        val selected = selectedRows().copy()
+        if (!selected.isEmpty()) choices += selectedLabel(selected) to selected
+        val bookmarked = shown.rowsOf(session.bookmarks)
+        val bookmarkedLabel = "The shown bookmarked ${counted(bookmarked.count, "record")}"
+        if (!bookmarked.isEmpty()) choices += bookmarkedLabel to bookmarked
+        export(shown, choices)
+    }
+
+    /** Asks where to export the selected rows to, and exports them. */
+    private fun exportSelectedRows() {
+        val shown = model?.shown ?: return
+        val selected = selectedRows().copy()
+        if (selected.isEmpty()) return
+        export(shown, listOf(selectedLabel(selected) to selected))
+    }
+
+    private fun selectedLabel(selected: RowRanges) = "The selected ${counted(selected.count, "row")}"
+
+    /** [count] and [noun], plural unless [count] is 1, e.g. "1,204 records". */
+    private fun counted(count: Int, noun: String): String {
+        val number = NumberFormat.getIntegerInstance().format(count)
+        return if (count == 1) "$number $noun" else "$number ${noun}s"
+    }
+
+    /** Asks where to export to and which of [choices], each the rows of [shown] under a label; then exports them. */
+    private fun export(shown: ShownLog, choices: List<Pair<String, RowRanges>>) {
+        val exportFiles = host.exportFiles ?: return
+        val window = SwingUtilities.getWindowAncestor(this)
+        val file = exportFiles.choose(window, exportName(), choices.map { it.first }) ?: return
+        if (isShown(file.path)) {
+            val message = "${file.path.fileName} is a file this tab shows; export to another file."
+            JOptionPane.showMessageDialog(this, message, "Export", JOptionPane.ERROR_MESSAGE)
+            return
+        }
+        val rows = choices[file.choice].second
+        val records = counted(rows.count, "record")
+        // A reload while the dialog was open ended [shown]: the export then tells that the file changed.
+        val prepared = shown.exportRows(rows, file.path)
+        runWithProgress("Export", "Exporting $records…", { prepared.progress }) {
+            when (val result = prepared.run()) {
+                is ExportResult.Written -> {
+                    showHint("Exported $records to ${file.path.fileName}")
+                    null
+                }
+                ExportResult.FileChanged -> "The file changed while exporting; export again."
+                is ExportResult.Failed -> "Cannot export to ${file.path}: ${result.message}"
+            }
+        }
+    }
+
+    /** Whether [file] is one of the files this tab shows, which an export must not replace. */
+    private fun isShown(file: Path): Boolean {
+        if (!Files.exists(file)) return false
+        return paths.any { shownFile ->
+            try {
+                Files.isSameFile(shownFile, file)
+            } catch (_: IOException) {
+                false
+            }
+        }
+    }
+
+    /** The name offered for an export:the tab's (first) file's with "-export", e.g. `app-export.log` for `app.log`. */
+    private fun exportName(): String {
+        val name = path.fileName.toString()
+        val dot = name.lastIndexOf('.')
+        return if (dot > 0) "${name.substring(0, dot)}-export${name.substring(dot)}" else "$name-export.log"
     }
 
     /** Why a copy was refused: [reason], the limit, and whether more memory would raise it. */
@@ -735,6 +834,11 @@ class LogTab(
                     val prepared = shown.copyColumn(fieldIndex, copyLimit(), selectedRows())
                     copyColumn(prepared)
                 }
+            })
+        }
+        if (canExport && table.isRowSelected(row)) {
+            popup.add(JMenuItem("Export Selected Rows…").apply {
+                addActionListener { exportSelectedRows() }
             })
         }
         val part = if (isMerged && field.role == Role.SOURCE) sourceNames.indexOf(value) else -1

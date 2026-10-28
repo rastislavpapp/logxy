@@ -66,6 +66,9 @@ interface LogViewHost {
     /** How to raise the limit on copying, appended to a refused copy's message; null if the user cannot. */
     val moreMemoryHint: String?
 
+    /** The host's save dialog for exporting records; null if the host offers no export, and the views show none. */
+    val exportFiles: ExportFiles?
+
     /**
      * Binds keys to the bookmark actions while the focus is in [rows], a [LogTab]'s table, to call [run] with the
      * action, and returns the key of each to show in the row menu; an action without a key is missing. The default
@@ -141,6 +144,18 @@ interface SettingsDialogs {
 
     fun editLevelMapping(owner: Window?)
 }
+
+/** Asks where to export records to. */
+interface ExportFiles {
+    /**
+     * Asks for the file to export to, offering [name] in the last folder exported to, and which records to export:
+     * one of [choices], each a label such as "The 12 selected rows", the first picked at first. Null if cancelled.
+     */
+    fun choose(owner: Window?, name: String, choices: List<String>): ExportFile?
+}
+
+/** The file the user chose to export to, and the index of the records chosen among those offered. */
+data class ExportFile(val path: Path, val choice: Int)
 
 /** Shows the selected record's whole text, read-only, with what the filter and the find bar matched marked. */
 interface DetailPane {

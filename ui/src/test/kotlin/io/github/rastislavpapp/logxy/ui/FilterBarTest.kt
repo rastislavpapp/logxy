@@ -116,6 +116,7 @@ private class VisualOnlyHost : LogViewHost {
         current: List<Parser?>,
     ): List<Parser?>? = null
     override val moreMemoryHint: String? = null
+    override val exportFiles: ExportFiles? = null
 }
 
 /** Plain Swing values, enough for components to be made and laid out. */
