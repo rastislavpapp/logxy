@@ -30,6 +30,8 @@ import io.github.rastislavpapp.logxy.core.query.TextSearch
 import io.github.rastislavpapp.logxy.core.template.TemplateCounts
 import io.github.rastislavpapp.logxy.core.template.VariableSeries
 import io.github.rastislavpapp.logxy.core.template.VariableValues
+import io.github.rastislavpapp.logxy.core.trace.TraceIndex
+import io.github.rastislavpapp.logxy.core.trace.Traces
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -540,6 +542,31 @@ class LogSession internal constructor(
         val values = engine.variableValues(null, recordCount, template, variable)
         if (allValuesOf == loaded to recordCount) allValues[key] = values
         return values
+    }
+
+    /** The traces of the loaded records by the trace ids in [traceIndex]'s column, kept until the session reloads. */
+    private var traceIndex: TraceIndex? = null
+    private var traceIndexOf: Pair<LoadedLog, String>? = null
+
+    /** How far [traces] got with reading new records, from 0 to 1. */
+    val traceProgress: Double get() = traceIndex?.progress ?: 1.0
+
+    /**
+     * The traces of all records by the trace ids in the field named [column]; null if nothing is loaded or the
+     * trace ids cannot come from that field (see [Traces.canHoldTraceIds]). Only the records appended since the last call
+     * with the same column are read. Cancelling the caller stops it, keeping what it read.
+     */
+    suspend fun traces(column: String): Traces? {
+        val loaded = loaded ?: return null
+        val field = traceField(loaded.records.schema, column)
+        if (field < 0) return null
+        var index = traceIndex
+        if (index == null || traceIndexOf != loaded to column) {
+            index = TraceIndex(column, if (isMerged) sourceNames else emptyList())
+            traceIndex = index
+            traceIndexOf = loaded to column
+        }
+        return index.update(loaded.traceSource(field))
     }
 
     /** The template of [record]'s message; null if it has none, or nothing is loaded. */

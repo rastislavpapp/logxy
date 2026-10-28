@@ -24,6 +24,7 @@ private const val MAIN_SIZE = 1L shl 30
 private const val MERGE_FILES = 8
 private const val MERGE_FILE_SIZE = 64L shl 20
 private const val APPEND_SIZE = 64L shl 10
+private const val REQUESTS_SIZE = 256L shl 20
 private const val RUNS = 3
 private const val SETUP = "main=1g seed=1; merge=8x64m seeds=2..9; JMH single shot, $WARMUPS warm-ups and $RUNS runs " +
     "per JVM; median of the JVMs' bests"
@@ -58,6 +59,7 @@ private fun measureAll(): Map<String, Timings> {
     val main = dataFile("main.log", MAIN_SIZE, 1)
     val appended = dataFile("appended.log", APPEND_SIZE, 10)
     val parts = (0 until MERGE_FILES).map { dataFile("merge-$it.log", MERGE_FILE_SIZE, 2L + it) }
+    val requests = dataFile("requests.log", REQUESTS_SIZE, 11, requests = true)
     val groups = listOf(
         indexRows to indexParams(main),
         parseFileRows to parseFileParams(main),
@@ -65,6 +67,7 @@ private fun measureAll(): Map<String, Timings> {
         filterRows to filterParams(main),
         followRows to followParams(main, appended),
         mergeRows to mergeParams(parts),
+        traceRows to traceParams(requests),
     )
     val runs = Runs(RUNS, FORKS)
     printHeader(runs)
@@ -75,13 +78,13 @@ private fun measureAll(): Map<String, Timings> {
 
 /**
  * A generated log with a fixed [seed], kept between runs; written aside first so an interrupted run leaves no
- * partial file.
+ * partial file. With [requests], a web service's log with an id per request, see [generateLog].
  */
-private fun dataFile(name: String, size: Long, seed: Long): Path {
+private fun dataFile(name: String, size: Long, seed: Long, requests: Boolean = false): Path {
     val file = DATA_DIR.resolve(name)
     if (Files.exists(file) && Files.size(file) >= size) return file
     val partial = DATA_DIR.resolve("$name.partial")
-    generateLog(partial, size, seed)
+    generateLog(partial, size, seed, requests = requests)
     Files.move(partial, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
     return file
 }

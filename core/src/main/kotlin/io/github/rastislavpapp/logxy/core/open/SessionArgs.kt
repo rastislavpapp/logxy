@@ -24,6 +24,8 @@ data class OpenSession(
     val position: SessionPosition<String>? = null,
     /** The timestamp shift of each of [paths] in nanoseconds; empty if none has one. */
     val shifts: List<Long> = emptyList(),
+    /** The name of the field the Traces panel takes trace ids from; null if none was chosen. */
+    val traceColumn: String? = null,
 ) {
     /** Whether this session has the same files as [other], in any order. */
     fun sameFiles(other: OpenSession) = paths.toSet() == other.paths.toSet()
@@ -68,6 +70,7 @@ object SessionArgs {
     private const val TOP_ARG = "--top"
     private const val BOOKMARK_ARG = "--bookmark"
     private const val SHIFTS_ARG = "--shifts"
+    private const val TRACES_ARG = "--traces"
 
     /**
      * Arguments that make the next start reopen [sessions], each with its filter and chosen parsers, and select
@@ -101,6 +104,10 @@ object SessionArgs {
                 add(SHIFTS_ARG)
                 add(session.shifts.joinToString(",") { TimestampShift.format(it) })
             }
+            session.traceColumn?.let {
+                add(TRACES_ARG)
+                add(encode(it))
+            }
         }
         if (selected >= 0) add(SELECT_ARG).also { add(selected.toString()) }
     }
@@ -117,11 +124,12 @@ object SessionArgs {
             var top: RecordStart<String>? = null,
             val bookmarks: MutableList<RecordStart<String>> = ArrayList(),
             var shifts: List<Long> = emptyList(),
+            var traceColumn: String? = null,
         ) {
             fun session(): OpenSession {
                 val filter = SavedFilter("", level, query).takeUnless { it.isEmpty }
                 val position = SessionPosition.of(lead, top, bookmarks)
-                return OpenSession(paths, parsers ?: paths.map { null }, filter, position, shifts)
+                return OpenSession(paths, parsers ?: paths.map { null }, filter, position, shifts, traceColumn)
             }
         }
         val groups = ArrayList<Group>()
@@ -160,6 +168,7 @@ object SessionArgs {
                     val shifts = group.paths.indices.map { TimestampShift.read(texts.getOrNull(it)) }
                     group.shifts = OpenSession.keptShifts(shifts)
                 }
+                TRACES_ARG -> groups.last().traceColumn = decode(value())
                 SELECT_ARG -> selected = value().toIntOrNull() ?: 0
                 else -> groups.last().paths.add(arg)
             }

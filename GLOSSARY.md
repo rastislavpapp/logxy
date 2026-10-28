@@ -13,7 +13,7 @@ A zip or tar file, possibly compressed, or a single compressed file, whose files
 _Avoid_: bundle, package
 
 **Recent session**:
-A closed session as it can be opened again: its files, the parser chosen for each and its timestamp shift, its filter, its position (the selection's lead record and the top row's record) and its bookmarks, each record by where it starts in its file.
+A closed session as it can be opened again: its files, the parser chosen for each and its timestamp shift, its filter, its position (the selection's lead record and the top row's record), its bookmarks, each record by where it starts in its file, and the column its trace ids come from.
 _Avoid_: recent file, history entry
 
 **Timestamp shift**:

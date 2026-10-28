@@ -4,13 +4,15 @@ import java.nio.file.Path
 import kotlin.system.exitProcess
 
 private const val USAGE = """Usage:
-  generate <file> <size> [--seed N] [--mdc] [--json] [--rabbitmq] [--logfmt] [--access] [--errors N] [--warnings N]
+  generate <file> <size> [--seed N] [--mdc] [--json] [--rabbitmq] [--logfmt] [--access] [--requests]
+                         [--errors N] [--warnings N]
                                         write a log4j-style test log, size like 500m or 2g;
                                         --mdc adds a log4j2 %X map such as {breadcrumbId=..., tenant=...};
                                         --json writes JSON lines like logstash-logback-encoder, MDC keys included;
                                         --rabbitmq writes a RabbitMQ broker's JSON log (log.file.formatter = json);
                                         --logfmt writes logfmt lines, MDC keys included;
                                         --access writes a web server's access log, common and combined lines;
+                                        --requests writes a web service's lines, each request's id in the MDC;
                                         --errors and --warnings write exactly N such records, at random places
   scenario <file> <size> [--seed N] [--mdc] [--json] [--rabbitmq]
                                         write a day of a service's log with things worth finding: daily traffic,
@@ -36,7 +38,7 @@ private const val USAGE = """Usage:
                                         run from the project root after changing SplashGif.kt"""
 
 fun main(args: Array<String>) {
-    val flags = setOf("--mdc", "--json", "--rabbitmq", "--logfmt", "--access")
+    val flags = setOf("--mdc", "--json", "--rabbitmq", "--logfmt", "--access", "--requests")
     val positional = args.filterIndexed { i, arg ->
         !arg.startsWith("--") && (i == 0 || !args[i - 1].startsWith("--") || args[i - 1] in flags)
     }
@@ -53,7 +55,7 @@ fun main(args: Array<String>) {
             generateLog(
                 Path.of(positional[1]), parseSize(positional[2]), option("seed")?.toLong() ?: 1L, flag("mdc"),
                 option("errors")?.toInt(), option("warnings")?.toInt(), flag("json"), flag("rabbitmq"), flag("logfmt"),
-                flag("access"),
+                flag("access"), flag("requests"),
             )
         "scenario" if positional.size == 3 ->
             generateScenarioLog(

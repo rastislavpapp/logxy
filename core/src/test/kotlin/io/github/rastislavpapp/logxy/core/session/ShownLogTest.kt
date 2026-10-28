@@ -58,6 +58,7 @@ class ShownLogTest {
         override fun templateOf(record: Int) = throw UnsupportedOperationException()
         override fun fieldReader(field: Int, records: IntArray?, count: Int) = throw UnsupportedOperationException()
         override fun sourceReader() = throw UnsupportedOperationException()
+        override fun traceSource(field: Int) = throw UnsupportedOperationException()
         override fun append(part: Int, data: AppendedData) = throw UnsupportedOperationException()
         override suspend fun settle() = throw UnsupportedOperationException()
     }

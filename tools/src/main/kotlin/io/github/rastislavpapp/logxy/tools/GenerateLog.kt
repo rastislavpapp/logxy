@@ -36,8 +36,8 @@ internal interface RecordGenerator {
  * Writes log4j-style lines (`%d [%t] %-5p %c - %m%n`, or `%d [%t] %-5p %c %X - %m%n` with [mdc])
  * with occasional stack traces until [size] bytes; with [json], JSON lines as logstash-logback-encoder
  * writes them; with [rabbitmq], a RabbitMQ broker's JSON log; with [logfmt], logfmt lines; with [access], a web
- * server's access log. With [errors] or [warnings], exactly that many records of the level are written, at random
- * places.
+ * server's access log; with [requests], a web service's lines with an id per request (see [RequestGenerator]). With
+ * [errors] or [warnings], exactly that many records of the level are written, at random places.
  */
 fun generateLog(
     file: Path,
@@ -50,6 +50,7 @@ fun generateLog(
     rabbitmq: Boolean = false,
     logfmt: Boolean = false,
     access: Boolean = false,
+    requests: Boolean = false,
 ) {
     val random = SplittableRandom(seed)
     val placed = listOfNotNull(errors?.let { "ERROR" to it }, warnings?.let { "WARN" to it })
@@ -62,6 +63,7 @@ fun generateLog(
     val generator = when {
         rabbitmq -> RabbitMqGenerator(random, excluded)
         access -> AccessLogGenerator(random)
+        requests -> RequestGenerator(random)
         else -> LogGenerator(random, mdc, excluded, json, logfmt)
     }
     val started = System.nanoTime()

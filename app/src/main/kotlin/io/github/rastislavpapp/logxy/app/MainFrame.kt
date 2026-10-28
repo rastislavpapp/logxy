@@ -266,7 +266,7 @@ class MainFrame : JFrame("logxy") {
         val filter = tab.filter.takeUnless { it.isEmpty }
         val position = tab.position?.mapFiles(::storedPath)
         val shifts = OpenSession.keptShifts(tab.shifts)
-        return OpenSession(tab.paths.map(::storedPath), tab.chosenParsers, filter, position, shifts)
+        return OpenSession(tab.paths.map(::storedPath), tab.chosenParsers, filter, position, shifts, tab.traceColumn)
     }
 
     /** The sessions of the open tabs as they can be opened again, in tab order. */
@@ -594,7 +594,8 @@ class MainFrame : JFrame("logxy") {
                 }
             }
             val position = session.position?.mapFiles(files::get)
-            SessionFiles(files.values.toList(), parsers, session.filter, position, OpenSession.keptShifts(shifts))
+            val kept = OpenSession.keptShifts(shifts)
+            SessionFiles(files.values.toList(), parsers, session.filter, position, kept, session.traceColumn)
         }
         if (leftOut.isNotEmpty()) {
             TableNoticeDialog(
@@ -661,7 +662,8 @@ class MainFrame : JFrame("logxy") {
 
     private fun openSessions() = (0..<tabs.tabCount).map { i ->
         (tabs.getComponentAt(i) as LogTab).let { tab ->
-            SessionFiles(tab.paths, tab.chosenParsers, tab.filter, shifts = OpenSession.keptShifts(tab.shifts))
+            val shifts = OpenSession.keptShifts(tab.shifts)
+            SessionFiles(tab.paths, tab.chosenParsers, tab.filter, shifts = shifts, traceColumn = tab.traceColumn)
         }
     }
 
@@ -683,6 +685,7 @@ class MainFrame : JFrame("logxy") {
             session.paths, AppHost, ::openFiles, ::openEach, session.filter, ::originOf, session.parsers,
             restore = session.position,
             shifts = session.shifts,
+            traceColumn = session.traceColumn,
         ) {
             updateStatus()
         }

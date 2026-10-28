@@ -57,8 +57,8 @@ class OpeningPage : SettingsPage("Opening Files", Icons.open) {
         add(subfolders, "span 2")
         add(rememberRecent, "span 2")
         val note = Note(
-            "Lists closed sessions under File › Open Recent, with their parsers, filter and position, " +
-                "for Reopen Closed Tab too. Turning it off deletes the list.",
+            "Lists closed sessions under File › Open Recent, with their parsers, filter, position and trace id " +
+                "column, for Reopen Closed Tab too. Turning it off deletes the list.",
         )
         // Under the checkbox's text, past its box.
         val box = UIManager.getIcon("CheckBox.icon")?.iconWidth ?: 0
