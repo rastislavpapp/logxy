@@ -10,8 +10,8 @@ import io.github.rastislavpapp.logxy.core.log.Schema
 import io.github.rastislavpapp.logxy.core.merge.MergedLog
 import io.github.rastislavpapp.logxy.core.parse.CompiledPattern
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
-import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.io.TempDir
@@ -19,6 +19,8 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardOpenOption
 import java.time.ZoneOffset
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
@@ -410,16 +412,41 @@ class ShownLogTest {
         }
     }
 
+    /**
+     * [load] with its records read through a reader whose first [SourceReader.read], once the export writes, waits
+     * for [proceed]; [reading] tells the read has begun.
+     */
+    private class HeldLoad(private val load: LoadedLog) : LoadedLog by load {
+        val reading = CountDownLatch(1)
+        val proceed = CountDownLatch(1)
+
+        override fun sourceReader(): SourceReader {
+            val reader = load.sourceReader()
+            return object : SourceReader by reader {
+                override fun read(part: Int, position: Long, length: Int): ByteArray {
+                    reading.countDown()
+                    check(proceed.await(10, TimeUnit.SECONDS)) { "The test never let the read go on" }
+                    return reader.read(part, position, length)
+                }
+            }
+        }
+    }
+
     @Test
     fun `a cancelled export leaves no file`() {
         val content = ("2026-10-01 10:00:01.000 INFO  a.A - " + "x".repeat(1000) + "\n").repeat(3000)
         parse("a.log", content).use { log ->
-            val shown = ShownLog(SingleLoad(log))
+            val load = HeldLoad(SingleLoad(log))
+            val shown = ShownLog(load)
             val out = dir.resolve("out.log")
             val export = shown.exportRows(rows(0..<shown.size), out)
             runBlocking {
-                // Runs up to writing on another thread, as from the UI thread, and is cancelled meanwhile.
-                launch(start = CoroutineStart.UNDISPATCHED) { export.run() }.cancelAndJoin()
+                // Cancelled while it writes, with its partial file there: the read waits until the cancel is in.
+                val job = launch(Dispatchers.Default) { export.run() }
+                assertTrue(load.reading.await(10, TimeUnit.SECONDS), "The export never read the records")
+                job.cancel()
+                load.proceed.countDown()
+                job.join()
             }
             assertEquals(listOf("a.log"), filesInDir())
         }
