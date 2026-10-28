@@ -553,8 +553,8 @@ class LogSession internal constructor(
 
     /**
      * The traces of all records by the trace ids in the field named [column]; null if nothing is loaded or the
-     * trace ids cannot come from that field (see [Traces.canHoldTraceIds]). Only the records appended since the last call
-     * with the same column are read. Cancelling the caller stops it, keeping what it read.
+     * trace ids cannot come from that field (see [Traces.canHoldTraceIds]). Only the records appended since the last
+     * call with the same column are read. Cancelling the caller stops it, keeping what it read.
      */
     suspend fun traces(column: String): Traces? {
         val loaded = loaded ?: return null
