@@ -11,7 +11,7 @@ oldest-ide-jdk = "21"
 oldest-ide-kotlin-api = "2.2"
 # Its coroutines, for the app too: the plugin always gets the IDE's copy, and `core` built against a newer one may not
 # link with it (1.11 is not binary compatible with the 1.10.x the IDEs ship).
-kotlinx-coroutines = "1.10.1"
+kotlinx-coroutines = "1.11.0"
 flatlaf = "3.7.2"
 junit = "6.1.3"
 slf4j = "2.0.20"
@@ -30,7 +30,7 @@ flatlaf-extras = { module = "com.formdev:flatlaf-extras", version.ref = "flatlaf
 flatlaf-intellij-themes = { module = "com.formdev:flatlaf-intellij-themes", version.ref = "flatlaf" }
 flatlaf-fonts-inter = { module = "com.formdev:flatlaf-fonts-inter", version = "4.1" }
 flatlaf-fonts-jetbrains-mono = { module = "com.formdev:flatlaf-fonts-jetbrains-mono", version = "2.304" }
-miglayout-swing = { module = "com.miglayout:miglayout-swing", version = "11.5.1" }
+miglayout-swing = { module = "com.miglayout:miglayout-swing", version = "11.5.2" }
 rsyntaxtextarea = { module = "com.fifesoft:rsyntaxtextarea", version = "4.0.1" }
 autocomplete = { module = "com.fifesoft:autocomplete", version = "4.0.0" }
 intellij-icons = { module = "com.jetbrains.intellij.platform:icons", version = "262.10968.176" }
