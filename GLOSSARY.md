@@ -104,6 +104,18 @@ _Avoid_: transaction key, group key, correlation id
 The time from one record of a trace to the next record of the same trace, named by the message templates of the two, as in `Calling payment service → Payment service answered`. A _hop_ is a step whose two records come from different files of a merged session.
 _Avoid_: gap, segment, span
 
+**Comparison**:
+What sets a target apart from a baseline: the message templates, values and step times much more or less common in one than in the other.
+_Avoid_: diff, run comparison, log rate analysis
+
+**Baseline**:
+The records a comparison takes as normal, such as a good run's session or the traces that were fast.
+_Avoid_: run, reference, A
+
+**Target**:
+The records a comparison explains against its baseline, such as a failed run's session or one slow trace.
+_Avoid_: run, subject, B
+
 **Mark**:
 The background painted behind the text a filter's query or a find matched, in the table and the detail pane.
 _Avoid_: highlight (that is a row highlight)
