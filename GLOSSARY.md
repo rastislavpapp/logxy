@@ -92,6 +92,18 @@ _Avoid_: block, subquery
 A query paired with a palette color: the rows of the records it matches get that color as background, in every log the user opens. The user's row highlights are ordered, and a record takes the color of the first one it matches.
 _Avoid_: color rule, highlighting rule, row color
 
+**Trace**:
+The records of a session that share one value of its trace id column, from the first of them to the last; its duration is the time between those two. With a max gap set, a silence longer than it between two of those records ends one trace and starts the next.
+_Avoid_: transaction, group (that is a query's), span
+
+**Trace id**:
+The value the records of one trace share, in the column the user chose for it, such as a request id or a thread name.
+_Avoid_: transaction key, group key, correlation id
+
+**Step**:
+The time from one record of a trace to the next record of the same trace, named by the message templates of the two, as in `Calling payment service → Payment service answered`. A _hop_ is a step whose two records come from different files of a merged session.
+_Avoid_: gap, segment, span
+
 **Mark**:
 The background painted behind the text a filter's query or a find matched, in the table and the detail pane.
 _Avoid_: highlight (that is a row highlight)
