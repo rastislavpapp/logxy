@@ -293,7 +293,7 @@ class LogTab(
 
     /** The Traces panel; null if the host has no traces. */
     private val traces = if (Feature.TRACES in host.features) {
-        TracesPanel(scope, session::traces, { session.traceProgress }, filterBar::edit, ::goToTrace)
+        TracesPanel(scope, session::traces, { session.traceProgress }, { session.status }, filterBar::edit, ::goToTrace)
             .apply { column = traceColumn }
     } else {
         null
@@ -1965,6 +1965,7 @@ class LogTab(
 
         override fun statusChanged(status: SessionStatus) {
             showFilterProgress(status.filtering)
+            traces?.statusChanged()
             onStatusChanged()
         }
     }

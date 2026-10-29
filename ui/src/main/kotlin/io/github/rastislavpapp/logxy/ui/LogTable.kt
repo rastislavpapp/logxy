@@ -134,7 +134,8 @@ class LogTable(private val logModel: LogTableModel) : JTable(logModel) {
         autoResizeMode = AUTO_RESIZE_LAST_COLUMN
         setShowGrid(false)
         fillsViewportHeight = true
-        selectionModel = rowSelection
+        // Not `selectionModel =`: that sets JTable's protected field, and the table would not hear the model.
+        setSelectionModel(rowSelection)
         tableHeader.reorderingAllowed = false
         (tableHeader.defaultRenderer as? JLabel)?.horizontalAlignment = SwingConstants.LEADING
         updateLook()

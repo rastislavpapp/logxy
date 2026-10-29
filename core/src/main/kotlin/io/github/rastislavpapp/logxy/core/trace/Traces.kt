@@ -40,9 +40,6 @@ class Traces internal constructor(
     /** The duration statistics over the traces with times; null if no trace has one. */
     val statistics: DurationStatistics? = DurationStatistics.of(timedDurations())
 
-    /** The histogram of the durations of the traces with times, in at most [maxBins] bins; null if none has one. */
-    fun durationHistogram(maxBins: Int): DurationHistogram? = DurationHistogram.of(timedDurations(), maxBins)
-
     private fun timedDurations(): LongArray {
         val durations = LongArray(size, ::duration)
         var timed = 0

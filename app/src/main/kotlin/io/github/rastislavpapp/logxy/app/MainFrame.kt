@@ -92,6 +92,9 @@ private const val CARD_PLACEHOLDER = "placeholder"
 private const val CARD_TABS = "tabs"
 private const val LIVE_COLOR = "Actions.Green"
 private const val FOLLOW_COLOR = "Component.accentColor"
+
+/** The client property of a tab's [LogTab] that holds what its icon shows, so it is set only when that changes. */
+private const val TAB_ICON_KIND = "logxy.tabIconKind"
 private const val OPENING_TITLE = "Opening Files"
 
 class MainFrame : JFrame("logxy") {
@@ -753,12 +756,20 @@ class MainFrame : JFrame("logxy") {
     }
 
     private fun updateStatus() {
+        // This runs on every status change, e.g. each selected row, and setting a tab's icon or title repaints all of
+        // the tab, changed or not: only what changed is set.
         for (i in 0..<tabs.tabCount) {
             val tab = tabs.getComponentAt(i) as LogTab
-            tabs.setIconAt(i, tabIcon(tab))
+            val icon = tabIconKind(tab)
+            if (tab.getClientProperty(TAB_ICON_KIND) != icon) {
+                tab.putClientProperty(TAB_ICON_KIND, icon)
+                tabs.setIconAt(i, tabIcon(tab))
+            }
             // A merge may have left out files without timestamps.
-            tabs.setTitleAt(i, tab.title)
-            tabs.setToolTipTextAt(i, tab.description)
+            val title = tab.title
+            if (tabs.getTitleAt(i) != title) tabs.setTitleAt(i, title)
+            val description = tab.description
+            if (tabs.getToolTipTextAt(i) != description) tabs.setToolTipTextAt(i, description)
         }
         val tab = selectedTab()
         title = if (tab == null) "logxy" else "${tab.title} — logxy"
@@ -830,11 +841,18 @@ class MainFrame : JFrame("logxy") {
     // Green: the file is being written to; accent: followed, though nothing is written yet.
     private fun tabIcon(tab: LogTab): Icon {
         val icon = if (tab.isMerged) Icons.merged else Icons.logFile
-        return when {
-            tab.status.live -> DotIcon(icon, LIVE_COLOR)
-            tab.status.following -> DotIcon(icon, FOLLOW_COLOR)
-            else -> icon
+        val dot = tabIconKind(tab).second ?: return icon
+        return DotIcon(icon, dot)
+    }
+
+    /** What [tabIcon] shows for [tab]: whether a merge, and the color key of its dot, if live or following. */
+    private fun tabIconKind(tab: LogTab): Pair<Boolean, String?> {
+        val dot = when {
+            tab.status.live -> LIVE_COLOR
+            tab.status.following -> FOLLOW_COLOR
+            else -> null
         }
+        return tab.isMerged to dot
     }
 
     /** A place in the menu bar for one tab's controls at a time; it gives way when space is short. */
