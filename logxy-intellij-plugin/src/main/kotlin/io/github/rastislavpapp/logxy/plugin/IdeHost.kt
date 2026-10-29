@@ -12,6 +12,7 @@ import io.github.rastislavpapp.logxy.core.query.TextSearch
 import io.github.rastislavpapp.logxy.ui.BookmarkAction
 import io.github.rastislavpapp.logxy.ui.DetailPane
 import io.github.rastislavpapp.logxy.ui.ExportFiles
+import io.github.rastislavpapp.logxy.ui.Feature
 import io.github.rastislavpapp.logxy.ui.FindView
 import io.github.rastislavpapp.logxy.ui.LogViewHost
 import io.github.rastislavpapp.logxy.ui.QueryText
@@ -21,6 +22,7 @@ import io.github.rastislavpapp.logxy.ui.WritableSettings
 import kotlinx.coroutines.CoroutineDispatcher
 import java.awt.Window
 import java.nio.file.Path
+import java.util.EnumSet
 import javax.swing.JComponent
 import javax.swing.KeyStroke
 import javax.swing.SwingUtilities
@@ -70,6 +72,9 @@ class IdeHost(private val project: Project) : LogViewHost, SettingsDialogs {
     override val moreMemoryHint get() = "Give the IDE more memory in Help › Change Memory Settings to copy more."
 
     override val exportFiles: ExportFiles? get() = null
+
+    // A smarter log reader beside the run: deeper analysis, such as traces, stays in the app.
+    override val features: Set<Feature> = EnumSet.noneOf(Feature::class.java)
 
     // The keys of the IDE's own bookmark actions, as the keymap has them, so a user's bindings work here too. The
     // app's Ctrl+F2 would take Stop away from a run's tab.

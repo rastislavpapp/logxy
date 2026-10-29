@@ -5,8 +5,6 @@ What's new in the logxy IntelliJ plugin, shown as its change notes in the IDE an
 ## Unreleased
 
 - Bookmarks: bookmark records with the IDE's Toggle Bookmark key (F11) or the row menu, and step through them with the IDE's Next and Previous Bookmark keys (F2 and Shift+F2 unless the keymap has others). Once there are some, a strip left of the rows shows them, where a click adds or removes one. They stay while the tab is open, also through a reload, and show as ticks on the time histogram.
-- Traces: see how long each request took, from the records that share a trace id in a column you pick, such as a request id or a thread, in the new Traces part or from a column header's menu. Each trace lists its start, end, duration, records and worst level, with the duration's min, median, p90, p95, p99 and max above. Click a trace to show only its records, Ctrl-click to add more, double-click to go to its first record. Durations grow as the run logs more.
-- Trace duration charts: beside the Traces list, a histogram of how many traces took how long, and a chart of each trace's start time against its duration, so a slowdown shows as dots climbing. Both scales grow by factors, so a few very slow traces do not flatten the rest. Hover a bar or a dot for its details; click a dot to show only that trace's records, double-click to go to its first record.
 
 ## 0.2.0 - 2026-10-27
 

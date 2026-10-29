@@ -140,13 +140,6 @@ fun viewActions(view: RunLogView): ActionGroup = DefaultActionGroup(
         "Show the message templates of the shown records",
         AllIcons.Nodes.Template,
     ),
-    PartToggle(
-        view,
-        LogPart.TRACES,
-        "Traces",
-        "Show the traces of a trace id column, such as a request id, and how long each took",
-        AllIcons.Vcs.History,
-    ),
 )
 
 private fun whyNoCharts(view: RunLogView): String? =
