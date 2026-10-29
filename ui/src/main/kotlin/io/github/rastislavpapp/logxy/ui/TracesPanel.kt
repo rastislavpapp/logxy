@@ -2,9 +2,9 @@ package io.github.rastislavpapp.logxy.ui
 
 import io.github.rastislavpapp.logxy.core.formatTimeSpan
 import io.github.rastislavpapp.logxy.core.log.Level
-import io.github.rastislavpapp.logxy.core.log.Records
 import io.github.rastislavpapp.logxy.core.query.Query
 import io.github.rastislavpapp.logxy.core.query.TraceRules
+import io.github.rastislavpapp.logxy.core.trace.DurationHistogram
 import io.github.rastislavpapp.logxy.core.trace.TraceColumn
 import io.github.rastislavpapp.logxy.core.trace.Traces
 import kotlinx.coroutines.CancellationException
@@ -19,13 +19,11 @@ import java.awt.CardLayout
 import java.awt.Component
 import java.awt.Font
 import java.awt.Graphics
+import java.awt.GridLayout
 import java.awt.Toolkit
 import java.awt.event.HierarchyEvent
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
-import java.time.Instant
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
 import javax.swing.DefaultComboBoxModel
 import javax.swing.JComboBox
 import javax.swing.JLabel
@@ -49,8 +47,6 @@ private const val PROGRESS_DELAY_MILLIS = 200
 private const val TABLE_CARD = "table"
 private const val PLACEHOLDERS_CARD = "placeholders"
 
-private val TIME: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS")
-
 /** A field the trace ids can come from: its [name], and the name its column shows, as the picker lists it. */
 class TraceColumnChoice(val name: String, val shown: String) {
     override fun toString() = shown
@@ -58,12 +54,13 @@ class TraceColumnChoice(val name: String, val shown: String) {
 
 /**
  * The traces of all records by a trace id column the user picks (see `GLOSSARY.md`), one row each, longest first,
- * with the duration statistics above. Builds them only while it is showing: [traces] does the work, reading only the
- * records appended since it last ran, and [progress] tells how far it got.
+ * with the duration statistics above, and beside it a histogram of the durations and the traces' start times against
+ * their durations ([DurationHistogramChart], [TraceScatterChart]). Builds them only while it is showing: [traces]
+ * does the work, reading only the records appended since it last ran, and [progress] tells how far it got.
  *
  * A click shows only the clicked trace's records, Ctrl-click adds a trace to those shown, both through [edit], which
  * sets the filter; they wait for the double-click time, as a double-click instead calls [goToFirst] with the trace's
- * first record and leaves the filter as it is.
+ * first record and leaves the filter as it is. A dot of the scatter acts like its trace's row.
  */
 class TracesPanel(
     private val scope: CoroutineScope,
@@ -86,6 +83,16 @@ class TracesPanel(
     private val center = JPanel(CardLayout()).apply {
         add(scrollPane, TABLE_CARD)
         add(placeholders, PLACEHOLDERS_CARD)
+    }
+
+    private val histogram = DurationHistogramChart()
+    private val scatter = TraceScatterChart(::clickTrace, ::goToTrace)
+    private val charts = JPanel(GridLayout(1, 2)).apply {
+        add(histogram)
+        add(JPanel(BorderLayout()).apply {
+            add(scatter, BorderLayout.CENTER)
+            add(TimeAxis(scatter::timeline), BorderLayout.SOUTH)
+        })
     }
 
     /** How far a slow build got, from 0 to 1, or -1 if unknown; null while not building. */
@@ -118,7 +125,12 @@ class TracesPanel(
             add(picker)
             add(summary)
         }, BorderLayout.NORTH)
-        add(center, BorderLayout.CENTER)
+        add(look.horizontalSplit().apply {
+            leftComponent = center
+            rightComponent = charts
+            resizeWeight = TABLE_SHARE
+            border = null
+        }, BorderLayout.CENTER)
         picker.addActionListener {
             if (!choosing) column = (picker.selectedItem as TraceColumnChoice?)?.name
         }
@@ -197,8 +209,8 @@ class TracesPanel(
             }
             try {
                 val traces = traces(column)
-                val order = withContext(Dispatchers.Default) { traces?.order(sortColumn, descending) } ?: IntArray(0)
-                setTraces(traces, order)
+                val shown = withContext(Dispatchers.Default) { traces?.let { shownTraces(it, sortColumn, descending) } }
+                setTraces(traces, shown?.order ?: IntArray(0), shown)
                 showSummary(missing = traces == null)
             } catch (e: CancellationException) {
                 throw e
@@ -232,9 +244,20 @@ class TracesPanel(
         return model.columnAt(key.column) to (key.sortOrder != SortOrder.ASCENDING)
     }
 
-    /** Shows [traces] in [order], keeping the selected traces selected. */
-    private fun setTraces(traces: Traces?, order: IntArray) {
+    /** What is worked out off the UI thread about a build's [Traces]: the table's order, and what the charts draw. */
+    private class Shown(val order: IntArray, val histogram: DurationHistogram?, val extent: TraceExtent?)
+
+    private fun shownTraces(traces: Traces, sortColumn: TraceColumn, descending: Boolean) = Shown(
+        traces.order(sortColumn, descending),
+        traces.durationHistogram(DURATION_BINS),
+        TraceExtent.of(traces),
+    )
+
+    /** Shows [traces] in [order] and in the charts as [shown] has them, keeping the selected traces selected. */
+    private fun setTraces(traces: Traces?, order: IntArray, shown: Shown? = null) {
         val selected = selectedTraces()
+        histogram.histogram = shown?.histogram
+        scatter.show(traces, shown?.extent)
         if (model.update(traces, order)) setUpColumns()
         if (selected.isEmpty()) return
         val rows = IntArray(order.size)
@@ -275,6 +298,20 @@ class TracesPanel(
         val traces = model.traces ?: return
         val ids = selectedTraces().map(traces::id)
         if (ids.isNotEmpty()) edit { TraceRules.showOnly(column, ids) }
+    }
+
+    /** A click on a dot of the scatter acts as one on the trace's row; [extend] adds it to the selection. */
+    private fun clickTrace(trace: Int, extend: Boolean) {
+        val row = model.rowOf(trace)
+        if (row < 0) return
+        table.changeSelection(row, 0, extend, false)
+        table.scrollRectToVisible(table.getCellRect(row, 0, true))
+        clickTimer.restart()
+    }
+
+    private fun goToTrace(trace: Int) {
+        clickTimer.stop()
+        model.traces?.firstRecord(trace)?.let(goToFirst)
     }
 
     private fun selectedTraces(): List<Int> = table.selectedRows.toList().mapNotNull(model::trace)
@@ -390,6 +427,9 @@ class TracesPanel(
         /** The trace shown in [row]; null if there is none. */
         fun trace(row: Int): Int? = order.getOrNull(row)
 
+        /** The row [trace] is shown in; -1 if it is not. */
+        fun rowOf(trace: Int): Int = order.indexOf(trace)
+
         fun firstRecord(row: Int): Int? = trace(row)?.let { traces?.firstRecord(it) }
 
         override fun getRowCount() = order.size
@@ -411,8 +451,8 @@ class TracesPanel(
             val trace = order[row]
             return when (columns[column]) {
                 TraceColumn.ID -> traces.id(trace)
-                TraceColumn.START -> time(traces.start(trace))
-                TraceColumn.END -> time(traces.end(trace))
+                TraceColumn.START -> formatTraceTime(traces.start(trace))
+                TraceColumn.END -> formatTraceTime(traces.end(trace))
                 TraceColumn.DURATION -> duration(traces.duration(trace))
                 TraceColumn.RECORDS -> "%,d".format(traces.records(trace))
                 TraceColumn.LEVEL -> traces.worstLevel(trace)
@@ -422,17 +462,9 @@ class TracesPanel(
 
         private fun duration(nanos: Long) = if (nanos == Traces.NO_DURATION) "" else formatTimeSpan(nanos)
 
-        private fun time(nanos: Long): String {
-            if (nanos == Records.NO_TIMESTAMP) return ""
-            val seconds = Math.floorDiv(nanos, NANOS_PER_SECOND)
-            val instant = Instant.ofEpochSecond(seconds, Math.floorMod(nanos, NANOS_PER_SECOND))
-            return TIME.format(instant.atZone(ZoneId.systemDefault()))
-        }
-
         companion object {
             val SINGLE_FILE = TraceColumn.entries - TraceColumn.SOURCES
             val MERGED = TraceColumn.entries.toList()
-            const val NANOS_PER_SECOND = 1_000_000_000L
         }
     }
 
@@ -455,6 +487,9 @@ class TracesPanel(
 
     private companion object {
         const val DEFAULT_DOUBLE_CLICK_MILLIS = 500
+
+        /** The table gets this share of a widening panel; the charts beside it the rest. */
+        const val TABLE_SHARE = 0.5
 
         val DESCENDING_FIRST = setOf(TraceColumn.DURATION, TraceColumn.RECORDS, TraceColumn.LEVEL)
     }
