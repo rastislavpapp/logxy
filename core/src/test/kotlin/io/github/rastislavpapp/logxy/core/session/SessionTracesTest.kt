@@ -2,7 +2,9 @@ package io.github.rastislavpapp.logxy.core.session
 
 import io.github.rastislavpapp.logxy.core.config.Settings
 import io.github.rastislavpapp.logxy.core.parse.Parser
+import io.github.rastislavpapp.logxy.core.template.Templates
 import io.github.rastislavpapp.logxy.core.trace.TraceColumn
+import io.github.rastislavpapp.logxy.core.trace.TraceSteps
 import io.github.rastislavpapp.logxy.core.trace.Traces
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
@@ -68,8 +70,8 @@ class SessionTracesTest {
 
     private val mdc = Parser.Pattern("MDC", "%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %-5p %c %X - %m%n")
 
-    private fun line(time: String, thread: String, level: String, mdc: String = "{}") =
-        "2026-10-01 $time [$thread] $level app.L $mdc - message\n"
+    private fun line(time: String, thread: String, level: String, mdc: String = "{}", message: String = "message") =
+        "2026-10-01 $time [$thread] $level app.L $mdc - $message\n"
 
     private fun open(vararg files: Path, shifts: List<Long> = emptyList(), parser: Parser = mdc) = runBlocking {
         val loads = Loads()
@@ -160,6 +162,25 @@ class SessionTracesTest {
     }
 
     @Test
+    fun `steps follow appended records, also one whose message was unfinished when read`() {
+        fun logfmt(second: Int, message: String) = "ts=2026-10-01T08:00:0$second.000Z level=info req=r1 msg=$message\n"
+        val file = Files.writeString(dir.resolve("steps.log"), logfmt(0, "started"))
+        val session = open(file, parser = Parser.Logfmt("logfmt"))
+        assertEquals(emptyList(), traces(session, "req")!!.steps!!.rows())
+        // Read while the message is `answ`.
+        val next = logfmt(2, "answered")
+        Files.writeString(file, next.substringBefore("ered"), APPEND)
+        awaitRead(session, file)
+        assertEquals(listOf("started → answ: 1, 2000 ms"), traces(session, "req")!!.steps!!.rows())
+        Files.writeString(file, next.substringAfter("answ") + logfmt(3, "done"), APPEND)
+        awaitRead(session, file)
+        assertEquals(
+            listOf("started → answered: 1, 2000 ms", "answered → done: 1, 1000 ms"),
+            traces(session, "req")!!.steps!!.rows(),
+        )
+    }
+
+    @Test
     fun `groups a column of mostly distinct values, which the log stores as text in the file`() {
         val requests = 20_000
         val content = buildString {
@@ -172,6 +193,143 @@ class SessionTracesTest {
         assertEquals(requests, traces.size)
         assertEquals("req-0: 1000 ms, 2, INFO, 0", traces.rows().first())
         assertEquals(requests, traces.statistics!!.count)
+    }
+
+    /** Each step, summed by template pair, as `from → to: count, total ms`, by total time, longest first. */
+    private fun TraceSteps.rows(): List<String> = order().map { pair ->
+        val from = Templates.numbered(from(pair)!!)
+        val to = Templates.numbered(to(pair)!!)
+        "$from → $to: ${count(pair)}, ${total(pair) / 1_000_000} ms"
+    }
+
+    @Test
+    fun `sums the steps of a trace by the message templates of their two records`() {
+        val file = Files.writeString(
+            dir.resolve("steps.log"),
+            line("10:00:00.000", "t", "INFO ", message = "Request a1b2 started") +
+                line("10:00:00.010", "t", "INFO ", message = "Calling payment service") +
+                line("10:00:04.110", "t", "INFO ", message = "Payment service answered") +
+                line("10:00:04.130", "t", "INFO ", message = "Request a1b2 done"),
+        )
+        val steps = traces(open(file), "Thread")!!.steps!!
+        assertEquals(
+            listOf(
+                "Calling payment service → Payment service answered: 1, 4100 ms",
+                "Payment service answered → Request {1} done: 1, 20 ms",
+                "Request {1} started → Calling payment service: 1, 10 ms",
+            ),
+            steps.rows(),
+        )
+        assertEquals(4_130_000_000L, steps.total)
+    }
+
+    @Test
+    fun `a trace's records in order, each with the step to the next one and its share of the trace`() {
+        fun record(time: String, thread: String, message: String) = line(time, thread, "INFO ", message = message)
+        val file = Files.writeString(
+            dir.resolve("one.log"),
+            record("10:00:00.000", "t", "Request a1b2 started") +
+                record("10:00:00.005", "other", "Unrelated") +
+                record("10:00:00.010", "t", "Calling payment service") +
+                record("10:00:04.110", "t", "Payment service answered") +
+                record("10:00:04.130", "t", "Request a1b2 done"),
+        )
+        val session = open(file)
+        val traces = traces(session, "Thread")!!
+        val one = runBlocking(ui) { session.traceRecords(traces, 0) }!!
+        assertEquals(
+            listOf(
+                "0 Request a1b2 started: 10 ms, 0%",
+                "2 Calling payment service: 4100 ms, 99%",
+                "3 Payment service answered: 20 ms, 0%",
+                "4 Request a1b2 done",
+            ),
+            List(one.size) { i ->
+                val step = if (one.step(i) == Traces.NO_DURATION) "" else ": ${one.step(i) / 1_000_000} ms"
+                val share = if (one.step(i) == Traces.NO_DURATION) "" else ", ${Math.round(one.share(i) * 100)}%"
+                "${one.record(i)} ${one.message(i)}$step$share"
+            },
+        )
+    }
+
+    @Test
+    fun `a pair keeps the 50 traces where its step took longest, each once`() {
+        var millis = 0L
+        fun at(): String = "08:%02d:%02d.%03d".format(millis / 60_000, millis / 1000 % 60, millis % 1000)
+        val content = buildString {
+            // Trace t<i> takes i + 1 ms from Asked to Answered; t0 takes 1000 ms the second time.
+            for ((i, step) in (0..<60).map { it to it + 1L } + (0 to 1000L)) {
+                append(line(at(), "t$i", "INFO ", message = "Asked"))
+                millis += step
+                append(line(at(), "t$i", "INFO ", message = "Answered"))
+                millis += 5000
+            }
+        }
+        val traces = traces(open(Files.writeString(dir.resolve("longest.log"), content)), "Thread")!!
+        val steps = traces.steps!!
+        val pair = (0..<steps.size).single { steps.from(it) == "Asked" && steps.to(it) == "Answered" }
+        val expected = listOf("t0: 1000") + (59 downTo 11).map { "t$it: ${it + 1}" }
+        val longest = steps.longest(pair)
+        val times = steps.longestTimes(pair)
+        assertEquals(expected, longest.indices.map { "${traces.id(longest[it])}: ${times[it] / 1_000_000}" })
+    }
+
+    @Test
+    fun `a merge's steps follow its records in time, also through a file's last record`() {
+        fun request(time: String, message: String, id: String = "r1") =
+            line(time, "x", "INFO ", "{requestId=$id}", message)
+        // a.log's last record, which may still grow, falls between two of b.log's records of the same trace.
+        val a = Files.writeString(
+            dir.resolve("a.log"),
+            request("08:00:00.000", "Request started") + request("08:00:02.000", "Calling inventory"),
+        )
+        val b = Files.writeString(
+            dir.resolve("b.log"),
+            request("08:00:01.000", "Order read") + request("08:00:03.000", "Inventory answered") +
+                request("08:00:05.000", "Other request", id = "r2"),
+        )
+        val traces = traces(open(a, b), "MDC[requestId]")!!
+        assertEquals(listOf(0, 1, 2, 3), traces.recordNumbers(0).toList())
+        val steps = traces.steps!!
+        assertEquals(
+            listOf(
+                "Calling inventory → Inventory answered: 1, 1000 ms",
+                "Order read → Calling inventory: 1, 1000 ms",
+                "Request started → Order read: 1, 1000 ms",
+            ),
+            steps.rows().sorted(),
+        )
+    }
+
+    @Test
+    fun `the summed steps' counts and totals are those of each trace's steps added up one by one`() {
+        val random = java.util.Random(152)
+        val kinds = listOf("Received order {id}", "Checking stock", "Stock checked", "Charging card", "Done")
+        // Per thread, the time and kind of its last record, which a straightforward sum takes each step from.
+        val last = HashMap<String, Pair<Long, String>>()
+        val expected = HashMap<String, LongArray>()
+        var millis = 0L
+        val content = buildString {
+            repeat(2_000) {
+                millis += random.nextInt(0, 400)
+                val thread = "t${random.nextInt(30)}"
+                val kind = kinds[random.nextInt(kinds.size)]
+                val time = "08:%02d:%02d.%03d".format(millis / 60_000, millis / 1000 % 60, millis % 1000)
+                append(line(time, thread, "INFO ", message = kind.replace("{id}", "o${random.nextInt(99)}")))
+                last[thread]?.let { (before, from) ->
+                    val sums = expected.getOrPut("$from → $kind") { LongArray(2) }
+                    sums[0]++
+                    sums[1] += millis - before
+                }
+                last[thread] = millis to kind
+            }
+        }
+        val steps = traces(open(Files.writeString(dir.resolve("random.log"), content)), "Thread")!!.steps!!
+        val actual = (0..<steps.size).associate { pair ->
+            val name = "${steps.from(pair)} → ${steps.to(pair)}".replace("{1}", "{id}").replace("{}", "{id}")
+            name to listOf(steps.count(pair).toLong(), steps.total(pair) / 1_000_000)
+        }
+        assertEquals(expected.mapValues { it.value.toList() }, actual)
     }
 
     @Test

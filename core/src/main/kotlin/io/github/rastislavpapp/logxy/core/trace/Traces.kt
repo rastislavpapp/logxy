@@ -1,5 +1,6 @@
 package io.github.rastislavpapp.logxy.core.trace
 
+import io.github.rastislavpapp.logxy.core.index.IntChunkList
 import io.github.rastislavpapp.logxy.core.log.ColumnType
 import io.github.rastislavpapp.logxy.core.log.Field
 import io.github.rastislavpapp.logxy.core.log.Level
@@ -25,10 +26,20 @@ class Traces internal constructor(
     /** Per trace, its worst level as by [severity], or [NO_LEVEL]. */
     private val levels: ByteArray,
     private val firsts: IntArray,
+    private val lasts: IntArray,
+    /**
+     * The trace of each record, -1 for none; the index's own list, which goes on growing, and is read here only up
+     * to each trace's last record. The pending records, those last in their file then, are -1 there: their traces
+     * are in [pendingTraces], each as the record's number followed by its trace.
+     */
+    private val traceOf: IntChunkList,
+    private val pendingTraces: IntArray,
     /** Per trace, [sourceWords] longs with a bit set for each file its records come from. */
     private val sources: LongArray,
     /** The names of a merged session's files; empty for a single file. */
     private val sourceNames: List<String>,
+    /** The steps of all traces summed by template pair; null if the records have no message to name them by. */
+    val steps: TraceSteps?,
 ) {
     private val sourceWords = (sourceNames.size + Long.SIZE_BITS - 1) / Long.SIZE_BITS
 
@@ -72,6 +83,27 @@ class Traces internal constructor(
 
     /** The record number, among the session's records, of the first record of [trace]. */
     fun firstRecord(trace: Int): Int = firsts[trace]
+
+    /**
+     * The record numbers of the first [limit] records of [trace], in the session's order. Finding them reads the
+     * trace's records from its first one on, so a limit keeps a trace of millions of records, such as a thread's,
+     * quick to show.
+     */
+    fun recordNumbers(trace: Int, limit: Int = Int.MAX_VALUE): IntArray {
+        val numbers = IntArray(minOf(counts[trace], limit))
+        var found = 0
+        var record = firsts[trace]
+        while (found < numbers.size && record <= lasts[trace]) {
+            if (traceAt(record) == trace) numbers[found++] = record
+            record++
+        }
+        return numbers.copyOf(found)
+    }
+
+    private fun traceAt(record: Int): Int {
+        for (i in pendingTraces.indices step 2) if (pendingTraces[i] == record) return pendingTraces[i + 1]
+        return traceOf[record]
+    }
 
     /** The names of the files the records of [trace] come from, in the session's order; empty for a single file. */
     fun sources(trace: Int): List<String> = sourceNames.filterIndexed { part, _ -> hasSource(trace, part) }

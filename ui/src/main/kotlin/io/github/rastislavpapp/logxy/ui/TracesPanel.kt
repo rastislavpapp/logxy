@@ -6,6 +6,8 @@ import io.github.rastislavpapp.logxy.core.query.Query
 import io.github.rastislavpapp.logxy.core.query.TraceRules
 import io.github.rastislavpapp.logxy.core.session.SessionStatus
 import io.github.rastislavpapp.logxy.core.trace.TraceColumn
+import io.github.rastislavpapp.logxy.core.trace.TraceRecords
+import io.github.rastislavpapp.logxy.core.trace.TraceSteps
 import io.github.rastislavpapp.logxy.core.trace.Traces
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -25,10 +27,12 @@ import java.awt.event.HierarchyEvent
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import javax.swing.DefaultComboBoxModel
+import javax.swing.JButton
 import javax.swing.JComboBox
 import javax.swing.JLabel
 import javax.swing.JPanel
 import javax.swing.JScrollPane
+import javax.swing.JTabbedPane
 import javax.swing.JTable
 import javax.swing.RowSorter
 import javax.swing.SortOrder
@@ -57,13 +61,16 @@ class TraceColumnChoice(val name: String, val shown: String) {
 
 /**
  * The traces of all records by a trace id column the user picks (see `GLOSSARY.md`), one row each, longest first,
- * with the duration statistics above, and beside it a [TraceDurationChart] of them. Builds them only while it is
- * showing: [traces] does the work, reading only the records appended since it last ran, and [progress] tells how far
- * it got. The traces ignore the filter, which the statistics say, with the counts of [status].
+ * with the duration statistics above, and beside it tabs: a [TraceDurationChart] of them, the records of the selected
+ * trace with the steps between them, which [traceRecords] gives, and the steps of all traces summed by template pair.
+ * Builds them only while it is showing: [traces] does the work, reading only the records appended since it last ran,
+ * and [progress] tells how far it got. The traces ignore the filter, which the statistics say, with the counts of
+ * [status].
  *
  * A click shows only the clicked trace's records, Ctrl-click adds a trace to those shown, both through [edit], which
- * sets the filter; they wait for the double-click time, as a double-click instead calls [goToFirst] with the trace's
- * first record and leaves the filter as it is. A dot of the chart acts like its trace's row.
+ * sets the filter; they wait for the double-click time, as a double-click instead calls [goTo] with the trace's
+ * first record and leaves the filter as it is. A dot of the chart acts like its trace's row, and a double-click on
+ * a record of the selected trace goes to it. Selecting a step lists only the traces where it took longest.
  */
 class TracesPanel(
     private val scope: CoroutineScope,
@@ -71,7 +78,8 @@ class TracesPanel(
     private val progress: () -> Double,
     private val status: () -> SessionStatus,
     private val edit: (change: (Query.Group) -> Query.Group) -> Unit,
-    private val goToFirst: (record: Int) -> Unit,
+    private val goTo: (record: Int) -> Unit,
+    private val traceRecords: (traces: Traces, trace: Int) -> TraceRecords?,
 ) : JPanel(BorderLayout()) {
 
     private val model = TracesModel()
@@ -86,12 +94,34 @@ class TracesPanel(
 
     private val scrollPane = JScrollPane(table).apply { border = NO_OUTLINE }
     private val placeholders = PlaceholderRows(table)
-    private val center = JPanel(CardLayout()).apply {
+    private val cards = JPanel(CardLayout()).apply {
         add(scrollPane, TABLE_CARD)
         add(placeholders, PLACEHOLDERS_CARD)
     }
 
+    /** Above the traces while a step narrows them: which step, and the button that shows all traces again. */
+    private val stepLabel = JLabel()
+    private val stepBar = JPanel(MigLayout("insets 2 8 2 8", "[grow,fill][]")).apply {
+        add(stepLabel)
+        add(JButton("Show all traces").apply { addActionListener { stepsView.clearSelection() } })
+        isVisible = false
+    }
+    private val center = JPanel(BorderLayout()).apply {
+        add(stepBar, BorderLayout.NORTH)
+        add(cards, BorderLayout.CENTER)
+    }
+
     private val chart = TraceDurationChart(::clickTrace, ::goToTrace)
+    private val recordsView = TraceRecordsView { goTo(it) }
+    private val stepsView = TraceStepsView(::narrowTo)
+    private val tabs = JTabbedPane().apply {
+        addTab("Chart", chart)
+        addTab("Trace", recordsView)
+        addTab("Steps", stepsView)
+    }
+
+    /** The step whose longest traces the table lists instead of all; null to list all. */
+    private var step: StepKey? = null
 
     /** How far a slow build got, from 0 to 1, or -1 if unknown; null while not building. */
     private var shownProgress: Double? = null
@@ -113,6 +143,7 @@ class TracesPanel(
             if (value == field) return
             field = value
             selectChoice()
+            showStep(null)
             setTraces(null, IntArray(0))
             refresh()
         }
@@ -125,7 +156,7 @@ class TracesPanel(
         }, BorderLayout.NORTH)
         add(look.horizontalSplit().apply {
             leftComponent = center
-            rightComponent = chart
+            rightComponent = tabs
             resizeWeight = TABLE_SHARE
             border = null
         }, BorderLayout.CENTER)
@@ -134,7 +165,9 @@ class TracesPanel(
         }
         table.rowSorter = TraceSorter()
         table.selectionModel.addListSelectionListener { e ->
-            if (!e.valueIsAdjusting) chart.selected = selectedTraces().toIntArray()
+            if (e.valueIsAdjusting) return@addListSelectionListener
+            chart.selected = selectedTraces().toIntArray()
+            showSelectedRecords()
         }
         table.setShowGrid(false)
         table.tableHeader.reorderingAllowed = false
@@ -152,7 +185,7 @@ class TracesPanel(
                     clickTimer.restart()
                 } else {
                     clickTimer.stop()
-                    model.firstRecord(row)?.let(goToFirst)
+                    model.firstRecord(row)?.let(goTo)
                 }
             }
         })
@@ -203,6 +236,7 @@ class TracesPanel(
         stale = false
         val column = column ?: return showSummary()
         val (sortColumn, descending) = sortedBy()
+        val step = step
         job = scope.launch {
             val timer = Timer(40) { showProgress() }.apply {
                 initialDelay = PROGRESS_DELAY_MILLIS
@@ -210,7 +244,9 @@ class TracesPanel(
             }
             try {
                 val traces = traces(column)
-                val shown = withContext(Dispatchers.Default) { traces?.let { shownTraces(it, sortColumn, descending) } }
+                val shown = withContext(Dispatchers.Default) {
+                    traces?.let { shownTraces(it, sortColumn, descending, step) }
+                }
                 setTraces(traces, shown?.order ?: IntArray(0), shown)
                 showSummary(missing = traces == null)
             } catch (e: CancellationException) {
@@ -245,22 +281,67 @@ class TracesPanel(
         return model.columnAt(key.column) to (key.sortOrder != SortOrder.ASCENDING)
     }
 
-    /** What is worked out off the UI thread about a build's [Traces]: the table's order, and what the chart draws. */
-    private class Shown(val order: IntArray, val extent: TraceExtent?)
+    /**
+     * What is worked out off the UI thread about a build's [Traces]: the table's order, what the chart draws, and
+     * while a step narrows the traces, its time in each trace of [order].
+     */
+    private class Shown(val order: IntArray, val extent: TraceExtent?, val stepTimes: LongArray?)
 
-    private fun shownTraces(traces: Traces, sortColumn: TraceColumn, descending: Boolean) =
-        Shown(traces.order(sortColumn, descending), TraceExtent.of(traces))
+    /** [traces] sorted as the table shows them, or with [step] those where it took longest, the longest first. */
+    private fun shownTraces(
+        traces: Traces,
+        sortColumn: TraceColumn,
+        descending: Boolean,
+        step: StepKey?,
+    ): Shown {
+        val extent = TraceExtent.of(traces)
+        if (step == null) return Shown(traces.order(sortColumn, descending), extent, null)
+        val none = Shown(IntArray(0), extent, LongArray(0))
+        val steps = traces.steps ?: return none
+        val pair = steps.pairOf(step.from, step.to)
+        if (pair < 0) return none
+        return Shown(steps.longest(pair), extent, steps.longestTimes(pair))
+    }
 
     /** Shows [traces] in [order] and in the chart as [shown] has them, keeping the selected traces selected. */
     private fun setTraces(traces: Traces?, order: IntArray, shown: Shown? = null) {
         val selected = selectedTraces()
         chart.show(traces, shown?.extent)
-        if (model.update(traces, order)) setUpColumns()
-        if (selected.isEmpty()) return
-        val rows = IntArray(order.size)
+        stepsView.show(traces, step)
+        if (model.update(traces, order, shown?.stepTimes)) setUpColumns()
+        val rows = IntArray(traces?.size ?: 0) { -1 }
         for ((row, trace) in order.withIndex()) rows[trace] = row
         for (trace in selected) {
-            if (trace < rows.size) table.addRowSelectionInterval(rows[trace], rows[trace])
+            val row = rows.getOrElse(trace) { -1 }
+            if (row >= 0) table.addRowSelectionInterval(row, row)
+        }
+        showSelectedRecords()
+    }
+
+    /** Shows the records of the trace at the selection's lead in the Trace tab, or a hint if none is selected. */
+    private fun showSelectedRecords() {
+        val traces = model.traces
+        val lead = table.selectionModel.leadSelectionIndex
+        val trace = if (table.isRowSelected(lead)) model.trace(lead) else null
+        if (traces == null || trace == null) return recordsView.show(null, "", 0)
+        recordsView.show(traceRecords(traces, trace), traces.id(trace), traces.records(trace))
+    }
+
+    /** Lists only the traces where the step [selected] took longest; null lists all traces. */
+    private fun narrowTo(selected: StepKey?) {
+        if (selected == step) return
+        showStep(selected)
+        table.clearSelection()
+        refresh()
+    }
+
+    private fun showStep(selected: StepKey?) {
+        step = selected
+        stepBar.isVisible = selected != null
+        if (selected != null) {
+            stepLabel.text = "Where ${selected.name} took longest"
+            stepLabel.toolTipText = "The ${TraceSteps.LONGEST} traces at most where this step took longest, " +
+                "each with its longest time of the step"
         }
     }
 
@@ -339,7 +420,7 @@ class TracesPanel(
 
     private fun goToTrace(trace: Int) {
         clickTimer.stop()
-        model.traces?.firstRecord(trace)?.let(goToFirst)
+        model.traces?.firstRecord(trace)?.let(goTo)
     }
 
     private fun selectedTraces(): List<Int> = table.selectedRows.toList().mapNotNull(model::trace)
@@ -348,7 +429,7 @@ class TracesPanel(
         val fraction = progress()
         // Reading new records has a progress; sorting the traces after it has none.
         shownProgress = if (fraction >= 1.0) -1.0 else fraction
-        if (model.rowCount == 0) (center.layout as CardLayout).show(center, PLACEHOLDERS_CARD)
+        if (model.rowCount == 0) (cards.layout as CardLayout).show(cards, PLACEHOLDERS_CARD)
         placeholders.repaint()
         repaint(0, 0, width, PROGRESS_HEIGHT)
     }
@@ -356,7 +437,7 @@ class TracesPanel(
     private fun hideProgress() {
         if (shownProgress == null) return
         shownProgress = null
-        (center.layout as CardLayout).show(center, TABLE_CARD)
+        (cards.layout as CardLayout).show(cards, TABLE_CARD)
         repaint(0, 0, width, PROGRESS_HEIGHT)
     }
 
@@ -370,7 +451,8 @@ class TracesPanel(
         val columns = table.columnModel
         for (column in 0..<columns.columnCount) {
             val tableColumn = columns.getColumn(column)
-            val shown = model.columnAt(column)
+            // The step's time shows as a duration does.
+            val shown = if (model.isStep(column)) TraceColumn.DURATION else model.columnAt(column)
             tableColumn.cellRenderer = TraceRenderer(shown)
             val sample = when (shown) {
                 TraceColumn.ID -> "0123456789abcdef0123"
@@ -397,6 +479,8 @@ class TracesPanel(
         override fun getModel(): TableModel = rows
 
         override fun toggleSortOrder(column: Int) {
+            // A step lists its longest traces in that order only.
+            if (step != null) return
             val current = keys.firstOrNull()
             val order = when {
                 current?.column == column && current.sortOrder == SortOrder.DESCENDING -> SortOrder.ASCENDING
@@ -427,19 +511,25 @@ class TracesPanel(
         override fun rowsUpdated(firstRow: Int, endRow: Int, column: Int) {}
     }
 
-    /** One row per trace, in the order given; a merge's traces also name their files. */
+    /**
+     * One row per trace, in the order given; a merge's traces also name their files. While a step narrows the
+     * traces, a last column has its time in each.
+     */
     private class TracesModel : AbstractTableModel() {
         var traces: Traces? = null
             private set
         private var order = IntArray(0)
         private var columns = SINGLE_FILE
+        private var stepTimes: LongArray? = null
 
-        /** Shows [traces] in [order]; returns whether the columns changed. */
-        fun update(traces: Traces?, order: IntArray): Boolean {
+        /** Shows [traces] in [order], and [stepTimes] in a step's column unless null; tells if the columns changed. */
+        fun update(traces: Traces?, order: IntArray, stepTimes: LongArray?): Boolean {
             this.traces = traces
             this.order = order
             val columns = if (traces?.isMerged == true) MERGED else SINGLE_FILE
-            if (columns == this.columns) {
+            val stepChanged = (stepTimes == null) != (this.stepTimes == null)
+            this.stepTimes = stepTimes
+            if (columns == this.columns && !stepChanged) {
                 fireTableDataChanged()
                 return false
             }
@@ -447,6 +537,9 @@ class TracesPanel(
             fireTableStructureChanged()
             return true
         }
+
+        /** Whether [column] is the step's, which no [TraceColumn] is. */
+        fun isStep(column: Int): Boolean = column == columns.size
 
         fun columnAt(column: Int): TraceColumn = columns[column]
 
@@ -462,21 +555,26 @@ class TracesPanel(
 
         override fun getRowCount() = order.size
 
-        override fun getColumnCount() = columns.size
+        override fun getColumnCount() = if (stepTimes == null) columns.size else columns.size + 1
 
-        override fun getColumnName(column: Int) = when (columns[column]) {
-            TraceColumn.ID -> "Trace id"
-            TraceColumn.START -> "Start"
-            TraceColumn.END -> "End"
-            TraceColumn.DURATION -> "Duration"
-            TraceColumn.RECORDS -> "Records"
-            TraceColumn.LEVEL -> "Worst level"
-            TraceColumn.SOURCES -> "Sources"
+        override fun getColumnName(column: Int): String {
+            if (isStep(column)) return "Step"
+            return when (columns[column]) {
+                TraceColumn.ID -> "Trace id"
+                TraceColumn.START -> "Start"
+                TraceColumn.END -> "End"
+                TraceColumn.DURATION -> "Duration"
+                TraceColumn.RECORDS -> "Records"
+                TraceColumn.LEVEL -> "Worst level"
+                TraceColumn.SOURCES -> "Sources"
+            }
         }
 
         override fun getValueAt(row: Int, column: Int): Any? {
             val traces = traces ?: return null
             val trace = order[row]
+            val stepTimes = stepTimes
+            if (isStep(column) && stepTimes != null) return duration(stepTimes[row])
             return when (columns[column]) {
                 TraceColumn.ID -> traces.id(trace)
                 TraceColumn.START -> formatTraceTime(traces.start(trace))

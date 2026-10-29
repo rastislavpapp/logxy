@@ -17,7 +17,8 @@ private const val REQUEST_ID = "MDC[requestId]"
 
 /**
  * Building the traces of [file], a log of [RequestGenerator]'s, by its request ids, from scratch as a session first
- * does. Open so JMH can generate its subclass.
+ * does: alone, and with their steps, which takes finding the message templates first. Open so JMH can generate its
+ * subclass.
  */
 @State(Scope.Benchmark)
 open class TraceBenchmark {
@@ -38,9 +39,16 @@ open class TraceBenchmark {
 
     @Benchmark
     fun byRequestId(): Traces = runBlocking { traces(log, REQUEST_ID) } ?: error("$file has no $REQUEST_ID column")
+
+    @Benchmark
+    fun stepsByRequestId(): Traces =
+        runBlocking { traces(log, REQUEST_ID, steps = true) } ?: error("$file has no $REQUEST_ID column")
 }
 
-val traceRows = listOf(BenchmarkRow(TraceBenchmark::class.java, "byRequestId", "traces: by request id"))
+val traceRows = listOf(
+    BenchmarkRow(TraceBenchmark::class.java, "byRequestId", "traces: by request id"),
+    BenchmarkRow(TraceBenchmark::class.java, "stepsByRequestId", "traces: steps by request id"),
+)
 
 /** Parameters of [TraceBenchmark]. */
 fun traceParams(file: Path): Map<String, List<String>> = mapOf(TraceBenchmark::file.name to listOf(file.toString()))

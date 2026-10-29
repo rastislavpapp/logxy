@@ -7,6 +7,7 @@ import io.github.rastislavpapp.logxy.core.archive.ArchiveOrigin
 import io.github.rastislavpapp.logxy.core.config.RowHighlight
 import io.github.rastislavpapp.logxy.core.filter.ChunkListener
 import io.github.rastislavpapp.logxy.core.filter.Filter
+import io.github.rastislavpapp.logxy.core.filter.FilterEngine
 import io.github.rastislavpapp.logxy.core.filter.LevelCondition
 import io.github.rastislavpapp.logxy.core.filter.PreparedFilter
 import io.github.rastislavpapp.logxy.core.filter.RecordFilter
@@ -18,6 +19,7 @@ import io.github.rastislavpapp.logxy.core.log.Level
 import io.github.rastislavpapp.logxy.core.log.LogData
 import io.github.rastislavpapp.logxy.core.log.Records
 import io.github.rastislavpapp.logxy.core.log.Role
+import io.github.rastislavpapp.logxy.core.merge.MergedFilter
 import io.github.rastislavpapp.logxy.core.merge.MergedLog
 import io.github.rastislavpapp.logxy.core.merge.TimestampShift
 import io.github.rastislavpapp.logxy.core.parse.Parser
@@ -28,9 +30,11 @@ import io.github.rastislavpapp.logxy.core.query.QueryCompiler
 import io.github.rastislavpapp.logxy.core.query.QueryException
 import io.github.rastislavpapp.logxy.core.query.TextSearch
 import io.github.rastislavpapp.logxy.core.template.TemplateCounts
+import io.github.rastislavpapp.logxy.core.template.TemplateIndex
 import io.github.rastislavpapp.logxy.core.template.VariableSeries
 import io.github.rastislavpapp.logxy.core.template.VariableValues
 import io.github.rastislavpapp.logxy.core.trace.TraceIndex
+import io.github.rastislavpapp.logxy.core.trace.TraceRecords
 import io.github.rastislavpapp.logxy.core.trace.Traces
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -566,7 +570,31 @@ class LogSession internal constructor(
             traceIndex = index
             traceIndexOf = loaded to column
         }
-        return index.update(loaded.traceSource(field))
+        val templates = if (loaded.records.schema.indexOf(Role.MESSAGE) >= 0) templateIndexes() else null
+        return index.update(loaded.traceSource(field, templates))
+    }
+
+    /**
+     * The first [TraceRecords.MOST] records of [trace] in [traces], which [traces] gave for the loaded records, with
+     * the step from each to the next; null if nothing is loaded or the records are no longer those [traces] counted.
+     */
+    fun traceRecords(traces: Traces, trace: Int): TraceRecords? {
+        val loaded = loaded ?: return null
+        val records = loaded.records
+        val numbers = traces.recordNumbers(trace, TraceRecords.MOST)
+        if (numbers.any { it >= records.recordCount }) return null
+        val message = records.schema.indexOf(Role.MESSAGE)
+        val messages = numbers.map { if (message < 0) "" else records.fieldText(it, message).substringBefore('\n') }
+        val templates = numbers.map { if (message < 0) "" else loaded.templateOf(it) }
+        val times = LongArray(numbers.size) { records.timestampNanos(numbers[it]) }
+        return TraceRecords(numbers, times, messages, templates, traces.duration(trace))
+    }
+
+    /** The message template index of each file, which the engine keeps; null for an engine that keeps none. */
+    private fun templateIndexes(): List<TemplateIndex>? = when (val engine = engine) {
+        is FilterEngine -> engine.templateIndexes
+        is MergedFilter -> engine.templateIndexes
+        else -> null
     }
 
     /** The template of [record]'s message; null if it has none, or nothing is loaded. */

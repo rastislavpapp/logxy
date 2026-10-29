@@ -64,8 +64,11 @@ internal interface LoadedLog {
     /** Reads the records there are now as written in the files. Created on the owner thread. */
     fun sourceReader(): SourceReader
 
-    /** The records there are now, for a [TraceIndex] of [field]. Created on the owner thread. */
-    fun traceSource(field: Int): TraceSource
+    /**
+     * The records there are now, for a [TraceIndex] of [field] whose steps are named by [templates], the files'
+     * template indexes; null for no steps. Created on the owner thread.
+     */
+    fun traceSource(field: Int, templates: List<TemplateIndex>?): TraceSource
 
     /** Applies [data] appended to [part]; returns the record that may have more text now, -1 if none. */
     fun append(part: Int, data: AppendedData): Int
@@ -154,8 +157,8 @@ internal class SingleLoad(private val log: LogData) : LoadedLog {
 
     override fun sourceReader(): SourceReader = SnapshotSourceReader(listOf(log.filterSnapshot()), { 0 }, { it })
 
-    override fun traceSource(field: Int) =
-        TraceSource(listOf(log.filterSnapshot()), log.recordCount, null, intArrayOf(field), longArrayOf(0))
+    override fun traceSource(field: Int, templates: List<TemplateIndex>?) =
+        TraceSource(listOf(log.filterSnapshot()), log.recordCount, null, intArrayOf(field), longArrayOf(0), templates)
 
     override fun append(part: Int, data: AppendedData): Int {
         val changed = log.recordCount - 1
@@ -204,12 +207,13 @@ internal class MergedLoad(private val log: MergedLog) : LoadedLog {
         SnapshotSourceReader(log.parts.map { it.filterSnapshot() }, log::part, log::record)
 
     // As for sourceReader, the merge's lists are read on other threads below the count there was.
-    override fun traceSource(field: Int) = TraceSource(
+    override fun traceSource(field: Int, templates: List<TemplateIndex>?) = TraceSource(
         log.parts.map { it.filterSnapshot() },
         log.recordCount,
         origin,
         IntArray(log.parts.size) { log.partField(it, field) },
         LongArray(log.parts.size) { log.shift(it) },
+        templates,
     )
 
     override fun append(part: Int, data: AppendedData): Int {

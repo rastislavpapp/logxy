@@ -50,8 +50,9 @@ internal class TemplateIndex(private val maxTemplates: Int = MAX_TEMPLATES, priv
         matching
     }
 
-    /** Templates by id. */
-    suspend fun texts(): List<String> = mutex.withLock { List(templates.size) { templates.text(it) } }
+    /** Templates by id, from id [from] on. */
+    suspend fun texts(from: Int = 0): List<String> =
+        mutex.withLock { List(maxOf(0, templates.size - from)) { templates.text(from + it) } }
 
     private suspend fun updateLocked(snapshot: RecordSnapshot) = withContext(Dispatchers.Default) {
         val count = snapshot.count

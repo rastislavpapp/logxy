@@ -9,6 +9,7 @@ import io.github.rastislavpapp.logxy.core.log.RowText
 import io.github.rastislavpapp.logxy.core.log.Schema
 import io.github.rastislavpapp.logxy.core.merge.MergedLog
 import io.github.rastislavpapp.logxy.core.parse.CompiledPattern
+import io.github.rastislavpapp.logxy.core.template.TemplateIndex
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -60,7 +61,7 @@ class ShownLogTest {
         override fun templateOf(record: Int) = throw UnsupportedOperationException()
         override fun fieldReader(field: Int, records: IntArray?, count: Int) = throw UnsupportedOperationException()
         override fun sourceReader() = throw UnsupportedOperationException()
-        override fun traceSource(field: Int) = throw UnsupportedOperationException()
+        override fun traceSource(field: Int, templates: List<TemplateIndex>?) = throw UnsupportedOperationException()
         override fun append(part: Int, data: AppendedData) = throw UnsupportedOperationException()
         override suspend fun settle() = throw UnsupportedOperationException()
     }

@@ -293,8 +293,15 @@ class LogTab(
 
     /** The Traces panel; null if the host has no traces. */
     private val traces = if (Feature.TRACES in host.features) {
-        TracesPanel(scope, session::traces, { session.traceProgress }, { session.status }, filterBar::edit, ::goToTrace)
-            .apply { column = traceColumn }
+        TracesPanel(
+            scope,
+            session::traces,
+            { session.traceProgress },
+            { session.status },
+            filterBar::edit,
+            ::goToTrace,
+            session::traceRecords,
+        ).apply { column = traceColumn }
     } else {
         null
     }
@@ -691,7 +698,7 @@ class LogTab(
         schema.fields.filter(Traces::canHoldTraceIds).map { TraceColumnChoice(it.name, columnNames.of(it)) }
 
     /**
-     * Goes to [record], the first record of a trace, as Go to does: selects it if it is shown, else the first shown
+     * Goes to [record], a record of a trace, as Go to does: selects it if it is shown, else the first shown
      * row after it, or the last row if there is none, with a hint saying so.
      */
     private fun goToTrace(record: Int) {

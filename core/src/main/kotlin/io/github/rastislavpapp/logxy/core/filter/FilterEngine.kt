@@ -137,6 +137,8 @@ class FilterEngine(private val log: LogData, private val maxCacheBytes: Long = D
     /** Message templates of the log's records, for [TemplateCondition]s and for counting them. */
     internal val templates = TemplateIndex()
 
+    internal val templateIndexes get() = listOf(templates)
+
     @Volatile
     private var cachedLevels: LevelMapping? = null
 

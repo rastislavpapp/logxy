@@ -102,14 +102,17 @@ class MergedFilter(private val log: MergedLog) : RecordFilter {
     // Templates are counted per part and joined by their text.
     override suspend fun countTemplates(rows: IntArray?, rowCount: Int): TemplateCounts {
         val snapshots = log.parts.map { it.filterSnapshot() }
-        return TemplateCounts.count(engines.map { it.templates }, snapshots, rows, rowCount, origin)
+        return TemplateCounts.count(templateIndexes, snapshots, rows, rowCount, origin)
     }
 
     override val templateProgress get() = engines.sumOf { it.templates.progress } / engines.size
 
+    /** The message template index of each file, in the merge's order. */
+    internal val templateIndexes get() = engines.map { it.templates }
+
     override suspend fun variableSeries(rows: IntArray?, rowCount: Int, template: String, variables: IntArray) =
         VariableSeries.collect(
-            engines.map { it.templates },
+            templateIndexes,
             log.parts.map { it.filterSnapshot() },
             rows,
             rowCount,
@@ -121,7 +124,7 @@ class MergedFilter(private val log: MergedLog) : RecordFilter {
 
     override suspend fun variableValues(rows: IntArray?, rowCount: Int, template: String, variable: Int) =
         VariableValues.count(
-            engines.map { it.templates },
+            templateIndexes,
             log.parts.map { it.filterSnapshot() },
             rows,
             rowCount,
