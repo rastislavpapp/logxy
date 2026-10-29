@@ -38,11 +38,16 @@ class Traces internal constructor(
     val isMerged: Boolean get() = sourceNames.isNotEmpty()
 
     /** The duration statistics over the traces with times; null if no trace has one. */
-    val statistics: DurationStatistics? = run {
+    val statistics: DurationStatistics? = DurationStatistics.of(timedDurations())
+
+    /** The histogram of the durations of the traces with times, in at most [maxBins] bins; null if none has one. */
+    fun durationHistogram(maxBins: Int): DurationHistogram? = DurationHistogram.of(timedDurations(), maxBins)
+
+    private fun timedDurations(): LongArray {
         val durations = LongArray(size, ::duration)
         var timed = 0
         for (duration in durations) if (duration != NO_DURATION) durations[timed++] = duration
-        DurationStatistics.of(durations.copyOf(timed))
+        return durations.copyOf(timed)
     }
 
     fun id(trace: Int): String = String(key(trace), Charsets.UTF_8)
