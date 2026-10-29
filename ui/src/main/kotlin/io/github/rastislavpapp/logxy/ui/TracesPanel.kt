@@ -4,7 +4,7 @@ import io.github.rastislavpapp.logxy.core.formatTimeSpan
 import io.github.rastislavpapp.logxy.core.log.Level
 import io.github.rastislavpapp.logxy.core.query.Query
 import io.github.rastislavpapp.logxy.core.query.TraceRules
-import io.github.rastislavpapp.logxy.core.trace.DurationHistogram
+import io.github.rastislavpapp.logxy.core.session.SessionStatus
 import io.github.rastislavpapp.logxy.core.trace.TraceColumn
 import io.github.rastislavpapp.logxy.core.trace.Traces
 import kotlinx.coroutines.CancellationException
@@ -17,9 +17,9 @@ import net.miginfocom.swing.MigLayout
 import java.awt.BorderLayout
 import java.awt.CardLayout
 import java.awt.Component
+import java.awt.FlowLayout
 import java.awt.Font
 import java.awt.Graphics
-import java.awt.GridLayout
 import java.awt.Toolkit
 import java.awt.event.HierarchyEvent
 import java.awt.event.MouseAdapter
@@ -47,6 +47,9 @@ private const val PROGRESS_DELAY_MILLIS = 200
 private const val TABLE_CARD = "table"
 private const val PLACEHOLDERS_CARD = "placeholders"
 
+private const val SCOPE_TIP =
+    "Traces are found in all records, whatever the filter: a click on a trace sets the filter to it"
+
 /** A field the trace ids can come from: its [name], and the name its column shows, as the picker lists it. */
 class TraceColumnChoice(val name: String, val shown: String) {
     override fun toString() = shown
@@ -54,25 +57,28 @@ class TraceColumnChoice(val name: String, val shown: String) {
 
 /**
  * The traces of all records by a trace id column the user picks (see `GLOSSARY.md`), one row each, longest first,
- * with the duration statistics above, and beside it a histogram of the durations and the traces' start times against
- * their durations ([DurationHistogramChart], [TraceScatterChart]). Builds them only while it is showing: [traces]
- * does the work, reading only the records appended since it last ran, and [progress] tells how far it got.
+ * with the duration statistics above, and beside it a [TraceDurationChart] of them. Builds them only while it is
+ * showing: [traces] does the work, reading only the records appended since it last ran, and [progress] tells how far
+ * it got. The traces ignore the filter, which the statistics say, with the counts of [status].
  *
  * A click shows only the clicked trace's records, Ctrl-click adds a trace to those shown, both through [edit], which
  * sets the filter; they wait for the double-click time, as a double-click instead calls [goToFirst] with the trace's
- * first record and leaves the filter as it is. A dot of the scatter acts like its trace's row.
+ * first record and leaves the filter as it is. A dot of the chart acts like its trace's row.
  */
 class TracesPanel(
     private val scope: CoroutineScope,
     private val traces: suspend (column: String) -> Traces?,
     private val progress: () -> Double,
+    private val status: () -> SessionStatus,
     private val edit: (change: (Query.Group) -> Query.Group) -> Unit,
     private val goToFirst: (record: Int) -> Unit,
 ) : JPanel(BorderLayout()) {
 
     private val model = TracesModel()
     private val table = JTable(model)
-    private val summary = JLabel(" ")
+
+    /** The statistics of the traces, each part with a tooltip saying what it means; or a message, such as an error. */
+    private val summary = JPanel(FlowLayout(FlowLayout.LEADING, 0, 0))
     private val picker = JComboBox<TraceColumnChoice>()
 
     /** Whether [picker] is being set from code, so its change is not the user's choice. */
@@ -85,15 +91,7 @@ class TracesPanel(
         add(placeholders, PLACEHOLDERS_CARD)
     }
 
-    private val histogram = DurationHistogramChart()
-    private val scatter = TraceScatterChart(::clickTrace, ::goToTrace)
-    private val charts = JPanel(GridLayout(1, 2)).apply {
-        add(histogram)
-        add(JPanel(BorderLayout()).apply {
-            add(scatter, BorderLayout.CENTER)
-            add(TimeAxis(scatter::timeline), BorderLayout.SOUTH)
-        })
-    }
+    private val chart = TraceDurationChart(::clickTrace, ::goToTrace)
 
     /** How far a slow build got, from 0 to 1, or -1 if unknown; null while not building. */
     private var shownProgress: Double? = null
@@ -127,7 +125,7 @@ class TracesPanel(
         }, BorderLayout.NORTH)
         add(look.horizontalSplit().apply {
             leftComponent = center
-            rightComponent = charts
+            rightComponent = chart
             resizeWeight = TABLE_SHARE
             border = null
         }, BorderLayout.CENTER)
@@ -135,6 +133,9 @@ class TracesPanel(
             if (!choosing) column = (picker.selectedItem as TraceColumnChoice?)?.name
         }
         table.rowSorter = TraceSorter()
+        table.selectionModel.addListSelectionListener { e ->
+            if (!e.valueIsAdjusting) chart.selected = selectedTraces().toIntArray()
+        }
         table.setShowGrid(false)
         table.tableHeader.reorderingAllowed = false
         (table.tableHeader.defaultRenderer as? JLabel)?.horizontalAlignment = SwingConstants.LEADING
@@ -215,7 +216,7 @@ class TracesPanel(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                summary.text = "Cannot find the traces: ${e.message ?: e.javaClass.simpleName}"
+                showMessage("Cannot find the traces: ${e.message ?: e.javaClass.simpleName}")
             } finally {
                 timer.stop()
                 hideProgress()
@@ -244,20 +245,16 @@ class TracesPanel(
         return model.columnAt(key.column) to (key.sortOrder != SortOrder.ASCENDING)
     }
 
-    /** What is worked out off the UI thread about a build's [Traces]: the table's order, and what the charts draw. */
-    private class Shown(val order: IntArray, val histogram: DurationHistogram?, val extent: TraceExtent?)
+    /** What is worked out off the UI thread about a build's [Traces]: the table's order, and what the chart draws. */
+    private class Shown(val order: IntArray, val extent: TraceExtent?)
 
-    private fun shownTraces(traces: Traces, sortColumn: TraceColumn, descending: Boolean) = Shown(
-        traces.order(sortColumn, descending),
-        traces.durationHistogram(DURATION_BINS),
-        TraceExtent.of(traces),
-    )
+    private fun shownTraces(traces: Traces, sortColumn: TraceColumn, descending: Boolean) =
+        Shown(traces.order(sortColumn, descending), TraceExtent.of(traces))
 
-    /** Shows [traces] in [order] and in the charts as [shown] has them, keeping the selected traces selected. */
+    /** Shows [traces] in [order] and in the chart as [shown] has them, keeping the selected traces selected. */
     private fun setTraces(traces: Traces?, order: IntArray, shown: Shown? = null) {
         val selected = selectedTraces()
-        histogram.histogram = shown?.histogram
-        scatter.show(traces, shown?.extent)
+        chart.show(traces, shown?.extent)
         if (model.update(traces, order)) setUpColumns()
         if (selected.isEmpty()) return
         val rows = IntArray(order.size)
@@ -267,30 +264,61 @@ class TracesPanel(
         }
     }
 
+    /** Updates the statistics' counts of the records, e.g. after the filter changed. */
+    fun statusChanged() {
+        if (model.traces != null) showSummary()
+    }
+
     private fun showSummary(missing: Boolean = false) {
         val column = column
         val traces = model.traces
-        summary.text = when {
-            column == null -> "Pick the column that holds the trace ids, such as a request id or a thread."
-            missing -> "These records have no column “$column” to take trace ids from."
-            traces == null -> " "
-            traces.size == 0 -> "No record has a value in “$column”."
-            else -> statistics(traces)
+        when {
+            column == null -> showMessage("Pick the column that holds the trace ids, such as a request id or a thread.")
+            missing -> showMessage("These records have no column “$column” to take trace ids from.")
+            traces == null -> showMessage(" ")
+            traces.size == 0 -> showMessage("No record has a value in “$column”.")
+            else -> showStatistics(traces)
         }
     }
 
-    private fun statistics(traces: Traces): String {
-        val counted = count(traces.size, "trace")
-        val statistics = traces.statistics ?: return counted
-        val spread = listOf(
-            "min" to statistics.min,
-            "median" to statistics.median,
-            "p90" to statistics.p90,
-            "p95" to statistics.p95,
-            "p99" to statistics.p99,
-            "max" to statistics.max,
-        ).joinToString(" · ") { (label, nanos) -> "$label ${formatTimeSpan(nanos)}" }
-        return "$counted · $spread"
+    private fun showMessage(text: String) = showSummaryParts(listOf(JLabel(text)))
+
+    /**
+     * The count of traces, in how many records, and their durations' spread, each with a tooltip saying what it
+     * means: as the filter does not narrow the traces, "in all 6,576,388 records, not only the 84 shown".
+     */
+    private fun showStatistics(traces: Traces) {
+        val status = status()
+        val records = status.records
+        val scope = when {
+            records == null -> ""
+            status.shown == null -> " in all ${"%,d".format(records)} records"
+            else -> " in all ${"%,d".format(records)} records, not only the ${"%,d".format(status.shown)} shown"
+        }
+        val parts = arrayListOf(part(count(traces.size, "trace") + scope, SCOPE_TIP))
+        val statistics = traces.statistics
+        if (statistics != null) {
+            parts += part("min ${formatTimeSpan(statistics.min)}", "The shortest trace")
+            parts += part("median ${formatTimeSpan(statistics.median)}", percentileTip("p50", 50, statistics.median))
+            parts += part("p90 ${formatTimeSpan(statistics.p90)}", percentileTip("p90", 90, statistics.p90))
+            parts += part("p95 ${formatTimeSpan(statistics.p95)}", percentileTip("p95", 95, statistics.p95))
+            parts += part("p99 ${formatTimeSpan(statistics.p99)}", percentileTip("p99", 99, statistics.p99))
+            parts += part("max ${formatTimeSpan(statistics.max)}", "The longest trace")
+        }
+        showSummaryParts(parts)
+    }
+
+    private fun part(text: String, tip: String) = JLabel(text).apply { toolTipText = tip }
+
+    /** Shows [parts] as the statistics, with dots between them. */
+    private fun showSummaryParts(parts: List<JLabel>) {
+        summary.removeAll()
+        for ((index, part) in parts.withIndex()) {
+            if (index > 0) summary.add(JLabel(" · "))
+            summary.add(part)
+        }
+        summary.revalidate()
+        summary.repaint()
     }
 
     private fun showOnlySelected() {
@@ -347,7 +375,7 @@ class TracesPanel(
             val sample = when (shown) {
                 TraceColumn.ID -> "0123456789abcdef0123"
                 TraceColumn.START, TraceColumn.END -> "0000-00-00 00:00:00.000"
-                TraceColumn.DURATION -> "0 min 00.000 s"
+                TraceColumn.DURATION -> "00h 00min 00.000s"
                 TraceColumn.RECORDS -> "000,000"
                 TraceColumn.LEVEL -> "UNKNOWN"
                 TraceColumn.SOURCES -> "server.log, server.log"

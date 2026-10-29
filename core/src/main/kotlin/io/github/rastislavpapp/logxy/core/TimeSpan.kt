@@ -11,23 +11,23 @@ private const val HOUR = 60 * MINUTE
 private const val DAY = 24 * HOUR
 
 /**
- * Formats a span of time in nanoseconds for display, in the largest unit that fits,
- * e.g. `500 ns`, `12.5 ms`, `3.25 s`, `1 h 2 min 3.5 s`; negative spans get a minus sign.
+ * Formats a span of time in nanoseconds for display, in the largest unit that fits, each number joined to its unit,
+ * e.g. `500ns`, `12.5ms`, `3.25s`, `1h 2min 3.5s`; negative spans get a minus sign.
  */
 fun formatTimeSpan(nanos: Long): String {
     if (nanos < 0) return "-" + formatTimeSpan(if (nanos == Long.MIN_VALUE) Long.MAX_VALUE else -nanos)
     return when {
-        nanos < MICRO -> "$nanos ns"
-        nanos < MILLI -> "${decimal(nanos, MICRO)} µs"
-        nanos < SECOND -> "${decimal(nanos, MILLI)} ms"
-        nanos < MINUTE -> "${decimal(nanos, SECOND)} s"
+        nanos < MICRO -> "${nanos}ns"
+        nanos < MILLI -> "${decimal(nanos, MICRO)}µs"
+        nanos < SECOND -> "${decimal(nanos, MILLI)}ms"
+        nanos < MINUTE -> "${decimal(nanos, SECOND)}s"
         else -> buildList {
             val days = nanos / DAY
-            if (days > 0) add("$days d")
-            if (nanos >= HOUR) add("${nanos % DAY / HOUR} h")
-            add("${nanos % HOUR / MINUTE} min")
+            if (days > 0) add("${days}d")
+            if (nanos >= HOUR) add("${nanos % DAY / HOUR}h")
+            add("${nanos % HOUR / MINUTE}min")
             // Milliseconds are enough next to minutes.
-            add("${decimal(nanos % MINUTE / MILLI * MILLI, SECOND)} s")
+            add("${decimal(nanos % MINUTE / MILLI * MILLI, SECOND)}s")
         }.joinToString(" ")
     }
 }

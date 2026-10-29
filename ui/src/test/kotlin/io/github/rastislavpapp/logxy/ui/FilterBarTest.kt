@@ -121,7 +121,7 @@ private class VisualOnlyHost : LogViewHost {
 }
 
 /** Plain Swing values, enough for components to be made and laid out. */
-private object PlainLook : Look {
+internal object PlainLook : Look {
     override fun icon(path: String, size: Int): Icon = ImageIcon()
     override fun scale(value: Int) = value
     override fun scale(value: Float) = value
