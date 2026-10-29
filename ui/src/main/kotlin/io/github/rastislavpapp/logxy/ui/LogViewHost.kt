@@ -21,7 +21,7 @@ import javax.swing.text.JTextComponent
 
 /**
  * What a [LogTab] takes from the program it runs in, the app or the IDE plugin: where settings and UI state are kept,
- * the UI thread's dispatcher, and the parts only the app has.
+ * the UI thread's dispatcher, and the parts only the app has, such as traces.
  */
 interface LogViewHost {
 
@@ -69,6 +69,9 @@ interface LogViewHost {
     /** The host's save dialog for exporting records; null if the host offers no export, and the views show none. */
     val exportFiles: ExportFiles?
 
+    /** The features of the views that the host offers; the views leave out the others. */
+    val features: Set<Feature>
+
     /**
      * Binds keys to the bookmark actions while the focus is in [rows], a [LogTab]'s table, to call [run] with the
      * action, and returns the key of each to show in the row menu; an action without a key is missing. The default
@@ -87,6 +90,15 @@ interface LogViewHost {
         }
         return keys
     }
+}
+
+/**
+ * A feature of the views that a host offers or not, as [LogViewHost.features] lists them. The views have all it takes;
+ * a part the host must supply, such as a dialog, is a function or a nullable property of [LogViewHost] instead.
+ */
+enum class Feature {
+    /** The Traces panel, and Show Traces in a column header's menu. */
+    TRACES,
 }
 
 /** What the user can do with a session's bookmarks, from the row menu or by keys the host binds. */

@@ -4,6 +4,7 @@ import io.github.rastislavpapp.logxy.core.parse.Parser
 import io.github.rastislavpapp.logxy.ui.DetailPane
 import io.github.rastislavpapp.logxy.ui.ExportFile
 import io.github.rastislavpapp.logxy.ui.ExportFiles
+import io.github.rastislavpapp.logxy.ui.Feature
 import io.github.rastislavpapp.logxy.ui.LogViewHost
 import io.github.rastislavpapp.logxy.ui.QueryText
 import io.github.rastislavpapp.logxy.ui.SettingsDialogs
@@ -15,6 +16,7 @@ import java.awt.Component
 import java.awt.Window
 import java.io.File
 import java.nio.file.Path
+import java.util.EnumSet
 import javax.swing.ButtonGroup
 import javax.swing.JDialog
 import javax.swing.JFileChooser
@@ -64,6 +66,8 @@ object AppHost : LogViewHost, SettingsDialogs {
     override val moreMemoryHint get() = "Give logxy more memory in Preferences › Memory to copy more."
 
     override val exportFiles: ExportFiles get() = ExportDialog
+
+    override val features: Set<Feature> = EnumSet.allOf(Feature::class.java)
 }
 
 /** The app's save dialog for exports: a file chooser with the choice of records below the files, if there is one. */
