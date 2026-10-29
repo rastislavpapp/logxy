@@ -87,8 +87,8 @@ class DurationHistogramChart : JComponent() {
 
     private fun binAt(x: Int): Int? {
         val histogram = histogram ?: return null
-        val bin = x * histogram.counts.size / width
-        return bin.takeIf { x in 0..<width && it < histogram.counts.size }
+        if (x !in 0..<width) return null
+        return (x * histogram.counts.size / width).takeIf { it < histogram.counts.size }
     }
 
     override fun getToolTipText(e: MouseEvent): String? {
@@ -146,7 +146,8 @@ class DurationHistogramChart : JComponent() {
             val x = edge * width / bins
             val label = axisLabel(histogram.edgeAt(edge))
             val labelWidth = metrics.stringWidth(label)
-            val labelX = (x - labelWidth / 2).coerceIn(0, width - labelWidth)
+            // A chart narrower than the label puts it at the left edge.
+            val labelX = (x - labelWidth / 2).coerceAtMost(width - labelWidth).coerceAtLeast(0)
             if (labelX < next) continue
             g2.drawString(label, labelX, baseline)
             next = labelX + labelWidth + look.scale(12)
@@ -251,7 +252,10 @@ class TraceScatterChart(
 
     override fun getMinimumSize() = Dimension(0, 0)
 
-    /** The times the dots are placed at, for the axis under the chart, at [width] pixels. */
+    /**
+     * The times the dots are placed at, for the axis under the chart, at [width] pixels: one slice from the earliest
+     * start to just past the latest, so the latest start is inside it.
+     */
     fun timeline(width: Int): Timeline? {
         val extent = extent ?: return null
         return Timeline(extent.from, extent.to - extent.from + 1, 1, width)
@@ -277,7 +281,7 @@ class TraceScatterChart(
         for (trace in 0..<traces.size) {
             val duration = traces.duration(trace)
             if (duration == Traces.NO_DURATION) continue
-            val x = timeline.x(traces.start(trace)).toInt().coerceIn(0, width - 1)
+            val x = timeline.x(traces.start(trace)).toInt().coerceAtMost(width - 1).coerceAtLeast(0)
             val y = (plotBottom - heightOf(duration, extent) * span).roundToInt() - plotTop
             val index = (y / cell).coerceIn(0, rows - 1) * columns + x / cell
             crowd[index]++
